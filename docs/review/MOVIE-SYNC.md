@@ -89,6 +89,17 @@ conclusion. The standard profile is byte-identical again and **faster**: -1.25 %
 against the parent, -2.94 % and -1.50 % cumulatively since `428c50e6`. Its section is §4i, with
 the amendments marked *NESHAWK-PROFILE-4* in §5; it added no instrument of its own.
 
+**NESHAWK-PROFILE-5 found what seeds the three cycles, and switched it off.** Both candidates
+§4i's §5 named are eliminated by measurement — NesHawk's 6502 spends the same seven reset cycles as
+this core and the `.bk2`'s `Reset` is applied on the cycle the player already applies it on — and
+the first event of the movie whose cycle differs is in **frame 11**, the first that plays a DPCM
+sample: NesHawk's DMC powers its timer on at 1 020 CPU cycles where this core starts it one period
+in at 427. **Item 11** fixes that to the cycle on all thirteen fetches of the frame and **costs the
+movie 7 080 frames**, because the wrong phase was cancelling one cycle elsewhere; it therefore
+ships implemented, tested and **off**, with **Q-182** as the gate. No suite and neither *Faxanadu*
+dump moves by a line. Its section is §4j, with the amendments marked *NESHAWK-PROFILE-5* in §5; it
+added no instrument of its own.
+
 ---
 
 ## The short version
@@ -1561,6 +1572,96 @@ NMI; that is why it worked and why it had to go.
 
 ---
 
+## 4j. The seed found, measured and switched off: the DMC's power-on timer (NESHAWK-PROFILE-5)
+
+### The result first
+
+**The seed of §4h's three cycles is found, it is the DMC's power-on timer, and enabling it makes
+the movie worse — so it ships off.** All three clauses are measurements.
+
+| | |
+|---|---|
+| the first event of the whole movie whose cycle differs | frame **11**, the first that plays a DPCM sample. **Frames 1 to 10 are identical event for event and cycle for cycle** — the power-on, the movie's soft reset and ten frames of play |
+| what differs in it | the DMC fetches the sample's **second** byte 211 cycles earlier on NesHawk: four of the output unit's 54-cycle bit periods |
+| why | NesHawk's `DMCUnit` constructor sets `timer = 1020` where this core starts the timer one period in at 427, so its whole output phase is `1020 - 428 = 592` cycles further on. **Item 11** |
+| with item 11 | **all thirteen** fetches of frame 11 land at a constant offset from BizHawk's own per-byte ledger, where the baseline drifted out of it; frame 11's residual halves, −2 to −1 |
+| and the movie | **8 005 → 925.** Which is where *Kirby* parted before this profile existed at all (§4e) |
+| and every other measurement | **unmoved, on both profiles.** The thirty DMC/DMA/APU ROMs, `ppu_vbl_nmi`, `vbl_nmi_timing`, `cpu_interrupts_v2`, `AccuracyCoin` and both *Faxanadu* dumps are identical with item 11 and without it |
+
+So item 11 is **implemented, tested and off** (`NesHawkCompat::DMC_POWER_ON_TIMER = 0`), and
+turning it on is one constant. The reasoning is in one line: the profile exists to replay a NesHawk
+movie, and a change that costs 7 080 frames of the one movie there is while buying nothing anywhere
+else is not an improvement, however exactly right it is about the chip.
+
+### Both of §4h's named candidates are eliminated by measurement
+
+§4i's §5 left two things unmeasured and this lot measured both, from a ledger of **both machines
+from the power-on**:
+
+| | |
+|---|---|
+| **the 6502's own reset sequence** | **the same on both machines, to the cycle.** Seven cycles, the sixth reading `$FFFC`, the first instruction on the eighth — NesHawk's `VOP_RESET` and this core's `Cpu6502::reset` alike. `pc$FFF0` → `pc$C000` is **11 cycles on both**. The eight cycles of apparent offset are the frame boundary, not the chip: NesHawk runs its reset cycles inside `FrameAdvance` and this core between frames |
+| **the cycle the `.bk2`'s `Reset` is applied on** | **already right.** The start of the frame *after* the flagged one, before any PPU tick, which is what `MovieFile::reset_after_frame` already does and what EVAL-SYNC-3 measured against the lag count |
+| and the soft reset's effect on the DMC | **nothing, on either machine.** NesHawk's `APU.NESSoftReset()` clears the sequencer, writes `$4015 = 0` and clears the two fill glitches; this core's `DmcChannel::soft_reset` moves the output level, the IRQ flag and item 2's countdown. **Neither touches the timer or the bit counter**, so the phase is set once, at the power-on — and the measurement agrees: a soft reset that re-seeded it at frame 5 would put the second fetch 55 cycles from where it is |
+
+### Why a correct item costs the movie, and where the cycle went
+
+Because **two errors were cancelling**. The lots before this one fitted the DMC's fetch-cost items
+(§4f, §4g) against a power-on phase that was 592 cycles wrong; some of what those items were worth
+was compensation for it. Fixing the phase makes the compensation visible, which is why the metric
+falls — and the honest reading is that a *second* difference has just become measurable, not that
+item 11 is wrong.
+
+It is measurable, and it is one cycle. With item 11 on, frame 11's events sort as: `nmi`, `oam` and
+**every** `$40xx` write at residual **0**, then `r$4015`, the NMI handler's `RTI` and `pc$C074` all
+at **−1**. The cycle goes missing between the last write and the `$4015` read, and the only DMA in
+that stretch is one reload fetch whose request lands on the very cycle the CPU writes `$4007` — a
+slip of 1, an **odd** run of write cycles, and therefore item 1c's three cycles rather than four.
+
+**Charging it four makes frame 11 exact on every tag**, takes the movie back to **1 100**, takes the
+1-1 100 ledger from 920 frames with an event off its anchor to **861** (the baseline is 867), and
+costs the thirty DMC/DMA ROMs nothing. **And the source says three is right**: for a slip of 1 the
+write on `A` leaves `rdy_freeze` false, the read on `A+1` sets it true (`Execute.cs`: a read
+microstep is `rdy_freeze = !RDY; if (RDY) { … }`, a write microstep executes unconditionally and
+never assigns it), so NesHawk's `+2` is suppressed on `A+2` and both machines resume on `A+4` —
+which is exactly what item 1c buys.
+
+**That conflict is `Q-182`**, and what it turns on is one unpinned number: the cycle BizHawk's Lua
+reports a **DMA** read on. This tree's calibration — an execute at 0, a read or a write at 1 — was
+measured on **CPU** accesses (`r$4015` → `w$4011` at exactly 0 on 75 of 75) and does not transfer to
+a read performed by a DMA unit. With item 11 the thirteen reload fetches sit at a constant **3**
+from BizHawk's reported cycles and the one write-started fetch at **0**; whether that 3 is
+bookkeeping or three real cycles decides whether the missing cycle is at that fetch at all. The
+ticket names the three-line Lua run that settles it — one known reload fetch's own callback cycle
+*and* the cycle its stalled read executes on — and needs no new reference and no new ROM.
+
+**Until it is answered, item 11 and item 1c move together or not at all.** Enabling item 11 alone
+costs 7 080 frames; dropping item 1c alone would be a behaviour change with no source behind it.
+
+### What this lot did not do, said plainly
+
+| | |
+|---|---|
+| **enable item 11** | measured and refused, as above. One constant to reverse |
+| **retract item 1c** | measured as an improvement on five counts and refused, because the source says the item is right and Q-182 is unresolved. **This is the one place in the five lots where a measurement was overruled by a reading**, and it is recorded as a ticket rather than as a decision |
+| **rounds 2 to 5** | not run, and step 4 says why: the round loop's last step is *source → item*, and this round's source **refused** the item. A second round would re-measure the same cycle against the same unpinned calibration. What is needed is the Lua run, not another ledger |
+| **further per-frame references** | **not produced**, and no disk spent on one: the movie reaches 8 005 and the four existing windows cover everything this configuration can say |
+| **the whole 156 312 frames against `kirby-jp.txt`** | not run. §4f settled that the checksum column cannot discriminate, and the shipped configuration is behaviourally identical to §4i's, whose figure it would reproduce |
+| **the pictures** | not taken, for the same reason: this lot's shipped behaviour is NESHAWK-PROFILE-4's to the byte |
+| **the bench in the shipped configuration** | measured on the build with item 11 **enabled** (+2.68 % and +1.24 % against the parent, −1.85 % and −1.65 % cumulative). The shipped build differs from it by one constant the `Standard` path never reads, and `golden-core` is byte-identical in both |
+
+### A failing test the last lot did not catch
+
+`timing_profile_tests.rs`'s no-DPCM invariant — *"a ROM that never starts a DPCM sample must run
+identically on both profiles for ever"* — **had been failing since §4i**, which added a **PPU**
+item that applies to every ROM whether it plays a sample or not: `595615` against `593227`, which
+is item 10's 7 165 dots over three. NESHAWK-PROFILE-4's reported "1 142 passed, 0 failed" was the
+count of a run that **aborted** on it. Fixed in the stronger form — the gap must now be *exactly*
+item 10's — so the invariant still fails the moment a DMC item reaches the common path. The suite
+is **1 205** passing.
+
+---
+
 ## 5. What is still unknown
 
 Said plainly, because the result in §4 is strong enough to be worth bounding.
@@ -1753,15 +1854,16 @@ Five new ones, from NESHAWK-PROFILE-4:
   because item 8 is provably not NesHawk's mechanism and item 10 provably is** — but a profile
   whose job is replaying one movie could reasonably be asked to prefer the movie. If the owner
   wants the 18 321 back, the change is one `bool` and §4i's table is the price list.
-* **What seeds the 3-cycle spin-loop phase is still unknown, and the boot is now eliminated as the
-  answer.** §4h said the phase "was seeded at frame 6, where the movie's first reset lands and the
-  absolute drift jumps 2 382 cycles". The drift was two start-up frames (item 10) and it is now
-  zero — and the phase is **still three cycles**, with frame 1 100's only differing event being
-  `$C06E` at -3, exactly as it was. So the drift and the phase were two different things wearing
-  one number. What is left to measure: the 6502's own reset sequence on both machines
-  (NesHawk's `MOS 6502X` reset against this core's seven cycles), the cycle the `.bk2`'s `Reset`
-  command is applied on, and the first frame in which the two machines' spin loops are *known* to
-  be in phase — which the cycle ledger of frames 2 to 1 201 can now answer, the drift being zero.
+* ~~**What seeds the 3-cycle spin-loop phase is still unknown, and the boot is now eliminated as
+  the answer.** … What is left to measure: the 6502's own reset sequence on both machines, the
+  cycle the `.bk2`'s `Reset` command is applied on, and the first frame in which the two machines'
+  spin loops are *known* to be in phase.~~ **Answered, NESHAWK-PROFILE-5, and all three parts of
+  it** (§4j). The two named candidates are **eliminated by measurement**: NesHawk's 6502 spends the
+  same seven reset cycles as this core and reads `$FFFC` on the sixth, and the `.bk2`'s `Reset` is
+  applied on the cycle the player already applies it on. The first frame the loops are known to be
+  in phase is **frame 10** — frames 1 to 10 are identical event for event and cycle for cycle — and
+  the seed is in **frame 11**, the first that plays a DPCM sample: the DMC's power-on timer, item
+  11. What replaces this unknown is a narrower one, below.
 * **`ppu_vbl_nmi` 05 to 08 and `cpu_interrupts_v2` 2 and 3 are a sharper instrument than any
   movie, and this series did not use them until its fourth lot.** They decided item 8 in one
   afternoon after two lots had reasoned about it. The recipe in
@@ -1775,6 +1877,30 @@ Five new ones, from NESHAWK-PROFILE-4:
   game there is — but the ~29 658-cycle window in which the hardware ignores PPUCTRL, PPUMASK,
   PPUSCROLL and PPUADDR is still not modelled on either profile (Q-078), and item 10 does not
   change that.
+Three new ones, from NESHAWK-PROFILE-5:
+
+* **`Q-182` is the whole of what stands between item 11 and the movie, and it is one Lua run.**
+  With item 11 enabled *Kirby*'s frame 11 is exact on every tag but one cycle, and the measurement
+  says that cycle belongs to the one reload fetch whose request falls on a write cycle while the
+  **source says it does not**. The number that decides it is the cycle BizHawk's Lua reports a
+  **DMA** read on, which is not published and which this tree's calibration — measured on CPU
+  accesses — does not cover. Until it is answered item 11 ships off and item 1c stays, and the two
+  move together or not at all. **This is the one place in five lots where a measurement was
+  overruled by a reading**, and it should not be left standing for long.
+* **The DMC fetch-cost items were fitted against a power-on phase that was 592 cycles wrong, and
+  only one of them has been re-examined.** Items 1a, 1b, 1c, 3 and 7 were each measured honestly
+  against *Kirby* and each helped — but item 11 proves the phase they were fitted against was out,
+  so some part of what they are worth may be compensation rather than model. Item 1c is the only
+  one this lot re-derived from the source line by line. The other four deserve the same treatment
+  **with item 11 enabled**, which is the configuration in which their own errors are visible rather
+  than cancelled.
+* **The profile is now at the point where one movie cannot take it further.** Every item after
+  this one will be worth a cycle or two on a metric that is noisy by ±3 and partly self-healing, and
+  *Kirby* is the only `.bk2` in hand that exercises any of it. **A second NesHawk `.bk2` of a
+  DPCM-heavy game with a per-frame `ram=` reference is now worth more than any further analysis of
+  this one** — it is the only thing that can tell a model from a fit, and it is the single most
+  valuable thing the owner could produce for this question.
+
 * **Whether *Faxanadu* at 247 and 314 is agreement or luck cannot be told.** Those are the best
   figures any configuration of this profile has produced, and they are **better than the standard
   profile's own** 207 and 220 — which, if the column meant what it looks like, would make the
@@ -2367,3 +2493,68 @@ done; done
 `fax-rev1.txt` and not `fax-usa.txt` for the Rev 1 dump: the earlier commands blocks show one
 reference for both, and a Rev 1 run against the USA reference scores **0 of 832**, which looks
 like a catastrophe and is a wrong command.
+
+### NESHAWK-PROFILE-5's own commands
+
+This lot added no instrument either. `bk2cyc2.lua` is `bk2cyc1.lua` with the window at frames
+1-1 100 and the boot's PCs watched; `bk2dmc1.lua` is the same cut to frames 10-14 with one
+`event.onmemoryread` per byte of `$FCC0`-`$FCFF`. Both are described in
+`docs/review/NESHAWK-PROFILE-3-SCRIPTS.md`'s terms and live in `$S`, never in the worktree; the two
+Python analysers were regenerated from that document into the session's scratchpad.
+
+```sh
+# -------- step 1: both machines from the power-on, and the first event that differs
+#   BizHawk's Lua cannot see frame 1: --lua is loaded after the first frame has run, so the
+#   ledger's first F line is frame 2 and the reset sequence is measured at the movie's SOFT reset.
+$E --config=$S/config-neshawk.ini --lua=$S/bk2cyc2.lua --movie="$K" "$KR"   # -> kirby-jp-cyc7.txt
+$H frame-trace "$K" "$KR" --frame 1 --frames 1100 --event-log zax-cyc7.txt \
+    --event-pc FFF0 --event-pc C000 --event-pc C06E --event-pc C074 --event-pc C3A1
+# the $40xx events are in BizHawk's ledger and not in this side's PLAIN one, so the comparison is
+# held to the tags both carry (nmi, irq, pc$...) -- filter both, then drift.py
+python drift.py bh-cyc7-exec.txt zax-cyc7-exec.txt 2 1100     # first residual: frame 11
+
+# -------- the fetches themselves, which is where the 211 cycles are
+$E --config=$S/config-neshawk.ini --lua=$S/bk2dmc1.lua --movie="$K" "$KR"   # -> kirby-jp-dmc1.txt
+$HC frame-trace "$K" "$KR" --frame 11 --frames 1 --dmc-census        # the fetch rows, with costs
+#   $4012=F3 puts the sample at $C000 + 0xF3 * 64 = $FCC0; 13 fetches, a CONSTANT 3 from
+#   BizHawk's with item 11 and +211 without it. The write-started $FCC0 is at 5 106 either way.
+
+# -------- step 3/4: the A/B, with ONE binary. The baseline column is this tree with the item's
+#   constant set back to 0, NOT an earlier lot's reported figures -- the two differ.
+for r in step1:400 step1b:1100 step1c:10001 step1d:30001; do
+  $H movie-sync "$K" "$KR" --engine zaxnes --lag --frames ${r##*:} --trace-step 1 \
+      --trace-ref "$B/kirby-jp-${r%%:*}.txt" --ram-ref "$B/kirby-jp-${r%%:*}.txt"
+done
+#   item 11 off: 400 / 1 100 / 8 005 / none      <- shipped, and NESHAWK-PROFILE-4's figures
+#   item 11 on : 400 /   925 /  none  / none     <- measured, and why it ships off
+#   item 11 on, item 1c dropped: 400 / 1 100, frame 11 exact, ledger 861 off-anchor -> Q-182
+
+# the frame-11 residuals with the writes included: drop the dmc rows from BizHawk's ledger so the
+# event sequences match, and compare the CENSUS event log rather than the plain one
+$HC frame-trace "$K" "$KR" --frame 10 --frames 5 --dmc-census \
+    --event-pc C06E --event-pc C074 --event-pc C3A1 --event-log zax-dmc.txt
+python drift.py bh-dmc1-nofetch.txt zax-dmc.txt 10 14
+#   frame 11: r$4015 (-1); pc$C3A1 (-1); pc$C074 (-1) -- every $40xx write at 0
+
+# -------- step 5: the regression set, and the bench against BOTH parents
+$H golden-core "G:/3DSen/test-originals" golden.jsonl 1200          # 8d50807085... byte-identical
+for p in standard neshawk; do
+  for f in dmc_dma_during_read4 sprdma_and_dmc_dma apu_test dmc_tests \
+           ppu_vbl_nmi vbl_nmi_timing cpu_interrupts_v2 AccuracyCoin; do
+    $H test-roms "$T" "tr-$p-$f.json" --filter "$f" --no-shots --quiet --profile $p
+  done
+done
+#   G: had 7.3 GB free, so a parent build there would have breached the brief's 5 GB stop: both
+#   were built on C: at the SHORT path C:/zxb (a long one makes link.exe fail with LNK1104), ONE
+#   AT A TIME, keeping only the 6.8 MB exe out of each and deleting the archive and target dir
+#   before unpacking the next. C:/zxb was deleted after the rounds.
+for round in 1 2 3 4 5 6; do for rom in "Super Mario Bros. 3 [USA][!!]" "Mega Man 3 [USA][!!]"; do
+  for who in 428c50e6 7dbe7c54 this; do
+    <that binary> bench-core "G:/3DSen/test-originals/$rom.nes" --frames 1200 --warmup 120
+done; done; done
+```
+
+**The one command that is not in this block is the one the lot needs next**, and Q-182 spells it
+out: a Lua run reporting, for a single known reload fetch, both its own `event.onmemoryread` cycle
+and the cycle the CPU's stalled read executes on. The gap is 1 under one reading of the calibration
+and 2 under the other, and that single number decides item 1c and with it item 11.

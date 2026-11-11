@@ -584,6 +584,13 @@ fn item_10_the_ppu_runs_a_start_up_frame_after_a_power_on_and_a_reset() {
 /// public and the fetches are what the difference is *about*: a long sample is started a few
 /// hundred cycles after the power-on, and the cycle of the **second** fetch — the first one the
 /// output unit asks for, as against the one the `$4015` write starts — is the phase.
+///
+/// **The item is implemented and switched off** — `NesHawkCompat::DMC_POWER_ON_TIMER` is `0`,
+/// because enabled on its own item 11 costs the *Kirby* `.bk2` 7 080 frames and buys nothing
+/// anywhere else (the constant's own note, and Q-182). So the mechanism is measured here through
+/// [`ItemElevenOn`], a profile of this test's own that is `NesHawkCompat` with the item's value in
+/// place: that keeps the item covered to the cycle while the shipped profile does not carry it, and
+/// the last assertion is the record of the choice itself.
 #[test]
 fn item_11_the_dmc_timer_powers_on_1020_cycles_from_its_first_bit() {
     /// The CPU cycle the memory reader next runs dry on, counted from the power-on itself.
@@ -629,15 +636,19 @@ fn item_11_the_dmc_timer_powers_on_1020_cycles_from_its_first_bit() {
     }
 
     let plain = second_request::<Standard>();
-    let hawk = second_request::<NesHawkCompat>();
-    println!("  standard {plain}, neshawk {hawk}, apart {}", hawk - plain);
+    let hawk = second_request::<ItemElevenOn>();
+    let shipped = second_request::<NesHawkCompat>();
+    println!(
+        "  standard {plain}, item 11 on {hawk}, apart {}; the shipped neshawk profile {shipped}",
+        hawk - plain
+    );
 
     // The output unit takes the buffer on its eighth clock, so with the timer started at `T` the
     // second fetch is a cycle or two after `T + 1 + 7 * 428`. `Standard`'s `T` is `428 - 1`.
     let expected = |timer: i32| i64::from(timer) + 1 + 7 * 428;
     for (name, measured, timer) in [
         ("standard", plain, 428 - 1),
-        ("neshawk", hawk, NesHawkCompat::DMC_POWER_ON_TIMER),
+        ("item 11 on", hawk, ItemElevenOn::DMC_POWER_ON_TIMER),
     ] {
         let want = expected(timer);
         assert!(
@@ -654,15 +665,57 @@ fn item_11_the_dmc_timer_powers_on_1020_cycles_from_its_first_bit() {
         "the two phases are `1020 - 428` cycles apart"
     );
 
-    // The half the fetch cycle cannot show, and the reason the item is shippable: 592 is **even**,
-    // so the parity a reload's alignment cycle turns on — `DmcChannel::reset`'s own note, and what
-    // blargg's `sync_dmc` loop in `dmc_dma_during_read4` and `sprdma_and_dmc_dma` depends on — is
-    // the same on both profiles.
+    // The half the fetch cycle cannot show: 592 is **even**, so the parity a reload's alignment
+    // cycle turns on — `DmcChannel::reset`'s own note, and what blargg's `sync_dmc` loop in
+    // `dmc_dma_during_read4` and `sprdma_and_dmc_dma` depends on — is the same either way. That is
+    // what made the item safe to *try*; what stopped it being shipped is the movie, below.
     assert_eq!(
         0,
         (hawk - plain) % 2,
         "the item moves the phase by an even number of cycles"
     );
+
+    // **The record of the choice, and the one line to change to undo it.** Item 11 is off on the
+    // shipped profile: on its own it takes the *Kirby* `.bk2` from no live difference until frame
+    // 8 005 to frame 925 — where the movie parted before this profile existed — and moves no other
+    // measurement on either profile at all. Q-182 is the gate; see the constant's own note.
+    assert_eq!(
+        0,
+        NesHawkCompat::DMC_POWER_ON_TIMER,
+        "item 11 ships OFF pending Q-182: setting this to {} is the whole of enabling it",
+        ItemElevenOn::DMC_POWER_ON_TIMER
+    );
+    assert_eq!(
+        plain, shipped,
+        "so the shipped NesHawk profile powers its DMC timer on exactly as `Standard` does"
+    );
+}
+
+/// `NesHawkCompat` with **item 11 in place**, so that the item stays measured to the cycle while
+/// the shipped profile does not carry it (see the test above and
+/// `NesHawkCompat::DMC_POWER_ON_TIMER`'s note).
+///
+/// Every other constant is `NesHawkCompat`'s, read from it rather than restated, so this profile
+/// cannot drift away from the one it stands for. It is a test type and nothing outside this file
+/// instantiates it.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+struct ItemElevenOn;
+
+impl TimingProfile for ItemElevenOn {
+    const NAME: &'static str = "neshawk-item-11";
+    const STATE_ID: u8 = NesHawkCompat::STATE_ID;
+    const STATE_CORE_NAME: &'static str = NesHawkCompat::STATE_CORE_NAME;
+
+    const DMC_HALT_ON_REQUEST_CYCLE: bool = NesHawkCompat::DMC_HALT_ON_REQUEST_CYCLE;
+    const DMC_FETCH_HAS_TWO_DUMMIES: bool = NesHawkCompat::DMC_FETCH_HAS_TWO_DUMMIES;
+    const DMC_LENGTH_LAGS_THE_FETCH: bool = NesHawkCompat::DMC_LENGTH_LAGS_THE_FETCH;
+    const DMC_ENABLE_WRITES_MID_SAMPLE: bool = NesHawkCompat::DMC_ENABLE_WRITES_MID_SAMPLE;
+    const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool = NesHawkCompat::DMC_HALT_LANDS_ON_A_WRITE_CYCLE;
+    const DMC_FETCH_STALLS_AN_OAM_TRANSFER: bool = NesHawkCompat::DMC_FETCH_STALLS_AN_OAM_TRANSFER;
+    const PPU_START_UP_DOTS_SKIPPED: i64 = NesHawkCompat::PPU_START_UP_DOTS_SKIPPED;
+
+    /// The item, and the only line of this profile that is not `NesHawkCompat`'s.
+    const DMC_POWER_ON_TIMER: i32 = 1019;
 }
 
 // ---------------------------------------------------------------- the interrupt-phase ROM

@@ -29,7 +29,7 @@ frame 1 100 — a frame with no DMC DMA at all — shows as exactly one event of
 - [x] 5. No regression. `Standard` byte-identical and every suite unchanged on both profiles;
       the bench is **inside the cumulative budget** and **slower than the immediate parent**,
       which is reported rather than smoothed.
-- [ ] 6. Report and final pass.
+- [x] 6. Report and final pass. **Item 11 ships OFF**, and the deciding measurement is here.
 
 ## The environment this lot runs in
 
@@ -597,3 +597,121 @@ on this configuration, and references for 30 000-60 000 would measure the partin
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE-5 step 5 done: Standard byte-identical, every suite unchanged, bench inside the cumulative budget
+
+---
+
+## Step 6 — report and final pass
+
+### The decision this step took, and it is the lot's result
+
+**Item 11 ships implemented, tested and OFF.** Step 3 measured it as exact and as costing the
+movie; step 4 isolated the cycle it is waiting for and found the source refusing the item that
+would pay it. Those two together leave one question — *ship a correct item that makes the one thing
+the profile is for worse?* — and the answer taken is **no**, with every number written down and one
+constant to reverse it.
+
+The deciding measurement was taken at this step and it is sharper than step 3's:
+
+| *Kirby*, `--profile neshawk`, the last frame with no live difference | item 11 **off** (shipped) | item 11 **on** |
+|---|---|---|
+| 1-400 | **400** | 400 |
+| 400-1 100 | **1 100** | 925 |
+| 1 100-10 000 | **8 005** | **none** |
+| 10 000-30 000 | none | none |
+
+**With item 11 on, the 1 100-10 000 window reports `none`** — the movie has parted before the
+window opens, so the profile's headline figure does not merely fall from 8 005 to 925, it ceases to
+exist. 925 is where *Kirby* parted in §4e, before this profile existed. An item that returns the
+movie to its pre-profile parting point and improves nothing else is not shippable on its own,
+however exactly right it is about NesHawk's chip — and it **is** right, which is why it is kept
+rather than deleted.
+
+Everything else was re-measured in the shipped configuration rather than assumed from step 5's
+run, because the constant changed after step 5:
+
+| | |
+|---|---|
+| `golden-core`, 98 originals × 1 200 frames | `8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773` — **byte-identical** |
+| the 30 DMC/DMA/APU ROMs, `neshawk` | **19 pass, 5 fail, 6 manual** |
+| `ppu_vbl_nmi` / `vbl_nmi_timing` / `cpu_interrupts_v2`, `neshawk` | **11/11, 7/7, 6/6** |
+| `AccuracyCoin`, `neshawk` | **122/147** |
+| *Faxanadu*, `neshawk`, both dumps | **247** and **314** of 832 |
+| *Kirby*, all four windows | **400 / 1 100 / 8 005 / none** |
+
+Every one of those is lot NESHAWK-PROFILE-4's figure exactly, which is the point: **the shipped
+behaviour of both profiles is `7dbe7c54`'s to the byte.** What this lot adds to the tree is an
+item that is off, a test that measures it anyway, a fixed test that was failing, a question ticket
+and five documents.
+
+### The item stays measured while it is off
+
+`NesHawkCompat::DMC_POWER_ON_TIMER` is `0`, so a differential test written against the shipped
+profile would compare `0` with `0` and assert nothing. The test instead measures the **mechanism**
+through `ItemElevenOn`, a profile of the test file's own that takes every constant *from*
+`NesHawkCompat` and overrides the one:
+
+    standard 3424, item 11 on 4016, apart 592; the shipped neshawk profile 3424
+
+— the second fetch at `T + 1 + 7 × 428` on each, 592 apart and even. Its last two assertions are
+the record of the choice itself: `NesHawkCompat::DMC_POWER_ON_TIMER == 0`, with the message naming
+`1019` as the whole of enabling it, and the shipped profile's fetch equal to `Standard`'s. If
+anyone enables the item without reading Q-182, that test says so by name.
+
+### The documents
+
+| | |
+|---|---|
+| `docs/review/MOVIE-SYNC.md` **§4j** | *The seed found, measured and switched off.* The result first (the seed, the 8 005 → 925, and that no other measurement moves), both of §4i's candidates eliminated by measurement, why a correct item costs the movie — two errors cancelling — and where the remaining cycle is, Q-182 in full, and a *what this lot did not do* table that includes **enabling item 11** and **retracting item 1c**. The header's lot list gained a NESHAWK-PROFILE-5 paragraph; §4i's "what seeds the phase" unknown is **struck and answered in all three of its parts**; §5 gained **three** of its own; the commands block gained this lot's, ending with the one command the lot needs next |
+| `docs/review/NESHAWK-PROFILE.md` | the item table gains **11**, marked *implemented and OFF* with the shipped value stated; the header gains a NESHAWK-PROFILE-5 note; the per-movie attribution gains a row for frame 8 005 explaining why it is **still** 8 005; the candidate list gains **item 1c itself**, re-opened under Q-182; the recipe's traps go from eight to **twelve**, the new ones being *an item can be exactly right and still not shippable*, *when two errors cancel, fixing one makes things worse — and that is progress*, and *a suite figure is only as good as the invocation that produced it*; the cost table carries this lot's bench and its honest reading, and the test count is corrected to 1 205 with the reason the old one was short |
+| `docs/review/NESHAWK-PROFILE-5-SCRIPTS.md` | **new**, because this lot added two instruments where lot 4 added none: `bk2cyc2.lua` (the boot's ledger, frames 1-1 100) and `bk2dmc1.lua` (the fetch ledger, one callback per sample byte), in full, with the limit that shaped both — BizHawk's Lua cannot see frame 1 — and the calibration neither can answer, which is Q-182 |
+| `spec/changes/Q-182.md` | **new.** Both readings of the 3-cycle fetch offset, the measurement that favours dropping item 1c, the derivation that refuses it, the provisional choice (change nothing) and the three-line Lua run that settles it. Referenced in code at `nes_bus.rs` `promote_dmc_wait` and at `timing_profile.rs`'s `DMC_HALT_LANDS_ON_A_WRITE_CYCLE`. It is a **question ticket**, which `CLAUDE.md` requires for exactly this situation; the specification itself is not edited |
+
+### fmt, clippy and the suites
+
+| | |
+|---|---|
+| `cargo fmt --all --check` | clean |
+| clippy `-D warnings --all-targets`, whole workspace, feature **off** | clean |
+| the same with **`dma-census`** | clean |
+| the same with **`fceux-core`** | clean |
+| `zax-nes` release, `--include-ignored` | **1 205** passed, 0 failed |
+| `zax-harness` release, `--include-ignored` | **128** passed, 0 failed; **128** with `dma-census`; **148** with `fceux-core` |
+
+A `cargo test --workspace` is still impossible here (`LNK1181: cannot open input file 'SDL2.lib'`),
+so the suites are run per crate as the four lots before this one did; `cargo clippy --workspace
+--all-targets` does link and covers `zax-app` and `zax-platform` and all their test targets in all
+three configurations.
+
+### The brief's rules, checked
+
+| | |
+|---|---|
+| the `Standard` path's behaviour | `golden-core` **byte-identical**; 24 of 24 DMC/DMA ROMs, `AccuracyCoin` 128/147, `ppu_vbl_nmi` 11/11, `vbl_nmi_timing` 7/7, `cpu_interrupts_v2` 6/6 and both *Faxanadu* dumps unchanged; savestates unchanged to the byte and to the version — item 11 adds **no field**, only a constant |
+| the `Standard` path's speed | +2.68 % and +1.24 % against the parent over six interleaved rounds, **−1.85 % and −1.65 % cumulatively** since `428c50e6` — inside the +1 % cumulative budget the brief gates on, with the per-parent figure reported rather than smoothed and its layout cause named |
+| the `NesHawkCompat` profile keeps passing everything NesHawk passes | **yes**: `ppu_vbl_nmi` 11/11, `vbl_nmi_timing` 7/7, `cpu_interrupts_v2` 6/6 on **both** profiles |
+| no `if profile == NesHawk` in a hot path | item 11 is read as `if P::DMC_POWER_ON_TIMER > 0` at **one** site, `DmcChannel::reset`, reached from `power_on` alone — once per machine. No other site was touched |
+| safe Rust only | no `unsafe` added; `zax-nes` keeps `#![forbid(unsafe_code)]` |
+| generics and associated constants, not runtime flags | one associated constant, folded at every site |
+| diagnostic hooks behind a cfg/feature off by default | none added. The census is `dma-census`'s, as before; no temporary hook is in any commit |
+| no downloads | none. BizHawk read through `raw.githubusercontent.com` at tag **2.11.1** — `APU.cs`, `NES.Core.cs`, `MOS 6502X/MOS6502X.cs` and `MOS 6502X/Execute.cs`; nothing cloned or fetched |
+| nothing staged that must not be | no ROM, movie, trace, dump, screenshot, `rust/target-*`, `.claude/` or `CLAUDE.md`; every commit staged files **by name** |
+| no absolute path with a user name in a committed file | checked across all five commits and all four documents |
+| `spec/` not edited | the specification is not edited. **A new question ticket** `spec/changes/Q-182.md` is written, which `CLAUDE.md`'s hard rules require for an ambiguity and which lives outside this repository (`spec/` is not part of the worktree, so it is in no commit) |
+| scripts and outputs outside the worktree | the two Lua scripts stay in `G:/3DSen/ext-tools/scripts/`, every output in `G:/3DSen/test-movies/bizhawk-runs/`, the Python analysers regenerated into the session's scratchpad; the parent builds on `C:/zxb`, deleted |
+| the disk | `G:` 8.6 GB at the start, **7.2 GB** at the end, never below 7.2; `C:` 18 and 17. The brief's stops are 5 GB and 1 GB. The parents were built on `C:` **because** building them on `G:` would have breached the 5 GB stop, which is said in step 5 |
+
+### What this lot did not do, said plainly
+
+| | |
+|---|---|
+| **enable item 11** | measured and refused, and the measurement is above. One constant to reverse, and the test names it |
+| **retract item 1c** | measured as better on five counts and refused, because the derivation is verbatim from three files of two sources and Q-182 is open. The one place in five lots where a measurement is overruled by a reading, and it is a ticket rather than a decision |
+| **rounds 2 to 5 of step 4** | not run; step 4 says why. The round loop's last step is *source → item* and this round's source refused the item, so a second round would re-measure the same cycle against the same unpinned calibration |
+| **further per-frame references** | **not produced**, and no disk spent: the four windows that exist cover everything the shipped configuration can say, and it is NESHAWK-PROFILE-4's configuration to the byte |
+| **the whole 156 312 frames, the pictures, a `--png` sweep** | not run, for one reason: the shipped behaviour of both profiles is `7dbe7c54`'s, so every one of them would reproduce a figure already in §4i |
+| **the bench re-run after the constant was switched off** | not done. The figures are from the item-11-enabled build; the shipped build differs by one constant the `Standard` path never reads, and `golden-core` is byte-identical in both. Said here rather than left to be inferred |
+| **the four other DMC items re-derived with item 11 on** | not done, and it is §5's second new unknown. Items 1a, 1b, 3 and 7 were all fitted against the wrong power-on phase; item 1c is the only one this lot re-read line by line |
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-5 step 6 done: item 11 ships off, the documents, and Q-182

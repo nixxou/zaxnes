@@ -265,5 +265,32 @@ impl TimingProfile for NesHawkCompat {
     const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool = true;
     const DMC_FETCH_STALLS_AN_OAM_TRANSFER: bool = true;
     const PPU_START_UP_DOTS_SKIPPED: i64 = 7165;
-    const DMC_POWER_ON_TIMER: i32 = 1019;
+
+    /// **Item 11 is implemented and deliberately left OFF, and `1019` is the value to put here.**
+    ///
+    /// The item is not in doubt: NesHawk's `DMCUnit` constructor sets `timer = 1020`, and with
+    /// `1019` here every DMC sample fetch of *Kirby*'s frame 11 lands at a constant offset from
+    /// BizHawk's own per-byte fetch ledger where this value of `0` drifts 211 cycles out of it
+    /// (lot NESHAWK-PROFILE-5 steps 1 to 3).
+    ///
+    /// **It is off because half of it is worse than none of it.** Enabled on its own it takes the
+    /// *Kirby* `.bk2` from no live difference until frame **8 005** to no live difference until
+    /// frame **925** — which is where the movie parted before this profile existed at all — while
+    /// moving no other measurement on either profile by one ROM or one line: the thirty DMC/DMA
+    /// ROMs, `ppu_vbl_nmi`, `vbl_nmi_timing`, `cpu_interrupts_v2`, `AccuracyCoin` and both
+    /// *Faxanadu* dumps are all identical with it and without it. The profile exists to replay a
+    /// NesHawk movie, so a change that costs 7 080 frames of the one movie there is and buys
+    /// nothing anywhere else is not shippable, however exact it is in isolation.
+    ///
+    /// **What it is waiting for is one cycle, and `Q-182` is the gate.** With item 11 on, frame 11
+    /// is exact on every tag except a single cycle lost at the one reload fetch whose request falls
+    /// on a write cycle; charging that fetch four cycles instead of item 1c's three makes frame 11
+    /// exact and takes the movie back to 1 100 — but the source says three is right, and the number
+    /// that would settle it (the cycle BizHawk's Lua reports a *DMA* read on) is not pinned. Once
+    /// Q-182 is answered, this constant and item 1c move together or not at all.
+    ///
+    /// Setting this to `1019` restores the measured item; leaving it `0` keeps lot
+    /// NESHAWK-PROFILE-4's behaviour exactly. `tests/neshawk_profile_tests.rs` measures the
+    /// mechanism at `1019` through a profile of its own, so the item stays covered while it is off.
+    const DMC_POWER_ON_TIMER: i32 = 0;
 }
