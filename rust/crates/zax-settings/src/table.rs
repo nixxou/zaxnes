@@ -2195,8 +2195,15 @@ fn shader_slots(out: &mut Vec<SettingDescriptor>) {
         let ids = slot.ids();
         let (default_mode, modes) = match slot.fallback() {
             None => (OFF, vec![opt(OFF, "Off"), opt(PRESET, "Preset")]),
+            // On Android the 3D scene does not take the 2D preset by default: it is filtered at
+            // the window's own size, which a 2D preset such as Mega Bezel is too heavy for on a
+            // phone GPU (Adreno 610: 0.5 fps, Adreno 650: 22 fps). It is chosen for 3D on purpose.
             Some(parent) => (
-                FOLLOW,
+                if cfg!(target_os = "android") && slot == ShaderSlot::ThreeD {
+                    OFF
+                } else {
+                    FOLLOW
+                },
                 vec![
                     opt(FOLLOW, parent.follow_label()),
                     opt(OFF, "Off"),
