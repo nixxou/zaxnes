@@ -35,12 +35,16 @@ them into your own profile folder. Nothing is downloaded, nothing is redistribut
 installation is left untouched. On a handheld, run the import on a PC and copy the `profiles`
 folder to the card.
 
-> **3dSen version 2 is not supported yet.** Its new profile format cannot be imported for now;
-> the import works with the profiles of the earlier versions.
+The import works with every version of 3dSen, including **2.0 and 2.1**, and Zaxnes plays what
+those versions brought to the profiles: reflections, bend, the new camera and Lua features.
 
 **Some community profiles are free:** players share the profiles they made in the
 [Profile Repository](https://itch.io/board/872690/profile-repository) of the 3dSen Maker forum on
 itch.io. Import them with **File ▸ Import a profile…**.
+
+**Profiles made for Zaxnes:** [zaxnes_3dn](https://github.com/nixxou/zaxnes_3dn) holds 3D profiles
+made for Zaxnes itself (*Faxanadu*, *Metal Force*), shipped with each release. They have their own
+licence (CC BY-NC-ND 4.0), separate from the Zaxnes code.
 
 Without a profile, every game still plays, in **2D**, or in a **default 3D** that gives every tile
 the same depth.
@@ -56,9 +60,12 @@ new version of Zaxnes brings a new version of the game.
 
 ### Making your own profiles
 
-Zaxnes has **no profile editor of its own yet**. To make or change a profile, use
-[3dSen Maker](https://geod.itch.io/3dsen-maker), Geod Studio's free profile editor, then import the
-profile in Zaxnes (**File ▸ Import a profile…**).
+To make or change a profile, use [3dSen Maker](https://geod.itch.io/3dsen-maker), Geod Studio's
+free profile editor, then import the profile in Zaxnes (**File ▸ Import a profile…**).
+
+Zaxnes also has an **editor mode** (work in progress): an AI-assisted way to write a profile in Lua.
+It gives an AI agent a harness through a local MCP server, and a prompt ready to copy and paste;
+see [`rust/docs/EDITOR.md`](rust/docs/EDITOR.md).
 
 ## Widescreen (experimental)
 
@@ -89,8 +96,10 @@ Games supported so far:
 - *Blaster Master*
 - *Castlevania*
 - *Excitebike*
+- *Faxanadu*
 - *Final Fantasy*
 - *FlappyZaxNes* (the game included with Zaxnes)
+- *Kirby's Adventure*
 - *Mega Man*, *Mega Man 2*, *3*, *4*, *5* and *6*
 - *Metal Force*
 - *Metroid*
@@ -102,7 +111,13 @@ Games supported so far:
 
 - **RetroAchievements**, in softcore mode: sign in from the options, and save states, rewind and
   fast forward stay allowed. The ROM list shows how far you got in each game.
-- **Save states** with thumbnails, **rewind** and **fast forward**.
+- **Save states** with thumbnails, **rewind** and **fast forward**. With a widescreen game, a
+  save state loads with the widescreen on or off.
+- **RetroArch shaders** (slang, through librashader) in Vulkan and DirectX 12, on the desktop and
+  on Android: CRT, scanlines, LCD, Mega Bezel TV frames, for 2D and 3D separately.
+- **Run-ahead**, and an experimental **smooth scrolling at 120 Hz** that draws the playfield
+  between two emulated frames.
+- A growing **accuracy**: 144 mappers, and 128 of the 147 tests of AccuracyCoin.
 - **Movies**: record a game and replay it exactly.
 - A **console interface** made for the gamepad, on handhelds and on the desktop (F1).
 - Vulkan and DirectX 12 on the desktop, besides OpenGL; in Vulkan, ReShade can use the depth of
@@ -147,10 +162,11 @@ Every [release](../../releases) has one package per platform:
 
 | Package | For |
 |---|---|
-| `Zaxnes-<version>-win-x64.zip` | Windows 10/11: a single `zaxnes.exe`, nothing to install |
+| `Zaxnes-<version>-win-x64.zip` | Windows 10/11: a single `zaxnes.exe`, nothing to install; portable (its data in `userdata` next to it; delete `portable.txt` to use `%LOCALAPPDATA%\Zaxnes`) |
 | `Zaxnes-<version>-linux-x64.tar.gz` | Linux (needs SDL2, `libsdl2-2.0-0` on Debian/Ubuntu) |
 | `Zaxnes-<version>-portmaster-aarch64.zip` | PortMaster handhelds: unzip into the `ports` folder of the SD card |
 | `Zaxnes-<version>-android-arm64.apk` | Android 7.0 or later, 64-bit ARM (tablets and handhelds): install the APK |
+| `Zaxnes-<version>-3dn-profiles.zip` | The 3D profiles made for Zaxnes ([zaxnes_3dn](https://github.com/nixxou/zaxnes_3dn)), already in the `profiles` folder of the Windows, Linux and PortMaster packages |
 
 **The only game included is FlappyZaxNes**, with its 3D profile (see above). For any other game you
 need your own, legally owned ROMs.
