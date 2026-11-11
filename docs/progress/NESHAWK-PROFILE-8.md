@@ -9,9 +9,13 @@ Branch `feat/neshawk-profile`, worktree `cleanroom/wt-bk2`, base `c20c8cb1` (lot
       whose start cycle differs is frame 11's `$C562 STA ($18,X)`, 10 cycles here against **9**
       there. Two differences found, both measured: **item 1c is right** (705 fetches, no
       exceptions) and the movie's **reset lands 3 CPU cycles late** here.
-- [ ] 2. Explain and fix: item 1c restored, with a differential test.
-- [ ] 3. Rounds.
-- [ ] 4. No regression, report, final pass.
+- [x] 2. **Explain and fix.** Item 1c **restored** behind its constant with the 705-fetch
+      measurement and its differential test, and **shipped off**: alone it costs the movie 44 170
+      frames, and the gate is the reset.
+- [x] 3. **One round of five**, and it stops there because the residual is now one measured
+      quantity: the reset.
+- [x] 4. No regression (`golden-core` byte-identical, every suite and both *Faxanadu* dumps
+      unchanged, the bench +0.60 % and -0.31 %), report, final pass.
 
 ## The environment this lot runs in
 
@@ -171,3 +175,146 @@ Full texts in `docs/review/NESHAWK-PROFILE-8-SCRIPTS.md`.
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE-8 step 1 done: the phase is born at the reset, and item 1c is right on 705 fetches
+
+---
+
+## Step 2 — item 1c restored by measurement, and shipped off with the gate named
+
+### The answer first
+
+The round did what step 1's measurement asks and **restored item 1c**, which lot NESHAWK-PROFILE-6
+retracted: the arms it removed are back, verbatim, behind the constant it removed, and the
+differential test is back with `[4, 5, 4, 5]` against `Standard`'s `[5, 4, 5, 4]`. Then it measured
+the movie, and **the item is shipped off**: on its own it takes *Kirby* from 45 095 back to **925**,
+because the slip it fires on is read off this core's CPU position and this core's CPU is 2 cycles
+further into the instruction than NesHawk's from the reset onwards — the right rule on the wrong
+fetches. The gate is the reset, and it is now a measured quantity rather than a guess.
+
+### What the item does to the movie, measured
+
+`movie-sync --engine zaxnes --profile neshawk --no-lag --ram-ref <window>`, the figure being the
+last frame with no live difference:
+
+| window | frames | shipped (1c off) | **1c on** | **1c on + the reset's phase moved** |
+|---|---|---|---|---|
+| `step1` | 1 - 400 | 400 | 400 (194 → 287 identical to the byte) | 400 |
+| `step1b` | 400 - 1 100 | 1 100 | parted at **925** | 1 100 |
+| `step1c` | 1 100 - 10 000 | 10 000 | parted at 1 100 | parted at **9 353** |
+| `step1e` | 30 000 - 60 000 | **45 095** | — | — |
+
+The third column is the item alone. The fourth is the item **plus** item 10's dot count raised by 9
+at the reset alone — the only knob in the tree that can move the post-reset phase — and it is worth
+8 428 frames over the item alone and still 35 742 short of the shipped 45 095.
+
+### Why the dot knob is not the reset fix, measured rather than argued
+
+A dot bias moves the **PPU against the CPU**; applying the reset 3 cycles earlier moves the **whole
+machine** and leaves the game's position against the PPU alone. The difference is not academic: the
+post-reset boot polls `$2002` in a 7-cycle loop, so a PPU-against-CPU shift is re-quantised by it.
+Swept over the bias, the residual of frames 7 to 11 — which must come back to the **−1** the frames
+before the reset read — is:
+
+| bias, dots | −9 | −3 | **0** | 3 | 6 | 9 | 12 |
+|---|---|---|---|---|---|---|---|
+| residual | +2 | +2 | **+2** | +2 | +2 | **+1** | −5 |
+
+**No value reaches −1.** So the reset item has to be the reset itself: the frame must end at the PPU
+dot, which is `NesCoreOf::run_frame_profiled`'s loop and not a constant, and that is the next lot's
+one job. Both halves are then in hand, each measured on its own.
+
+### Round 1
+
+| | |
+|---|---|
+| parting frame before | **45 095** |
+| the first difference of any kind | frame **55** (lot 7), now explained: a DMC halt on a write cycle that this core charges a cycle more for, on a CPU 3 cycles out of phase with the DMC's train since the reset |
+| the first frame whose residual leaves its constant | frame **12** (new) |
+| the first instruction whose start cycle differs | frame 11's `$C562 STA ($18,X)`, 10 cycles here and 9 there (new) |
+| items shipped | **none on**: item 1c is restored, measured on 705 fetches, and off with its gate |
+| frame 40's collision | **gone** with item 1c on (+165 → 0); frame 55's remains (−160 → −156), which is the reset |
+| parting frame after | **45 095**, unchanged: the item ships off |
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-8 step 2 done: item 1c restored by measurement, shipped off, the reset named as its gate
+
+---
+
+## Step 3 — the round, and why it stops at one
+
+One round of five, as lot 7 stopped at one, and for a reason of the same shape: what is left is
+**one** difference — the reset's 3 cycles — it is measured to the cycle, and the fix is a change to
+the frame loop rather than a constant. Rounds 2 to 5 would measure the same residual again.
+
+What this round delivers that lot 7 did not have: the frame the phase is **born** in (the reset
+after frame 4, not frame 55), the instruction (`$C562 STA ($18,X)`), the rule (item 1c, 705
+fetches, no exceptions), the two collisions it explains (frames 40 and 55, in opposite directions),
+and the one knob that cannot fix it, swept.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-8 step 3 done: one round of five, the residual reduced to the reset's three cycles
+
+---
+
+## Step 4 — no regression, and the final pass
+
+### The answer first
+
+**The shipped behaviour of both profiles is unchanged**, which is the point of shipping item 1c off:
+every arm it adds is inside `if P::DMC_HALT_LANDS_ON_A_WRITE_CYCLE`, which is `false` on both
+profiles, so nothing is emitted for either. Measured rather than argued:
+
+| gate | result |
+|---|---|
+| `golden-core`, 98 originals × 1 200 frames, release, feature off | `8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773` — **byte-identical** to every lot since FCEUX-23 |
+| the 30 DMC/DMA/APU ROMs, `standard` | **24 pass, 0 fail, 6 manual** (3 + 2 + 19 + 0), the same column |
+| the 30 DMC/DMA/APU ROMs, `neshawk` | **19 pass, 5 fail, 6 manual**, the same column |
+| `AccuracyCoin` | **128/147** `standard`, **121/147** `neshawk` — both unchanged |
+| `ppu_vbl_nmi` / `vbl_nmi_timing` / `cpu_interrupts_v2` | **11/11, 7/7, 6/6 on both profiles** |
+| *Faxanadu*, `[USA][!!]` and `[USA][Rev 1][!!]` | **207** and **220** of 832 on `standard`, **247** and **314** on `neshawk` — all four unchanged |
+| *Kirby*, all four windows | 400, 1 100, 10 000, **45 095** with 4 763 lines identical to the byte — unchanged |
+| `bench-core`, 3 interleaved rounds against the parent `c20c8cb1` built on `C:` | Super Mario Bros. 3 **+0.60 %**, Mega Man 3 **−0.31 %**; cumulatively against `428c50e6` still inside the +1 % budget |
+
+The two binaries are **not** byte-identical, and that is line numbers rather than code: the item's
+arms add lines to `nes_bus.rs`, which moves every panic location below them. The gates above are
+what says the emitted core did not change.
+
+### The final pass
+
+| | |
+|---|---|
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean (one error fixed on the way: `assert!(!P::ITEM)` is an assertion on a constant, so the record of the choice is written as the *behaviour* — `[5, 5, 5, 5]` on the shipped profile — which is the better test anyway) |
+| `cargo test -p zax-nes --release` | **56 targets, 1 194 passed, 0 failed, 11 ignored**, summed per target as the review doc's trap requires |
+| `cargo test --release`, the crates that link | **103 targets, 2 188 passed, 0 failed, 87 ignored** |
+| the ignored tests, with `ZAXNES_ROMS`, `ZAXNES_TEST_ROMS`, `ZAXNES_PROFILES` | **100 targets, 31 passed, 0 failed** |
+| `zax-app` and `zax-platform` | **do not link in this worktree**: `LNK1181: cannot open input file 'SDL2.lib'`. An environment prerequisite, not a regression — this lot's diff is three files of `zax-nes` plus documents, and neither crate is downstream of a timing constant |
+| `zax-profiles`'s six `three_d_sen_real_install_tests` | **fail for want of `ZAXNES_3DSEN_INSTALL`**, which the brief does not set and which names the original program's installation. Not run, not a regression |
+
+### The documents
+
+| | |
+|---|---|
+| `docs/progress/NESHAWK-PROFILE-8.md` | this note |
+| `docs/review/NESHAWK-PROFILE-8-SCRIPTS.md` | the four BizHawk Lua texts |
+| `docs/review/NESHAWK-PROFILE.md` | item 1c back in the item table with its measurement and its gate, and the trap about reading a slip off the wrong machine |
+| `docs/review/MOVIE-SYNC.md` | §4l, this lot's result in context |
+| `journal/` | the session log |
+
+### What this lot did not do, said plainly
+
+* **It shipped no behaviour change.** Item 1c is restored, measured and off; the movie still parts at
+  45 095. What changed is that the residual is now one named quantity instead of a jitter.
+* **It did not implement the reset item.** The reset lands 3 CPU cycles late because this core's
+  frame boundary is instruction-quantised and NesHawk's is a PPU dot. Fixing it means breaking
+  `run_frame_profiled`'s loop **before** the instruction that straddles the dot, on the NesHawk
+  profile alone, which needs a latch in `Ppu2C02` one dot before `vblank_just_started`. That is a
+  frame-loop change with its own no-regression story and it is the next lot's one job.
+* **It did not re-measure Q-182.** The ticket's answer stands either way: the DMA-read calibration
+  it hung on is invisible to the CPU, which lot 7 measured on thirteen fetches and this lot's slip
+  table confirms on 705 — every column of it is a difference of two BizHawk cycles.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-8 step 4 done: no regression, the documents, and the final pass

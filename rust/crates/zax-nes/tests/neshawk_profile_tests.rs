@@ -243,19 +243,16 @@ fn item_1c_an_odd_run_of_write_cycles_costs_the_fetch_one_cycle_less() {
         standard,
         "standard: the alignment follows the halted read's own parity"
     );
-    // **The record of the choice, and the one line to change to undo it.** The shipped profile
-    // charges four cycles at every slip, which is item 1b on its own, and the test above is what
-    // says the item's own mechanism still works.
-    assert!(
-        !NesHawkCompat::DMC_HALT_LANDS_ON_A_WRITE_CYCLE,
-        "item 1c ships OFF while the reset lands 3 cycles late: `true` is the whole of enabling it"
-    );
+    // **The record of the choice, and the one line to change to undo it.** Item 1c ships OFF
+    // while the movie's reset lands 3 cycles late (the constant's note is the gate), so the
+    // shipped profile charges four cycles at every slip — item 1b on its own. Written as the
+    // behaviour and not as `assert!(!P::ITEM)`, which clippy reads as an assertion on a constant.
     assert_eq!(
         vec![5, 5, 5, 5],
         (1..5)
             .map(cost_with_the_read_displaced::<NesHawkCompat>)
             .collect::<Vec<i64>>(),
-        "so the shipped neshawk profile charges a reload four cycles at every slip"
+        "the shipped neshawk profile charges a reload four cycles at every slip: setting          `DMC_HALT_LANDS_ON_A_WRITE_CYCLE` to true on it is the whole of enabling the item"
     );
 }
 

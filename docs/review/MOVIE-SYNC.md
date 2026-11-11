@@ -1726,6 +1726,43 @@ the instrument that measures it at any frame.
 
 ---
 
+## 4l. Item 1c is right after all, and the phase is born at the reset (NESHAWK-PROFILE-8)
+
+### The result first
+
+**§4k's answer was the wrong way round, and the measurement that says so needs no calibration at
+all.** A NesHawk DMC reload fetch whose halt lands on a CPU **write** cycle costs the CPU **three**
+cycles, not four — so **item 1c is restored** — and the reason §4k read the opposite is that it took
+the *slip* from this core's census and the *stall* from BizHawk's stream, while the two machines'
+CPUs are two cycles apart inside the instruction. The item nevertheless **ships off**, because a
+second difference holds it: **the movie's reset lands 3 CPU cycles late here**, so the right rule
+fires on the wrong fetches.
+
+| | |
+|---|---|
+| the measurement | tree frames 11 to 46 of the *Kirby* `.bk2`, **705** sample fetches, read off BizHawk's own bus stream. `stall = duration − nominal`, where `nominal` is the shortest duration that PC is ever seen to take in the window, and the writes that passed **through** the DMA are the cycles carrying a `w` **and** an `r` — NesHawk's write microstep ignoring `RDY` is exactly what puts two accesses on one cycle. Both numbers are BizHawk's, so **no cross-machine calibration enters anywhere** |
+| the table, by slip | 0 → **4** (648 of 648), 1 → **3** (46 of 46), 2 → **4** (11 of 11). No exceptions: `stall = 4 − (slip mod 2)`, which is item 1c's own rule |
+| why §4k read it backwards | the slip is a property of what the **CPU** is doing on the request cycle. Lot 6's own table said "slip 1 came out 4 six times and **3 ten times**" and treated the ten as drift; they were the measurement, and the sixes were the fetches whose slip differs between the machines |
+| where the CPU phase is born | the four once-a-frame marks of frames 1-56 (the NMI entry, its `RTI`, `$C06E` — the last instruction before the frame-sync spin loop — and the loop's exit) put the execute residual at a **constant −1** before the movie's reset and a **constant +2** after it, and at frame **12** it starts to jitter. The reset is the step: NesHawk begins its 7 reset cycles on the cycle this core's straddling instruction *starts* on, because **NesHawk's frame ends at a fixed PPU dot, mid-instruction**, where this core's `run_frame_profiled` breaks after the instruction that crossed it |
+| why that is the whole collision | the reset restarts the PPU (item 10), the game is NMI-synced and the DMC's train is CPU-counter-clocked — so a reset 3 cycles late leaves the game's code 3 cycles late **against every DMC fetch for the rest of the movie**, which is what puts NesHawk's halts on write cycles and this core's on read cycles |
+| the two collisions it explains | frame **40**, where *this core* runs the extra pass of Kirby's input routine (+165 cycles), and frame **55**, where NesHawk does (−160). Item 1c on its own **removes frame 40's** and leaves frame 55's |
+| the movie | item 1c alone: 45 095 → **925**. Item 1c plus the only knob that can move the post-reset phase (item 10's dot count at the reset, `+9`): **9 353**. Shipped, with the item off: **45 095**, unchanged |
+| why the knob is not the fix | a dot bias moves the PPU **against** the CPU, so the post-reset boot's 7-cycle `$2002` polling loop re-quantises it; the residual reads +2, +2, +2, **+1**, −5 over biases of 0, 3, 6, 9 and 12 dots and **never reaches the −1** the frames before the reset read. Applying the reset 3 cycles earlier moves the whole machine instead, and leaves the code's position against the PPU alone |
+| and `Standard` | untouched: every arm item 1c adds is inside a constant that is `false` on **both** profiles. `golden-core` **byte-identical**, 24 of 24 and 19 of 24 DMC/DMA ROMs, `AccuracyCoin` 128/147 and 121/147, `ppu_vbl_nmi` 11/11, `vbl_nmi_timing` 7/7, `cpu_interrupts_v2` 6/6 on both, both *Faxanadu* dumps at 207/220 and 247/314, the bench **+0.60 %** and **−0.31 %** against the parent |
+
+**This is the first time in this series that a measurement lost to a measurement.** The lesson is
+narrower than the earlier ones and worth as much: *a quantity read off one machine and compared
+against the other is only valid while the two are in step*, and these two have not been in step
+inside an instruction since the movie's fourth frame. Lot 6's figure was honest, reproducible and
+measured on the wrong machine's clock.
+
+### What the next lot does
+
+One thing: end a frame at the PPU dot on the NesHawk profile, so the reset lands where NesHawk's
+does. It needs a latch in `Ppu2C02` one dot before `vblank_just_started` and a profile-gated break
+in `run_frame_profiled`'s loop — and then item 1c's own measurement says it goes back on.
+`docs/progress/NESHAWK-PROFILE-8.md`.
+
 ## 5. What is still unknown
 
 Said plainly, because the result in §4 is strong enough to be worth bounding.
