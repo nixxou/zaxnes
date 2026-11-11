@@ -267,7 +267,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
                 default: true,
             },
         ],
-        after_other_way_state: Some(zelda2_after_other_way_state),
+        // The world map's redraw is its pack's (states section: $0736 05 -> 02).
+        after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies and the world map past the edges.
         advanced: true,
         // The pack's code runs in the execution zone ($2000-$3FFF, instruction fetches only),
@@ -290,7 +291,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // the game's moved addresses for this build; a PAL pack).
         bps: include_bytes!("../patches/zelda2-europe-widescreen.zxpk"),
         options: ZELDA2_OPTIONS,
-        after_other_way_state: Some(zelda2_after_other_way_state),
+        // The world map's redraw is its pack's (states section: $0736 05 -> 02).
+        after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies and the world map
         // past the edges.
         advanced: true,
@@ -312,7 +314,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // the game's moved addresses for this build; a PAL pack); the pack of the Europe build: this revision has the same code where the hack hooks it.
         bps: include_bytes!("../patches/zelda2-europe-widescreen.zxpk"),
         options: ZELDA2_OPTIONS,
-        after_other_way_state: Some(zelda2_after_other_way_state),
+        // The world map's redraw is its pack's (states section: $0736 05 -> 02).
+        after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies and the world map
         // past the edges.
         advanced: true,
@@ -334,7 +337,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // the game's moved addresses for this build; a PAL pack).
         bps: include_bytes!("../patches/zelda2-europe-rev2-widescreen.zxpk"),
         options: ZELDA2_OPTIONS,
-        after_other_way_state: Some(zelda2_after_other_way_state),
+        // The world map's redraw is its pack's (states section: $0736 05 -> 02).
+        after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies and the world map
         // past the edges.
         advanced: true,
@@ -357,7 +361,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // `tools/build.py`); its translations take it by their signatures.
         bps: include_bytes!("../patches/zelda2-usa-mmc5-widescreen.zxpk"),
         options: ZELDA2_OPTIONS,
-        after_other_way_state: Some(zelda2_after_other_way_state),
+        // The world map's redraw is its pack's (states section: $0736 05 -> 02).
+        after_other_way_state: None,
         advanced: true,
         // The pack's code runs in the execution zone, open from power-on.
         boot_window: None,
@@ -2209,17 +2214,6 @@ const CASTLEVANIA_OPTIONS: &[HackOption] = &[
         default: true,
     },
 ];
-
-/// Zelda II: the world map is laid out in four nametables by the hack and in two by the game, and
-/// only redrawn when it is entered; a map state made the other way goes back through
-/// the game's own map initialisation (game mode 2), which redraws it around Link.
-fn zelda2_after_other_way_state(ram: &mut [u8]) {
-    const GAME_MODE: usize = 0x0736;
-    const WORLD_MAP: u8 = 0x05;
-    if let Some(mode) = ram.get_mut(GAME_MODE).filter(|mode| **mode == WORLD_MAP) {
-        *mode = 0x02;
-    }
-}
 
 impl BuiltinPatch {
     /// The option bits with every option as it is by default (the low byte: `$500A`).

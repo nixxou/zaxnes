@@ -43,7 +43,7 @@
 //!
 //! | Field | Contents |
 //! |---|---|
-//! | flags | u8, bit 0: a state made at the game's wait for the next frame goes on with the hack as it is set, whether it was made with or without it (no question asked on loading it) |
+//! | flags | u8, bit 0: a state made with the hack, at the game's wait for the next frame, goes on without it; bit 1: one made without it goes on with it (no question asked on loading either) |
 //! | redraw | u8 count, each: u16 CPU RAM address, u8 condition (0 always, 1 when the byte there is the next one), u8 the byte compared, u8 the byte written |
 //!
 //! The redraw steps run on a state restored the other way (made with the widescreen while it is
@@ -82,9 +82,10 @@ pub struct HackPack {
 /// How the states of a pack's game stand against its hack.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct States {
-    /// A state made at the game's wait for the next frame goes on with the hack as it is set,
-    /// made with or without it.
-    pub portable: bool,
+    /// A state made with the hack, at the game's wait for the next frame, goes on without it.
+    pub to_off: bool,
+    /// A state made without the hack, at the game's wait for the next frame, goes on with it.
+    pub to_on: bool,
     /// The writes that put right a state restored the other way.
     pub redraw: Vec<RedrawStep>,
 }
@@ -121,7 +122,7 @@ impl States {
             bytes: payload,
             at: 0,
         };
-        let portable = reader.u8()? & 1 != 0;
+        let flags = reader.u8()?;
         let mut redraw = Vec::new();
         for _ in 0..reader.u8()? {
             let address = reader.u16()?;
@@ -139,7 +140,11 @@ impl States {
                 value,
             });
         }
-        (reader.at == payload.len()).then_some(Self { portable, redraw })
+        (reader.at == payload.len()).then_some(Self {
+            to_off: flags & 1 != 0,
+            to_on: flags & 2 != 0,
+            redraw,
+        })
     }
 }
 
@@ -768,14 +773,14 @@ mod tests {
             b'Z', b'X', b'P', b'K', 1, 1, b'T', 0, 0, 0, 0,
             0, // format 1, no code, no component
             9, 2, 0, 0xEE, 0xEE, // an unknown kind, skipped
-            1, 12, 0, 1, 2, // states: portable, two steps
+            1, 12, 0, 3, 2, // states: both ways, two steps
             0x36, 0x07, 1, 0x05, 0x02, // $0736: 05 -> 02
             0x10, 0x00, 0, 0x00, 0x7F, // $0010 = 7F
         ];
         let pack = HackPack::read(PACK).expect("a pack with sections");
         assert_eq!(pack.hack_len, 12);
         assert_eq!(HackPack::hack_bytes(PACK), &PACK[..12]);
-        assert!(pack.states.portable);
+        assert!(pack.states.to_off && pack.states.to_on);
         let mut ram = vec![0; 0x800];
         ram[0x0736] = 0x05;
         pack.states.redraw(&mut ram);

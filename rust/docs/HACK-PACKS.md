@@ -90,13 +90,19 @@ which already holds every field but the context (Mega Man 6's damage hook, `$8F7
   with or without the extension (`state_fits_builtin_patches`) gives way to this one. Movies stay
   bound to their pack's version: any difference of behaviour makes them drift.
 * **States section (done, 2026-11).** What a pack says of it, after its components (format in
-  `zax-nes/src/hack_pack.rs`, written by `tools/hackpack.py` `Pack.states`): `portable`, a state
-  made at the idle loop loads with the hack as set, made with it or without it, no question
-  asked (checked per game by a round trip, `zax-nes/tests/portable_state_tests.rs`); `redraw`,
-  CPU RAM writes run on a state restored the other way, to send the game to a step that redraws
-  its screen. The section is not part of the pack's version, so adding one keeps old states
-  valid. Packs without it keep the question (load as set, or set the hack as the state had it).
-  First: `FlappyZaxNes`.
+  `zax-nes/src/hack_pack.rs`, written by `tools/hackpack.py` `Pack.states`, or set on a pack
+  already built by `tools/pack_states.py`): `to_off`, a state made with the hack at the idle loop
+  loads without it, no question asked; `to_on`, one made without it loads with it; `redraw`, CPU
+  RAM writes run on a state restored the other way, to send the game to a step that redraws its
+  screen. The section is not part of the pack's version, so adding one keeps old states valid.
+  Packs without it, and states not made at the idle loop, keep the question (load as set, or
+  set the hack as the state had it). Every built-in pack has it, from a survey of each game
+  played on with and without its hack (`zax-nes/tests/portable_pack_survey_tests.rs`, pictures
+  checked by eye where they differed): both ways, but Kirby's only from without the hack to with
+  it (a hack state loaded without it shows the room laid out for the hack until the next room);
+  Zelda II's world map redrawn by `$0736` 05 -> 02 (moved from `builtin_patches.rs`).
+  `portable_state_tests.rs` checks every pack says so: a pack rebuilt from its repository without
+  `Pack.states` fails it.
 
 ## 4. Moved code (later step)
 

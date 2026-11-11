@@ -100,7 +100,7 @@ def main():
     clouds.hook(*place(hide), hide_bytes, jsr(sym['wide_cloud_column'], len(hide_bytes)))
     # The hack writes only its margins (the sprite list, the extension): a state made at the wait
     # for the next frame goes on the same with or without it (zax-nes portable_state_tests.rs).
-    pack.states(portable=True)
+    pack.states(to_off=True, to_on=True)
     result = pack.build(bytes(data), PRG_SIZE)
     open(out, 'wb').write(result)
     # the wait for the next frame (LDA NMIReady / BEQ MainLoop), for builtin_patches.rs' idle_loop

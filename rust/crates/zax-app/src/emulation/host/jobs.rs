@@ -806,8 +806,20 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         now.sort();
         saved.sort();
         // A pack whose states carry across (its states section): a state made at the game's wait
-        // for the next frame goes on with the hack as it is set, no question asked.
-        let carries = state.header.at_idle == Some(true) && patch.states().portable;
+        // for the next frame goes on with the hack as it is set, no question asked, in the
+        // directions the pack allows (made with the widescreen and loaded without it, or the
+        // other way round; only aids differing, either way allowed will do).
+        let states = patch.states();
+        let wide = zax_nes::hack_pack::WIDESCREEN;
+        let carries = state.header.at_idle == Some(true)
+            && match (
+                saved.iter().any(|component| component == wide),
+                now.iter().any(|component| component == wide),
+            ) {
+                (true, false) => states.to_off,
+                (false, true) => states.to_on,
+                _ => states.to_off || states.to_on,
+            };
         if now == saved || carries {
             SlotPatchStatus::Fits
         } else {

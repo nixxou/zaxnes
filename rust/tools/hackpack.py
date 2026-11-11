@@ -21,12 +21,13 @@ A component applies to a ROM when its first group does; each other group on its 
 groups it requires. Components are judged apart: the widescreen and each aid never depend on
 each other.
 
-    pack.states(portable=True, redraw=[(0x0736, 0x05, 0x02)])
+    pack.states(to_off=True, to_on=True, redraw=[(0x0736, 0x05, 0x02)])
 
-`states` adds the states section after the hack: `portable`, a state made at the game's wait for
-the next frame loads with the hack as it is set, made with it or without it; `redraw`, the CPU RAM
-writes that put right a state restored the other way, each (address, byte expected there or None,
-byte written). The section is not part of the pack's version: adding one keeps the states made
+`states` adds the states section after the hack: `to_off`, a state made with the hack at the
+game's wait for the next frame loads without it, no question asked; `to_on`, one made without it
+loads with it; `redraw`, the CPU RAM writes that put right a state restored the other way, each
+(address, byte expected there or None, byte written). `tools/pack_states.py` sets the section of
+a pack already built. The section is not part of the pack's version: adding one keeps the states made
 with the pack valid.
 """
 
@@ -95,12 +96,14 @@ class Pack:
         self.region = REGIONS[region]
         self.mappers = list(mappers)
         self.components = []
-        self.portable = False
+        self.to_off = False
+        self.to_on = False
         self.redraw = []
 
-    def states(self, portable=False, redraw=()):
+    def states(self, to_off=False, to_on=False, redraw=()):
         """The states section: see the module."""
-        self.portable = portable
+        self.to_off = to_off
+        self.to_on = to_on
         self.redraw = list(redraw)
 
     def component(self, name):
@@ -144,15 +147,15 @@ class Pack:
                 for bank, address, length in group.checks:
                     offset = offset_of(bank, address)
                     out += place(bank, address, banks) + bytes([length]) + bytes(data[offset:offset + length])
-        if self.portable or self.redraw:
-            out += section(STATES_SECTION, states(self.portable, self.redraw))
+        if self.to_off or self.to_on or self.redraw:
+            out += section(STATES_SECTION, states(self.to_off, self.to_on, self.redraw))
         return bytes(out)
 
 
-def states(portable, redraw):
+def states(to_off, to_on, redraw):
     """The payload of the states section."""
     assert len(redraw) < 256
-    out = bytearray([1 if portable else 0, len(redraw)])
+    out = bytearray([(1 if to_off else 0) | (2 if to_on else 0), len(redraw)])
     for address, expected, value in redraw:
         assert 0 <= address < 0x800, f'${address:04X}: not CPU RAM'
         out += struct.pack('<HBBB', address, 0 if expected is None else 1, expected or 0, value)

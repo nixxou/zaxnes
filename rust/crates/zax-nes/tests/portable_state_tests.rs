@@ -179,11 +179,39 @@ fn the_pack_says_its_states_carry_and_keeps_its_version() {
         .iter()
         .find(|patch| patch.name == zax_nes::builtin_patches::FLAPPYZAXNES)
         .expect("the FlappyZaxNes patch");
-    assert!(patch.states().portable);
+    assert!(patch.states().to_off && patch.states().to_on);
     assert_eq!(patch.states().redraw, []);
     assert_eq!(
         patch.version(),
         0x540D_CBDF,
         "the version of the pack before its section"
     );
+}
+
+/// Every pack says how its states carry (`tools/pack_states.py`, checked by the survey of
+/// `portable_pack_survey_tests.rs`): both ways, but Kirby's only from without the hack to with it
+/// (its rooms are laid out otherwise in video memory, and redrawn only at the next room); Zelda
+/// II's world map is redrawn by the game's own map initialisation (`$0736` 05 -> 02).
+#[test]
+fn every_pack_says_how_its_states_carry() {
+    use zax_nes::hack_pack::{is_pack, RedrawStep};
+    for patch in zax_nes::builtin_patches::PATCHES
+        .iter()
+        .filter(|patch| is_pack(patch.bps))
+    {
+        let states = patch.states();
+        let kirby = patch.name.contains("Kirby");
+        assert!(states.to_on, "{}", patch.name);
+        assert_eq!(states.to_off, !kirby, "{}", patch.name);
+        let redraw: &[RedrawStep] = if patch.game == "Zelda II" {
+            &[RedrawStep {
+                address: 0x0736,
+                when: Some(0x05),
+                value: 0x02,
+            }]
+        } else {
+            &[]
+        };
+        assert_eq!(states.redraw, redraw, "{}", patch.name);
+    }
 }
