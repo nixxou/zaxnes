@@ -274,3 +274,81 @@ So the rounds stop at **one of five**, with the movie at **45 095**.
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE-6 step 2 done: one round, the residual isolated to the DMC output unit's bit phase, item 6 named
+
+---
+
+## Step 3 — no regression
+
+### The answer first
+
+The `Standard` profile does not move, in behaviour or in speed. The `NesHawkCompat` profile keeps
+everything NesHawk itself passes and loses **one** `AccuracyCoin` row, named and traced below —
+which is the retraction showing up exactly where a retraction of a DMA-cost item should.
+
+### The `Standard` profile: nothing moved
+
+| | |
+|---|---|
+| `golden-core`, 98 originals × 1 200 frames, release, feature off | `8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773` — **byte-identical** to lot FCEUX-23's baseline and to all five earlier NESHAWK lots' |
+| the 30 ROMs of `dmc_dma_during_read4`, `sprdma_and_dmc_dma`, `apu_test`, `dmc_tests` | **24 pass, 0 fail, 6 manual** — the same column, suite for suite (3+2+19 pass; 2+4 manual) |
+| `ppu_vbl_nmi` / `vbl_nmi_timing` / `cpu_interrupts_v2` | **11/11, 7/7, 6/6** |
+| `AccuracyCoin` | **128/147**, the same nineteen rows failing |
+| *Faxanadu*, `[USA][!!]` and `[USA][Rev 1][!!]` | **207** and **220** of 832, every compared lag count agreeing |
+| savestates | unchanged to the byte and to the version: the retraction **removes** a constant and adds no field, and item 11 never had one |
+
+That `golden-core` is byte-identical is the whole argument, and it is cheap to believe: both removed
+reads sat inside `if P::DMC_FETCH_HAS_TWO_DUMMIES`, which is `false` on `Standard`, so the compiler
+had already folded the arm away.
+
+### The `NesHawkCompat` profile
+
+| | lot NESHAWK-PROFILE-5 | **this lot** |
+|---|---|---|
+| `ppu_vbl_nmi` / `vbl_nmi_timing` / `cpu_interrupts_v2` | 11/11, 7/7, 6/6 | **11/11, 7/7, 6/6** — the brief's precondition, met |
+| the 30 DMC/DMA/APU ROMs | 19 pass, 5 fail, 6 manual | **19 pass, 5 fail, 6 manual**, ROM for ROM |
+| `AccuracyCoin` | 122/147 | **121/147** |
+| *Faxanadu*, both dumps | 247 and 314 of 832 | **247** and **314** |
+| *Kirby*, the seven windows | 400 / 1 100 / 8 005 / — / — / — / — | **400 / 1 100 / 10 000 / 30 000 / 45 095** / none / none |
+
+### The one row that moved, named rather than rounded
+
+The parent's own two source files (`timing_profile.rs`, `nes_bus.rs` at `7eb5eceb`) were checked
+out, built and run against this lot's, so the delta is a measurement and not a subtraction of two
+notes:
+
+| | |
+|---|---|
+| the row | **`DMA + $4015 Read`** (page "APU Registers and DMA tests") — the only one. `DMA Landing on Write` and `DMC Reload Timing`, the two whose names sound like item 1c, were **already failing** at `7eb5eceb` |
+| why it is expected | the row times what a `$4015` read sees across a DMA, and the retraction changes a reload's cost by one cycle at an odd slip. `Standard` still **passes** it (128/147, the same nineteen rows) |
+| the gate the recipe sets | *"run the public ROMs that measure the quantity your item is about on NesHawk itself; if NesHawk passes one that your item makes the profile fail, stop."* **It does not fire**: NesHawk's own `AccuracyCoin` run (`bizhawk-runs/coin-neshawk.txt`) scores 67/147 and leaves **69 rows `NOT RUN`**, `DMA + $4015 Read` among them — NesHawk never reaches that page, so it offers no evidence either way, and what decides is the direct measurement of NesHawk's own bus stream in step 1 |
+| the trade | one `AccuracyCoin` row of the profile that is **not** the accurate chip (it already fails six others `Standard` passes), against **37 090 frames** of the one movie the profile exists for |
+
+### The `Standard` profile's speed
+
+`bench-core`, default 1 200 frames after 120 of warm-up, feature off, **interleaved** parent/this
+round by round, three rounds each, against a clean `git archive` of **`428c50e6`** — the parent the
+whole series is measured from — extracted and built on `C:` (see the disk note), and deleted after:
+
+| | parent 428c50e6 | this lot | |
+|---|---|---|---|
+| Super Mario Bros. 3 `(USA)` | 1.2914 / 1.2992 / 1.3183 → **1.30297** | 1.2863 / 1.2895 / 1.2993 → **1.29170** | **−0.86 %** |
+| Mega Man 3 `[USA][!!]` | 0.9477 / 0.9416 / 0.9441 → **0.94447** | 0.9449 / 0.9427 / 0.9360 → **0.94120** | **−0.35 %** |
+
+Both **negative** and well inside the +1 % cumulative budget, and the sign is the expected one: the
+retraction takes two folded-away comparisons out of `promote_dmc_wait` and one out of
+`is_a_lone_dmc_fetch`, and nothing was added to a per-cycle path. This core beats `428c50e6` on both
+ROMs, as it did at the end of lot NESHAWK-PROFILE-5.
+
+### The disk, and the one thing it stopped
+
+**`G:` fell to 1.5 GB during step 2, under the brief's 5 GB stop.** 521 MB of regenerable
+`target-ev/debug` and the temp directory were deleted, which brought it to **2.0 GB** — still under
+the stop, so **no further build was started on `G:`**. What that would have blocked is the bench's
+parent tree, which needs a second full release build; it was run on **`C:`** instead (12 GB free,
+the brief's stop being 1 GB), with the `git archive` tree, its `CARGO_TARGET_DIR` and its `TMP` all
+there, and all three deleted afterwards. So every suite the brief names was run; the only thing the
+disk changed is **where** the parent was built. `C:` ended at 12 GB and `G:` at 2.0 GB.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-6 step 3 done: Standard byte-identical and faster, one AccuracyCoin row named
