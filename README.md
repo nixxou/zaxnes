@@ -43,8 +43,9 @@ those versions brought to the profiles: reflections, bend, the new camera and Lu
 itch.io. Import them with **File ▸ Import a profile…**.
 
 **Profiles made for Zaxnes:** [zaxnes_3dn](https://github.com/nixxou/zaxnes_3dn) holds 3D profiles
-made for Zaxnes itself (*Faxanadu*, *Metal Force*), shipped with each release. They have their own
-licence (CC BY-NC-ND 4.0), separate from the Zaxnes code.
+made for Zaxnes itself (*Faxanadu*, *Metal Force*). The released programs carry them and put them
+in your profiles at the first start. Their files have their own licence (CC BY-NC-ND 4.0) and are
+not part of the Zaxnes sources.
 
 Without a profile, every game still plays, in **2D**, or in a **default 3D** that gives every tile
 the same depth.
@@ -166,7 +167,7 @@ Every [release](../../releases) has one package per platform:
 | `Zaxnes-<version>-linux-x64.tar.gz` | Linux (needs SDL2, `libsdl2-2.0-0` on Debian/Ubuntu) |
 | `Zaxnes-<version>-portmaster-aarch64.zip` | PortMaster handhelds: unzip into the `ports` folder of the SD card |
 | `Zaxnes-<version>-android-arm64.apk` | Android 7.0 or later, 64-bit ARM (tablets and handhelds): install the APK |
-| `Zaxnes-<version>-3dn-profiles.zip` | The 3D profiles made for Zaxnes ([zaxnes_3dn](https://github.com/nixxou/zaxnes_3dn)), already in the `profiles` folder of the Windows, Linux and PortMaster packages |
 
-**The only game included is FlappyZaxNes**, with its 3D profile (see above). For any other game you
+**The only game included is FlappyZaxNes**, with its 3D profile (see above); the 3D profiles made
+for Zaxnes come with every package. For any other game you
 need your own, legally owned ROMs.

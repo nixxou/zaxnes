@@ -54,18 +54,6 @@ New-Item -ItemType Directory -Force -Path $profiles | Out-Null
 Set-Content -Path (Join-Path $profiles 'README.txt') -Encoding utf8 `
     -Value "Déposez ici vos profils .3dn ; ils sont chargés au démarrage. Aucun profil n'est fourni."
 
-# The 3D profiles made for Zaxnes (github.com/nixxou/zaxnes_3dn), when ZAXNES_3DN_DIR names a copy
-# of that repository: the .3dn files and their licence, which is not the program's.
-$extra = @()
-if ($env:ZAXNES_3DN_DIR) {
-    foreach ($file in Get-ChildItem -File (Join-Path $env:ZAXNES_3DN_DIR '*.3dn')) {
-        Copy-Item $file.FullName (Join-Path $profiles $file.Name)
-        $extra += "profiles\$($file.Name)"
-    }
-    Copy-Item (Join-Path $env:ZAXNES_3DN_DIR 'LICENSE') (Join-Path $profiles 'LICENSE-3DN.txt')
-    $extra += 'profiles\LICENSE-3DN.txt'
-}
-
 $readme = @"
 Zaxnes $version — émulateur NES avec rendu 3D
 ==========================================
@@ -86,7 +74,9 @@ Détail et licences : ASSETS-LICENSES.md.
 
 AUCUNE ROM N'EST FOURNIE. Utilisez une ROM dont vous disposez légalement.
 
-AUCUN PROFIL DE JEU N'EST FOURNI. La bibliothèque démarre avec deux entrées génériques :
+Les profils 3D faits pour Zaxnes (Faxanadu, Metal Force) sont intégrés au programme et
+installés dans vos profils au premier lancement. Pour les autres jeux, aucun profil n'est
+fourni. La bibliothèque démarre aussi avec deux entrées génériques :
 « 2D Mode » (l'image de la console, sans conversion) et « 3D par défaut (sans profil) » (la
 géométrie 3D par défaut, pour n'importe quelle ROM). Si vous disposez légalement d'un profil
 « .3dn », importez-le par Fichier ▸ Importer un profil… : il est copié dans votre dossier de
@@ -114,7 +104,7 @@ Set-Content -Path (Join-Path $Output 'README.txt') -Value $readme -Encoding utf8
 # The folder ships the executable, the documents and profiles\README.txt, and nothing else
 # (portable.txt is added after these checks).
 $expected = @('zaxnes.exe', 'zax-harness.exe', 'LICENSE', 'HOWTO-RUN.md', 'ASSETS-LICENSES.md',
-    'THIRD-PARTY-NOTICES.md', 'README.txt', 'profiles\README.txt') + $extra
+    'THIRD-PARTY-NOTICES.md', 'README.txt', 'profiles\README.txt')
 $shipped = @(Get-ChildItem -Recurse -File $Output | ForEach-Object {
         $_.FullName.Substring($Output.Length + 1)
     })

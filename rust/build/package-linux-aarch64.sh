@@ -77,14 +77,6 @@ chmod 755 "$stage/Zaxnes.sh"
 printf '%s\n' "Put your 3dSen profiles (.3dn or converted profile files) here." \
     > "$port/profiles/README.txt"
 printf '%s\n' "Put your .nes files here." > "$port/roms/README.txt"
-# The 3D profiles made for Zaxnes (github.com/nixxou/zaxnes_3dn), when ZAXNES_3DN_DIR names a copy
-# of that repository: the .3dn files and their licence, which is not the program's.
-if [[ -n "${ZAXNES_3DN_DIR:-}" ]]; then
-    for file in "$ZAXNES_3DN_DIR"/*.3dn; do
-        cp "$file" "$port/profiles/"
-    done
-    cp "$ZAXNES_3DN_DIR/LICENSE" "$port/profiles/LICENSE-3DN.txt"
-fi
 
 zip_path="$out_dir/Zaxnes.zip"
 rm -f "$zip_path"

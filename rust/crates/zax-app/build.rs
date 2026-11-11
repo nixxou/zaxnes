@@ -1,5 +1,6 @@
 //! Records the `target-cpu` of the build flags, for the frame profiler's start-up line, and
-//! with the feature `shaders` zips the slang shader pack into the executable.
+//! with the feature `shaders` zips the slang shader pack into the executable; puts the 3D profiles
+//! made for Zaxnes (the `zaxnes_3dn` repository, kept out of these sources) into it too.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -22,6 +23,9 @@ fn main() {
     if let Some(cpu) = cpu {
         println!("cargo:rustc-env=ZAXNES_TARGET_CPU={cpu}");
     }
+    if let Err(error) = bundled_profiles() {
+        println!("cargo::error=the bundled 3D profiles: {error}");
+    }
     if std::env::var_os("CARGO_FEATURE_SHADERS").is_some() {
         if let Err(error) = shader_pack() {
             println!("cargo::error=the slang shader pack: {error}");
@@ -43,6 +47,57 @@ fn shader_source(manifest: &Path) -> Option<PathBuf> {
     ]
     .into_iter()
     .find(|folder| folder.is_dir())
+}
+
+/// The copy of the `zaxnes_3dn` repository (the 3D profiles made for Zaxnes, under a licence of
+/// their own): `ZAXNES_3DN_DIR`, else a `zaxnes_3dn` folder beside the workspace or one or two
+/// levels above it. None: the program carries no such profile.
+fn profiles_source(manifest: &Path) -> Option<PathBuf> {
+    println!("cargo:rerun-if-env-changed=ZAXNES_3DN_DIR");
+    if let Some(chosen) = std::env::var_os("ZAXNES_3DN_DIR") {
+        return Some(PathBuf::from(chosen));
+    }
+    let workspace = manifest.parent()?.parent()?;
+    [
+        workspace.join("..").join("zaxnes_3dn"),
+        workspace.join("..").join("..").join("zaxnes_3dn"),
+    ]
+    .into_iter()
+    .find(|folder| folder.is_dir())
+}
+
+/// Writes `bundled-profiles.rs`: the `.3dn` files of [`profiles_source`], each with its file name,
+/// included in the executable (`bundled_profiles.rs` installs them).
+fn bundled_profiles() -> std::io::Result<()> {
+    use std::fmt::Write as _;
+    let manifest = environment("CARGO_MANIFEST_DIR")?;
+    let mut files: Vec<PathBuf> = Vec::new();
+    if let Some(source) = profiles_source(&manifest) {
+        println!("cargo:rerun-if-changed={}", source.display());
+        for entry in std::fs::read_dir(&source)? {
+            let path = entry?.path();
+            if path.extension().is_some_and(|extension| extension == "3dn") {
+                println!("cargo:rerun-if-changed={}", path.display());
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    let mut code = String::from("&[\n");
+    for path in &files {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        let absolute = std::path::absolute(path)?;
+        let _ = writeln!(
+            code,
+            "    ({name:?}, include_bytes!({:?}) as &[u8]),",
+            absolute.display().to_string()
+        );
+    }
+    code.push_str("]\n");
+    std::fs::write(environment("OUT_DIR")?.join("bundled-profiles.rs"), code)
 }
 
 fn environment(name: &str) -> std::io::Result<PathBuf> {

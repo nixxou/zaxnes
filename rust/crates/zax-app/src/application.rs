@@ -290,6 +290,7 @@ impl Running {
         let paths = resolve_user_data(options);
         let (store, mut model) = load_settings(options, &paths);
         let demo_rom = install_demo_game(&paths, &model);
+        install_bundled_profiles(&paths);
         #[cfg(feature = "shaders")]
         install_shader_pack(&paths);
         let mut catalog = LibraryGameCatalog::open(asset_root.as_deref(), &paths, Box::new(log));
@@ -1702,6 +1703,18 @@ fn build_host(parts: HostParts<'_>) -> AppHost {
     // AMD-062 REQ-PROF-082: `--no-tile-cache` starts from an empty resolved set.
     options.tile_cache = parts.tile_cache;
     EmulationHost::new(options)
+}
+
+/// The 3D profiles made for Zaxnes that the executable carries, into the user's profiles when
+/// this version of the set is not there yet.
+fn install_bundled_profiles(paths: &UserDataPaths) {
+    match crate::bundled_profiles::install(paths) {
+        Ok(names) if !names.is_empty() => {
+            log(&format!("3D profiles installed: {}.", names.join(", ")));
+        }
+        Ok(_) => {}
+        Err(error) => log(&format!("The 3D profiles could not be installed: {error}")),
+    }
 }
 
 /// The user folder, and the file copy of the log opened in it. On a handheld, a root the

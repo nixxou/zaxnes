@@ -7,6 +7,7 @@ pub mod app_log;
 pub mod app_options;
 pub mod application;
 pub mod audio;
+pub mod bundled_profiles;
 pub mod core_worker;
 pub mod demo_game;
 pub mod editor_mode;

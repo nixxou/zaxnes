@@ -63,22 +63,13 @@ install -m 644 "$root_dir/LICENSE" "$root_dir/THIRD-PARTY-NOTICES.md" "$root_dir
     "$root_dir/HOWTO-RUN.md" "$dir/"
 printf '%s\n' "Déposez ici vos profils .3dn ; ils sont chargés au démarrage. Aucun profil n'est fourni." \
     > "$dir/profiles/README.txt"
-# The 3D profiles made for Zaxnes (github.com/nixxou/zaxnes_3dn), when ZAXNES_3DN_DIR names a copy
-# of that repository: the .3dn files and their licence, which is not the program's.
-extra=""
-if [[ -n "${ZAXNES_3DN_DIR:-}" ]]; then
-    for file in "$ZAXNES_3DN_DIR"/*.3dn; do
-        install -m 644 "$file" "$dir/profiles/"
-    done
-    install -m 644 "$ZAXNES_3DN_DIR/LICENSE" "$dir/profiles/LICENSE-3DN.txt"
-    extra="$(cd "$dir" && find ./profiles -type f ! -name README.txt)"
-fi
 cat > "$dir/README.txt" <<EOF
 Zaxnes $version — émulateur NES avec rendu 3D (Linux x86_64)
 ================================================
 
 Nécessite SDL2 (paquet libsdl2-2.0-0 sur Debian/Ubuntu, sdl2 sur Arch/Fedora) et OpenGL 3.3.
-Aucune ROM et aucun profil ne sont fournis.
+Aucune ROM n'est fournie ; les profils 3D faits pour Zaxnes (Faxanadu, Metal Force) sont
+intégrés au programme et installés au premier lancement.
 
     ./zaxnes
     ./zaxnes --rom "jeu.nes" --profile "3D par défaut (sans profil)"
@@ -88,8 +79,6 @@ EOF
 # The package holds the binary, the documents and profiles/README.txt, and nothing else.
 shipped="$(cd "$dir" && find . -type f | sort | tr '\n' ' ')"
 expected="./ASSETS-LICENSES.md ./HOWTO-RUN.md ./LICENSE ./README.txt ./THIRD-PARTY-NOTICES.md ./profiles/README.txt ./zax-harness ./zaxnes "
-# File names may hold spaces ("Metal Force.3dn"): the lists are sorted one name a line.
-expected="$({ printf '%s' "$expected" | tr ' ' '\n'; printf '%s\n' "$extra"; } | grep -v '^$' | sort | tr '\n' ' ')"
 if [[ "$shipped" != "$expected" ]]; then
     echo "error: unexpected package contents: $shipped" >&2
     exit 1
