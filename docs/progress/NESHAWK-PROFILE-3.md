@@ -18,7 +18,7 @@ machines** and bisects back to the first one that differs.
 - [x] 1. Measure where the cycles come from, on both machines.
 - [x] 2. Explain the first differing interval.
 - [x] 3. Add it to the profile, and iterate 1-3 up to five rounds (two were run; step 3 says why).
-- [ ] 4. No regression.
+- [x] 4. No regression.
 - [ ] 5. Report and final pass.
 
 ## The environment this lot runs in
@@ -481,5 +481,129 @@ game): a script that said MATCH indiscriminately could not produce both columns,
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE-3 step 3/5 done: add it to the profile, and iterate
+
+---
+
+## Step 4 — no regression, and the one real cost
+
+### The `Standard` profile's behaviour: nothing moved
+
+| | |
+|---|---|
+| `golden-core`, 98 originals × 1 200 frames, release, feature off | `8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773` — **byte-identical** to lot FCEUX-23's baseline and to both earlier NESHAWK lots' |
+| the 30 ROMs of `dmc_dma_during_read4`, `sprdma_and_dmc_dma`, `apu_test`, `dmc_tests`, `--profile standard` | **24 pass, 0 fail, 6 manual** — ROM for ROM, the same column |
+| `AccuracyCoin`, `--profile standard` | **128/147** — unchanged |
+| `ppu_vbl_nmi`, `vbl_nmi_timing`, `cpu_interrupts_v2`, `--profile standard` | **11/11, 7/7, 6/6** — every one, which is what item 8 had to leave alone and did |
+| *Faxanadu*, both dumps, `--profile standard` | **207** and **220** of 832 lines, last agreeing 83 200, every lag count agreeing, final pictures `03d7e6a1…` and `13920624…` — §4's figures to the hash |
+| savestates | unchanged to the byte and to the version: the new field is written only on the profile that has it, and `NesCore::STATE_VERSION` did not move |
+
+### The `Standard` profile's speed: +0.77 % and +0.40 %, inside the budget
+
+`bench-core --frames 1200 --warmup 120`, the `core run_frame` line only, **six interleaved rounds
+per ROM** against the parent commit `7c0b88b1` built from a clean `git archive` copy, the two
+binaries alternating which goes first:
+
+| ROM | parent | this commit | |
+|---|---|---|---|
+| Super Mario Bros. 3 `[USA][!!]` | 1.15065 ms/frame | 1.15957 | **+0.77 %** |
+| Mega Man 3 `[USA][!!]` | 0.89205 | 0.89562 | **+0.40 %** |
+
+Per-round figures: SMB3 parent 1.1518 / 1.1585 / 1.1545 / 1.1493 / 1.1441 / 1.1457 against
+1.1563 / 1.1622 / 1.1766 / 1.1563 / 1.1557 / 1.1503; Mega Man 3 parent 0.8939 / 0.8968 / 0.8897 /
+0.8982 / 0.8898 / 0.8839 against 0.8934 / 0.8969 / 0.8878 / 0.8948 / 0.9044 / 0.8964. SMB3 is
+slower in all six rounds, so this is a real effect and not noise, and it is **the same layout class
+NESHAWK-PROFILE-2 measured in the other direction** (−2.24 % there, for a lot whose `Standard`
+arms were equally untouched): `golden-core` is byte-identical, every new statement on the
+`Standard` path is inside an `if P::…` that folds away, and what is left is **one `bool` in
+`NesBusOf`** — `nmi_seen`, placed next to `dmc_from_write` so the two share the padding — plus one
+store in `reset`. Both figures are inside the +1 % the brief allows, and nothing was tuned to get
+them there.
+
+### The `NesHawkCompat` profile: item 8 costs six public ROMs and four `AccuracyCoin` rows
+
+This is the item's price and it is the largest any item on this profile has carried, so it is
+reported first and in full, with the parent commit's own column beside it (the same binary, the
+same ROMs, `--profile neshawk`):
+
+| | parent `7c0b88b1` | this commit |
+|---|---|---|
+| the 30 DMC/DMA/APU ROMs | 19 pass, 5 fail, 6 manual | **19 pass, 5 fail, 6 manual** — unchanged |
+| `ppu_vbl_nmi` | 11 pass | **9 pass, 2 fail** (`05-nmi_timing`, and the collection that contains it) |
+| `vbl_nmi_timing` | 7 pass | **6 pass, 1 fail** (`7.nmi_timing`, "FAILED #5") |
+| `cpu_interrupts_v2` | 6 pass | **3 pass, 3 fail** (`2-nmi_and_brk`, `3-nmi_and_irq`, and the collection) |
+| `AccuracyCoin` | 122/147 | **118/147** |
+
+The nine `AccuracyCoin` rows the NesHawk profile now fails and the standard one passes are
+`DMC DMA + OAM DMA`, `Delta Modulation Channel`, `DMC Reload Timing`, `Implied Dummy Reads`,
+`Interrupt flag latency`, **`NMI Overlap BRK`**, **`NMI Overlap IRQ`**, **`NMI Suppression`** and
+**`NMI Timing`** — the last four new, and `DMA Landing on Write` **gained** (it was on
+NESHAWK-PROFILE-2's list of six).
+
+**Every one of the six lost ROMs measures the NMI at CPU-cycle resolution, which is exactly the
+one cycle item 8 introduces**, so they fail by construction and not by accident. That matters
+because it is also a *tension*: step 2 measured NesHawk itself **passing** `05-nmi_timing`,
+`06-suppression`, `07-nmi_on_timing`, `08-nmi_off_timing` and `5-branch_delays_irq`. So NesHawk is
+one cycle later than this core at the *instruction boundary* the movie measures and not one cycle
+later at the *cycle* a test ROM measures — which means item 8 as written is a **coarser model than
+NesHawk's mechanism**, right about the effect and blunt about the shape. §5 records that as the
+lot's main open question and names what would settle it.
+
+The alternative shape was tried rather than argued about: lagging only the line's **rise** and
+letting its fall through at once — which is what NesHawk's one-shot `NMI = false` and its
+`nmi_destiny` latch suggest — left *Kirby* and *Faxanadu* exactly where they were and took
+`ppu_vbl_nmi` to **6 of 11** and `vbl_nmi_timing` to 4 of 7. It was reverted. The blunt model is
+the better of the two measured, and that is the only reason it is the one that shipped.
+
+### *Faxanadu*, and the first time an item has made a second NesHawk movie worse
+
+| | parent, `neshawk` | this commit, `neshawk` | `standard`, both commits |
+|---|---|---|---|
+| `[USA][!!]` against `fax-usa.txt` | 207 of 832 | **136** of 832 | 207 of 832 |
+| `[USA][Rev 1][!!]` against `fax-rev1.txt` | 220 of 832 | **169** of 832 | 220 of 832 |
+| all 832 lag counts, both dumps | agree | **agree** | agree |
+| the final picture | `03d7e6a1…` / `13920624…` | **the same hashes** | the same hashes |
+
+So nothing *observable* moved — the lag count is frame-exact and the final picture is the same
+bytes — and the column that did move is the one §4f already said cannot discriminate: a checksum
+over the whole 2 KiB, stack page included. But it moved **down**, on a movie that was also
+recorded on NesHawk, and that is reported as the counter-indication it is rather than explained
+away.
+
+What it is almost certainly about: **Faxanadu does not wait on an NMI semaphore at all.** The DMA
+census of its frame 1000 shows a tight `$2002` polling loop — a read every seven cycles, 72
+instructions in — where *Kirby* reads `$2002` **not once**. Every one of those reads clears the
+vblank flag, so Faxanadu's frame sync is decided by the *deassertion* of /NMI and the suppression
+window around it, which is precisely where a blanket one-cycle lag of the whole line is coarser
+than NesHawk's. The measurement that would settle it is a per-frame `ram=` reference for
+*Faxanadu*, which does not exist: `fax-usa.txt` carries a checksum every hundred frames and no
+RAM, so this lot cannot say whether the 71 lines it lost are live bytes or the stack page.
+
+### The suites
+
+| | passed | failed |
+|---|---|---|
+| **`zax-nes`**, release, `--include-ignored` | **1 204** | 0 |
+| **`zax-harness`**, release, feature off, `--include-ignored` | **128** | 0 |
+| the same with **`dma-census`** | **128** | 0 |
+| the same with **`fceux-core`** (`--test-threads 1`) | **148** | 0 |
+
+`zax-nes` goes from NESHAWK-PROFILE-2's 1 201 by item 8's own differential test and the
+interrupt-phase ROM's two (one of them the ignored writer, which `--include-ignored` runs).
+`zax-harness` goes from 127 to 128 by the cycle ledger's format test.
+
+`cargo fmt --all --check` is clean and `cargo clippy --workspace --all-targets -- -D warnings` is
+clean in **three** configurations: feature off, with `dma-census`, and with `fceux-core`.
+
+### The disk
+
+`G:` had 8.8 GB free at the start and **8.9 GB** at the end of this step; `C:` 8.9 and 7.6. The
+low point was 6.3 GB on `G:`, reached by this lot's own second reference
+(`kirby-jp-step1d.txt`, 20 001 frames × 4.2 KiB = **82 MB**) and ten screenshots; the parent
+commit's `git archive` copy and its 307 MB build were put on `C:` for that reason and deleted
+again. Nothing was skipped for want of space.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-3 step 4/5 done: no regression
 
 ---
