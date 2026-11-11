@@ -83,7 +83,13 @@ def build_libraries(sdk, ndk):
     run(['cargo', 'ndk', '-t', ABI, '-P', str(MIN_SDK), 'build', '--release', '-p',
          'zax-android'], cwd=RUST, env=env)
     out = os.path.join(TARGET, TRIPLE, 'release')
-    return [os.path.join(out, name) for name in ('libSDL2.so', 'libmain.so')]
+    # The C++ runtime of the slang shaders (glslang, through librashader): libmain.so needs it
+    # at start-up, and the NDK's shared one is the one Android's loader finds in the APK.
+    cxx = glob.glob(os.path.join(ndk, 'toolchains', 'llvm', 'prebuilt', '*', 'sysroot', 'usr',
+                                 'lib', TRIPLE, 'libc++_shared.so'))
+    if not cxx:
+        sys.exit('libc++_shared.so is not in the NDK')
+    return [os.path.join(out, name) for name in ('libSDL2.so', 'libmain.so')] + cxx[:1]
 
 
 def sdl_java():

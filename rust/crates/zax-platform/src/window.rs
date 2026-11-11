@@ -179,6 +179,13 @@ impl HostWindow {
         if gl {
             builder.opengl();
         }
+        // Android: SDL gives a window an EGL surface unless it is made for Vulkan, and the
+        // Vulkan swapchain cannot connect to a window EGL holds ("already connected"). The
+        // desktop windows stay as they were.
+        #[cfg(all(feature = "wgpu", target_os = "android"))]
+        if settings.graphics == WindowGraphics::Wgpu(crate::wgpu_display::GpuApi::Vulkan) {
+            builder.vulkan();
+        }
         builder.resizable().position_centered();
         if settings.fullscreen {
             // SPEC-09 REQ-PERS-067: the persisted full-screen state is restored at launch, on

@@ -16,4 +16,6 @@ name = "main"
 crate-type = ["cdylib"]
 
 [target.'cfg(target_os = "android")'.dependencies]
-zax-app = { path = "../zax-app", default-features = false, features = ["android"] }
+# The slang shaders on the Vulkan renderer (owner decision: offered on Vulkan only, OpenGL stays
+# the default), with the light pack (zax-app build.rs).
+zax-app = { path = "../zax-app", default-features = false, features = ["android", "shaders"] }
