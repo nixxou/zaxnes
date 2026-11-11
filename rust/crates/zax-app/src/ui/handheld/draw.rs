@@ -3,7 +3,7 @@
 //! models and the gamepad moves it; the focus is a bright bar with dark text. Each row and each
 //! hint records where it lies, for the mouse of the desktop's console mode ([`super::pointer`]).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use imgui::{Condition, DrawListMut, StyleColor, StyleVar, Ui, WindowFlags, WindowToken};
 use zax_platform::input::labels;
@@ -105,6 +105,8 @@ struct Painter<'ui> {
     /// The widescreen button being held (owner request): its hint's label and how far the hold
     /// is to the widescreen's settings, 0 to 1, drawn as a ring filling round the label.
     hold_ring: Option<(&'static str, f32)>,
+    /// How many lines the hints drawn took, for the sizes of the next frame.
+    hint_lines: &'ui Cell<u8>,
 }
 
 impl Painter<'_> {
@@ -281,16 +283,39 @@ impl Painter<'_> {
     }
 
     /// The same, each meaning in a colour of its own.
+    /// Hints that do not fit the width go on a line under the others (owner request); the band
+    /// grows upwards and the next frame's rows make room for it.
     fn hint_entries(&self, hints: &[(&str, String, [f32; 4])]) {
-        let metrics = &self.metrics;
+        let mut metrics = self.metrics;
+        let gap = metrics.padding * 1.6;
+        let room = self.size[0] - metrics.padding;
+        let mut lines: Vec<usize> = Vec::new();
+        let mut used = metrics.padding;
+        for (index, (button, meaning, _)) in hints.iter().enumerate() {
+            let wide = self.width(button) + metrics.padding * 0.5 + self.width(meaning);
+            if index > 0 && used + wide > room {
+                lines.push(index);
+                used = metrics.padding;
+            }
+            used += wide + gap;
+        }
+        let count = u8::try_from(lines.len() + 1).unwrap_or(u8::MAX);
+        self.hint_lines.set(count);
+        metrics.hint_lines = count;
         let top = self.size[1] - metrics.hint_band();
         self.list
             .add_rect([0.0, top], self.size, BAR)
             .filled(true)
             .build();
-        let y = top + metrics.padding;
+        let mut y = top + metrics.padding;
         let mut x = metrics.padding;
-        for (button, meaning, colour) in hints {
+        let mut band_top = top;
+        for (index, (button, meaning, colour)) in hints.iter().enumerate() {
+            if lines.contains(&index) {
+                y += metrics.hint_line_step();
+                x = metrics.padding;
+                band_top = y - metrics.padding * 0.5;
+            }
             let start = x;
             if let Some((_, progress)) = self.hold_ring.filter(|(label, _)| label == button) {
                 self.ring(x, y, button, progress);
@@ -301,9 +326,14 @@ impl Painter<'_> {
             x += self.width(meaning) + metrics.padding * 1.6;
             if let Some(action) = pointer::hint_action(button) {
                 let half_gap = metrics.padding * 0.8;
+                let band_bottom = if lines.iter().any(|&next| next > index) {
+                    y + metrics.font + metrics.padding * 0.25
+                } else {
+                    self.size[1]
+                };
                 self.zone(
-                    [start - half_gap, top],
-                    [x - half_gap, self.size[1]],
+                    [start - half_gap, band_top],
+                    [x - half_gap, band_bottom],
                     action,
                 );
             }
@@ -469,6 +499,7 @@ impl HandheldUi {
         self.zones.get_mut().clear();
         let size = ui.io().display_size;
         self.metrics = self.metrics_for(size[1]);
+        self.metrics.hint_lines = self.hint_lines.get();
         let _body = self.body_font().map(|font| ui.push_font(font));
         self.follow_the_state_picture(frame.host);
         match self.screen {
@@ -503,6 +534,7 @@ impl HandheldUi {
             size: ui.io().display_size,
             heading: self.heading_font,
             zones: &self.zones,
+            hint_lines: &self.hint_lines,
             hold_ring: self
                 .widescreen_hold
                 .as_ref()

@@ -21,6 +21,9 @@ pub struct Metrics {
     pub row: f32,
     /// The space around the content.
     pub padding: f32,
+    /// How many lines the bar of control hints takes: two or more once its hints do not fit
+    /// the width of the display (owner request: `PortMaster` and narrow Android screens).
+    pub hint_lines: u8,
 }
 
 impl Metrics {
@@ -35,6 +38,7 @@ impl Metrics {
             heading: (font * 1.25).round(),
             row: (font * 1.75).round().max(MINIMUM_ROW),
             padding: (font * 0.6).round(),
+            hint_lines: 1,
         }
     }
 
@@ -56,7 +60,14 @@ impl Metrics {
     /// The height of the bar of control hints.
     #[must_use]
     pub fn hint_band(&self) -> f32 {
-        self.font + 2.0 * self.padding
+        let extra = f32::from(self.hint_lines.max(1) - 1);
+        self.font + 2.0 * self.padding + extra * self.hint_line_step()
+    }
+
+    /// The distance from one line of hints to the next.
+    #[must_use]
+    pub fn hint_line_step(&self) -> f32 {
+        self.font + self.padding * 0.5
     }
 
     /// How many rows fit between the title and the hints on a display `height` pixels high.
@@ -187,6 +198,17 @@ pub const CAPTURE_HINTS: &[Hint] = &[hint("Menu", keys::HANDHELD_HINT_CANCEL)];
 mod tests {
     use super::*;
     use crate::ui::strings::{self, UiLanguage};
+
+    #[test]
+    fn a_second_line_of_hints_takes_room_from_the_rows() {
+        let one = Metrics::for_height(480.0);
+        let two = Metrics {
+            hint_lines: 2,
+            ..one
+        };
+        assert!((two.hint_band() - one.hint_band() - one.hint_line_step()).abs() < 0.01);
+        assert!(two.visible_rows(480.0) < one.visible_rows(480.0));
+    }
 
     #[test]
     fn the_sizes_follow_the_height_of_the_display() {

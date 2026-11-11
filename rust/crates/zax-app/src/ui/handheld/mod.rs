@@ -162,6 +162,8 @@ pub struct HandheldUi {
     body_font: Option<imgui::FontId>,
     /// Where the rows and the hints of the last drawn screen lie, for the mouse.
     zones: RefCell<Vec<Zone>>,
+    /// How many lines the bar of hints took at the last drawing.
+    hint_lines: Cell<u8>,
     /// The RetroAchievements screen.
     achievements: AchievementsModel,
     /// The keyboard on the screen, while it types.
@@ -254,6 +256,7 @@ impl HandheldUi {
             pictures: Vec::new(),
             confirming: false,
             zones: RefCell::new(Vec::new()),
+            hint_lines: Cell::new(1),
             achievements: AchievementsModel::new(),
             keyboard: None,
             list_scroll: 0.0,
