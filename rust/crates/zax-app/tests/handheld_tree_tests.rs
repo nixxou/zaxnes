@@ -42,6 +42,7 @@ fn row_key(row: OptionRow) -> String {
         OptionRow::Controls => "page.controls".to_owned(),
         OptionRow::Achievements => "page.achievements".to_owned(),
         OptionRow::TouchPad => "row.touch_pad".to_owned(),
+        OptionRow::Shader(slot) => format!("row.shader.{}", slot.ids().mode.key()),
     }
 }
 
@@ -58,6 +59,7 @@ fn page_name(page: OptionsPage) -> &'static str {
         OptionsPage::Camera => "camera",
         OptionsPage::Emulation => "emulation",
         OptionsPage::Audio => "audio",
+        OptionsPage::Shaders => "shaders",
     }
 }
 

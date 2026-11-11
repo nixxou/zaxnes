@@ -49,20 +49,7 @@ fn tr(key: &str) -> String {
     strings::get(key)
 }
 
-fn slot_label(slot: ShaderSlot) -> String {
-    tr(match slot {
-        ShaderSlot::TwoD => "shaders.slot.2d",
-        ShaderSlot::TwoDWide => "shaders.slot.2d_ws",
-        ShaderSlot::ThreeD => "shaders.slot.3d",
-        ShaderSlot::ThreeDWide => "shaders.slot.3d_ws",
-    })
-}
-
-/// The name a stored preset is shown by: its catalogue name, or its path in the pack.
-fn preset_label(stored: &str) -> String {
-    shader_panel::catalogue_entry(stored)
-        .map_or_else(|| stored.to_owned(), |preset| tr(preset.label))
-}
+use shader_panel::{preset_label, slot_label};
 
 /// A combo over `values` with `labels`; the value chosen when it changed.
 fn choice(ui: &Ui, label: &str, current: i32, values: &[i32], labels: &[String]) -> Option<i32> {

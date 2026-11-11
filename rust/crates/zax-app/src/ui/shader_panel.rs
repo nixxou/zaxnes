@@ -307,6 +307,94 @@ pub const CATALOGUE: [CatalogPreset; 22] = [
     ),
 ];
 
+/// The name of `slot`, in the language in force.
+#[must_use]
+pub fn slot_label(slot: ShaderSlot) -> String {
+    crate::ui::strings::get(match slot {
+        ShaderSlot::TwoD => "shaders.slot.2d",
+        ShaderSlot::TwoDWide => "shaders.slot.2d_ws",
+        ShaderSlot::ThreeD => "shaders.slot.3d",
+        ShaderSlot::ThreeDWide => "shaders.slot.3d_ws",
+    })
+}
+
+/// The name a stored preset is shown by: its catalogue name, or its path in the pack.
+#[must_use]
+pub fn preset_label(stored: &str) -> String {
+    catalogue_entry(stored).map_or_else(
+        || stored.to_owned(),
+        |preset| crate::ui::strings::get(preset.label),
+    )
+}
+
+/// What a slot shows, as the console's row of it steps through: the slot it follows, nothing,
+/// then the presets of the catalogue (a preset of its own, chosen on the desktop, is shown and
+/// left at the first step).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SlotPick {
+    /// [`shader_slots::FOLLOW`].
+    Follow,
+    /// [`shader_slots::OFF`].
+    Off,
+    /// A preset, by its path in the pack.
+    Preset(String),
+}
+
+/// Every pick of `slot`, in the order the console steps through them.
+#[must_use]
+pub fn slot_picks(slot: ShaderSlot) -> Vec<SlotPick> {
+    let mut picks = Vec::with_capacity(CATALOGUE.len() + 2);
+    if slot.fallback().is_some() {
+        picks.push(SlotPick::Follow);
+    }
+    picks.push(SlotPick::Off);
+    picks.extend(
+        CATALOGUE
+            .iter()
+            .map(|preset| SlotPick::Preset(preset.path.to_owned())),
+    );
+    picks
+}
+
+/// The pick `slot` holds in `model`.
+#[must_use]
+pub fn slot_pick(model: &SettingsModel, slot: ShaderSlot) -> SlotPick {
+    let ids = slot.ids();
+    match model.get(ids.mode).as_int() {
+        shader_slots::FOLLOW if slot.fallback().is_some() => SlotPick::Follow,
+        PRESET => SlotPick::Preset(model.get(ids.preset).as_text().to_owned()),
+        _ => SlotPick::Off,
+    }
+}
+
+/// Puts `pick` in `slot`: a preset with what the catalogue starts it with ([`choose_preset`]).
+pub fn set_slot_pick(model: &mut SettingsModel, slot: ShaderSlot, pick: &SlotPick) {
+    let ids = slot.ids();
+    match pick {
+        SlotPick::Follow => {
+            model.set(ids.mode, SettingValue::Enum(shader_slots::FOLLOW));
+        }
+        SlotPick::Off => {
+            model.set(ids.mode, SettingValue::Enum(OFF));
+        }
+        SlotPick::Preset(path) => choose_preset(model, slot, path),
+    }
+}
+
+/// The text of `pick` in `slot`'s row.
+#[must_use]
+pub fn pick_label(slot: ShaderSlot, pick: &SlotPick) -> String {
+    use crate::ui::strings;
+    match pick {
+        SlotPick::Follow => slot.fallback().map_or_else(String::new, |parent| {
+            strings::format(&strings::get("shaders.mode.follow"), &[&slot_label(parent)])
+        }),
+        SlotPick::Off => strings::get("shaders.mode.off"),
+        SlotPick::Preset(path) if path.is_empty() => strings::get("shaders.none"),
+        SlotPick::Preset(path) => preset_label(path),
+    }
+}
+
 /// Whether `preset` is put forward for `slot`.
 #[must_use]
 pub const fn featured_for(preset: &CatalogPreset, slot: ShaderSlot) -> bool {

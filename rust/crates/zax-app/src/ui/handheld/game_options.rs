@@ -138,7 +138,10 @@ pub const fn page_rows(page: OptionsPage) -> &'static [OptionRow] {
         OptionsPage::Emulation => &GAME_EMULATION_ROWS,
         // AUDIO-2: the choice of audio output belongs to the device, not to a game, so the Audio
         // page is not on a game's hub at all.
-        OptionsPage::NesPicture | OptionsPage::Camera | OptionsPage::Audio => &[],
+        OptionsPage::NesPicture
+        | OptionsPage::Camera
+        | OptionsPage::Audio
+        | OptionsPage::Shaders => &[],
     }
 }
 
@@ -197,6 +200,7 @@ pub const fn row_settings(row: OptionRow) -> &'static [SettingId] {
         | OptionRow::Controls
         | OptionRow::Achievements
         | OptionRow::Page(_)
+        | OptionRow::Shader(_)
         | OptionRow::Group(_) => &[],
     }
 }

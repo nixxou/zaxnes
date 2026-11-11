@@ -49,6 +49,11 @@ options
         video.anti_alias
       [group.advanced]
         video.max_queued_frames
+    page.shaders
+      row.shader.shader.2d.mode
+      row.shader.shader.2d_ws.mode
+      row.shader.shader.3d.mode
+      row.shader.shader.3d_ws.mode
     page.rendering_3d
       render.visual_style
       page.enhanced_effects

@@ -10,7 +10,8 @@ use super::overlay::CameraPreset;
 use super::pad::PadButton;
 use crate::persistence::app_settings::{AppSettings as _, AppSettingsMut as _, TvRegionSetting};
 use crate::render_scaling::{DIRECT_METHOD, RENDER_TEXTURE_METHOD};
-use crate::ui::{keys, strings, text};
+use crate::ui::{keys, shader_panel, strings, text};
+use zax_settings::shader_slots::ShaderSlot;
 
 /// The volumes the row steps through.
 const VOLUME_LEVELS: [f32; 11] = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
@@ -66,6 +67,9 @@ pub enum OptionRow {
     /// A setting of the desktop's options window shown as a stepped row
     /// ([`super::advanced::ROW_SETTINGS`] names every one the console offers).
     Setting(SettingId),
+    /// A slot of the slang shaders (owner request: the console mode offers them as the desktop's
+    /// window does): it steps through following, nothing and the presets of the catalogue.
+    Shader(ShaderSlot),
     /// A row that climbs to another page of the tree (RO-3).
     Page(OptionsPage),
     /// A group title: a label and nothing else (RO-3). Up and down skip it, and it is drawn
@@ -109,11 +113,13 @@ pub enum OptionsPage {
     /// owner's mockup, pinned row for row by
     /// `desktop_options_golden_tests::ro_3_the_handheld_main_pages_are_the_mockups`.
     Audio,
+    /// The slang shaders of the four slots (owner request, the desktop's Shaders window).
+    Shaders,
 }
 
 impl OptionsPage {
     /// Every page, for the tests that walk them all.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Optimizations,
         Self::Advanced,
         Self::Display,
@@ -125,6 +131,7 @@ impl OptionsPage {
         Self::Camera,
         Self::Emulation,
         Self::Audio,
+        Self::Shaders,
     ];
 
     /// The key of the page's title.
@@ -142,6 +149,7 @@ impl OptionsPage {
             Self::Camera => keys::TAB_CAMERA,
             Self::Emulation => keys::TAB_EMULATION,
             Self::Audio => keys::TAB_AUDIO,
+            Self::Shaders => "shaders.title",
         }
     }
 
@@ -160,6 +168,7 @@ impl OptionsPage {
             Self::Camera => &CAMERA_ROWS,
             Self::Emulation => &EMULATION_ROWS,
             Self::Audio => &AUDIO_ROWS,
+            Self::Shaders => &SHADER_ROWS,
         }
     }
 
@@ -227,11 +236,22 @@ pub const OPTIMIZATION_ROWS: [OptionRow; 9] = [
     OptionRow::Setting(SettingId::EmuLuaSmoothGc),
 ];
 
+/// The rows of the *Shaders* page: the four slots, as the desktop's window has them (owner
+/// request). They are the same in a build without the shaders, which keeps the settings the
+/// desktop shares; such a build simply draws none.
+pub const SHADER_ROWS: [OptionRow; 4] = [
+    OptionRow::Shader(ShaderSlot::TwoD),
+    OptionRow::Shader(ShaderSlot::TwoDWide),
+    OptionRow::Shader(ShaderSlot::ThreeD),
+    OptionRow::Shader(ShaderSlot::ThreeDWide),
+];
+
 /// The *Advanced options* hub: six pages where RO-2 left one flat list of 56 rows. It repeats
 /// nothing the other pages offer — the palette and the shadows are the main page's, the nine
 /// overscan settings the overscan screen's, the performance switches the Optimisations page's.
-pub const ADVANCED_HUB: [OptionRow; 7] = [
+pub const ADVANCED_HUB: [OptionRow; 8] = [
     OptionRow::Page(OptionsPage::Display),
+    OptionRow::Page(OptionsPage::Shaders),
     OptionRow::Page(OptionsPage::Rendering3d),
     OptionRow::Page(OptionsPage::LightShadows),
     OptionRow::Page(OptionsPage::NesPicture),
@@ -661,6 +681,11 @@ pub fn step_row(row: OptionRow, settings: &mut SettingsModel, step: i32) -> Opti
         OptionRow::Controls | OptionRow::Page(_) | OptionRow::Group(_) => {}
         OptionRow::Setting(id) => super::advanced::step(id, settings, step),
         OptionRow::Achievements => return Some(OptionsCommand::OpenAchievements),
+        OptionRow::Shader(slot) => {
+            let picks = shader_panel::slot_picks(slot);
+            let next = cycled(&picks, &shader_panel::slot_pick(settings, slot), step).clone();
+            shader_panel::set_slot_pick(settings, slot, &next);
+        }
     }
     None
 }
@@ -699,6 +724,7 @@ pub fn label(row: OptionRow) -> String {
         OptionRow::Achievements => strings::get(keys::TAB_ACHIEVEMENTS),
         OptionRow::Page(page) => strings::get(page.title_key()),
         OptionRow::Group(key) => strings::get(key),
+        OptionRow::Shader(slot) => shader_panel::slot_label(slot),
     }
 }
 
@@ -754,6 +780,9 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
         OptionRow::Controls | OptionRow::Page(_) | OptionRow::Group(_) => String::new(),
         OptionRow::Setting(id) => super::advanced::value_text(id, settings),
         OptionRow::Achievements => switch(settings.get(SettingId::AchievementsEnabled).as_bool()),
+        OptionRow::Shader(slot) => {
+            shader_panel::pick_label(slot, &shader_panel::slot_pick(settings, slot))
+        }
     }
 }
 
