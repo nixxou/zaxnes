@@ -1664,9 +1664,15 @@ impl GameSession {
     pub fn nes_background_color(&self) -> Rgb24 {
         // With the 3D paused (`emu.pause_3d_in_2d`) no frame is converted: the core's own
         // backdrop, not the last converted frame's (grey around a game started in 2D, or after
-        // its widescreen was turned off).
-        if self.paused_3d {
-            let backdrop = self.core.ppu().snapshot_palette()[0] & 0x3F;
+        // its widescreen was turned off). A profile whose scripts reach into the core is still
+        // converted while paused (`convert_batch_lent`): its frames hold the colour, the core's
+        // snapshot not (a grey sky in SMB3's 2D on a handheld). The kept frame's palette comes
+        // first: the core may be on its own thread, its copy here not the frame's.
+        if self.paused_3d && self.pipeline.ahead_allowed {
+            let backdrop = self.skipped_batch.as_ref().map_or_else(
+                || self.core.ppu().snapshot_palette()[0],
+                |((palette, _), ..)| palette[0],
+            ) & 0x3F;
             return zax_engine3d::palette::nes_color(usize::from(backdrop));
         }
         let state = self.engine.state();
