@@ -252,6 +252,57 @@ pub trait TimingProfile: Copy + Clone + Default + core::fmt::Debug + Send + Sync
     ///
     /// Read at `apu/dmc_channel.rs` `reset`, reached from `nes_core.rs` `power_on` alone.
     const DMC_POWER_ON_TIMER: i32;
+
+    // ------------------------------------------------------- where a frame ends
+
+    /// **Item 12** (lot NESHAWK-PROFILE-9 step 1). A frame the movie taps RESET after ends **at
+    /// the PPU dot the frame boundary falls on**, before the instruction that straddles it — so
+    /// the reset's seven cycles begin on that dot's own CPU cycle rather than after the
+    /// straddling instruction has finished.
+    ///
+    /// **Where it comes from.** NesHawk interleaves the two clocks per cycle: `PPU.run.cs`
+    /// `TickPPU_preVBL()` sets `nes.frame_is_done = true` at the dot where `ppur.status.sl`
+    /// reaches `241 + preNMIlines`, and the CPU is clocked from inside that same dot loop, so a
+    /// frame ends **mid-instruction** as a rule. `NES.Core.cs` `FrameAdvance` then opens the next
+    /// frame with `if (resetSignal) { Board.NesSoftReset(); cpu.NESSoftReset(); apu.NESSoftReset();
+    /// ppu.NESSoftReset(); }` — the `.bk2`'s RESET is read into `resetSignal` at the **end** of the
+    /// frame it is pressed on and applied at the top of the next one — and `MOS 6502X`'s
+    /// `NESSoftReset()` is `opcode = VOP_RESET; mi = 0; iflag_pending = true; FlagI = true;`, which
+    /// **abandons the instruction in flight**: whatever cycles of it had run are spent, the rest
+    /// never run. This core's `NesCoreOf::run_frame_profiled` loop breaks *after* the instruction
+    /// `Ppu2C02::vblank_just_started` fired inside, so it runs that whole instruction before the
+    /// reset.
+    ///
+    /// **What it is worth.** The measurement is lot NESHAWK-PROFILE-8 step 1: over frames 1 to 56
+    /// of the *Kirby* `.bk2` the four once-a-frame marks read a constant `zaxnes − bizhawk` of
+    /// **−1** before the movie's reset and a constant **+2** after it, because at the reset
+    /// NesHawk's last cycle of frame 4 is 116 734 and its seven reset cycles are 116 735 to
+    /// 116 741, where this core runs the straddling `$C070` (116 734 to 116 736 on its own clock,
+    /// which reads one less) and only then resets — **3 CPU cycles late**. The PPU restarts there
+    /// (item 10), the game is NMI-synced and the DMC's train is counted in CPU cycles, so those 3
+    /// cycles put the game's code 3 cycles late against every DMC fetch for the rest of the movie,
+    /// which is what lands NesHawk's halts on write cycles and this core's on read cycles — the
+    /// gate on item 1c (`DMC_HALT_LANDS_ON_A_WRITE_CYCLE`).
+    ///
+    /// **A dot bias is not this item**, and that is measured too (NESHAWK-PROFILE-8 step 2): item
+    /// 10's dot count at the reset moves the PPU against the CPU and the post-reset boot's 7-cycle
+    /// `$2002` loop re-quantises it, so the residual reads +2, +2, +2, +1, −5 over biases of 0, 3,
+    /// 6, 9 and 12 dots and never reaches −1, where ending the frame at the dot moves the whole
+    /// machine and leaves the code's position against the PPU alone.
+    ///
+    /// **The mechanism, and what it does not do.** Read at `nes_core.rs`
+    /// `run_frame_profiled_gen`'s loop through `NesBusOf::frame_boundary_is_the_next_cycle`, on
+    /// the one frame the movie player announces a RESET after
+    /// ([`NesCoreOf::run_frame_before_soft_reset`]). The loop asks, before each instruction,
+    /// whether the boundary dot falls inside the **next** CPU cycle and ends the frame there, so
+    /// the reset begins on exactly the cycle NesHawk's does whenever the boundary dot is the first
+    /// cycle of an instruction — which is the measured case, `$C070` at this core's 116 734. Where
+    /// the dot falls *inside* an instruction instead, NesHawk spends that instruction's first
+    /// cycles and abandons the rest; this core cannot stop between an instruction's cycles, so it
+    /// ends the frame before the instruction and the reset is then up to (its length − 1) cycles
+    /// early. Nothing in the one movie there is exercises that, and the honest fix is a
+    /// cycle-stepped CPU, not a constant.
+    const RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT: bool;
 }
 
 /// Zaxnes's own 2A03: the behaviour every lot before NESHAWK-PROFILE measured, and the one every
@@ -276,6 +327,7 @@ impl TimingProfile for Standard {
     const DMC_FETCH_STALLS_AN_OAM_TRANSFER: bool = false;
     const PPU_START_UP_DOTS_SKIPPED: i64 = 0;
     const DMC_POWER_ON_TIMER: i32 = 0;
+    const RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT: bool = false;
 }
 
 /// A 2A03 that makes BizHawk NesHawk's timing choices where they differ from Zaxnes's, so that a
@@ -328,4 +380,6 @@ impl TimingProfile for NesHawkCompat {
     /// NESHAWK-PROFILE-4's behaviour exactly. `tests/neshawk_profile_tests.rs` measures the
     /// mechanism at `1019` through a profile of its own, so the item stays covered while it is off.
     const DMC_POWER_ON_TIMER: i32 = 1019;
+
+    const RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT: bool = true;
 }

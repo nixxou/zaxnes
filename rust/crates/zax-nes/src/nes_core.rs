@@ -864,8 +864,33 @@ impl<P: TimingProfile> NesCoreOf<P> {
     /// The body of each profile's `run_frame`, which is the public name; `#[inline(never)]` keeps
     /// it out of its two thin wrappers, and the measurements that asked for that are on the
     /// [`NesCoreOf<Standard>`] block those wrappers live in.
-    #[inline(never)]
+    #[inline]
     pub(crate) fn run_frame_profiled(&mut self, input_word: u16) -> i64 {
+        self.run_frame_profiled_gen::<false>(input_word)
+    }
+
+    /// Runs one frame the caller is about to tap RESET after, which the `NesHawkCompat` profile's
+    /// **item 12** ends at the PPU dot the frame boundary falls on rather than after the
+    /// instruction that straddles it (`TimingProfile::RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT`).
+    /// On [`Standard`] it is [`NesCore::run_frame`] and nothing else.
+    ///
+    /// **The caller must apply the reset before the next frame** — [`NesCoreOf::soft_reset`] or a
+    /// power cycle — because the frame it leaves behind ended *before* its boundary dot, and it is
+    /// the reset's own repositioning of the PPU (item 10's start-up dots) that consumes the dot.
+    /// Run an ordinary frame after this one instead and that frame meets the boundary inside its
+    /// first instruction and ends there. The `.bk2` player is the only caller, and it reads the
+    /// next frame's command before choosing: `movie_sync.rs` `step` and `frame_trace.rs` `play`.
+    #[inline(never)]
+    pub fn run_frame_before_soft_reset(&mut self, input_word: u16) -> i64 {
+        self.run_frame_profiled_gen::<true>(input_word)
+    }
+
+    /// `BEFORE_RESET` is a const parameter rather than an argument so that neither profile's
+    /// ordinary frame carries item 12's test at all: `run_frame_profiled` instantiates it `false`,
+    /// the `&&` below folds, and the loop is the loop this core always had. The cost is one more
+    /// copy of this function per profile in `.text`, which is the cold one.
+    #[inline(never)]
+    fn run_frame_profiled_gen<const BEFORE_RESET: bool>(&mut self, input_word: u16) -> i64 {
         if self.bus.cartridge().is_none() {
             return 0;
         }
@@ -915,6 +940,20 @@ impl<P: TimingProfile> NesCoreOf<P> {
         self.bus.ppu_mut().clear_frame_boundary();
         self.bus.defer_ppu();
         loop {
+            // **Item 12**, and only on the frame the movie taps RESET after: NesHawk's frame ends
+            // at the boundary dot, mid-instruction, and its reset then abandons the instruction in
+            // flight (`MOS 6502X` `NESSoftReset`), so the straddling instruction must not run.
+            // `BEFORE_RESET` is const, so for every other frame — and for the whole of `Standard`
+            // — this is not emitted.
+            if BEFORE_RESET
+                && P::RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT
+                && self.bus.frame_boundary_is_the_next_cycle()
+            {
+                // The boundary dot takes the frame's palette and mask for the 2D picture, and
+                // this frame ends before reaching it.
+                self.bus.ppu_mut().capture_frame_snapshot();
+                break;
+            }
             self.cpu.step(&mut self.bus);
             if let Some((first, last)) = idle_loop {
                 if (first..=last).contains(&self.cpu.pc) && self.bus.ppu().wide().stalling() {

@@ -40,7 +40,7 @@ use zax_nes::rom::InesHeader;
 use zax_nes::{NesCoreOf, NesHawkCompat, NesRegion, Standard, TimingProfile};
 
 use crate::movie_file::{MovieFile, RamPattern};
-use crate::movie_sync::{read_movie, relocate_resets, Machine, Resets, ZaxnesMachine};
+use crate::movie_sync::{read_movie, relocate_resets, resets_next, Machine, Resets, ZaxnesMachine};
 use crate::profile_choice::ProfileChoice;
 use crate::ram_trace::{checksum, Reference};
 use crate::HarnessError;
@@ -767,14 +767,14 @@ fn trace_on<P: TimingProfile>(
     // starts from is the state the movie puts the machine in and nothing else.
     for frame in 1..options.frame {
         let input = movie.frames[usize::try_from(frame).unwrap_or(1) - 1];
-        play(&mut machine, input)?;
+        play(&mut machine, input, resets_next(movie, frame))?;
     }
 
     // The control: the first traced frame, run the ordinary way, from this exact state. It is
     // taken first and undone by `restore`, so the trace itself starts from the same bytes.
     let input = movie.frames[usize::try_from(options.frame).unwrap_or(1) - 1];
     machine.capture().map_err(HarnessError::Rom)?;
-    play(&mut machine, input)?;
+    play(&mut machine, input, resets_next(movie, options.frame))?;
     let control = checksum(machine.core.bus().ram());
     machine.restore().map_err(HarnessError::Rom)?;
 
@@ -829,12 +829,19 @@ fn trace_on<P: TimingProfile>(
                 .event_log
                 .as_ref()
                 .map(|_| options.event_pc.as_slice()),
+            resets_next(movie, frame),
         );
         traced.frame = frame;
         report.frames.push(traced);
         if probing.is_some() {
             machine.restore().map_err(HarnessError::Rom)?;
-            machine.run(input.word).map_err(HarnessError::Rom)?;
+            if resets_next(movie, frame) {
+                machine
+                    .run_before_soft_reset(input.word)
+                    .map_err(HarnessError::Rom)?;
+            } else {
+                machine.run(input.word).map_err(HarnessError::Rom)?;
+            }
         }
     }
 
@@ -851,6 +858,7 @@ fn trace_on<P: TimingProfile>(
 fn play<P: TimingProfile>(
     machine: &mut ZaxnesMachine<P>,
     input: crate::movie_file::FrameInput,
+    resets_next: bool,
 ) -> Result<(), HarnessError> {
     match input.command {
         crate::movie_file::FrameCommand::None => {}
@@ -867,7 +875,13 @@ fn play<P: TimingProfile>(
             ))
         }
     }
-    machine.run(input.word).map_err(HarnessError::Rom)?;
+    if resets_next {
+        machine
+            .run_before_soft_reset(input.word)
+            .map_err(HarnessError::Rom)?;
+    } else {
+        machine.run(input.word).map_err(HarnessError::Rom)?;
+    }
     Ok(())
 }
 
@@ -924,6 +938,33 @@ fn note_instruction<P: TimingProfile>(
     });
 }
 
+/// **Item 12** on the frame the movie taps RESET after: the `NesHawkCompat` profile's frame ends
+/// at the boundary dot, before the instruction that straddles it, because that is where NesHawk
+/// ends a frame and so where its reset's seven cycles begin.
+///
+/// `NesCoreOf::run_frame_profiled_gen`'s own test, and it has to be here too: the marks this
+/// instrument writes are what the item is measured on. With `--converge` the window does not
+/// slide past this one frame's boundary — a probe of the frame before a reset would be comparing
+/// a frame that ends three cycles from here.
+fn ends_at_the_boundary_dot<P: TimingProfile>(
+    out: &mut FrameTrace,
+    bus: &mut zax_nes::NesBusOf<P>,
+    at: (usize, (i64, i64, i64), bool),
+    before_reset: bool,
+) -> bool {
+    let (index, first, census) = at;
+    if !(before_reset
+        && P::RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT
+        && bus.frame_boundary_is_the_next_cycle())
+    {
+        return false;
+    }
+    bus.ppu_mut().capture_frame_snapshot();
+    out.instructions = index;
+    close_frame(out, bus, first, census);
+    true
+}
+
 /// Drives one frame instruction by instruction, which is `NesCore::run_frame`'s own loop.
 ///
 /// `probe` is the reference's own 2 KiB for this frame and how many instructions to carry on
@@ -937,6 +978,7 @@ fn trace_frame<P: TimingProfile>(
     window_half: usize,
     census: bool,
     ledger: Option<&[u16]>,
+    before_reset: bool,
 ) -> FrameTrace {
     let mut out = FrameTrace {
         word,
@@ -970,6 +1012,11 @@ fn trace_frame<P: TimingProfile>(
     });
     let mut boundary: Option<usize> = None;
     for index in 0..MAX_INSTRUCTIONS {
+        let at = (index, first, census);
+        if boundary.is_none() && ends_at_the_boundary_dot(&mut out, bus, at, before_reset) {
+            boundary = Some(index);
+            break;
+        }
         let pc = cpu.pc;
         let interrupt = match pc {
             // The handler's first instruction: the vector was just taken. Reported rather than

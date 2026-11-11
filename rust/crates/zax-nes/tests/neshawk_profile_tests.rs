@@ -278,6 +278,8 @@ impl TimingProfile for ItemOneCOn {
     const DMC_FETCH_STALLS_AN_OAM_TRANSFER: bool = NesHawkCompat::DMC_FETCH_STALLS_AN_OAM_TRANSFER;
     const PPU_START_UP_DOTS_SKIPPED: i64 = NesHawkCompat::PPU_START_UP_DOTS_SKIPPED;
     const DMC_POWER_ON_TIMER: i32 = NesHawkCompat::DMC_POWER_ON_TIMER;
+    const RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT: bool =
+        NesHawkCompat::RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT;
 
     /// The item, and the only line of this profile that is not `NesHawkCompat`'s.
     const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool = true;
@@ -731,6 +733,100 @@ fn item_11_the_dmc_timer_powers_on_1020_cycles_from_its_first_bit() {
     assert_ne!(
         plain, hawk,
         "and the two profiles do not power their DMC timer on alike"
+    );
+}
+
+/// **Item 12** — a frame the movie taps RESET after ends at the PPU dot the frame boundary falls
+/// on, before the instruction that straddles it.
+///
+/// NesHawk clocks the two chips together: `PPU.run.cs` `TickPPU_preVBL()` sets
+/// `nes.frame_is_done = true` at a dot, with the CPU clocked from inside the same loop, and
+/// `NES.Core.cs` `FrameAdvance` opens the next frame with `cpu.NESSoftReset()` — `opcode =
+/// VOP_RESET; mi = 0;`, which abandons the instruction in flight. So its reset's seven cycles
+/// begin on the boundary dot's own CPU cycle. This core's frame loop breaks *after* the straddling
+/// instruction, which on the *Kirby* `.bk2` put the reset **3 CPU cycles late** and every DMC
+/// fetch of the rest of the movie on the wrong cycle of the game's code (lot NESHAWK-PROFILE-8
+/// step 1, lot NESHAWK-PROFILE-9 step 1).
+///
+/// Measured as the two frames the same state can run: the ordinary one and
+/// [`NesCoreOf::run_frame_before_soft_reset`]'s. The gap is how much of the straddling instruction
+/// the ordinary frame runs past the dot, so it is 0 when the dot does not fall on an instruction's
+/// **first** cycle — this core cannot stop between an instruction's cycles — and the minimal ROM's
+/// `JMP $8000` loop is 3 cycles, so the dot walks through all three over consecutive frames and
+/// the table below is the whole behaviour.
+#[test]
+fn item_12_the_frame_before_a_reset_ends_at_the_boundary_dot() {
+    use zax_nes::{NesCoreOf, RunFrame as _};
+
+    /// `(the ordinary frame's length, the before-reset frame's length, and whether each left the
+    /// PPU past the boundary dot)`, both run from the state `frames` ordinary frames leave.
+    fn pair<P: TimingProfile>(frames: u32) -> (i64, i64, bool, bool) {
+        let build = || {
+            let mut core = NesCoreOf::<P>::new();
+            assert!(
+                core.load_rom(&minimal_rom(0x01, None, None), "Minimal.nes")
+                    .success
+            );
+            core
+        };
+        let (mut ordinary, mut early) = (build(), build());
+        for _ in 0..frames {
+            ordinary.run_frame(0);
+            early.run_frame(0);
+        }
+        (
+            ordinary.run_frame(0),
+            early.run_frame_before_soft_reset(0),
+            ordinary.bus().ppu().vblank_just_started(),
+            early.bus().ppu().vblank_just_started(),
+        )
+    }
+
+    let mut gaps = (Vec::new(), Vec::new());
+    for frames in 0..8 {
+        let plain = pair::<Standard>(frames);
+        let hawk = pair::<NesHawkCompat>(frames);
+        println!("  after {frames} frame(s): standard {plain:?}  neshawk {hawk:?}");
+
+        // `Standard`: the two calls are the same frame, to the cycle and to the flag.
+        assert_eq!(
+            (plain.0, plain.2),
+            (plain.1, plain.3),
+            "standard: a frame before a reset is the frame it always was"
+        );
+        assert!(plain.2, "standard: the frame ends past the boundary dot");
+
+        // `NesHawkCompat`: the before-reset frame never runs **past** the ordinary one, and when
+        // it ends earlier it ends short of the dot — which is the item.
+        assert!(
+            hawk.1 <= hawk.0 && hawk.0 - hawk.1 < 8,
+            "neshawk: the before-reset frame gives up part of one instruction, got {} against {}",
+            hawk.1,
+            hawk.0
+        );
+        assert!(
+            hawk.2,
+            "neshawk: the ordinary frame ends past the boundary dot"
+        );
+        assert_eq!(
+            hawk.3,
+            hawk.0 == hawk.1,
+            "neshawk: the before-reset frame has passed the boundary dot exactly when it did not \
+             end early, got {hawk:?}"
+        );
+        gaps.0.push(plain.0 - plain.1);
+        gaps.1.push(hawk.0 - hawk.1);
+    }
+
+    println!("  gaps: standard {:?}  neshawk {:?}", gaps.0, gaps.1);
+    assert_eq!(gaps.0, vec![0; 8], "standard: the item is not implemented");
+    // The item has to *fire*: the dot falls on the first cycle of the `JMP` on a third of the
+    // frames, and a change that stopped the early break would otherwise pass every assertion
+    // above by doing nothing at all.
+    assert!(
+        gaps.1.contains(&3),
+        "neshawk: not one of the eight frames ended at the boundary dot, got {:?}",
+        gaps.1
     );
 }
 

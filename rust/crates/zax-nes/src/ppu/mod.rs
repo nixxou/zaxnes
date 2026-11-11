@@ -1102,6 +1102,49 @@ impl Ppu2C02 {
         self.vblank_just_started = false;
     }
 
+    /// Whether the dot the frame boundary falls on — dot 1 of the vblank line, where
+    /// [`Ppu2C02::vblank_just_started`] is raised — lies inside the dots the **next** CPU cycle
+    /// is worth.
+    ///
+    /// The `NesHawkCompat` profile's item 12 asks it before each instruction of the frame the
+    /// movie taps RESET after: NesHawk ends a frame at that dot, mid-instruction, so the frame has
+    /// to end here and not after the instruction the dot falls inside. The caller must have
+    /// caught the PPU up (`NesBusOf::frame_boundary_is_the_next_cycle` does), because the position
+    /// is read off the counters.
+    ///
+    /// The count of dots the next cycle is worth is `run_cpu_cycles`'s own arithmetic for one
+    /// cycle — 3 on NTSC, 3 or 4 on PAL as the accumulator stands — so the answer is exact on both
+    /// regions.
+    ///
+    /// **Zero dots away is not "the next cycle"**: the boundary dot is then the one just
+    /// processed, so the frame boundary has already been taken and it is the *next* one, a whole
+    /// frame away, that this frame ends on. That state is reachable at the start of a frame whose
+    /// predecessor's last CPU cycle ended exactly on the dot, and reading it as "now" ended such a
+    /// frame after no instructions at all.
+    #[must_use]
+    pub fn frame_boundary_is_the_next_cycle(&self) -> bool {
+        let frame = i64::from(self.timing.scanlines_per_frame) * i64::from(DOTS_PER_SCANLINE);
+        let here = i64::from(self.scanline) * i64::from(DOTS_PER_SCANLINE) + i64::from(self.dot);
+        let there =
+            i64::from(self.timing.vblank_scanline) * i64::from(DOTS_PER_SCANLINE) + 1 - here;
+        let numerator = i64::from(self.timing.dots_per_cycle_numerator);
+        let denominator = i64::from(self.timing.dots_per_cycle_denominator);
+        let next_cycle = (i64::from(self.dot_accumulator) + numerator) / denominator;
+        (1..=next_cycle).contains(&there.rem_euclid(frame))
+    }
+
+    /// Takes the frame's palette and mask snapshot that dot 1 of the vblank line takes, for the
+    /// `NesHawkCompat` profile's item 12: a frame that ends **before** that dot has not had it
+    /// taken, and the 2D picture is composed from it (`Ppu2C02::frame_palette`).
+    ///
+    /// Exactly equal to what the dot itself would copy: the dots between the frame's last CPU
+    /// cycle and the boundary dot carry no CPU cycle, so nothing can write a palette entry or
+    /// PPUMASK inside them.
+    pub fn capture_frame_snapshot(&mut self) {
+        self.frame_palette = self.palette;
+        self.frame_mask = self.mask;
+    }
+
     fn step_dot(&mut self, cart: Cart<'_, '_>) {
         self.advance_counters();
         self.process_dot(cart);

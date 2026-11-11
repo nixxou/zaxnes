@@ -534,6 +534,16 @@ pub(crate) trait Machine {
     fn soft_reset(&mut self) -> Result<(), String>;
     /// Runs exactly one frame with `word` on the two pads.
     fn run(&mut self, word: u16) -> Result<(), String>;
+    /// Runs exactly one frame, the movie's next command being a RESET.
+    ///
+    /// The same frame on every machine but one: the `NesHawkCompat` profile ends it at the PPU
+    /// dot the frame boundary falls on, which is where NesHawk ends a frame and so where
+    /// NesHawk's reset lands (item 12). Everything else — FCEUX, and this core's own `Standard`
+    /// profile — runs the frame it always did, which is why this is a defaulted method and not a
+    /// capability one engine has.
+    fn run_before_soft_reset(&mut self, word: u16) -> Result<(), String> {
+        self.run(word)
+    }
     /// Copies the 2 KiB of work RAM into `out`.
     fn ram_into(&self, out: &mut Vec<u8>) -> Result<(), String>;
     /// Copies the picture into `out`, one NES colour index a pixel.
@@ -725,6 +735,13 @@ impl<P: TimingProfile> Machine for ZaxnesMachine<P> {
 
     fn run(&mut self, word: u16) -> Result<(), String> {
         RunFrame::run_frame(&mut *self.core, word);
+        self.since_reset += 1;
+        self.apply_ppu_warmup();
+        Ok(())
+    }
+
+    fn run_before_soft_reset(&mut self, word: u16) -> Result<(), String> {
+        self.core.run_frame_before_soft_reset(word);
         self.since_reset += 1;
         self.apply_ppu_warmup();
         Ok(())
@@ -1067,12 +1084,22 @@ pub fn compare_frame(
 /// left holding is the movie's own frame, picture and all. That order matters:
 /// `NesCore::restore_core_state` deliberately leaves the picture out of the block, so a probe run
 /// after the real one would overwrite the picture it was supposed to be checking.
-fn probe_input_sensitivity(machine: &mut dyn Machine, word: u16) -> Result<bool, String> {
+fn probe_input_sensitivity(
+    machine: &mut dyn Machine,
+    word: u16,
+    resets_next: bool,
+) -> Result<bool, String> {
     machine.capture()?;
     machine.run(!word)?;
     let alternate = outcome_digest(machine)?;
     machine.restore()?;
-    machine.run(word)?;
+    // The real frame is the one the run goes on from, so it is the one that ends where a frame
+    // before a RESET has to end (item 12); the alternate word's frame is thrown away.
+    if resets_next {
+        machine.run_before_soft_reset(word)?;
+    } else {
+        machine.run(word)?;
+    }
     let real = outcome_digest(machine)?;
     Ok(alternate != real)
 }
@@ -1903,11 +1930,16 @@ fn probes(options: &Options, frame: u32) -> bool {
 }
 
 /// One frame on one machine, with the probe when this frame is probed.
+///
+/// `resets_next` is the next frame's command: a movie's RESET is applied before the frame it is
+/// recorded on, so the frame **before** it is the one that has to end where the machine being
+/// replayed ends it (item 12, [`Machine::run_before_soft_reset`]).
 fn step(
     machine: &mut dyn Machine,
     input: FrameInput,
     ram: RamPattern,
     probe: bool,
+    resets_next: bool,
 ) -> Result<Option<bool>, String> {
     match input.command {
         FrameCommand::None => {}
@@ -1915,10 +1947,21 @@ fn step(
         FrameCommand::HardReset => machine.power(ram)?,
     }
     if probe {
-        probe_input_sensitivity(machine, input.word).map(Some)
+        probe_input_sensitivity(machine, input.word, resets_next).map(Some)
+    } else if resets_next {
+        machine.run_before_soft_reset(input.word).map(|()| None)
     } else {
         machine.run(input.word).map(|()| None)
     }
+}
+
+/// Whether the movie taps RESET on the frame after `frame`, which is the one thing the frame
+/// before a reset has to know (item 12). Out of range — the last frame — is false.
+pub(crate) fn resets_next(movie: &MovieFile, frame: u32) -> bool {
+    movie
+        .frames
+        .get(usize::try_from(frame).unwrap_or(usize::MAX))
+        .is_some_and(|next| matches!(next.command, FrameCommand::SoftReset))
 }
 
 /// How many frames to run: the movie's length, capped by `--frames`.
@@ -2001,9 +2044,10 @@ fn run_lockstep(
     for frame in 1..=total {
         let input = movie.frames[usize::try_from(frame).unwrap_or(1) - 1];
         let probe = probes(options, frame);
+        let resets = resets_next(movie, frame);
         let sensitivity = match (
-            step(ours.as_mut(), input, ram, probe),
-            step(&mut theirs, input, ram, probe),
+            step(ours.as_mut(), input, ram, probe, resets),
+            step(&mut theirs, input, ram, probe, resets),
         ) {
             (Ok(our_lag), Ok(their_lag)) => our_lag.zip(their_lag),
             (Err(why), _) => {
@@ -2238,7 +2282,7 @@ fn run_alone(
     for frame in 1..=total {
         let input = movie.frames[usize::try_from(frame).unwrap_or(1) - 1];
         let probe = probes(options, frame);
-        let sensitive = match step(machine, input, ram, probe) {
+        let sensitive = match step(machine, input, ram, probe, resets_next(movie, frame)) {
             Ok(sensitive) => sensitive,
             Err(why) => {
                 tracker.run.stopped = Some((frame, why));

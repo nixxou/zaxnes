@@ -792,6 +792,19 @@ impl<P: TimingProfile> NesBusOf<P> {
         self.sync_apu();
     }
 
+    /// Whether the dot the frame boundary falls on lies inside the **next** CPU cycle, the PPU
+    /// caught up first so that the answer is read off its real position.
+    ///
+    /// The `NesHawkCompat` profile's item 12 asks this before each instruction of the frame the
+    /// movie taps RESET after (`NesCoreOf::run_frame_profiled_gen`), which is the only caller: a
+    /// frame of NesHawk's ends at that dot, so the straddling instruction must not run before the
+    /// reset. Catching the PPU up on every instruction costs that one frame its batching and
+    /// changes nothing it computes ([`NesBus::sync_ppu`]).
+    pub fn frame_boundary_is_the_next_cycle(&mut self) -> bool {
+        self.catch_up_ppu();
+        self.ppu.frame_boundary_is_the_next_cycle()
+    }
+
     /// Catches the PPU up and returns to running it on every cycle.
     pub fn end_deferred_ppu(&mut self) {
         self.deferred_ppu = false;
