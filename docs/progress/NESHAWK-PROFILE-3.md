@@ -17,7 +17,7 @@ machines** and bisects back to the first one that differs.
 
 - [x] 1. Measure where the cycles come from, on both machines.
 - [x] 2. Explain the first differing interval.
-- [ ] 3. Add it to the profile, and iterate 1-3 up to five rounds.
+- [x] 3. Add it to the profile, and iterate 1-3 up to five rounds (two were run; step 3 says why).
 - [ ] 4. No regression.
 - [ ] 5. Report and final pass.
 
@@ -317,5 +317,169 @@ bus, plus the batching horizon that copy needs. The magnitude is one cycle from 
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE-3 step 2/5 done: explain the first differing interval
+
+---
+
+## Step 3 — item 8, and the rounds
+
+### Round 1 — item 8, `NMI_SEEN_A_CYCLE_LATE`
+
+**Frame 9354 is closed, and the 8 968 frames after it with it.** The movie runs out of the
+reference window, so this lot produced the next reference itself and the movie now holds to
+**frame 18321**.
+
+| | NESHAWK-PROFILE-2's seven items | with item 8 |
+|---|---|---|
+| frames compared (1 100-10 000) | 8 901 | 8 901 |
+| **the last frame with no live difference** | **9 353** | **10 000** — the window's last frame |
+| frames with no difference outside the stack page and `$0000-$001F` | 8 175 of 8 901 | **8 792** of 8 901 |
+| frames with a live difference | 726 | **109**, every one isolated |
+| frames **identical to the byte**, the dead stack included | **0** | **213** |
+| all 8 901 lag counts | agree | agree |
+
+That last row is the one worth stopping on. Before this item **not one** of the 8 901 frames was
+identical to the byte — the stack page always differed, on every frame since 1 100, and
+NESHAWK-PROFILE-2 §5 recorded a one-address-shifted block of it at 4 663-4 665 as "the fossil of
+the two machines' stack pointers having been one byte apart". With item 8 there are **213 frames
+whose whole 2 KiB agrees**, dead stack and all. The shifted block was the NMI having been taken
+one instruction apart.
+
+### The implementation, and the one site
+
+`TimingProfile::NMI_SEEN_A_CYCLE_LATE`, `false` on `Standard`, `true` on `NesHawkCompat`, read at
+`nes_bus.rs` `nmi_asserted` — which is what `Cpu6502::end_cycle` calls once per CPU cycle — with:
+
+| | |
+|---|---|
+| `NesBusOf::nmi_seen` | the line as the previous cycle's sample left it. One `bool`, set in `tick` **before** the PPU runs this cycle's dots, which is what makes it exactly one cycle of lag and nothing else |
+| `ppu_horizon` | one more `return 1`: the cycle the copy changes on has to be run in step, or the batching would copy a sample the PPU had already moved past |
+| the savestate | written **only** on the profile that has the field, as item 2's reload countdown is, so a `Standard` block stays byte for byte what it always was and `NesCore::STATE_VERSION` does not move. It is *not* transient the way `dma` is: `Cpu6502` saves `nmi_line`, so a copy that reloaded as `false` against an asserted line would manufacture an edge and take the NMI twice |
+| `reset` | cleared, with the rest of the per-cycle state |
+
+The `Standard` arm of `nmi_asserted` is the one-line body the function had before the item
+existed, and `tick`'s and `ppu_horizon`'s additions are both inside `if P::…`, so that profile's
+two functions are the source they were.
+
+### The test
+
+`item_8_the_cpu_sees_the_vblank_nmi_one_cycle_later` counts, on each profile, the cycles from the
+`$2000` write that enables the NMI to the first cycle on which **the CPU's own view** of the line
+is true, and separately to the first cycle on which **the PPU's own sample** is. It then asserts
+three things rather than one number:
+
+* the PPU's sample is at the **same** cycle on both profiles — the item is in the chip, not in the
+  picture;
+* on `Standard` the CPU sees the line on exactly that cycle, as this core always did;
+* on `NesHawkCompat` it sees it **one cycle later**, and that is the whole of item 8.
+
+### Round 2 — item 9, and it is not an item at all
+
+Frame 18322 is **frame 4666's signature a third time**: `$0038`, `$0039`, `$0048`, `$0049` — the
+frame semaphore and the counters it drives — with `--converge` reporting "at NO instant of this
+frame does the live memory agree", 69 DMC fetches and one OAM transfer. The frame's work crossed
+the vblank again.
+
+The cycle ledger over frames 18 250-18 330 then pointed somewhere precise. With item 8 in, the
+`$4014` **request** is on the same cycle as NesHawk's on **71 of 72** frames — but `pc$C37C`, one
+OAM transfer later, on only **40 of 72**, the rest differing by exactly ±1. One OAM transfer, one
+cycle: the transfer's **alignment**. And NesHawk's source says it outright (`NES.Core.cs`, the
+`sprdma_countdown` block):
+
+```
+sprdma_countdown = 1;                       // at the $4014 write
+…                                           // on the cycle it reaches zero:
+if (apu.dmc.timer % 2 == 0) cpu_deadcounter = 2; else cpu_deadcounter = 1;
+oam_dma_exec = true; oam_dma_index = 0;
+```
+
+with the transfer loop then spending `cpu_deadcounter` cycles doing nothing and 512 doing the
+get/put pairs. **Nothing in that decision looks at the cycle**: NesHawk aligns the transfer on the
+parity of the **DMC's timer**, where this core (and Mesen 2, and the nesdev *DMA* page's "+1 if on
+an odd CPU cycle") waits for the first get cycle.
+
+It was implemented — one constant, `OAM_ALIGNS_ON_THE_DMC_TIMER`, read at `run_dma` where a
+transfer's get cycles are decided — and the result was that **the 81-frame cycle ledger came out
+byte-identical**: not one of the 81 transfers changed length. That is not the inertness items 3
+and 7 have; it is stronger, and the reason is arithmetic:
+
+> **The DMC's timer counts down one per CPU cycle and reloads to `rates[i] - 1`, so its period is
+> `rates[i]`. All sixteen NTSC rates — 428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128,
+> 106, 84, 72, 54 — and all sixteen PAL ones are EVEN. So the timer's parity is locked to the CPU
+> cycle's parity from power-on and no reload, and no `$4010` write, can ever unlock it.**
+
+Both machines start from the equivalent state (this core's timer is `rates[0] - 1` at cycle 0,
+NesHawk's is `DMC_RATE[0]` at its cycle 0 — the plus-one convention again), so
+`apu.dmc.timer % 2 == 0` and "the cycle after the halt is not a get cycle" are **the same
+predicate on every reachable state of either machine**. NesHawk's rule is a different *expression*
+of this core's rule, not a different rule.
+
+**So item 9 was reverted rather than shipped**, and that is the right answer rather than a
+shortcut: a constant whose two arms are provably the same function cannot be given the
+differential test the recipe requires — a test that cannot fail is not a test — and shipping it
+would have put an untestable `if` and a `sync_apu` on the NesHawk profile's OAM path for nothing.
+The proof is the deliverable, and it closes the brief's "OAM DMA alignment" candidate for good
+rather than for this movie.
+
+### Why the rounds stop at two
+
+Rounds 3 to 5 are not run, and the reason is the same shape as NESHAWK-PROFILE-2's:
+
+* every candidate the brief named has now been **measured** rather than argued about. The APU
+  frame sequencer and `$4017`, the `$4016` strobe delay, the NMI/IRQ polling points, `$2002` and
+  the vblank flag, the odd-frame skip, the branch quirk and the OAM alignment: the first is
+  downstream of the NMI (step 2's table), the branch quirk is eliminated by the interrupt-phase
+  ROM, the alignment is eliminated by the parity of the rate table, and the rest by the ledger's
+  own residuals;
+* what is left at frame 18 322 is the **phase**, not a rule. The two machines' spin loops are
+  still a multiple of three cycles apart on most frames — the drift of the NMI entry runs
+  4 771 to 4 778 over the 81-frame window — and that offset was seeded long before frame 1 100
+  (step 1 measured a **2 382-cycle** jump at frame 6, where the movie's first reset lands) and is
+  self-sustaining: a 3-cycle phase difference in a 6-cycle spin loop reproduces itself exactly,
+  and feeds the ±1 of an OAM alignment and the ±4 of a DMC fetch's placement that then mostly
+  heal. 213 frames identical to the byte says the *rules* now agree; the phase says the two
+  machines did not start from the same place;
+* so the next thing worth measuring is **the boot**, not another item on the DMA or the APU, and
+  that is a different lot's work: it needs a reference over frames 1 to 400 with the reset in it,
+  which `kirby-jp-step1.txt` has and which §5 of the review now asks for by name.
+
+### Kirby, measured
+
+| | `standard` | `neshawk`, NESHAWK-PROFILE-2 | `neshawk`, with item 8 |
+|---|---|---|---|
+| the last frame with no live difference, 1 100-10 000 | 925 | 9 353 | **10 000** |
+| the same, 10 000-30 000 (this lot's own reference) | — | — | **18 321** |
+| frames with no live difference, 10 000-30 000 | — | — | **8 261** of 20 001 |
+| isolated differing frames below the parting frame, 10 000-30 000 | — | — | **61** |
+| all 20 001 lag counts of the second window | — | — | agree |
+| the whole 156 312 frames against `kirby-jp.txt`, checksum lines | 2 of 1 563 | 1 of 1 563 | **4** of 1 563 |
+| all 1 563 lag counts | agree | agree | agree |
+
+The checksum column still cannot discriminate, for §4f's reason — a checksum covers the stack page
+and `$0000-$001F` — and is reported only so that it is not missing.
+
+### The pictures
+
+Under EVAL-SYNC §4's colour-bijection rule, with the eight overscan rows cropped top and bottom
+(BizHawk writes 256×224, this core the whole 256×240, REQ-CORE-048):
+
+| | 1500 … 10000, every 500 | 12000 … 30000, every 2000 |
+|---|---|---|
+| `neshawk`, with item 8 | **16 of 18** (9 500 and 10 000 gained; 5 500 and 8 500 are 4-pixel misses) | **6 of 10** — 12 000 to 18 000 all match, and so do 26 000 and 30 000 |
+| `standard` | **0 of 18**, 38 914 to 54 963 pixels out | — |
+
+**Every picture inside the synchronised stretch matches except two, and both of those are four
+pixels on a frame whose work RAM has no live difference at all** — frame 8 500 is the one
+NESHAWK-PROFILE-2 §4g recorded and frame 5 500 is new, which makes three instances of that class
+(frame 400's single pixel being the first). It is a PPU or sprite-evaluation difference and not a
+timing one, and it is recorded rather than absorbed.
+
+The **0 of 18 against 16 of 18** is also the validation of the comparison script, which is a
+re-implementation (the original was never committed, because it reads pictures of a commercial
+game): a script that said MATCH indiscriminately could not produce both columns, and one that said
+"no" indiscriminately could not produce the first.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-3 step 3/5 done: add it to the profile, and iterate
 
 ---
