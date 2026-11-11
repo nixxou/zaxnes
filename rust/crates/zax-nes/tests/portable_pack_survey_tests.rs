@@ -21,9 +21,43 @@ const B: u16 = 0x02;
 const START: u16 = 0x08;
 const RIGHT: u16 = 0x80;
 
+/// The pad words of `ZAXNES_SURVEY_INPUTS` (a file of little-endian u16, one per frame, from a
+/// movie), played instead of [`generic_input`] while they last; nothing after.
+fn movie() -> Option<&'static [u16]> {
+    static WORDS: std::sync::OnceLock<Option<Vec<u16>>> = std::sync::OnceLock::new();
+    WORDS
+        .get_or_init(|| {
+            let bytes = std::fs::read(std::env::var_os("ZAXNES_SURVEY_INPUTS")?).ok()?;
+            Some(
+                bytes
+                    .chunks_exact(2)
+                    .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                    .collect(),
+            )
+        })
+        .as_deref()
+}
+
+/// The frames the states are made at: `ZAXNES_SURVEY_AT` (`,`-separated) or [`SAVES`].
+fn saves() -> Vec<usize> {
+    std::env::var("ZAXNES_SURVEY_AT")
+        .ok()
+        .map_or_else(
+            || SAVES.to_vec(),
+            |list| list.split(',').filter_map(|f| f.trim().parse().ok()).collect(),
+        )
+}
+
+fn input(frame: usize) -> u16 {
+    match movie() {
+        Some(words) => words.get(frame).copied().unwrap_or(0),
+        None => generic_input(frame),
+    }
+}
+
 /// A pad that gets most games past their title and moving: Start now and then, Right held, B
 /// held (run), A every half second.
-fn input(frame: usize) -> u16 {
+fn generic_input(frame: usize) -> u16 {
     let start = matches!(frame % 300, 60..=64) && frame < 1500;
     let mut pad = if start { START } else { 0 };
     if frame > 400 {
@@ -127,7 +161,7 @@ fn survey_of_the_packs() {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        for save in SAVES {
+        for save in saves() {
             let mut line = format!("{:<52} @{save:>4}", patch.name);
             for on in [true, false] {
                 let Some(mut source) = core(&image, &name, on) else {
