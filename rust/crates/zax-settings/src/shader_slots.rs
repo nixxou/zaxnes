@@ -40,9 +40,6 @@ pub const FRAME_PICTURE: i32 = 2;
 
 /// The lines of the console's picture, the default of the 2D slots.
 pub const CONSOLE_LINES: i32 = 240;
-
-/// The lines of the 3D scene the shaders filter on Android (see [`ShaderSlot::default_lines`]).
-pub const PHONE_3D_LINES: i32 = 540;
 /// The most lines `shader.<slot>.lines` takes (0 is the window's own).
 pub const MAXIMUM_LINES: i32 = 4320;
 
@@ -119,13 +116,11 @@ impl ShaderSlot {
 
     /// The default of `shader.<slot>.lines`: the console's 240 in 2D, where the presets meet the
     /// pixels they were written for; the window's own in 3D, where 240 lines would crush the
-    /// voxels. On Android, 540 lines in 3D: a phone GPU filters the scene in time at that size
-    /// (Adreno 650, Mega Bezel POTATO: 44 fps against 22 at the window's 1080).
+    /// voxels.
     #[must_use]
     pub const fn default_lines(self) -> i32 {
         match self {
             Self::TwoD | Self::TwoDWide => CONSOLE_LINES,
-            Self::ThreeD | Self::ThreeDWide if cfg!(target_os = "android") => PHONE_3D_LINES,
             Self::ThreeD | Self::ThreeDWide => 0,
         }
     }
