@@ -159,6 +159,17 @@ impl ScaleFramebuffer for OwnedImage {
     ) -> Result<Size<u32>, Self::Error> {
         let format: Option<wgpu::TextureFormat> = format.into();
         let format = format.unwrap_or(TextureFormat::Bgra8Unorm);
+        // Zaxnes: the passes bind every texture as filterable, which a 32-bit float one is only
+        // with FLOAT32_FILTERABLE (absent on many mobile GPUs, Adreno 6xx): 16-bit float then.
+        let format = if format == TextureFormat::Rgba32Float
+            && !device
+                .features()
+                .contains(wgpu::Features::FLOAT32_FILTERABLE)
+        {
+            TextureFormat::Rgba16Float
+        } else {
+            format
+        };
         Ok(self.scale(
             device,
             scaling,

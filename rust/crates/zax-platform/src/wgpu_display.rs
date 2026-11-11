@@ -56,6 +56,16 @@ const SHADER_FEATURES: wgpu::Features = wgpu::Features::FLOAT32_FILTERABLE;
 #[cfg(not(feature = "shaders"))]
 const SHADER_FEATURES: wgpu::Features = wgpu::Features::empty();
 
+/// [`SHADER_FEATURES`], less `FLOAT32_FILTERABLE` with `ZAXNES_WGPU_NO_FLOAT32_FILTER=1` (to see on
+/// a desktop GPU what a mobile one without it, such as the Adreno 6xx, gets).
+fn shader_features() -> wgpu::Features {
+    if std::env::var_os("ZAXNES_WGPU_NO_FLOAT32_FILTER").is_some_and(|value| value == "1") {
+        SHADER_FEATURES - wgpu::Features::FLOAT32_FILTERABLE
+    } else {
+        SHADER_FEATURES
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct SceneLayer<'a> {
     pub view: &'a wgpu::TextureView,
@@ -151,7 +161,7 @@ impl WgpuDisplay {
             required_features: adapter.features()
                 & (wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
                     | BATCHING_FEATURES
-                    | SHADER_FEATURES),
+                    | shader_features()),
             required_limits: wgpu::Limits {
                 max_binding_array_elements_per_shader_stage:
                     adapter.limits().max_binding_array_elements_per_shader_stage,

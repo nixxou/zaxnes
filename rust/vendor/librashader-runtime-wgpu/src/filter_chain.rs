@@ -352,7 +352,17 @@ impl FilterChainWgpu {
 
             let filters: Vec<error::Result<FilterPass>> = passes_iter
                 .enumerate()
-                .map(|(index, (config, mut reflect))| {
+                .map(|(index, (mut config, mut reflect))| {
+                    // Zaxnes: every texture is bound as filterable, which a 32-bit float one
+                    // is only with FLOAT32_FILTERABLE (absent on many mobile GPUs, Adreno 6xx):
+                    // without it such a pass renders to 16-bit float instead.
+                    if config.data.format == librashader_common::ImageFormat::R32G32B32A32Sfloat
+                        && !device
+                            .features()
+                            .contains(wgpu::Features::FLOAT32_FILTERABLE)
+                    {
+                        config.data.format = librashader_common::ImageFormat::R16G16B16A16Sfloat;
+                    }
                     let reflection = reflect.reflect(index, semantics)?;
                     let wgsl = reflect.compile(NagaLoweringOptions {
                         write_pcb_as_ubo: true,

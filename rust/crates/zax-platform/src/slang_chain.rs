@@ -134,6 +134,8 @@ pub struct SlangShaders {
     loading: Option<Loading>,
     /// The preset that failed and why: it is not tried again until another one is asked for.
     refused: Option<(PathBuf, String)>,
+    /// The line for the log of a preset dropped while drawing, given at the next update.
+    dropped: Option<String>,
     /// The frame count the shaders read (the emulated frames, so that an animated effect keeps
     /// the game's pace at 120 Hz).
     frame: usize,
@@ -151,6 +153,7 @@ impl SlangShaders {
             active: None,
             loading: None,
             refused: None,
+            dropped: None,
             frame: 0,
         }
     }
@@ -273,7 +276,7 @@ impl SlangShaders {
     /// frame count: the line for the log when a preset was compiled or refused.
     pub fn update(&mut self, frame: usize) -> Option<String> {
         self.frame = frame;
-        self.poll()
+        self.dropped.take().or_else(|| self.poll())
     }
 
     /// The width over the height of the rectangle the preset draws in (see
@@ -358,6 +361,10 @@ impl SlangShaders {
             (Ok(()), Some(error)) => error,
         };
         let preset = active.preset.clone();
+        self.dropped = Some(format!(
+            "slang preset dropped: {}: {problem}",
+            preset.display()
+        ));
         self.refused = Some((preset, problem));
         self.active = None;
         None
