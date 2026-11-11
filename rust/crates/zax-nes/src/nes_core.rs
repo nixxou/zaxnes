@@ -741,7 +741,9 @@ impl<P: TimingProfile> NesCoreOf<P> {
         self.bus.ppu_mut().reset();
         self.boot_patch_window(self.builtin_patch);
         self.boot_pack_zone();
-        self.bus.apu_mut().reset();
+        // Item 11 is read inside this call, and only here: the DMC's timer powers on 1 020 CPU
+        // cycles from its first bit on the NesHawk profile and one period from it on `Standard`.
+        self.bus.apu_mut().reset::<P>();
         let clear_prg_ram = !self.battery_ram_imported;
         if let Some(cartridge) = self.bus.cartridge_mut() {
             cartridge.reset();

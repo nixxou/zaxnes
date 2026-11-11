@@ -432,13 +432,23 @@ impl DmcChannel {
     /// every ROM of `dmc_dma_during_read4` and `sprdma_and_dmc_dma`. Mesen 2 sets the same
     /// phase at reset for the same reason.
     ///
+    /// **Item 11** is the one profile difference here: NesHawk powers the timer on at a flat 1 020
+    /// CPU cycles (`DMCUnit`'s constructor, `timer = 1020` beside `timer_reload = DMC_RATE[0]`)
+    /// rather than one period of the rate in force, which puts its whole output phase 592 cycles
+    /// further on. 592 is even, so the alignment parity the paragraphs above depend on is the same
+    /// on both profiles — which is what makes the item an item rather than a hang.
+    ///
     /// [`NesBus::run_dma`]: crate::NesBus
     // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
-    pub fn reset(&mut self) {
+    pub fn reset<P: TimingProfile>(&mut self) {
         let rates = self.rates;
         *self = Self::default();
         self.rates = rates;
-        self.timer = rates[0] - 1;
+        if P::DMC_POWER_ON_TIMER > 0 {
+            self.timer = P::DMC_POWER_ON_TIMER;
+        } else {
+            self.timer = rates[0] - 1;
+        }
     }
 
     /// The documented *after reset* state of the DMC (AMD-044 REQ-CORE-122): the output level

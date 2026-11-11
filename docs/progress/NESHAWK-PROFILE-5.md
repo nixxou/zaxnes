@@ -17,7 +17,12 @@ frame 1 100 — a frame with no DMC DMA at all — shows as exactly one event of
       ten frames — and the first differing event is in **frame 11**, the first frame that plays a
       DPCM sample.
 - [x] 2. Explain it from the sources — **item 11**, the DMC's power-on timer.
-- [ ] 3. Add it to the profile, with a differential test, and re-run *Kirby* on every window.
+- [x] 3. Add it to the profile, with a differential test, and re-run *Kirby* on every window.
+      **Item 11 is in, it is exact — every DMC fetch of frame 11 now lands on NesHawk's own
+      cycle, where the baseline was 208 out — and it makes the movie *worse*: 400-1 100 falls
+      from 1 100 to 925.** So the baseline's wrong power-on phase was compensating for something,
+      and step 4 names it. A stale test of lot NESHAWK-PROFILE-4's was also found failing at
+      `63f937ea` and is fixed here.
 - [ ] 4. Iterate.
 - [ ] 5. No regression.
 - [ ] 6. Report and final pass.
@@ -260,3 +265,121 @@ be checked before the item could be an item, and it is why it can be one.
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE-5 step 2 done: item 11, the DMC's power-on timer, from both sources
+
+---
+
+## Step 3 — item 11 in the profile, and the measurement that says it is not alone
+
+### The answer first
+
+**Item 11 is exact, and it costs the movie.** Both halves are measurements, not readings:
+
+1. With item 11 the **whole of frame 11's DMC fetch train lands on NesHawk's own cycle.** Against
+   `bk2dmc1.lua`'s per-byte fetch ledger, every fetch from `$FCC1` to `$FCCD` sits at a **constant
+   3 cycles** from BizHawk's — the two instruments' calibration for this event kind, the same 3 on
+   all thirteen — where the baseline was **+211 and climbing out of step with the write**. The
+   write-started fetch of `$FCC0` is at 5 106 on both, exactly as before.
+2. And the movie is **worse**: the 400-1 100 window's last frame with no live difference falls from
+   **1 100 to 925**, and the 1-1 100 cycle ledger goes from **867** frames with an event off its
+   anchor to **920**.
+
+That pair is only a contradiction if the DMC's power-on phase were the only thing wrong, and it is
+not: **the baseline's wrong phase was cancelling an error somewhere else**, and step 4 round 1
+names it and retracts it.
+
+### The A/B, measured with one binary
+
+The baseline column is this lot's own tree with `NesHawkCompat::DMC_POWER_ON_TIMER` set back to
+`0`, built and run exactly like the item column — not lot NESHAWK-PROFILE-4's reported figures.
+That matters: the two differ, and the committed baseline is what an item is owed a comparison
+against.
+
+| *Kirby*, `--profile neshawk` | baseline (`timer = 427`) | **item 11** (`1019`) |
+|---|---|---|
+| 1-400, last frame with no live difference | 400 | **400** |
+| 1-400, frames identical to the byte | 281 | **194** |
+| 400-1 100, last frame with no live difference | **1 100** | **925** |
+| 400-1 100, frames identical to the byte | 388 | **0** |
+| all lag counts, both windows | agree | **agree** |
+
+| the 1-1 100 cycle ledger | baseline | **item 11** |
+|---|---|---|
+| frames with an event off the frame's anchor | **867** of 1 099 | 920 of 1 099 |
+| `nmi` at residual 0 | 1 094 of 1 094 | 1 054 of 1 054 |
+| `pc$C3A1` at 0 | **514** of 1 094 | 499 of 1 054 |
+| `pc$C074` at 0 | 277 of 988 | 233 of 962 |
+| `pc$C06E` at 0 | 268 of 988 | 209 of 962 |
+| the first frame with a residual | 11, at **−2** | 11, at **−1** |
+
+Two readings of that table are worth separating, because they point different ways:
+
+* **frame 11's own residual halves**, −2 to −1, which is item 11 doing exactly what step 2 said it
+  would and stopping one cycle short of the frame being exact;
+* **`identical to the byte` collapses to 0** on the 400-1 100 window while `no live difference`
+  still reaches 925. Those two metrics differ by the **stack page**, so what item 11 moves on every
+  frame of that window is the *pushed PC* — the spin loop's phase — and not the game's live state.
+  That is the signature §4h gave the whole problem, and it says the remaining cycle is carried
+  frame to frame rather than re-made each frame.
+
+### Where the last cycle of frame 11 is
+
+Under `drift.py`'s calibration frame 11's events sort into: every `$40xx` write at **0**, the
+`r$4015` at **−1**, `pc$C3A1` (the NMI handler's `RTI`) at **−1**, `pc$C074` at **−1**. So the
+cycle is lost **between the last write and the `$4015` read**, and the only DMA in that stretch is
+the fetch of `$FCC8`:
+
+    cyc    kind   instr  SL:DOT     addr val  ready cost  dmc(timer,bits,bytes)
+    8041  fetch    2321  49:246   $FCC7 68      -    4    (50,8,442)
+    8473  fetch    2453  53:181   $FCC8 73      -    3    (50,8,441)    <- three, not four
+    8905  fetch    2592  57:116   $FCC9 00      -    4    (50,8,440)
+
+`$FCC8` is the one fetch of the frame that costs **three** cycles rather than four, and the
+constant that spends it is **item 1c**, `DMC_HALT_LANDS_ON_A_WRITE_CYCLE`. Step 4 reads NesHawk's
+own source on that and finds item 1c has the **sign wrong**.
+
+### The item, as committed
+
+`TimingProfile::DMC_POWER_ON_TIMER`, read at `apu/dmc_channel.rs` `reset` and reached from
+`nes_core.rs` `power_on` alone — one site, which runs once a machine.
+
+| | |
+|---|---|
+| `Standard` | `0`, meaning "one period of the rate in force", which is the line `DmcChannel::reset` had before the profile existed — the same source, not merely an equivalent |
+| `NesHawkCompat` | `1019`, which is NesHawk's `timer = 1020` in this core's convention |
+
+**The convention, checked against both bodies rather than assumed.** NesHawk's `Run()` is
+`if (timer > 0) timer--; if (timer == 0) { timer = timer_reload; Clock(); }`, so a timer of `N`
+clocks first on the `N`th call. This core's `clock_timer` is `if self.timer > 0 { self.timer -= 1;
+return false }` and then plays the bit, so a timer of `T` clocks first on call `T + 1`. Hence
+`T = N - 1 = 1019`, and the differential test measures that rather than restating it: the second
+fetch — the first one the output unit asks for, as against the one the `$4015` write starts — comes
+out at **3 424** on `Standard` and **4 016** on `NesHawkCompat`, which is `T + 1 + 7 × 428` on each,
+**592** apart, and even.
+
+### A stale test of lot NESHAWK-PROFILE-4's, found failing at `63f937ea`
+
+`timing_profile_tests.rs`'s `a_rom_that_plays_no_dpcm_runs_identically_on_both_profiles` **fails at
+the commit this lot started from**, and not because of anything in this lot: `595615` against
+`593227`, a gap of **2 388** cycles, which is item 10's 7 165 PPU dots divided by three and nothing
+else. It was checked by reverting this lot's five files and running the target alone.
+
+Its premise — *"every item the NesHawk profile carries is about the DMC's sample-fetch DMA, so a
+ROM that never starts a DPCM sample must run identically on both profiles for ever"* — stopped
+being true when lot NESHAWK-PROFILE-4 added a **PPU** item, and that lot's reported "1 142 passed,
+0 failed" did not catch it.
+
+Fixed here in the stronger form rather than deleted: the test now asserts the gap is **exactly**
+`PPU_START_UP_DOTS_SKIPPED / 3` and that `Standard`'s own constant is 0, so it still fails the
+moment a DMC item reaches the common path, and it fails too if item 10 ever stops being the only
+thing a silent ROM can see.
+
+### The suite
+
+`cargo test --release -p zax-nes`: **1 194 passed, 0 failed, 11 ignored** — against 1 132 passed
+and **1 failed** at `63f937ea` (the failing target aborts the run, which is why the passing count
+moves by more than one). `cargo fmt --all --check` clean; `cargo clippy --release -p zax-nes
+--all-targets -- -D warnings` clean.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-5 step 3 done: item 11 is exact, it costs the movie, and item 1c is why

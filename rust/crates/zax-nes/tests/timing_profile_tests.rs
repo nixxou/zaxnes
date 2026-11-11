@@ -100,20 +100,39 @@ fn a_profile_costs_the_core_no_memory() {
     );
 }
 
-/// The invariant that says every NesHawk item stays behind the profile: the minimal ROM writes no
-/// `$4010`-`$4013` and no `$4015`, so its DMC never asks for a byte, and the two profiles have
-/// nothing to disagree about. If this test ever fails, an item reached the common path.
+/// The invariant that says every NesHawk item stays behind the profile — in the form lot
+/// NESHAWK-PROFILE-4 left it. The minimal ROM writes no `$4010`-`$4013` and no `$4015`, so its DMC
+/// never asks for a byte and **every DMC item is silent on it**; the one difference such a ROM may
+/// show is item 10's start-up frame, which is a PPU item and applies to every ROM whether it plays
+/// a sample or not.
+///
+/// So the invariant is no longer "the same cycle count" but "the difference is **exactly** item
+/// 10's, to the cycle". That is the stronger statement of the two: it still fails the moment a DMC
+/// item reaches the common path, and it also fails if item 10's own cost ever stops being the one
+/// thing a silent ROM can see.
+///
+/// Lot NESHAWK-PROFILE-5 step 3 restored this test. Item 10 (lot NESHAWK-PROFILE-4) had made it
+/// fail — `595615` against `593227`, which is item 10's 7 165 dots and nothing else — and the
+/// failure was not in that lot's suite figures.
 #[test]
-fn a_rom_that_plays_no_dpcm_runs_identically_on_both_profiles() {
+fn a_rom_that_plays_no_dpcm_differs_by_item_10_alone_on_the_two_profiles() {
     let standard = run_minimal::<Standard>(20);
     let neshawk = run_minimal::<NesHawkCompat>(20);
 
+    // One start-up frame runs here — `power_on`'s — and a PPU dot is a third of a CPU cycle.
+    let item_10 = NesHawkCompat::PPU_START_UP_DOTS_SKIPPED / 3;
     assert_eq!(
-        standard.0, neshawk.0,
-        "20 frames of a ROM with no DPCM take the same CPU cycles on both profiles"
+        0,
+        Standard::PPU_START_UP_DOTS_SKIPPED,
+        "the `Standard` profile runs no start-up frame, so the whole gap is the NesHawk one"
     );
-    assert_eq!(standard.1, neshawk.1, "and leave the same picture behind");
-    assert!(standard.0 > 0, "the frames actually ran");
+    assert_eq!(
+        item_10,
+        standard.0 - neshawk.0,
+        "20 frames of a ROM with no DPCM differ by item 10's start-up frame and by nothing else: \
+         any other number means an item reached the common path"
+    );
+    assert!(standard.0 > 0 && neshawk.0 > 0, "the frames actually ran");
 }
 
 /// **Both profiles are an `Engine`** (step 4), from one generic `impl`, so the application and the

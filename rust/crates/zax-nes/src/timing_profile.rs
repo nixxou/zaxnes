@@ -161,6 +161,52 @@ pub trait TimingProfile: Copy + Clone + Default + core::fmt::Debug + Send + Sync
     /// Read at `nes_core.rs` `power_on` and `soft_reset`, through
     /// `NesBusOf::run_ppu_start_up_dots`.
     const PPU_START_UP_DOTS_SKIPPED: i64;
+
+    // ------------------------------------------------------- the DMC's power-on timer
+
+    /// **Item 11** (lot NESHAWK-PROFILE-5 step 2). The DMC's timer powers on **1 020 CPU cycles**
+    /// from its first bit rather than one period of the rate in force, so the output unit's whole
+    /// phase — and with it the cycle every sample fetch of the game lands on — is `1020 - 428 =
+    /// 592` cycles further on than this core's.
+    ///
+    /// **Where it comes from.** NesHawk's `APU.cs` `DMCUnit` constructor sets `timer_reload =
+    /// DMC_RATE[0]` (428 on NTSC) and then `timer = 1020`, with `out_bits_remaining = 7`; `Run()`
+    /// is `if (timer > 0) timer--; if (timer == 0) { timer = timer_reload; Clock(); }` and runs
+    /// once a CPU cycle out of `RunOneFirst()`, so its first output clock is on CPU cycle 1 020.
+    /// This core's `DmcChannel::reset` starts the timer one period out, at `rates[0] - 1`, so its
+    /// first clock is on cycle 428. Neither machine's **soft** reset touches it: NesHawk's
+    /// `APU.NESSoftReset()` clears the sequencer, writes `$4015 = 0` and clears the two fill
+    /// glitches, and this core's `DmcChannel::soft_reset` moves the output level, the IRQ flag and
+    /// item 2's countdown — the timer and the bit counter are left alone on both.
+    ///
+    /// **It is a count in this core's convention, which is NesHawk's minus one.** Both units take
+    /// the sample buffer on every eighth output clock (NesHawk counts `7 → 0` and reloads to 7,
+    /// this core `8 → 1` and reloads to 8), so the bit counter is the same function and the
+    /// timer's start is the whole of the item; and NesHawk's timer is this core's plus one at every
+    /// instant — the parity trap `docs/review/NESHAWK-PROFILE.md` records — so its 1 020 is this
+    /// core's **1 019**. The value is region-independent, exactly as NesHawk's is: `timer = 1020`
+    /// is set whatever `DMC_RATE` table the constructor picked.
+    ///
+    /// **What it is worth.** The first event of the *Kirby* `.bk2` whose cycle differs once item 10
+    /// has removed the drift. Frames 1 to 10 of that movie — the power-on, the movie's soft reset
+    /// and the first ten frames — are identical on both machines event for event, and frame 11, the
+    /// first that plays a DPCM sample, has NesHawk fetching the sample's **second** byte 211 cycles
+    /// earlier: four of the output unit's 54-cycle bit periods, which is this phase (lot
+    /// NESHAWK-PROFILE-5 step 1).
+    ///
+    /// **Why `Standard` cannot simply be moved to it.** This core's phase is load-bearing and
+    /// `DmcChannel::reset`'s own comment says so: it decides whether a reload fetch needs its
+    /// alignment cycle, and blargg's `sync_dmc` — the thirty ROMs of `dmc_dma_during_read4` and
+    /// `sprdma_and_dmc_dma` — has a fine-synchronisation loop written to be one cycle longer than
+    /// the DMC's 3 424-cycle byte so that it *drifts into* alignment. 1 020 is **even**, so it
+    /// moves the phase by an even number of cycles and leaves that alignment parity alone, which is
+    /// what makes the item shippable at all.
+    ///
+    /// `0` means "as this core has always done it", which is one full period: a timer of 0 would
+    /// clock on the first CPU cycle and is not a value either machine can power on with.
+    ///
+    /// Read at `apu/dmc_channel.rs` `reset`, reached from `nes_core.rs` `power_on` alone.
+    const DMC_POWER_ON_TIMER: i32;
 }
 
 /// Zaxnes's own 2A03: the behaviour every lot before NESHAWK-PROFILE measured, and the one every
@@ -184,6 +230,7 @@ impl TimingProfile for Standard {
     const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool = false;
     const DMC_FETCH_STALLS_AN_OAM_TRANSFER: bool = false;
     const PPU_START_UP_DOTS_SKIPPED: i64 = 0;
+    const DMC_POWER_ON_TIMER: i32 = 0;
 }
 
 /// A 2A03 that makes BizHawk NesHawk's timing choices where they differ from Zaxnes's, so that a
@@ -207,4 +254,5 @@ impl TimingProfile for NesHawkCompat {
     const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool = true;
     const DMC_FETCH_STALLS_AN_OAM_TRANSFER: bool = true;
     const PPU_START_UP_DOTS_SKIPPED: i64 = 7165;
+    const DMC_POWER_ON_TIMER: i32 = 1019;
 }

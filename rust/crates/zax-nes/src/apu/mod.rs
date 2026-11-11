@@ -559,12 +559,15 @@ impl Apu2A03 {
     /// the sequencer reset lands three cycles after the write, so starting the counter at
     /// zero reproduces the 9 to 12 cycle delay the hardware shows (blargg,
     /// `09.reset_timing`).
-    pub fn reset(&mut self) {
+    /// Generic over the profile for the DMC's power-on timer alone (item 11): every other field
+    /// here is the same on both, and `Standard`'s arm of that one is the line this function had
+    /// before the profile existed.
+    pub fn reset<P: TimingProfile>(&mut self) {
         self.pulse1.reset();
         self.pulse2.reset();
         self.triangle.reset();
         self.noise.reset();
-        self.dmc.reset();
+        self.dmc.reset::<P>();
         self.apply_timing();
 
         self.cycles = 0;

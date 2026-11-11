@@ -572,6 +572,99 @@ fn item_10_the_ppu_runs_a_start_up_frame_after_a_power_on_and_a_reset() {
     );
 }
 
+/// **Item 11** — the DMC's timer powers on 1 020 CPU cycles from its first bit, not one period.
+///
+/// NesHawk's `DMCUnit` constructor sets `timer = 1020` beside `timer_reload = DMC_RATE[0]` (428 on
+/// NTSC), and `Run()` counts it down one per CPU cycle out of `RunOneFirst()`, so its output unit's
+/// first clock is on CPU cycle 1 020 where this core's is on 428. Both units then take the sample
+/// buffer on every **eighth** output clock, so the phase of every sample fetch of a game is
+/// `1020 - 428 = 592` cycles apart for ever.
+///
+/// Measured through the fetches themselves rather than through the timer, because the timer is not
+/// public and the fetches are what the difference is *about*: a long sample is started a few
+/// hundred cycles after the power-on, and the cycle of the **second** fetch — the first one the
+/// output unit asks for, as against the one the `$4015` write starts — is the phase.
+#[test]
+fn item_11_the_dmc_timer_powers_on_1020_cycles_from_its_first_bit() {
+    /// The CPU cycle the memory reader next runs dry on, counted from the power-on itself.
+    ///
+    /// The **request** and not the fetch: item 1b makes a `Standard` fetch cost three cycles or
+    /// four by parity where a NesHawk one is a fixed four, so the cycle a fetch *ends* on carries
+    /// that item's cycle as well as this one's. The request is the output unit's own eighth clock
+    /// and nothing else.
+    fn second_request<P: TimingProfile>() -> i64 {
+        let rom = RomImage::try_load(&minimal_rom(0x01, None, None), "Minimal.nes").unwrap();
+        let mut bus = NesBusOf::<P>::new(Ppu2C02::new(), Apu2A03::new(), InputPorts::new());
+        bus.attach(Some(Cartridge::create(rom).unwrap()));
+        bus.ppu_mut().reset();
+        // The one call that reads the item, and the origin every cycle below is counted from:
+        // `nes_core.rs` `power_on` runs it before the CPU's own seven reset cycles.
+        bus.apu_mut().reset::<P>();
+        let origin = bus.cycle_count();
+
+        bus.write(0x4010, 0x00); // Rate 0: 428 CPU cycles a bit, 3 424 a byte, no IRQ, no loop.
+        bus.write(0x4012, 0x00); // Sample at $C000.
+        bus.write(0x4013, 0x0F); // 241 bytes, so none of the fetches below is the last.
+        bus.write(0x4015, 0x10); // Start it, which starts a write-style fetch of its own.
+
+        // Read cycles of PRG ROM, which have no side effect and which a DMA unit **may** halt, so
+        // that the write-started load fetch is taken at all: a loop of writes would never take it,
+        // because a write cycle can be halted on neither profile.
+        while bus.dmc_dma_count() < 1 {
+            bus.read(0x8000);
+            assert!(
+                bus.cycle_count() - origin < 1_000,
+                "{}: the load fetch a $4015 write starts is taken at once",
+                P::NAME
+            );
+        }
+
+        // And now the horizon the memory reader itself reports, which is the output unit's eighth
+        // clock counted from here.
+        let horizon = bus
+            .apu()
+            .cycles_until_dmc_fetch()
+            .expect("the sample is playing");
+        bus.cycle_count() - origin + i64::from(horizon)
+    }
+
+    let plain = second_request::<Standard>();
+    let hawk = second_request::<NesHawkCompat>();
+    println!("  standard {plain}, neshawk {hawk}, apart {}", hawk - plain);
+
+    // The output unit takes the buffer on its eighth clock, so with the timer started at `T` the
+    // second fetch is a cycle or two after `T + 1 + 7 * 428`. `Standard`'s `T` is `428 - 1`.
+    let expected = |timer: i32| i64::from(timer) + 1 + 7 * 428;
+    for (name, measured, timer) in [
+        ("standard", plain, 428 - 1),
+        ("neshawk", hawk, NesHawkCompat::DMC_POWER_ON_TIMER),
+    ] {
+        let want = expected(timer);
+        assert!(
+            (want..=want + 8).contains(&measured),
+            "{name}: the second fetch is the eighth output clock from a timer of {timer}, so near \
+             {want}; got {measured}"
+        );
+    }
+
+    // And the item itself, which is the gap and not either number: 1 020 - 428.
+    assert_eq!(
+        592,
+        hawk - plain,
+        "the two phases are `1020 - 428` cycles apart"
+    );
+
+    // The half the fetch cycle cannot show, and the reason the item is shippable: 592 is **even**,
+    // so the parity a reload's alignment cycle turns on — `DmcChannel::reset`'s own note, and what
+    // blargg's `sync_dmc` loop in `dmc_dma_during_read4` and `sprdma_and_dmc_dma` depends on — is
+    // the same on both profiles.
+    assert_eq!(
+        0,
+        (hawk - plain) % 2,
+        "the item moves the phase by an even number of cycles"
+    );
+}
+
 // ---------------------------------------------------------------- the interrupt-phase ROM
 //
 // Lot NESHAWK-PROFILE-3 step 2. The *Kirby* `.bk2` parts because the two machines take the
