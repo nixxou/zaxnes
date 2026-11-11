@@ -211,16 +211,15 @@ fn item_1b_the_fetch_is_a_fixed_four_cycles_whatever_the_parity() {
 /// program can produce and is measured only to show the rule is the slip's parity and nothing
 /// else.
 ///
-/// **The item is implemented and switched off** — `NesHawkCompat::DMC_HALT_LANDS_ON_A_WRITE_CYCLE`
-/// is `false`, because enabled on its own it costs the *Kirby* `.bk2` 44 170 frames while the
-/// movie's reset still lands 3 CPU cycles late (the constant's own note is the gate). So the
-/// mechanism is measured here through [`ItemOneCOn`], a profile of this test's own that is
-/// `NesHawkCompat` with the item's value in place, and the last assertion is the record of the
-/// choice itself.
+/// **The item is on** since lot NESHAWK-PROFILE-9 step 1 closed its gate: with item 12 the movie's
+/// reset lands on NesHawk's own cycle, so the slip this item fires on is read off a CPU in the same
+/// place inside the instruction as NesHawk's. The profile of this test's own that carried the
+/// mechanism while it was off is gone with the wait, as item 11's was; `NesHawkCompat` is measured
+/// directly.
 #[test]
 fn item_1c_an_odd_run_of_write_cycles_costs_the_fetch_one_cycle_less() {
     let neshawk: Vec<i64> = (1..5)
-        .map(cost_with_the_read_displaced::<ItemOneCOn>)
+        .map(cost_with_the_read_displaced::<NesHawkCompat>)
         .collect();
     let standard: Vec<i64> = (1..5)
         .map(cost_with_the_read_displaced::<Standard>)
@@ -243,46 +242,6 @@ fn item_1c_an_odd_run_of_write_cycles_costs_the_fetch_one_cycle_less() {
         standard,
         "standard: the alignment follows the halted read's own parity"
     );
-    // **The record of the choice, and the one line to change to undo it.** Item 1c ships OFF
-    // while the movie's reset lands 3 cycles late (the constant's note is the gate), so the
-    // shipped profile charges four cycles at every slip — item 1b on its own. Written as the
-    // behaviour and not as `assert!(!P::ITEM)`, which clippy reads as an assertion on a constant.
-    assert_eq!(
-        vec![5, 5, 5, 5],
-        (1..5)
-            .map(cost_with_the_read_displaced::<NesHawkCompat>)
-            .collect::<Vec<i64>>(),
-        "the shipped neshawk profile charges a reload four cycles at every slip: setting          `DMC_HALT_LANDS_ON_A_WRITE_CYCLE` to true on it is the whole of enabling the item"
-    );
-}
-
-/// `NesHawkCompat` with **item 1c in place**, so that the item stays measured to the cycle while
-/// the shipped profile does not carry it (see the test above and
-/// `NesHawkCompat::DMC_HALT_LANDS_ON_A_WRITE_CYCLE`'s note).
-///
-/// Every other constant is `NesHawkCompat`'s, read from it rather than restated, so this profile
-/// cannot drift away from the one it stands for. It is a test type and nothing outside this file
-/// instantiates it.
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-struct ItemOneCOn;
-
-impl TimingProfile for ItemOneCOn {
-    const NAME: &'static str = "neshawk-item-1c";
-    const STATE_ID: u8 = NesHawkCompat::STATE_ID;
-    const STATE_CORE_NAME: &'static str = NesHawkCompat::STATE_CORE_NAME;
-
-    const DMC_HALT_ON_REQUEST_CYCLE: bool = NesHawkCompat::DMC_HALT_ON_REQUEST_CYCLE;
-    const DMC_FETCH_HAS_TWO_DUMMIES: bool = NesHawkCompat::DMC_FETCH_HAS_TWO_DUMMIES;
-    const DMC_LENGTH_LAGS_THE_FETCH: bool = NesHawkCompat::DMC_LENGTH_LAGS_THE_FETCH;
-    const DMC_ENABLE_WRITES_MID_SAMPLE: bool = NesHawkCompat::DMC_ENABLE_WRITES_MID_SAMPLE;
-    const DMC_FETCH_STALLS_AN_OAM_TRANSFER: bool = NesHawkCompat::DMC_FETCH_STALLS_AN_OAM_TRANSFER;
-    const PPU_START_UP_DOTS_SKIPPED: i64 = NesHawkCompat::PPU_START_UP_DOTS_SKIPPED;
-    const DMC_POWER_ON_TIMER: i32 = NesHawkCompat::DMC_POWER_ON_TIMER;
-    const RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT: bool =
-        NesHawkCompat::RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT;
-
-    /// The item, and the only line of this profile that is not `NesHawkCompat`'s.
-    const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool = true;
 }
 
 /// The four values a program reads out of `$4015` on the four cycles after a sample's last fetch.

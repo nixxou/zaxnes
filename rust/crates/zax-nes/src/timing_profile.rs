@@ -136,29 +136,23 @@ pub trait TimingProfile: Copy + Clone + Default + core::fmt::Debug + Send + Sync
     /// Read at `nes_bus.rs` `promote_dmc_wait` and `is_a_lone_dmc_fetch`. Only a **reload** is
     /// affected: a fetch item 3's `$4015` write started is not halted on its request cycle at all.
     ///
-    /// **The shipped value is `false`, and the gate is written down** (lot NESHAWK-PROFILE-8 step
-    /// 2), which is the shape item 11 shipped in for a lot: the item is exactly right and costs
-    /// the one movie the profile exists for. On its own it takes the *Kirby* `.bk2` from no live
-    /// difference until frame **45 095** back to **925**, because the slip it fires on is read off
-    /// **this core's** CPU position and this core's CPU is 2 cycles further into the instruction
-    /// than NesHawk's from the movie's reset onwards — so the right rule fires on the wrong
-    /// fetches. The gate is therefore the *other* difference NESHAWK-PROFILE-8 step 1 measured:
-    /// **the movie's reset lands 3 CPU cycles late here**, because NesHawk's frame ends at a fixed
-    /// PPU dot, mid-instruction, where `NesCoreOf::run_frame_profiled`'s loop breaks after the
-    /// instruction that straddles it. Fix that and this item's own measurement says it must go
-    /// back on; `tests/neshawk_profile_tests.rs`'s `ItemOneCOn` keeps it measured to the cycle
-    /// while it is off, and setting this to `true` on [`NesHawkCompat`] is the whole of enabling
-    /// it.
+    /// **It shipped off for one lot, and the gate was the reset** (lot NESHAWK-PROFILE-8 step 2):
+    /// on its own it took the *Kirby* `.bk2` from no live difference until frame **45 095** back to
+    /// **925**, because the slip it fires on is read off **this core's** CPU position and this
+    /// core's CPU was 2 cycles further into the instruction than NesHawk's from the movie's reset
+    /// onwards — the right rule on the wrong fetches. **Lot NESHAWK-PROFILE-9 step 1 closed that
+    /// gate** with item 12 ([`TimingProfile::RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT`]): the reset
+    /// lands on NesHawk's own cycle, the four once-a-frame marks of the movie read the same
+    /// residual either side of it, and the item is **on**.
     ///
-    /// Measured, so that the next lot does not re-measure it: with the item on **and** the reset's
-    /// phase moved by the one knob that can move it (item 10's dot count at the reset alone, `+9`
-    /// dots) the movie reaches 1 100 and parts at **9 353** — better than the item alone by 8 428
-    /// frames and still 35 742 short of the shipped 45 095. The dot knob is **not** the reset fix:
-    /// a dot bias moves the PPU against the CPU, so the post-reset boot's 7-cycle `$2002` polling
-    /// loop re-quantises it (the residual reads +2, +2, +2, +1, −5 over biases of 0, 3, 6, 9 and
-    /// 12 dots and never reaches the −1 the frames before the reset read), where applying the
-    /// reset 3 cycles earlier moves the whole machine and leaves the code's position against the
-    /// PPU alone.
+    /// Measured, so that no later lot re-measures it: with the item on and the reset's phase moved
+    /// instead by the one knob that can move it (item 10's dot count at the reset alone, `+9` dots)
+    /// the movie reached 1 100 and parted at **9 353**, 35 742 short of 45 095. A dot bias is not
+    /// the reset fix — it moves the PPU against the CPU and the post-reset boot's 7-cycle `$2002`
+    /// polling loop re-quantises it, so the residual read +2, +2, +2, +1, −5 over biases of 0, 3,
+    /// 6, 9 and 12 dots and never reached the −1 the frames before the reset read — where ending
+    /// the frame where NesHawk ends it moves the whole machine and leaves the code's position
+    /// against the PPU alone.
     const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool;
 
     /// **Item 7** (lot NESHAWK-PROFILE-2 step 3), NesHawk's `dmc_realign`: a DMC fetch that falls
@@ -348,8 +342,10 @@ impl TimingProfile for NesHawkCompat {
     const DMC_FETCH_HAS_TWO_DUMMIES: bool = true;
     const DMC_LENGTH_LAGS_THE_FETCH: bool = true;
     const DMC_ENABLE_WRITES_MID_SAMPLE: bool = true;
-    /// **Off, with the gate**: see the constant's own note. `true` is the whole of enabling it.
-    const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool = false;
+    /// **On since lot NESHAWK-PROFILE-9**, whose step 1 closed the gate the constant's own note
+    /// names: with item 12 the movie's reset lands on NesHawk's own cycle, so the slip this item
+    /// fires on is read off a CPU in the same place inside the instruction as NesHawk's.
+    const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool = true;
     const DMC_FETCH_STALLS_AN_OAM_TRANSFER: bool = true;
     const PPU_START_UP_DOTS_SKIPPED: i64 = 7165;
 

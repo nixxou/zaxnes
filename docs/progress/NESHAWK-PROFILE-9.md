@@ -7,7 +7,10 @@ Branch `feat/neshawk-profile`, worktree `cleanroom/wt-bk2`, base `f1c0faa8` (lot
 - [x] 1. **Make the reset land where NesHawk's does.** Item 12: a frame the movie taps RESET after
       ends at the boundary dot. The four marks' residual is **−1 on every frame 2 to 9**, before
       the reset and after it, where it was −1 then +2.
-- [ ] 2. Item 1c on, the strobe counts of frames 40 and 55, *Kirby* on every window, the tests.
+- [x] 2. **Item 1c on**, and the two items together are **not** the shipped pair's 45 095: frame
+      40's collision is closed, frame 55's is not, and the movie parts at **9 353**. The cycle
+      residual is nevertheless −1 three frames further than before, and the first difference has
+      moved from frame 55 to tree frame **13**.
 - [ ] 3. Rounds, to frame 156 312 or five of them.
 - [ ] 4. No regression, report, final pass.
 
@@ -126,3 +129,74 @@ it). The predicate is `1..=`.
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE-9 step 1 done: item 12, the reset lands on the boundary dot, the four marks −1 across it
+
+---
+
+## Step 2 — item 1c on, and what the two items are worth together
+
+### The answer first
+
+1. **Item 1c is on** (`DMC_HALT_LANDS_ON_A_WRITE_CYCLE = true`), its gate closed by step 1. The
+   test profile that carried it while it was off is gone, as item 11's was; `NesHawkCompat` is
+   measured directly, `[4, 5, 4, 5]` against `Standard`'s `[5, 4, 5, 4]`.
+2. **The two items together are not the shipped pair.** The movie parts at **9 353** where the two
+   wrongs that cancelled each other reached **45 095** — which is what lot 8 said would happen and
+   is written down as a trap in `docs/review/NESHAWK-PROFILE.md`: *"when two errors cancel, fixing
+   one makes things worse"*. Both halves are measured right on their own, so neither goes back.
+3. **What is better is the clock, and that is the quantity the rounds work on.** The four marks
+   hold their −1 to BizHawk frame **12** where the shipped pair left it at frame 10 and item 12
+   alone leaves it at 10, and frame 40's strobe collision is **gone**. What is worse is the strobe
+   table's own count, 28 conflicted frames of 1 098 and **all 28 disagreeing** against lot 7's
+   23 of 30.
+
+### The movie, every window
+
+`movie-sync --engine zaxnes --profile neshawk --no-lag --frames <end> --ram-ref <window>`; the
+figure is the last frame with no live difference. The first two columns are lot 8's.
+
+| window | frames | shipped (12 off, 1c off) | 1c on alone (lot 8) | **12 alone** | **12 + 1c** |
+|---|---|---|---|---|---|
+| `step1` | 1 - 400 | 400 | 400 | 400 | 400 (288 identical to the byte) |
+| `step1b` | 400 - 1 100 | 1 100 | parted at 925 | 1 100 (157 identical) | **1 100** (363 identical) |
+| `step1c` | 1 100 - 10 000 | 10 000 | parted at 1 100 | parted at **4 665** | parted at **9 353** |
+| `step1d` | 10 000 - 30 000 | 30 000 | — | none | — |
+| `step1e` | 30 000 - 60 000 | **45 095** | — | — | — |
+
+Item 12 **alone** is the worst of the three (4 665): it moves the whole machine 3 cycles and
+nothing else, so every fetch whose halt NesHawk charges three cycles and this core four is now
+charged against the right CPU position and still wrongly. The pair is the configuration where both
+measured rules hold; the residual is a third difference, not a reason to retract either.
+
+### The controller strobes, frames 3 to 1 100
+
+`frame-trace --frame 2 --frames 1099 --profile neshawk --dmc-census --event-log` against
+`bizhawk-runs/q182g.txt` (lot 7's), `w $4016` counted per frame, this core's tree frame *f* against
+BizHawk's *f−1*:
+
+| | shipped pair (lot 7) | **12 + 1c** |
+|---|---|---|
+| conflicted frames (either side above 8 strobes) | 30 | **28** |
+| of which disagreeing | 23 | **28** |
+| tree frame 40 | 8 against 10 | **8 against 8** |
+| tree frame 55 | 8 against 10 | 8 against 10 |
+| the first disagreeing frame | — | tree frame **16** (12 against 8: **this** core takes two extra passes) |
+
+### Where the residual is now, and it is not frame 55
+
+The four marks, `zaxnes − bizhawk`, with both items on. Frames 2 to 12 are a constant **−1** — the
+reset included — and the first mark that leaves it is BizHawk frame 12's `RTI` at **+1**, inside
+this core's tree frame 13:
+
+| BizHawk frame | 2 - 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 |
+|---|---|---|---|---|---|---|---|---|
+| 12 only | −1 | −1/−2 | −3 | +2/+3 | −6/−4/19 | 0/1 | −2/1 | −2/0/3 |
+| **12 + 1c** | **−1** | −1/−2 | **−1** | **−1/+1** | −6/−4/3 | 0/−3 | **0/+317** | −1/+2 |
+
+The **+317** of BizHawk frame 15 is this core doing a whole extra pass of the input routine and
+more, which the strobe table sees as tree frame 16's 12 strobes against 8. So the movie's first
+difference has moved from frame 55 (lot 7) to tree frame **13**, with its first *visible* symptom
+at tree frame 16, and that is round 1's window.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-9 step 2 done: item 1c on, the pair parts at 9 353, the first difference is tree frame 13
