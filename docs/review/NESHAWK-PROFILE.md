@@ -1,9 +1,23 @@
 # The two timing profiles of the 2A03, and how to add an item to the NesHawk one
 
-Lots **NESHAWK-PROFILE** through **NESHAWK-PROFILE-6**, branch `feat/neshawk-profile`, base
-`b604dc83` (lot EVAL-SYNC-4). The working is `docs/progress/NESHAWK-PROFILE.md` and `-2` to `-6`;
+Lots **NESHAWK-PROFILE** through **NESHAWK-PROFILE-7**, branch `feat/neshawk-profile`, base
+`b604dc83` (lot EVAL-SYNC-4). The working is `docs/progress/NESHAWK-PROFILE.md` and `-2` to `-7`;
 the result in context is `docs/review/MOVIE-SYNC.md` §4f to §4k, and the instruments are in
-`docs/review/NESHAWK-PROFILE-3-SCRIPTS.md`, `-5-SCRIPTS.md` and `-6-SCRIPTS.md`.
+`docs/review/NESHAWK-PROFILE-3-SCRIPTS.md`, `-5-SCRIPTS.md`, `-6-SCRIPTS.md` and `-7-SCRIPTS.md`.
+
+> **NESHAWK-PROFILE-7 retired item 6 by measurement and moved the movie's first difference from
+> frame 45 085 to frame 55.** The DMC fetch train is **exact**: over frames 11 to 59 the two
+> machines make the same **1 524** sample fetches, of the same addresses, in the same order, at an
+> absolute-cycle residual of **−1**. So nothing an end-of-sample rule could fix is missing, and lot
+> 6's window could not have answered the question it was asked — at frame 45 085 the two machines
+> are not playing the same sample (NesHawk restarts at tree frames 45 085, 45 093, 45 097 and this
+> core at 45 047, 45 067, 45 087). What divides them is a DMC halt landing on the game's own
+> `LDA $4016,X` read on NesHawk and not here, at frame **55**, which costs Kirby's input routine one
+> extra pass (10 `$4016` strobes against 8); the two machines' whole DPCM schedule then agrees event
+> for event to frame **1002**, and the work RAM to 45 095 because the sound driver's state lives in
+> the cartridge's PRG-RAM, which `--ram-ref` does not compare. **Both constants that could move the
+> CPU stream against the DMC's train were swept over thirteen values and refused**, and the DMA
+> accounting was measured exact against BizHawk on thirteen fetches. `docs/progress/NESHAWK-PROFILE-7.md`.
 
 > **NESHAWK-PROFILE-6 answered Q-182 by measurement, retracted item 1c, and turned item 11 on.**
 > A NesHawk DMC reload fetch costs the CPU **four** cycles whatever the CPU was writing on the
@@ -82,6 +96,7 @@ and the standard arms, which agree with it, carry their attribution where they a
 | frame **4666** | **1c** does it, and the movie goes from parting at 4 665 to parting at **9 355** — 3 531 clean frames to 8 175 of 8 901, and 5 370 frames with a live difference to 726. **3's parity correction and 7 are *exactly* inert**: each leaves the 8 901-frame table byte-identical. `docs/progress/NESHAWK-PROFILE-2.md` step 4 |
 | frame **9354** | **8** did it, and the movie went from parting at 9 353 to running out of the reference entirely — 8 175 clean frames to 8 792 of 8 901 and 0 frames identical to the byte to 213, and a second reference then took it to 18 321. **Item 8 has since been retracted**: it is not a NesHawk difference (see below), and with it gone the movie parts at 8 005 again. The OAM alignment that looked like the next item is **eliminated by arithmetic**. `docs/progress/NESHAWK-PROFILE-3.md` steps 2 and 3 |
 | frame **8005**, and the reason it is still 8 005 | **11 does not do it, and that is a measurement and not a shrug.** The DMC's power-on phase was the first thing in the whole movie whose cycle differs once item 10 removed the drift: frames 1 to 10 — the power-on, the movie's soft reset and the first ten frames — are identical event for event and cycle for cycle on both machines, and frame 11, the first that plays a DPCM sample, has NesHawk fetching the sample's second byte 211 cycles earlier. Item 11 fixes exactly that, to the cycle, on all thirteen fetches of the frame — and **costs the movie 7 080 frames**, because the wrong phase was cancelling one cycle elsewhere. The cycle is isolated (the one reload fetch whose request lands on a write cycle) and the source refuses the item that would pay it, which is **Q-182**. `docs/progress/NESHAWK-PROFILE-5.md` steps 1 to 4 |
+| frame **55**, which is where the movie really parts | **nothing yet, and the frame is the result.** NESHAWK-PROFILE-7 measured the whole prefix instead of one window: the DMC fetch train is exact for 1 524 fetches, the DPCM schedule agrees event for event to frame **1002**, and the first difference of **any** kind is at frame 55, where a DMC halt lands on the game's `LDA $4016,X` read cycle — the **same absolute cycle** on both machines — and NesHawk's CPU is on that read while this core's is seven cycles further on in the same 14-cycle loop. NesHawk's pad byte comes back corrupted (`C0`, then `41`), Kirby re-reads, and the frame costs it ~155 cycles more. The reason 45 095 ever looked like the parting frame is that the extra pass reads the **same pad value**, so the work RAM cannot see it, and Kirby's sound driver keeps its state in the **cartridge's PRG-RAM at `$6000`**, which `--ram-ref` does not compare. `docs/progress/NESHAWK-PROFILE-7.md` steps 1 and 2 |
 | frame **45 095** | **item 1c's retraction**, with item 11. *Kirby* goes from 8 005 to 45 095 — the `step1c` and `step1d` windows reached in full and `step1e` parting at 45 095. What it parts on now is **not a DMA cost**: the `$4015` write that restarts frame 45 085's sample, the CPU stream and the write-started fetch are exact to the cycle, and the **next** fetch is 111 cycles later here against 372 on NesHawk — the DMC output unit owed 3 bits where NesHawk's owed about 7. That is **item 6**'s ground. `docs/progress/NESHAWK-PROFILE-6.md` steps 1 and 2 |
 | the **4 778-cycle drift**, and every ROM item 8 cost | **10** does it. BizHawk's own cycle ledger says its first frame is 27 392 cycles and so is the frame the movie's first reset lands in, where this core runs a whole 29 781 — and `2 * (29 781 - 27 392) = 4 778` is the constant drift NESHAWK-PROFILE-3 measured and could not explain. With item 10 the drift of the NMI entry over frames 2-1 201 is **-2 ± 5** instead of 4 776 ± 5, every one of the eleven ROMs and four `AccuracyCoin` rows item 8 cost is back, and *Faxanadu* goes to **247** and **314** of 832 — past the standard profile's own 207 and 220. *Kirby* parts at **8 005**. `docs/progress/NESHAWK-PROFILE-4.md` steps 1 and 2 |
 
@@ -100,7 +115,8 @@ scratch (NESHAWK-PROFILE step 1 items 5 and 6, and NESHAWK-PROFILE-2 step 3):
 | | what NesHawk does | why not implemented |
 |---|---|---|
 | **item 5**, the APU register delay | `RunOneLast`'s `pending_reg` dispatch applies `$4003`, `$4007`, `$4010`, `$4015` and `$4017` at the end of the write's own cycle and **every other APU register on the first cycle with `dmc.timer % 2 == 0`** — so `$4000`-`$4002`, `$4004`-`$4006`, `$4008`, `$400A`-`$400E`, `$4011`, `$4012`, `$4013` all wait nought or one cycle. A second write while one is pending **loses the first**: `WriteReg` overwrites `pending_reg` with no flush | **Measured as CPU-timing-neutral on the one movie there is.** Of the registers it defers only `$4012` and `$4013` can move a DMC fetch, and the sample address they set is not read until the next fetch hundreds of cycles later. It would touch `Apu2A03::write` for every game and grow a pending-write register, a dispatch in `step_cpu_cycle` and a savestate field. **It is still the first item to add for a game whose audio differs**, because the lost-write rule is audible |
-| **item 6**, the end-of-sample aborts | `fill_glitch` (a buffer fill with **no DMA at all**), `fill_glitch_2` (a one-cycle DMA then aborted by `RunCpuOne`), `pending_disable` (a `$4015` disable that waits for the reload countdown, with `dmc_irq_glitch` suppressing the IRQ) | **Eliminated by arithmetic for *Kirby*, not by choice.** Both flags are set only at a fetch that *completes* with `out_bits_remaining == 0`, and `DMCUnit.Clock` makes that the last bit period of a byte — seven bit periods and seventy-odd cycles from where a fetch can complete at 72 or 106 cycles a bit. **For a game at rate 14-15 (72 or 54 cycles a bit) with a short sample they are reachable**, and this is the item to try there. `set_lenctr_en(false)`'s first three arms need `sample_length != 0` with `out_bits_remaining == 0`, which *Kirby*'s one `$4015` = 0F of the window does not have |
+| **item 6**, the end-of-sample aborts — **retired** | `fill_glitch_2` (a one-cycle DMA, `dmc_dma_countdown = -2`, then aborted) and `pending_disable` (a `$4015` disable that waits for the reload countdown, with `dmc_irq_glitch` suppressing the IRQ), both set by `set_lenctr_en(false)` and both needing `out_bits_remaining == 0` **and** `sample_length != 0`. `fill_glitch` — the "buffer fill with no DMA at all" — is **assigned `true` nowhere at 2.11.1**: `Run()` reads it and clears it and no arm sets it | **Retired by NESHAWK-PROFILE-7, by measurement.** Over frames 11 to 59 the two machines make the **same 1 524 sample fetches, of the same addresses, in the same order**, at an absolute-cycle residual of **−1**, through every sample end and every restart of that window — so the output unit's bit phase is exact and there is nothing an end-of-sample rule could fix. Lot 6's "3 bits owed against about 7" at frame 45 085 compares **two different restarts**: NesHawk's sample runs tree frames 45 085-45 091 and this core's 45 087-45 093. Also useful from the reading: `DMCUnit.Clock` tests `out_bits_remaining == 0` **before** decrementing and reloads with **7**, so its counter is **this core's minus one** — the same `+1` convention trap as the timer, and `out_bits_remaining == 0` there means `bits_remaining == 1` here |
+| **item 10's dot count** and **item 11's seed**, as knobs | the two constants that move the game's code against the DMC's train: the game is frame-synced, so its code position is set by the PPU and the fetch train by the DMC's own timer, and the start-up dots run with no CPU cycle attached | **Both swept and refused, NESHAWK-PROFILE-7 step 2.** `PPU_START_UP_DOTS_SKIPPED` at 7 156, 7 159, 7 162, **7 165**, 7 168, 7 171, 7 174 and `DMC_POWER_ON_TIMER` at 1 013, 1 015, 1 017, **1 019**, 1 021, 1 023, 1 025, measured on the controller-strobe table of frames 2-1 100: **not one of the thirteen reproduces the frame-55 collision**, and the shipped pair is the best of them (23 disagreeing frames of 30 conflicted). The residual is not a phase constant |
 | the **`$4016` strobe delay** | `RunOneLast`'s *first* action: a strobe is applied on the next cycle with **`dmc.timer % 2 == 1`**, not at the write | A **controller** item, not a DMA one, and nothing in this tree records it. *Kirby* strobes once a frame many cycles before it reads, so it cannot move this movie |
 | the **IRQ sampling point** | `cpu.IRQ = _irq_apu \|\| Board.IrqSignal` is step 5 of `RunCpuOne`: after the DMA block and `RunOneFirst`, before `ExecuteOne` | *Kirby*'s MMC3 IRQ enters its handler at the **same dot** on both machines (EVAL-SYNC-4 §2, re-measured at SL 174 dot 288 in NESHAWK-PROFILE-2 step 2) |
 | the **OAM transfer's alignment** | `NES.Core.cs`'s `sprdma_countdown` block: `if (apu.dmc.timer % 2 == 0) cpu_deadcounter = 2; else cpu_deadcounter = 1;`, so the extra cycle is decided by the parity of the **DMC's timer** and nothing in the decision looks at the cycle, where this core waits for the first get cycle | **Eliminated by arithmetic, and for every game rather than for one movie.** The DMC's timer counts down one per CPU cycle and reloads to `rates[i] - 1`, so its period is `rates[i]` — and all sixteen NTSC rates and all sixteen PAL ones are **even**. The timer's parity is therefore locked to the CPU cycle's from power-on, no reload and no `$4010` write can unlock it, and NesHawk's rule is a different *expression* of this core's rule. It was implemented, measured byte-identical over 81 frames, and reverted: a constant whose two arms are provably the same function cannot be given a differential test |
@@ -305,6 +321,26 @@ compared only its *shape*, and the shape is all it has.
   a ROM written to ask. **Build the experiment before implementing what the source seems to say**;
   this one was forty lines of 6502 and it saved a round.
 
+* **Find the FIRST difference before explaining the one you can see.** The movie's work-RAM
+  reference says *Kirby* agrees to frame 45 095, and two lots read that as "the machines are in step
+  until 45 095". They are not: they part at frame **55**, and the reference cannot see it because the
+  difference is an extra pass of a controller read that returns the **same value**, and because
+  Kirby's sound driver keeps its state in the cartridge's **PRG-RAM**, which `--ram-ref` does not
+  compare at all. A window placed at the first *visible* difference was 45 041 frames downstream of
+  its cause, and everything measured in it was a comparison of two unrelated events. The cheap fix
+  is a whole-prefix ledger of the subsystem under suspicion — `q182e.lua` dumps the DPCM schedule of
+  45 100 frames in four minutes — taken **before** a window is chosen.
+* **One Lua callback per address, not one per access.** BizHawk's
+  `event.onmemoryread/write(func, address, name, domain)` hooks the address you name; passing `nil`
+  hooks every access and costs a Lua call for each. That is the whole difference between a 14-frame
+  window at frame 45 000 and the movie's first 45 100 frames: `q182c.lua` could not reach frame 309
+  affordably, `q182e.lua` reaches 45 100 in 4m 20s. Two lots' worth of "that window is unaffordable"
+  was a registration argument.
+* **A census column is an instrument, not a measurement.** `--dmc-census`'s `cost` is
+  `fetch - halt + 1`, and the census dates the halt a cycle after the request on 113 of 1 524
+  fetches — so 74 reloads read as costing **three** cycles where the CPU loses exactly the same
+  four. Before calling a column a difference, check it against the other machine's own stream: all
+  thirteen checked resume the CPU on the **same cycle** on both machines.
 * **A hot entry point must be concrete per profile.** Rust monomorphises a generic function in the
   crate that *calls* it, and a generic body with one call site is inlined into its wrapper. A
   generic `run_frame` cost **+3.8 %** on Super Mario Bros. 3 for both reasons together, with no

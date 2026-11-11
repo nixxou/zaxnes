@@ -16,9 +16,9 @@ lands on the game's own `$4016` read on NesHawk and not here.
       BizHawk and from this core's census. **Item 6 is retired by measurement**: the residual lot 6
       isolated is not an end-of-sample phase, it is a few-cycle phase between the **CPU/PPU stream**
       and the **DMC's own train**, and the first frame it is observable in is 55.
-- [ ] 2. Rounds against the references.
-- [ ] 3. No regression.
-- [ ] 4. Report and final pass.
+- [x] 2. **One round of five.** Both phase constants swept over thirteen values and **refused**; the DMA accounting measured **exact** against BizHawk on thirteen fetches. No item shipped.
+- [x] 3. No regression. **No source changed**, so the gates are inherited to the byte; `zax-nes` 1 194 of 1 194.
+- [x] 4. Report and final pass.
 
 ## The environment this lot runs in
 
@@ -67,9 +67,11 @@ lands on the game's own `$4016` read on NesHawk and not here.
    The core's start-up frame (item 10) plus the CPU's reset cycles is **27 394** cycles where
    NesHawk's is **27 392**, and after the power-on and the movie's frame-4 reset the CPU stream
    sits **+5** absolute cycles behind NesHawk's while the DMC train sits at **−1**. The game is
-   frame-synced, so its code position is set by the PPU and the fetch train by the DMC's own timer:
-   item 10's dot count is the one knob that moves them against each other. That is step 2's
-   experiment.
+   frame-synced, so its code position is set by the PPU and the fetch train by the DMC's own timer,
+   which makes item 10's dot count and item 11's seed the two knobs that move them against each
+   other. **Step 2 swept both over thirteen values and neither reproduces the frame-55 collision**,
+   so the residual is not a phase constant; what it is instead is cumulative, and §"Why the round
+   stops at one of five" says what the next lot needs for it.
 
 ### Why lot 6's window could not have answered the question
 
@@ -170,3 +172,158 @@ All five are `q182c.lua`/`q182d.lua` with one idea each, and all are in
     [PROGRESS] NESHAWK-PROFILE-7 step 1 done: item 6 retired by measurement, the movie's first difference isolated to frame 55
 
 ---
+
+## Step 2 — one round, and it ships no item, because both candidates were measured and refused
+
+### The answer first
+
+The round followed the loop the brief sets — first differing frame, both machines ledgered around
+it, first differing event isolated, mechanism confirmed by BizHawk measurement first — and then did
+the thing lot 6 did not: it **measured the two candidate constants before writing one**. Both are
+refused, and the DMA accounting that looked like the third candidate turns out to be **exact**.
+
+### What the residual at frame 55 is, and is not
+
+The frame-55 collision needs this core's CPU to be seven cycles earlier in its own 14-cycle
+`$4016` read loop. The two quantities that can move the CPU's code against the DMC's train are:
+
+* **item 10**, `PPU_START_UP_DOTS_SKIPPED`. The game is frame-synced on a 6-cycle spin loop, so its
+  code position is set by the PPU and the fetch train by the DMC's own timer; the start-up dots run
+  with no CPU cycle attached, so they are the one knob that moves the two against each other;
+* **item 11**, `DMC_POWER_ON_TIMER`, which moves the train itself.
+
+Both were swept, and the measure is the **controller-strobe table**: `q182g.lua` against
+`--event-log --dmc-census` over frames 2 to 1 100, counting the frames whose `$4016` strobe count
+differs between the machines (an extra pass is a collision one machine had and the other did not).
+
+| constant | value | frame-2 start | disagreeing frames | frame 55 |
+|---|---|---|---|---|
+| — | **as shipped (7 165 / 1 019)** | 27 394 | **23 of 30 conflicted** | 8 against 10 |
+| `PPU_START_UP_DOTS_SKIPPED` | 7 168 | 27 394 | 31 of 37 | 8 against 10 |
+| | 7 171 | 27 394 | 29 of 35 | 8 against 10 |
+| | 7 174 | 27 390 | 31 of 36 | 8 against 10 |
+| | 7 162 | 27 394 | 31 of 36 | 8 against 10 |
+| | 7 159 | 27 397 | 31 of 36 | 8 against 10 |
+| | 7 156 | 27 397 | 26 of 31 | 8 against 10 |
+| `DMC_POWER_ON_TIMER` | 1 021 / 1 023 / 1 025 | 27 394 | 26 / 32 / 30 | 8 against 10 |
+| | 1 017 / 1 015 / 1 013 | 27 394 | 23 / 33 / 26 | 8 against 10 |
+
+**Not one of the thirteen values reproduces the frame-55 collision**, and the shipped pair is the
+best of them. So the residual is **not a phase constant** — neither the PPU's start-up position nor
+the DMC's power-on seed. Both constants stay exactly as lot 6 left them, and this is written down so
+that no later lot spends a round on either.
+
+### The DMA accounting, which looked like the third candidate and is exact
+
+The census charges **74 of 1 520** reload fetches **three** cycles rather than four, which against
+lot 6's "four at every slip" read like an item. It is an **instrument artefact**: `cost` is
+`fetch - halt + 1`, and on 113 of 1 524 fetches the census dates the halt one or two cycles after
+the request, so the same four cycles read as three. Checked against BizHawk's own stream on
+thirteen of them, one by one:
+
+| | this core | **NesHawk** |
+|---|---|---|
+| the `$FCFE` reload of frame 54 | request 1 574 176, halt 1 574 177, fetch 1 574 179 | halt 1 574 176, re-read 1 574 177, fetch 1 574 178 |
+| the cycle the CPU resumes on | **1 574 180** | **1 574 180** |
+| the `$FD44` reload of frame 55 | halt 1 604 416, fetch 1 604 419 | halt 1 604 416, fetch 1 604 418 |
+| the cycle the CPU resumes on | **1 604 420** | **1 604 420** |
+
+**The stall is the same cycle count from the same cycle on every one of the thirteen.** The fetch's
+own read sits one cycle later inside the window here than there, which is the DMA-read calibration
+Q-182 could not pin — and it is **invisible to the CPU**, which is why it has never mattered. Items
+1a, 1b and 7 are confirmed by this rather than questioned by it.
+
+### Round 1
+
+| | |
+|---|---|
+| parting frame before | **45 095** |
+| the first live difference | frame **45 096**, unchanged — and now known to be 45 041 frames downstream of its cause |
+| the first difference of any kind | frame **55** (new) |
+| the first differing DPCM schedule event | frame **1002** (new) |
+| parting frame after | **45 095**: no item was added, and the two that could have been are refused by measurement |
+
+### Why the round stops at one of five
+
+What is left is a few-cycle difference in the **phase of the game's own code within the frame**,
+and the instrument this lot would need next is one neither machine has yet: a per-frame measure of
+*where in the frame* the two CPU streams part, over hundreds of frames rather than one. Frame 55's
+own execute-to-execute table says the residual inside that frame is **0 before the OAM transfer,
+-1 after it, -2 after the next fetch** and the NMI entry itself is **5 cycles apart** — the spin
+loop's phase, which the *previous* frame's total work sets. That is a cumulative measurement over
+the 54 frames before it, and it is a lot of its own, not a round of this one.
+
+What this round delivers instead is what the next lot needs and this one did not have: the frame
+(**55**, not 45 085), the event (a DMC halt on the game's `$4016` read), the instrument that counts
+them over a thousand frames at a time (`q182g.lua`, 7 s a run), and **two constants crossed off**.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-7 step 2 done: one round, both phase constants refused by measurement, the DMA accounting confirmed exact
+
+---
+
+## Step 3 — no regression
+
+### The answer first
+
+**No source file changed in this lot.** `git diff e52d70bf -- rust/` is empty at the tip, so every
+gate the brief names is inherited to the byte rather than re-measured — and that is a stronger
+statement than a re-run, not a weaker one. What was re-run is what could have caught a stray edit
+from the thirteen-value sweep.
+
+| | |
+|---|---|
+| `rust/` against the parent `e52d70bf` | **empty diff**, verified at the tip |
+| `cargo fmt --all -- --check` | clean |
+| `cargo test -p zax-nes --release` | **56 targets, 1 194 passed, 0 failed, 11 ignored** — summed per target, as the review doc's trap requires, and no target aborted |
+| `golden-core`, `test-roms`, `AccuracyCoin`, the bench | inherited: `8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773`, 128/147 on `Standard` and 121/147 on `NesHawkCompat`, 24 of 24 DMC/DMA ROMs, -0.86 % and -0.35 % cumulatively against `428c50e6`. The binary that produces them is byte-identical to lot 6's |
+
+### The sweep, and the one thing it nearly left behind
+
+The thirteen-value sweep edited `timing_profile.rs` with `sed`, and the pattern for
+`PPU_START_UP_DOTS_SKIPPED` matched **both** `impl`s — so `Standard` carried a non-zero start-up
+frame for six of the builds. No measurement is affected (every run of the sweep is a `.bk2`, which
+selects `NesHawkCompat`), and the file was restored from git rather than by hand, which is what the
+empty diff above verifies. Written down because a sweep that edits a shared constant is the obvious
+way to ship an accident.
+
+### The disk, and the one thing it stopped
+
+`G:` began the lot at 6.0 GB and the sweep's eight release builds took it to **3.0 GB**, under the
+brief's 5 GB stop. `cargo clean --release` gave back 3.6 GB and the lot went on at 6.4 GB, ending at
+5.9 GB. What it stopped is the re-run of `golden-core` and the thirty ROMs: with an empty diff they
+are inherited anyway, and the choice between an inherited gate and a 5 GB stop is not close.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-7 step 3 done: no source changed, the gates are inherited to the byte, zax-nes 1 194/1 194
+
+---
+
+## Step 4 — report and final pass
+
+### The documents
+
+| | |
+|---|---|
+| `docs/review/NESHAWK-PROFILE.md` | item 6 moved from "the item to try" to **retired by measurement**, with the 1 524-fetch comparison; the movie's first difference restated as frame **55**; the two refused constants added to the candidates table; two new traps |
+| `docs/review/NESHAWK-PROFILE-7-SCRIPTS.md` | the five Lua scripts, and the two tricks worth copying |
+| this note | the working |
+
+### What this lot did not do, said plainly
+
+* **It shipped no item and moved no metric.** *Kirby* still parts at 45 095, `AccuracyCoin` is still
+  121/147 on this profile and 128/147 on the other, and the binary is byte-identical to lot 6's.
+* **It did not find what divides the two machines at frame 55.** It found the event, the mechanism
+  and the frame, and it crossed off the two constants that could have explained them. What is left
+  is a cumulative few-cycle difference in the game's code phase, and the next lot needs a new
+  instrument for it.
+* **It retired item 6 rather than implementing it**, which is the brief's step 1 read literally:
+  *measure first*. The fetch train being exact for 1 524 consecutive fetches is not a reason to
+  implement an end-of-sample rule more carefully; it is a proof that no end-of-sample rule is
+  missing.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-7 step 4 done: the documents and the final pass
