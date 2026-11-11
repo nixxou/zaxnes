@@ -594,7 +594,35 @@ impl SettingsModel {
         match self.get(SettingId::VideoVSync).as_int() {
             1 => self.display_refresh_rate,
             2 => self.display_refresh_rate / 2.0,
-            _ => num::i32_to_f32(self.get(SettingId::VideoFrameRate).as_int()),
+            _ => num::i32_to_f32(self.frame_rate()),
         }
     }
+
+    /// `video.frame_rate` in frames per second: its value, or for Auto (0) the display's
+    /// refresh rate (see [`auto_frame_rate`]).
+    #[must_use]
+    pub fn frame_rate(&self) -> i32 {
+        match self.get(SettingId::VideoFrameRate).as_int() {
+            0 => auto_frame_rate(self.display_refresh_rate),
+            rate => rate,
+        }
+    }
+}
+
+/// The frame rate Auto picks for a display refreshing `refresh` times a second (Rust-only, owner
+/// request): the refresh rate rounded when that is at most one frame above it (59.94 Hz gives 60),
+/// else rounded down; 60 when the rate is not known.
+#[must_use]
+pub fn auto_frame_rate(refresh: f32) -> i32 {
+    if !refresh.is_finite() || refresh < 1.0 {
+        return 60;
+    }
+    let rounded = refresh.round();
+    #[allow(clippy::cast_possible_truncation)] // Refresh rates are far below i32::MAX.
+    let rate = if rounded - refresh <= 1.0 {
+        rounded
+    } else {
+        refresh.floor()
+    } as i32;
+    rate.max(1)
 }

@@ -59,7 +59,8 @@ fn the_host_view_validates_through_the_model() {
     model.set_frame_rate(75);
     model.set_game_speed(12);
     model.set_skybox(7);
-    assert_eq!(90, model.frame_rate());
+    // Out of the domain: the default, Auto, which reads the display's rate (60 until known).
+    assert_eq!(60, model.frame_rate());
     assert_eq!(8, model.game_speed());
     assert_eq!(-1, model.skybox());
 }

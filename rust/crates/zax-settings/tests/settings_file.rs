@@ -187,7 +187,8 @@ fn a_value_outside_its_domain_in_the_file_is_brought_back_in() {
     ));
     let mut model = SettingsModel::new();
     file.load(&mut model, now());
-    assert_eq!(model.get(SettingId::VideoFrameRate).as_int(), 90);
+    // The default, Auto since the owner's decision (90 in the tables).
+    assert_eq!(model.get(SettingId::VideoFrameRate).as_int(), 0);
     assert_exact(model.get(SettingId::EmuGameSpeed).as_float(), 8.0);
 }
 

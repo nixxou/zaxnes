@@ -76,6 +76,9 @@ fn options_of(configure: impl FnOnce(&mut AppOptions)) -> AppOptions {
 fn req_scn_061_a_runtime_vsync_change_reaches_the_window() {
     let mut surface = FakeDisplaySurface::default();
     let mut model = SettingsModel::new();
+    // The defaults of the tables (vsync off, 90), which the owner's replace (every refresh, Auto).
+    model.set_vsync(0);
+    model.set_frame_rate(90);
     let mut pacing = VideoPacing::new(None, None);
 
     pacing.apply(&mut surface, &model);
@@ -242,7 +245,8 @@ fn q_066_a_reset_to_the_default_ends_the_override() {
 
     settings.reset(SettingId::VideoFrameRate);
 
-    assert_eq!(settings.frame_rate(), 90);
+    // The default, Auto: the display's rate, 60 until it is known.
+    assert_eq!(settings.frame_rate(), 60);
     assert!(!settings.has_command_line_value(SettingId::VideoFrameRate));
 }
 

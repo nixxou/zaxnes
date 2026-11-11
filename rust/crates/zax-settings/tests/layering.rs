@@ -385,18 +385,18 @@ fn two_models_are_independent() {
 #[test]
 fn a_command_line_override_masks_the_preference_without_replacing_it() {
     let mut model = SettingsModel::new();
-    model.set(SettingId::VideoVSync, SettingValue::Enum(2));
+    model.set(SettingId::VideoVSync, SettingValue::Enum(0));
     model.set_layer(
         SettingId::VideoVSync,
-        SettingValue::Enum(0),
+        SettingValue::Enum(2),
         SettingLayer::CommandLine,
     );
-    assert_eq!(model.get(SettingId::VideoVSync).as_int(), 0);
+    assert_eq!(model.get(SettingId::VideoVSync).as_int(), 2);
     assert!(model.has_command_line_value(SettingId::VideoVSync));
     // Only the user layer is persisted, and it still holds what the user chose.
     assert_eq!(
         preference(&model, SettingId::VideoVSync),
-        [SettingValue::Enum(2)]
+        [SettingValue::Enum(0)]
     );
     // A script's write wins while the game runs and is undone at the end of it; the override is then
     // back in force.
@@ -407,15 +407,15 @@ fn a_command_line_override_masks_the_preference_without_replacing_it() {
     );
     assert_eq!(model.get(SettingId::VideoVSync).as_int(), 1);
     model.clear_session_layer();
-    assert_eq!(model.get(SettingId::VideoVSync).as_int(), 0);
+    assert_eq!(model.get(SettingId::VideoVSync).as_int(), 2);
     // The user's own change ends the override for that key, and is persisted.
-    model.set(SettingId::VideoVSync, SettingValue::Enum(1));
-    assert_eq!(model.get(SettingId::VideoVSync).as_int(), 1);
+    model.set(SettingId::VideoVSync, SettingValue::Enum(0));
+    assert_eq!(model.get(SettingId::VideoVSync).as_int(), 0);
     assert!(!model.has_command_line_value(SettingId::VideoVSync));
     assert!(model.drain_changes().any(|c| c.id == SettingId::VideoVSync));
     assert_eq!(
         preference(&model, SettingId::VideoVSync),
-        [SettingValue::Enum(1)]
+        [SettingValue::Enum(0)]
     );
 }
 

@@ -261,6 +261,17 @@ impl HostWindow {
         &self.window
     }
 
+    /// The refresh rate of the display the window is on, in hertz; none when SDL does not know it.
+    #[must_use]
+    pub fn refresh_rate(&self) -> Option<f32> {
+        #[allow(clippy::cast_precision_loss)] // Refresh rates are far below 2^24.
+        self.window
+            .display_mode()
+            .ok()
+            .filter(|mode| mode.refresh_rate > 0)
+            .map(|mode| mode.refresh_rate as f32)
+    }
+
     /// One line with the SDL video driver, the display mode the window is on and the drawable
     /// size, for the start-up log.
     #[must_use]

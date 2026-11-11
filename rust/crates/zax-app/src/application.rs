@@ -288,7 +288,7 @@ impl Running {
     fn build(options: &AppOptions) -> Result<Self, String> {
         let asset_root = neutral_assets::locate(options.asset_root.as_deref().map(Path::new));
         let paths = resolve_user_data(options);
-        let (store, model) = load_settings(options, &paths);
+        let (store, mut model) = load_settings(options, &paths);
         let demo_rom = install_demo_game(&paths, &model);
         #[cfg(feature = "shaders")]
         install_shader_pack(&paths);
@@ -318,6 +318,11 @@ impl Running {
             graphics: WindowGraphics::Gl,
         };
         let mut window = open_window(options, &model, &window_settings)?;
+        // The display's refresh rate, which `video.frame_rate` Auto and the vsync's derived rates
+        // read (60 until it is known).
+        if let Some(rate) = window.refresh_rate() {
+            model.set_display_refresh_rate(rate);
+        }
         if options.smoke_test {
             println!("{}", smoke_banner(options));
         }
@@ -1610,6 +1615,9 @@ fn load_settings(options: &AppOptions, paths: &UserDataPaths) -> (SettingsStore,
     // (owner request: some devices are powerful, each player tunes for his own).
     if options.handheld && !cfg!(target_os = "android") {
         handheld::defaults::apply(&mut model);
+    }
+    if cfg!(target_os = "android") {
+        handheld::defaults::apply_android(&mut model);
     }
     // Rust-only (owner request): the region comes from the ROM header unless the user turned the
     // automatic mode off, so a European dump runs at 50 Hz (`emu.auto_tv_mode` is off in C#).

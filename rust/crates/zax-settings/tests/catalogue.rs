@@ -16,6 +16,27 @@ use zax_settings::catalogue::{self, Layer, SettingId};
 use zax_settings::meta::{SettingEffect, SettingScope};
 use zax_settings::model::SettingsModel;
 
+/// The settings whose default the owner changed from the tables (Rust-only): `video.vsync`
+/// every refresh, `video.frame_rate` Auto. See [`owner_defaults_replace_those_of_the_tables`].
+const OWNER_DEFAULTS: [&str; 2] = ["video.vsync", "video.frame_rate"];
+
+/// The owner's defaults themselves.
+#[test]
+fn owner_defaults_replace_those_of_the_tables() {
+    let model = SettingsModel::new();
+    assert_eq!(model.get(SettingId::VideoVSync).as_int(), 1);
+    assert_eq!(model.get(SettingId::VideoFrameRate).as_int(), 0);
+    // Auto: the display's rate, 60 until it is known.
+    assert_eq!(model.frame_rate(), 60);
+    for (refresh, expected) in [(59.94, 60), (60.0, 60), (144.0, 144), (74.6, 75), (0.0, 60)] {
+        assert_eq!(
+            zax_settings::model::auto_frame_rate(refresh),
+            expected,
+            "{refresh}"
+        );
+    }
+}
+
 /// REQ-PERS-001: every setting of §4.1 is in the model.
 #[test]
 fn every_setting_of_the_tables_is_present_with_its_kind_default_scope_and_effect() {
@@ -26,6 +47,9 @@ fn every_setting_of_the_tables_is_present_with_its_kind_default_scope_and_effect
         assert_eq!(row.scope, descriptor.scope(), "{}", row.key);
         assert_eq!(row.effect, descriptor.effect(), "{}", row.key);
         assert_eq!(row.lua.as_deref(), descriptor.lua_path(), "{}", row.key);
+        if OWNER_DEFAULTS.contains(&row.key.as_str()) {
+            continue;
+        }
         assert_eq!(
             row.default,
             describe(descriptor.default_value()),
@@ -179,7 +203,8 @@ fn no_published_key_disappeared() {
 fn first_launch_values_are_the_defaults_of_the_tables() {
     let model = SettingsModel::new();
     assert_exact(model.get(SettingId::CameraFov).as_float(), 70.0);
-    assert_eq!(model.get(SettingId::VideoFrameRate).as_int(), 90);
+    // Auto, the owner's default (`owner_defaults_replace_those_of_the_tables`); 90 in the tables.
+    assert_eq!(model.get(SettingId::VideoFrameRate).as_int(), 0);
     assert_eq!(model.get(SettingId::SceneSkybox).as_int(), -1);
     assert_exact(model.get(SettingId::AudioVolume).as_float(), 1.0);
     assert!(model.get(SettingId::RenderShadow).as_bool());

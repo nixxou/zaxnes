@@ -12,17 +12,15 @@ use zax_settings::catalogue::{Layer, SettingId};
 use zax_settings::model::SettingsModel;
 use zax_settings::values::{SettingValue, Vector3};
 
-/// REQ-PERS-003 rule 1 and §5.1: a render rate outside {60, 90, 120} becomes 90.
+/// REQ-PERS-003 rule 1 and §5.1: a render rate outside {60, 90, 120} becomes the default, Auto (0)
+/// since the owner's decision (90 in the tables), which is also a value of its own.
 #[rstest]
 #[case(60, 60)]
 #[case(90, 90)]
 #[case(120, 120)]
-#[case(75, 90)]
-#[case(0, 90)]
-fn render_rate_outside_the_three_values_becomes_ninety(
-    #[case] written: i32,
-    #[case] expected: i32,
-) {
+#[case(75, 0)]
+#[case(0, 0)]
+fn render_rate_outside_the_three_values_becomes_auto(#[case] written: i32, #[case] expected: i32) {
     let mut model = SettingsModel::new();
     model.set(SettingId::VideoFrameRate, SettingValue::Int(written));
     assert_eq!(model.get(SettingId::VideoFrameRate).as_int(), expected);

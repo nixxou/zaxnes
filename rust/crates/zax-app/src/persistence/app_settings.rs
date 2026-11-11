@@ -211,7 +211,8 @@ impl AppSettings for SettingsModel {
     }
 
     fn frame_rate(&self) -> i32 {
-        self.get(SettingId::VideoFrameRate).as_int()
+        // Auto (0) resolved against the display's refresh rate.
+        SettingsModel::frame_rate(self)
     }
 
     fn vsync(&self) -> i32 {

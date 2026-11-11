@@ -94,6 +94,21 @@ pub fn apply(model: &mut SettingsModel) {
     }
 }
 
+/// The defaults of the Android package (owner decision): the desktop's, but for the Lua paths,
+/// the 3D left alone while the 2D is shown, the reflections' cheap rung and no backdrop lighting,
+/// as on a `PortMaster` handheld.
+pub fn apply_android(model: &mut SettingsModel) {
+    for (id, value) in [
+        (SettingId::EmuLuaOptimized, SettingValue::Bool(true)),
+        (SettingId::EmuLuaExperimental, SettingValue::Bool(true)),
+        (SettingId::EmuPause3dIn2d, SettingValue::Bool(true)),
+        (SettingId::RenderStyleSsrQuality, SettingValue::Int(0)),
+        (SettingId::RenderBackdropLighting, SettingValue::Bool(false)),
+    ] {
+        model.set_environment_default(id, value);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

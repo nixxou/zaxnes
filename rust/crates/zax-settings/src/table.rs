@@ -329,7 +329,8 @@ fn video_output(out: &mut Vec<SettingDescriptor>) {
         SettingDescriptor::new(
             SettingId::VideoVSync,
             SettingKind::Enum,
-            SettingValue::Enum(0),
+            // Every refresh (owner decision; 0 in 3dSen).
+            SettingValue::Enum(1),
             SettingScope::User,
             SettingEffect::Immediate,
             SettingTheme::Video,
@@ -346,13 +347,16 @@ fn video_output(out: &mut Vec<SettingDescriptor>) {
         SettingDescriptor::new(
             SettingId::VideoFrameRate,
             SettingKind::Int,
-            SettingValue::Int(90),
+            // Auto (owner decision; 90 in 3dSen): the display's refresh rate.
+            SettingValue::Int(0),
             SettingScope::User,
             SettingEffect::Immediate,
             SettingTheme::Video,
         )
-        // Rule 1 of REQ-PERS-003: anything other than 60, 90 or 120 becomes 90.
+        // Rule 1 of REQ-PERS-003: anything other than 60, 90 or 120 becomes 90. Rust-only (owner
+        // request): 0, Auto, the display's refresh rate (`crate::model::auto_frame_rate`).
         .with_domain(Domain::choice(vec![
+            SettingOption::new(0.0, "Auto"),
             SettingOption::new(60.0, "60fps"),
             SettingOption::new(90.0, "90fps"),
             SettingOption::new(120.0, "120fps"),
@@ -1958,16 +1962,11 @@ fn video_smooth_scroll(out: &mut Vec<SettingDescriptor>) {
         SettingDescriptor::new(
             SettingId::EmuSmoothScrollAhead,
             SettingKind::Bool,
-            // **Off** by default, and the one place this lot overrode the branch's own choice.
-            // The branch shipped it on (owner request), with the handheld's defaults turning it
-            // back off. On, with the default run-ahead of 1 and any display above 61 Hz, it
-            // shifts the 2D playfield of **every game, with no pack at all**, and turns on the
-            // PPU's per-line scroll record — a picture and a cost for a game that asked for
-            // neither. The owner's rule for this lot is that nothing may move for a game
-            // without a pack unless it is behind an option **off by default**, so this is that
-            // option. Nothing else about the feature changed: on, it behaves exactly as the
-            // branch built it (`docs/progress/KIRBY-MERGE.md` §2.4, (S4)).
-            SettingValue::Bool(false),
+            // **On** by default (owner decision, 2026-11-11), on the desktop and Android; the
+            // PortMaster defaults keep it off. KIRBY-MERGE had it off (`docs/progress/KIRBY-MERGE.md`
+            // §2.4, (S4)): on, with the default run-ahead of 1 and a display above 61 Hz, it shifts
+            // the 2D playfield of every game, pack or not; at 60 Hz or below it does nothing.
+            SettingValue::Bool(true),
             SettingScope::User,
             SettingEffect::Immediate,
             SettingTheme::Emulation,

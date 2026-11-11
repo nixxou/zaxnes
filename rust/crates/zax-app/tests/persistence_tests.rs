@@ -212,7 +212,8 @@ fn req_pers_003_an_invalid_value_falls_back_alone() {
     store.load(&mut model, at(0));
     assert!(store.message().is_none());
     assert!((model.fov() - 70.0).abs() < 1e-6);
-    assert_eq!(90, model.frame_rate());
+    // The default, Auto: the display's rate, 60 until it is known.
+    assert_eq!(60, model.frame_rate());
     assert_eq!(8, model.game_speed());
     assert!((model.volume() - 0.5).abs() < 1e-6);
 }
