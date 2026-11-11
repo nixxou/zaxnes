@@ -16,7 +16,7 @@ machines** and bisects back to the first one that differs.
 ## Steps
 
 - [x] 1. Measure where the cycles come from, on both machines.
-- [ ] 2. Explain the first differing interval.
+- [x] 2. Explain the first differing interval.
 - [ ] 3. Add it to the profile, and iterate 1-3 up to five rounds.
 - [ ] 4. No regression.
 - [ ] 5. Report and final pass.
@@ -188,5 +188,134 @@ Step 2 reads NesHawk's and this core's interrupt polling for the exact rule.
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE-3 step 1/5 done: measure where the cycles come from, on both machines
+
+---
+
+## Step 2 — the first differing interval, explained
+
+### The interval, and what each machine did in it
+
+The interval is the shortest one this series has had to explain: **the two cycles of the spin loop
+before the NMI handler's first instruction.** Frame 1113, with the two machines' spin loops in the
+same phase (frame 1112's work ended at the same cycle), in a common frame of reference:
+
+| cycle | BizHawk | Zaxnes |
+|---|---|---|
+| 144-146 | `$C072 BEQ $C070`, taken, no page crossing, 3 cycles | the same |
+| 147-149 | `$C070 LDA $39`, 3 cycles | the same |
+| 150 | **`$C072`'s opcode is fetched** | **the interrupt sequence begins** |
+| 150-152 | `BEQ $C070` runs again | cycles 2-3 of the sequence |
+| 153-159 | the interrupt sequence | the handler's first instruction at 157 |
+| 160 | the handler's first instruction | |
+
+The vblank is asserted at scanline 241 **dot 1**, which is inside the *second* cycle of the `BEQ`
+at 144-146 — before the `LDA` at 147 has even begun. Both machines declined the NMI at the
+`BEQ`'s own boundary (cycle 147). At the `LDA`'s boundary (cycle 150) **Zaxnes takes it and
+NesHawk does not**; NesHawk takes it at the next boundary, three cycles later.
+
+So the quantity that differs is **the cycle at which the CPU first sees an NMI it has already been
+handed** — not the dot the PPU asserts it on, not the length of the sequence, and not the DMA.
+
+### Both machines' rules, read from their own source
+
+**Zaxnes.** `Ppu2C02` raises /NMI when the vblank flag is set at scanline 241 dot 1
+(`nmi_asserted` = `vblank_flag && (control & 0x80) != 0`) and the CPU's view of the line is
+`nmi_line_sample`, taken **`NMI_SAMPLE_LEAD = 2` dots before the end of each CPU cycle**
+(`Ppu2C02::run_cpu_cycles` and `step_cpu_cycle`). `Cpu6502::end_cycle` then latches the edge and
+makes it usable at the **very next** instruction boundary:
+
+```rust
+self.poll_irq = self.irq_sample;
+let nmi = bus.nmi_asserted();
+if nmi && !self.nmi_line { self.nmi_pending = true; }
+self.nmi_line = nmi;
+self.poll_nmi = self.nmi_pending;
+```
+
+with the two-dot lead and the absence of the IRQ's extra cycle of lag both written down as what
+`ppu_vbl_nmi` tests 5-8 and `vbl_nmi_timing` tests 5-7 measure (REQ-CORE-116).
+
+**NesHawk**, read through `raw.githubusercontent.com` at tag **2.11.1** (MIT; nothing cloned,
+downloaded or copied):
+
+| | |
+|---|---|
+| `NES/PPU.run.cs` | a `nmi_destiny` flag is latched at cycle 0 of scanline 241 and `nes.cpu.NMI = true` is assigned at scanline 241 PPU cycle **`3 + NMI_offset`**, `NMI_offset` coming from `cpu_stepcounter` |
+| `CPUs/MOS 6502X/Execute.cs`, `Fetch1()` | `my_iflag = FlagI; FlagI = iflag_pending; if (!branch_irq_hack) { interrupt_pending = false; if (NMI) { ea = NMIVector; opcode = VOP_NMI; NMI = false; mi = 0; ExecuteOneRetry(); return; } if (IRQ && !my_iflag) { … } } mi = 0; opcode = VOP_Fetch1_NoInterrupt; Fetch1_Real();` — so `NMI` is read **at the cycle the next opcode would be fetched on**, and it is a one-shot (`NMI = false` when taken) |
+| `Execute.cs`, `Fetch1_Real()` | `rdy_freeze = !RDY; if (RDY) { branch_irq_hack = false; _link.OnExecFetch(PC); … opcode = _link.ReadMemory(PC++); mi = -1; } address_bus = PC;` — `OnExecFetch` is the hook `event.onmemoryexecute` rides on, and it fires **only** when an opcode is really fetched, which is what makes the ledger's "gap 10" readable (see below) |
+| `Execute.cs`, `RelBranch_Stage3()` | `if (RDY) { DummyReadMemory(PC); alu_temp = (byte)PC + (sbyte)opcode2; PC &= 0xFF00; PC \|= (alu_temp & 0xFF); if (alu_temp.Bit(8)) { opcode = VOP_RelativeStuff2; mi = -1; } else { if (!interrupt_pending) branch_irq_hack = true; } }` |
+| `NES.Core.cs`, `RunCpuOne()` | nothing assigns `cpu.NMI`: the PPU does |
+
+Zaxnes's CPU can therefore see the assertion from the cycle whose sample point falls at dot 1 or
+later — dot 2 in frame 1113's alignment — and NesHawk's from the cycle that begins at dot 3, 4 or
+5. **One CPU cycle later**, and a 3-cycle instruction turns one cycle of recognition into three
+cycles of handler entry.
+
+### The candidate that had to be eliminated, and the ROM that did it
+
+`branch_irq_hack` is the obvious suspect and the reading above predicts it: it is set for every
+taken non-page-crossing branch (`interrupt_pending` is assigned `false` in `Fetch1()` and **never
+assigned `true` anywhere in `Execute.cs` or `MOS6502X.cs`**, so the `if (!interrupt_pending)` gate
+is always open), and `Fetch1()` then skips the NMI test entirely on the instruction that follows.
+Kirby's spin loop is `LDA $39` / `BEQ` taken and non-page-crossing, so the prediction is sharp:
+**NesHawk could never take the NMI at the boundary before the `LDA`.**
+
+It does. Measured, with a ROM written for the purpose:
+
+`crates/zax-nes/tests/neshawk_profile_tests.rs`'s **interrupt-phase ROM** is Kirby's construct
+isolated — a `LDA $00` / `BEQ` spin loop, an NMI handler that records the low byte of the
+*interrupted* PC, 64 frames per variant — in two variants that differ in one bit: variant A's
+branch does **not** cross a page (`$8102 BEQ $8100`: `(byte)PC` is `$04`, displacement −4, no
+borrow) and variant B's **does** (`$8200 BEQ $81FE`: `(byte)PC` is `$02`, displacement −4, a
+borrow). The loop's phase relative to the vblank walks by itself, because a frame is 29 780 or
+29 781 cycles and the loop's period is 6 or 7, so 64 frames sweep every phase without a delay
+slide having to be written.
+
+The same bytes are given to both machines: the Rust test writes the `.nes` out under
+`ZAXNES_DUMP_ROM` and BizHawk is handed that file (`phaserom.lua` reads the two tables back out of
+`$0300` and `$0400`).
+
+| | variant A (no page crossing) | variant B (page crossing) |
+|---|---|---|
+| Zaxnes, both profiles | **21** of 64 answers are the `LDA`, 43 the `BEQ` | 27 of 64 are the `LDA`, 37 the `BEQ` |
+| NesHawk | **20** of 64 are the `LDA`, 44 the `BEQ` | **27** of 64 are the `LDA`, 37 the `BEQ` |
+
+**NesHawk names the `LDA` as the displaced instruction on 20 of 64 frames of variant A** — and
+every `LDA` boundary of that loop is immediately after a taken non-page-crossing branch. So
+`branch_irq_hack` does **not** suppress the NMI in BizHawk 2.11.1 as it runs, whatever the source
+reads like, and the branch quirk is eliminated as the mechanism **by measurement against a reading
+that predicted the opposite.** (It is also why the two tables have the same *shape* on both
+machines — 21 against 20 and 27 against 27 — and differ in which frame each answer falls on:
+the rule is "the first instruction boundary at or after a threshold", with a different threshold.)
+
+### What else was eliminated, and how
+
+| candidate | why it is not this |
+|---|---|
+| the **vblank dot** and the NMI sequence | NesHawk **passes** `ppu_vbl_nmi` `05-nmi_timing`, `06-suppression`, `07-nmi_on_timing` and `08-nmi_off_timing` (status `00`, signature `DE B0 61`), which measure the assertion and the suppression window at one-PPU-clock resolution; Zaxnes passes them too (REQ-CORE-116). The difference is **inside the tolerance of every public test there is**, which is why no lot found it from a test ROM |
+| the **branch interrupt quirk** | NesHawk **passes** `cpu_interrupts_v2` `5-branch_delays_irq`, whose own source states the rule in words — *"A taken non-page-crossing branch ignores IRQ during its last clock… The same occurs for NMI, though that's not tested here"* — and the phase ROM shows NesHawk taking the NMI right after such a branch anyway |
+| the **frame sequencer and `$4017`** | §4g sent this lot there first. The ledger says the `$4017` write is at the same cycle as Zaxnes's on 4 250 of 8 155 frames and off by exactly the NMI entry's own residual on the rest: it is downstream of the NMI, not upstream |
+| the **`$4016` strobe delay** | the same: all eight strobes of a frame are at the NMI's own residual, 33 037 of 65 240 of them at 0 |
+| **DMC, DMA, `$2002`, the odd-frame skip** | frame 1100 has `dmc=0/0`, its OAM transfer is over before the frame's work starts, it makes no `$2002` read, and the accumulated frame length over 8 901 frames agrees to the end-point quantisation. There is nothing else in that frame |
+
+### Why this was never going to be found by arithmetic
+
+The two previous lots sized their items in advance and were wrong twice. This one cannot be sized
+at all: **one cycle of recognition** moves the whole of a frame's work by **three** cycles
+relative to the PPU and the APU, which then changes which cycle every DMC fetch's halt lands on
+and whether the frame's OAM transfer costs 513 or 514 — and those are the ±1 and ±4 residuals
+NESHAWK-PROFILE-2's tables are full of. The thirty cycles frame 9354 is short of are a sum over
+*that*, not over anything with its own budget.
+
+### What step 3 implements
+
+**Item 8, `NMI_SEEN_A_CYCLE_LATE`**: the CPU's view of /NMI lags the PPU's sample by one CPU
+cycle. One associated constant, read at `NesBusOf::nmi_asserted` with a one-cycle copy kept in the
+bus, plus the batching horizon that copy needs. The magnitude is one cycle from NesHawk's
+`3 + NMI_offset` against this core's two-dot lead; if the movie says otherwise, round 2 tries two.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-3 step 2/5 done: explain the first differing interval
 
 ---
