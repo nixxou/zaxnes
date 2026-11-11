@@ -22,7 +22,7 @@ $root = Split-Path -Parent $rust
 
 Push-Location $rust
 try {
-    cargo build --release -p zax-app --features bundled,wgpu
+    cargo build --release -p zax-app --features bundled,shaders
     if ($LASTEXITCODE -ne 0) { throw "package: cargo build failed ($LASTEXITCODE)" }
     # The harness of the editor mode (the editor folder's AGENT.md): renders from any angle
     # without the window, lists a profile's patterns.
@@ -53,6 +53,18 @@ $profiles = Join-Path $Output 'profiles'
 New-Item -ItemType Directory -Force -Path $profiles | Out-Null
 Set-Content -Path (Join-Path $profiles 'README.txt') -Encoding utf8 `
     -Value "Déposez ici vos profils .3dn ; ils sont chargés au démarrage. Aucun profil n'est fourni."
+
+# The 3D profiles made for Zaxnes (github.com/nixxou/zaxnes_3dn), when ZAXNES_3DN_DIR names a copy
+# of that repository: the .3dn files and their licence, which is not the program's.
+$extra = @()
+if ($env:ZAXNES_3DN_DIR) {
+    foreach ($file in Get-ChildItem -File (Join-Path $env:ZAXNES_3DN_DIR '*.3dn')) {
+        Copy-Item $file.FullName (Join-Path $profiles $file.Name)
+        $extra += "profiles\$($file.Name)"
+    }
+    Copy-Item (Join-Path $env:ZAXNES_3DN_DIR 'LICENSE') (Join-Path $profiles 'LICENSE-3DN.txt')
+    $extra += 'profiles\LICENSE-3DN.txt'
+}
 
 $readme = @"
 Zaxnes $version — émulateur NES avec rendu 3D
@@ -102,7 +114,7 @@ Set-Content -Path (Join-Path $Output 'README.txt') -Value $readme -Encoding utf8
 # The folder ships the executable, the documents and profiles\README.txt, and nothing else
 # (portable.txt is added after these checks).
 $expected = @('zaxnes.exe', 'zax-harness.exe', 'LICENSE', 'HOWTO-RUN.md', 'ASSETS-LICENSES.md',
-    'THIRD-PARTY-NOTICES.md', 'README.txt', 'profiles\README.txt')
+    'THIRD-PARTY-NOTICES.md', 'README.txt', 'profiles\README.txt') + $extra
 $shipped = @(Get-ChildItem -Recurse -File $Output | ForEach-Object {
         $_.FullName.Substring($Output.Length + 1)
     })
