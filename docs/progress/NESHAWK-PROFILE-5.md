@@ -26,7 +26,9 @@ frame 1 100 — a frame with no DMC DMA at all — shows as exactly one event of
 - [x] 4. Iterate. **One round.** It isolates the remaining cycle of frame 11 to the odd-slip
       reload fetch and finds the source and the measurement in **conflict**, which is Q-182; item
       1c is left as it is and nothing is changed.
-- [ ] 5. No regression.
+- [x] 5. No regression. `Standard` byte-identical and every suite unchanged on both profiles;
+      the bench is **inside the cumulative budget** and **slower than the immediate parent**,
+      which is reported rather than smoothed.
 - [ ] 6. Report and final pass.
 
 ## The environment this lot runs in
@@ -486,3 +488,112 @@ script and no new reference.
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE-5 step 4 done: one round, the cycle isolated to one fetch, and Q-182
+
+---
+
+## Step 5 — no regression
+
+### The `Standard` profile's behaviour: nothing moved
+
+| | |
+|---|---|
+| `golden-core`, 98 originals × 1 200 frames, release, feature off | `8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773` — **byte-identical** to lot FCEUX-23's baseline and to all four earlier NESHAWK lots' |
+| the 30 ROMs of `dmc_dma_during_read4`, `sprdma_and_dmc_dma`, `apu_test`, `dmc_tests` | **24 pass, 0 fail, 6 manual** — ROM for ROM, the same column |
+| `ppu_vbl_nmi` / `vbl_nmi_timing` / `cpu_interrupts_v2` | **11/11, 7/7, 6/6** — unchanged |
+| `AccuracyCoin` | **128/147** — unchanged |
+| *Faxanadu*, `[USA][!!]` and `[USA][Rev 1][!!]` | **207** and **220** of 832, every lag count agreeing — unchanged |
+| savestates | unchanged to the byte and to the version: item 11 adds **no field** on either profile, only an associated constant |
+
+That `golden-core` is byte-identical is the whole of the `Standard` behaviour argument, and item 11
+makes it cheap to believe: its `Standard` arm is `self.timer = rates[0] - 1`, the line
+`DmcChannel::reset` had before the profile existed, selected by `if P::DMC_POWER_ON_TIMER > 0` on a
+constant the compiler folds.
+
+### The `NesHawkCompat` profile: every suite unchanged, and the brief's precondition met
+
+| | lot NESHAWK-PROFILE-4 | this lot |
+|---|---|---|
+| the 30 DMC/DMA/APU ROMs | 19 pass, 5 fail, 6 manual | **19 pass, 5 fail, 6 manual** |
+| `ppu_vbl_nmi` | 11 pass, 0 fail | **11 pass, 0 fail** |
+| `vbl_nmi_timing` | 7 pass, 0 fail | **7 pass, 0 fail** |
+| `cpu_interrupts_v2` | 6 pass, 0 fail | **6 pass, 0 fail** |
+| `AccuracyCoin` | 122/147 | **122/147** |
+| *Faxanadu* `[USA][!!]` | 247 of 832 | **247** of 832 |
+| *Faxanadu* `[USA][Rev 1][!!]` | 314 of 832 | **314** of 832 |
+
+**The brief's precondition — the `NesHawkCompat` profile must keep passing everything NesHawk
+passes — holds**: `ppu_vbl_nmi`, `vbl_nmi_timing` and `cpu_interrupts_v2` are 11/11, 7/7 and 6/6 on
+*both* profiles.
+
+So **item 11 is free everywhere except on *Kirby***: eight suites and four *Faxanadu* columns do not
+move by a single ROM or a single line. Only the one movie that presses RESET and plays DPCM from
+frame 11 can see it, which is consistent with what it is.
+
+### The `Standard` profile's speed: inside the cumulative budget, slower than the parent
+
+`bench-core --frames 1200 --warmup 120`, the `core run_frame` line only, **six interleaved rounds
+per ROM** against two clean `git archive` builds — `7dbe7c54` (this lot's code parent) and
+`428c50e6` (the parent of all five NESHAWK-PROFILE lots' code) — the three binaries run in the same
+order inside each round:
+
+| ROM | `428c50e6` | `7dbe7c54` | this commit | vs the parent | **cumulative** |
+|---|---|---|---|---|---|
+| Super Mario Bros. 3 `[USA][!!]` | 1.22995 ms/frame | 1.17572 | **1.20725** | **+2.68 %** | **−1.85 %** |
+| Mega Man 3 `[USA][!!]` | 0.95197 | 0.92477 | **0.93623** | **+1.24 %** | **−1.65 %** |
+
+Per-round figures, in `428c50e6` / `7dbe7c54` / this order — SMB3: 1.2162/1.1727/1.2081,
+1.2076/1.1796/1.1900, 1.2512/1.1718/1.1870, 1.2051/1.1645/1.2167, 1.2590/1.1807/1.2177,
+1.2406/1.1850/1.2240. Mega Man 3: 0.9424/0.9180/0.9275, 0.9568/0.9084/0.9241,
+0.9362/0.9075/0.9287, 0.9633/0.9237/0.9467, 0.9507/0.9383/0.9571, 0.9624/0.9527/0.9333.
+
+**The owner's budget is +1 % cumulative since the last release and the cumulative figures are
+−1.85 % and −1.65 %, so there is nothing to stop for.** But the figure against the immediate parent
+is a **slowdown of +2.68 % and +1.24 %**, and it is said plainly rather than hidden behind the
+cumulative one:
+
+* it is **consistent**, not noise: `this − 7dbe7c54` is positive in all six SMB3 rounds
+  (+3.0, +0.9, +1.3, +4.5, +3.1, +3.3 %) and in five of six Mega Man 3 rounds;
+* it **cannot be the item's work**, which is one `if` on a folded constant inside `reset`, a
+  function that runs once per power-on and never during a frame. The only other changes to
+  `zax-nes` in this lot are comments and a constant;
+* so it is the same **code-layout effect** lots NESHAWK-PROFILE-3 and -4 both measured and named —
+  −3 % in one direction in lot 4, +2.7 % back in this one — on a machine that also drifted upward
+  across the rounds for *all three* binaries (`428c50e6` rose from 1.2162 to 1.2406 over the same
+  six rounds, having changed not at all);
+* and the honest conclusion is that **this bench cannot resolve a layout effect from a real one at
+  this amplitude**, which is why the cumulative figure against a fixed reference is the one the
+  brief gates on and the one to trust.
+
+### The suites
+
+| | passed | failed |
+|---|---|---|
+| **`zax-nes`**, release, `--include-ignored` | **1 205** | 0 |
+| **`zax-harness`**, release, feature off, `--include-ignored` | **128** | 0 |
+| the same with **`dma-census`** | **128** | 0 |
+| the same with **`fceux-core`** (`--test-threads 1`) | **148** | 0 |
+
+`zax-nes` is 1 205 against lot NESHAWK-PROFILE-4's reported 1 142, and the difference is **not** 63
+new tests: that lot's figure was taken with a target that **aborted on a failing test** (step 3's
+finding), so its count was short. The tree has item 11's test added and no test removed.
+
+`cargo fmt --all --check` clean; `cargo clippy --workspace --all-targets -- -D warnings` clean in
+**three** configurations — feature off, `dma-census`, `fceux-core`.
+
+### The disk, and where the parent builds went
+
+`G:` had 8.6 GB free at the start of this session and **7.2 GB** at the end; `C:` 18 and 17.
+
+The two parents could **not** be built on `G:`: at 7.3 GB free, one release build of the workspace
+would have taken it under the brief's **5 GB stop**. They were built on `C:` instead (17 GB free,
+against a 1 GB stop) at the short path `C:/zxb` — short because a long one makes `link.exe` fail
+with `LNK1104`, which lot NESHAWK-PROFILE-4 paid a build to discover — **one at a time**, with only
+the 6.8 MB `zax-harness.exe` kept out of each and the archive and target directory deleted before
+the next was unpacked. Peak extra use was one build, and `C:/zxb` was deleted after the rounds.
+
+**No new per-frame reference was produced**, so no disk was spent on one: the movie parts at 1 100
+on this configuration, and references for 30 000-60 000 would measure the parting.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-5 step 5 done: Standard byte-identical, every suite unchanged, bench inside the cumulative budget
