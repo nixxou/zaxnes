@@ -222,3 +222,103 @@ fn where_the_idle_loop_is_missed() {
         );
     }
 }
+
+/// The survey from the owner's own states (`ZAXNES_SURVEY_STATES`, `;`-separated files of the
+/// app, whose core block is found by its magic): each is played 120 frames in the mode it was
+/// made in, saved at the idle loop there, and carried as [`survey_of_the_packs`] does.
+#[test]
+#[ignore = "needs ZAXNES_PACK_ROMS and ZAXNES_SURVEY_STATES"]
+fn survey_of_recorded_states() {
+    let Some(files) = std::env::var_os("ZAXNES_SURVEY_STATES") else {
+        return;
+    };
+    let dump = std::env::var_os("ZAXNES_SURVEY_DUMP").map(PathBuf::from);
+    let roms = roms();
+    for file in std::env::split_paths(&files) {
+        let Ok(data) = std::fs::read(&file) else {
+            continue;
+        };
+        let magic = NesCore::STATE_MAGIC.to_le_bytes();
+        let Some(offset) = data.windows(4).position(|window| window == magic) else {
+            println!("{}: no core block", file.display());
+            continue;
+        };
+        let label = file.display().to_string();
+        let Some(patch) = NesCore::state_builtin_patch(&data, offset) else {
+            println!("{label}: no built-in patch");
+            continue;
+        };
+        let Some((rom_path, image, _)) = roms.iter().find(|(_, _, known)| known.name == patch.name)
+        else {
+            println!("{label}: no ROM for {}", patch.name);
+            continue;
+        };
+        let name = rom_path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let made_on = NesCore::state_uses_widescreen(&data, offset).unwrap_or(false);
+        let Some(mut first) = core(image, &name, made_on) else {
+            continue;
+        };
+        if first.try_load_state(&data, offset).is_err() {
+            println!("{label}: does not load in its own mode");
+            continue;
+        }
+        for frame in 0..120 {
+            first.run_frame(input(1000 + frame));
+        }
+        let Ok((state, at_idle)) = first.save_state_at_idle(true) else {
+            continue;
+        };
+        let mut line = format!("{:<44} {} idle={}", patch.name, made_on, u8::from(at_idle));
+        for on in [made_on, !made_on] {
+            let Some(mut core) = core(image, &name, on) else {
+                continue;
+            };
+            if core.try_load_state(&state, 0).is_err() {
+                line += " | refused";
+                continue;
+            }
+            let carried = trace(&mut core, 1120);
+            if on == made_on {
+                // the reference: the same mode
+                line += " | ref";
+                let Some(mut other) = self::core(image, &name, !on) else {
+                    continue;
+                };
+                let _ = other.try_load_state(&state, 0);
+                let moved = trace(&mut other, 1120);
+                let ram: Vec<String> = carried
+                    .iter()
+                    .zip(&moved)
+                    .map(|(r, c)| diff(&r.0, &c.0).to_string())
+                    .collect();
+                let pix: Vec<String> = carried
+                    .iter()
+                    .zip(&moved)
+                    .map(|(r, c)| diff(&r.1, &c.1).to_string())
+                    .collect();
+                let _ = write!(line, " | moved ram {} pix {}", ram.join("/"), pix.join("/"));
+                if let Some(folder) = &dump {
+                    let stem = file
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().replace(' ', "_"))
+                        .unwrap_or_default();
+                    let parent = file
+                        .parent()
+                        .and_then(|p| p.file_name())
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    for (index, (r, c)) in carried.iter().zip(&moved).enumerate() {
+                        let stem = format!("{parent}-{stem}-{index}");
+                        let _ = std::fs::write(folder.join(format!("{stem}-ref.bin")), &r.1);
+                        let _ = std::fs::write(folder.join(format!("{stem}-car.bin")), &c.1);
+                    }
+                }
+                break;
+            }
+        }
+        println!("{line}  [{label}]");
+    }
+}
