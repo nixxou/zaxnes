@@ -652,6 +652,14 @@ impl<P: TimingProfile> NesCoreOf<P> {
             cartridge.soft_reset();
         }
 
+        // Item 10 again, and the measurement says it applies to the RESET button too: BizHawk's
+        // frame 5 of the *Kirby* `.bk2` — the frame the movie's first reset lands in — is 27 392
+        // cycles long, exactly as its frame 1 is (`PPU.cs` `Reset()`, which the soft reset calls,
+        // sets `ppudead = 1` again).
+        if P::PPU_START_UP_DOTS_SKIPPED > 0 {
+            self.bus.run_ppu_start_up_dots(P::PPU_START_UP_DOTS_SKIPPED);
+        }
+
         self.cpu.soft_reset(&mut self.bus);
         self.frame_count = 0;
         self.forget_real_frame(); // REQ-LOOP-066, as in `power_on`.
@@ -738,6 +746,14 @@ impl<P: TimingProfile> NesCoreOf<P> {
         if let Some(cartridge) = self.bus.cartridge_mut() {
             cartridge.reset();
             cartridge.clear_volatile_ram(clear_prg_ram);
+        }
+
+        // Item 10: NesHawk's PPU runs a start-up frame of `241 * 341 - 4` dots here, which is
+        // 2 389 CPU cycles shorter than the whole frame this core's own power-on position gives
+        // it. It is run **before** the CPU's seven reset cycles because that is where NesHawk's
+        // is: `NewDeadPPU()` clocks the CPU through `runppu()` for the whole of the dead frame.
+        if P::PPU_START_UP_DOTS_SKIPPED > 0 {
+            self.bus.run_ppu_start_up_dots(P::PPU_START_UP_DOTS_SKIPPED);
         }
 
         self.cpu.reset(&mut self.bus);

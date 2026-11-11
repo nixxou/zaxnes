@@ -478,62 +478,97 @@ fn the_reload_countdown_survives_a_savestate_round_trip() {
     );
 }
 
-/// **Item 8**: the CPU meets the vblank /NMI one CPU cycle later on the NesHawk profile.
+/// **Item 10**: the PPU runs a start-up frame after a power-on and after a soft reset.
 ///
-/// Differential, and of the one quantity the item is about: how many cycles after a profile's
-/// own power-on the CPU's view of the line first goes true. The PPU is the same chip on both
-/// profiles, so its own `nmi_asserted` and its own `nmi_line_sample` must come out identical and
-/// only the **bus's** answer — the one `Cpu6502::end_cycle` reads — may differ, by exactly one.
+/// Differential, and of the one quantity the item is about: the CPU cycles a profile spends in
+/// its **first** frame, counted from a power-on and again from a soft reset. NesHawk's PPU runs
+/// `241 * 341 - start_up_offset` dots there (`PPU.run.cs` `NewDeadPPU`, with `ppudead = 1` and
+/// `start_up_offset = 4` from `PPU.cs` `Reset()`), where this core's runs a whole frame from its
+/// own power-on position at the start of vblank — and NesHawk's `regs_reset()` puts its PPU back
+/// to the top of the frame on a **soft** reset too, where `Ppu2C02::soft_reset` deliberately does
+/// not (Q-078).
+///
+/// The second and later frames must be a frame long on both, or the item would be a permanent
+/// difference of the frame rate rather than of the start-up.
 #[test]
-fn item_8_the_cpu_sees_the_vblank_nmi_one_cycle_later() {
-    /// `(the cycle the CPU first sees it, the cycle the PPU's own sample first has it)`, counted
-    /// from the `$2000` write that enabled the NMI.
-    fn first_seen<P: TimingProfile>() -> (i64, i64) {
-        let mut bus = loaded_bus::<P>();
-        bus.write(0x2000, 0x80);
-        let from = bus.cycle_count();
-        let (mut cpu_at, mut ppu_at) = (None, None);
-        // A frame is under 29 781 cycles, so the first vblank after the write is well inside
-        // this; the panic below is the loop being broken rather than the frame being long.
-        for _ in 0..40_000 {
-            if ppu_at.is_none() && bus.ppu().nmi_line_sample() {
-                ppu_at = Some(bus.cycle_count() - from);
-            }
-            if cpu_at.is_none() && CpuBus::nmi_asserted(&bus) {
-                cpu_at = Some(bus.cycle_count() - from);
-            }
-            if cpu_at.is_some() && ppu_at.is_some() {
-                break;
-            }
-            bus.read(0x8000);
-        }
-        (
-            cpu_at.expect("the CPU saw the vblank NMI"),
-            ppu_at.expect("the PPU sampled the line"),
-        )
+fn item_10_the_ppu_runs_a_start_up_frame_after_a_power_on_and_a_reset() {
+    /// `(the first frame from the power-on, the next one, the first frame after a soft reset)`.
+    fn frames<P: TimingProfile>() -> (i64, i64, i64) {
+        use zax_nes::{NesCoreOf, RunFrame as _};
+
+        let mut core = NesCoreOf::<P>::new();
+        assert!(
+            core.load_rom(&minimal_rom(0x01, None, None), "Minimal.nes")
+                .success
+        );
+        let first = core.run_frame(0);
+        let second = core.run_frame(0);
+        core.soft_reset();
+        let after_reset = core.run_frame(0);
+        (first, second, after_reset)
     }
 
-    let plain = first_seen::<Standard>();
-    let hawk = first_seen::<NesHawkCompat>();
+    let plain = frames::<Standard>();
+    let hawk = frames::<NesHawkCompat>();
+    println!("  standard {plain:?}");
+    println!("  neshawk  {hawk:?}");
 
-    // The PPU is not the profile's: both chips assert and sample the line on the same cycle.
-    assert_eq!(
-        plain.1, hawk.1,
-        "the PPU's own sample is the same on both profiles ({} and {})",
-        plain.1, hawk.1
+    // A frame is 29 780 or 29 781 cycles and `run_frame` stops at the end of the instruction that
+    // crossed the boundary, so a frame as it is *reported* is a frame give or take an instruction.
+    // The second frame is one on both profiles: this item is about the start-up and nothing else.
+    for (name, length) in [
+        ("standard, the second frame", plain.1),
+        ("neshawk, the second frame", hawk.1),
+        ("standard, the first frame", plain.0),
+    ] {
+        assert!(
+            (29_770..=29_785).contains(&length),
+            "{name} is a frame long, got {length}"
+        );
+    }
+
+    // And NesHawk's first is its start-up frame: `241 * 341 - 4 = 82 177` dots, which at three
+    // dots a CPU cycle is 27 392 cycles and so 2 389 short of a frame.
+    assert!(
+        (27_380..=27_395).contains(&hawk.0),
+        "neshawk: the first frame is the start-up frame of {} dots, got {}",
+        241 * 341 - 4,
+        hawk.0
     );
-    // On the standard profile the CPU reads that sample directly, as this core always did.
-    assert_eq!(
-        plain.0, plain.1,
-        "standard: the CPU sees the line on the cycle the PPU sampled it"
+    assert!(
+        (2_380..=2_395).contains(&(plain.0 - hawk.0)),
+        "the start-up frame is 2 389 cycles short of a frame, got {}",
+        plain.0 - hawk.0
     );
-    // And the whole of item 8 is this one cycle.
+
+    // The reset does it again, and to the dot: the two start-up frames are the same length
+    // because NesHawk's soft reset puts the PPU back to the top of the frame as a power-on does.
     assert_eq!(
-        hawk.0,
-        plain.0 + 1,
-        "neshawk: the CPU meets the line one cycle later ({} against {})",
-        hawk.0,
-        plain.0
+        hawk.0, hawk.2,
+        "neshawk: the frame a soft reset lands in is the same start-up frame"
+    );
+    // The standard profile's reset does not restart the frame at all (Q-078), so its own frame
+    // after one is a frame minus however far into the frame the reset fell — never 27 392.
+    assert_ne!(
+        hawk.2, plain.2,
+        "standard: the soft reset does not restart the frame, so it is not the start-up frame"
+    );
+
+    // And the half of the item a frame-level measurement cannot see: the start-up frame is
+    // 82 177 dots **from the top of the frame**, wherever the reset found the PPU. NesHawk gets
+    // that from `regs_reset()`'s `ppur = new PPUREGS()`; this core has to put the position back,
+    // which is what `Ppu2C02::run_start_up_dots` does before it counts.
+    let position = |lag: u32| {
+        let mut ppu = Ppu2C02::new();
+        ppu.reset();
+        ppu.run_cpu_cycles(lag, None);
+        ppu.run_start_up_dots(NesHawkCompat::PPU_START_UP_DOTS_SKIPPED, None);
+        (ppu.scanline(), ppu.dot())
+    };
+    assert_eq!(
+        position(0),
+        position(1_234),
+        "the start-up frame starts from the top of the frame, not from where the reset fell"
     );
 }
 
