@@ -167,8 +167,10 @@ fn cost_with_the_read_displaced<P: TimingProfile>(writes: u32) -> i64 {
 /// DMA path. On `Standard` the alignment cycle is spent when the cycle after the dummy read is not
 /// a get cycle, so the fetch is three cycles or four.
 ///
-/// Measured at **even** slips alone (2 and 4), so that it is item 1b's parity being tested and not
-/// item 1c's slip: 1c takes a cycle off an *odd* slip, and the test below is the one that says so.
+/// Measured at **even** slips alone (2 and 4), which is where lot NESHAWK-PROFILE-2 had to put it
+/// while item 1c took a cycle off the odd ones. Item 1c is retracted, so every slip now answers 5
+/// here — the test below is the one that says so, and this one stays on the even slips so that the
+/// two tests keep failing for different reasons.
 #[test]
 fn item_1b_the_fetch_is_a_fixed_four_cycles_whatever_the_parity() {
     let neshawk: Vec<i64> = [2, 4]
@@ -191,20 +193,25 @@ fn item_1b_the_fetch_is_a_fixed_four_cycles_whatever_the_parity() {
     );
 }
 
-/// **Item 1c** — the halt lands on the request cycle **even when the CPU is writing on it**, so an
-/// **odd** slip costs one cycle less than an even one.
+/// **The retraction of item 1c, measured per slip** (lot NESHAWK-PROFILE-6 step 1): a NesHawk
+/// reload costs the CPU **four** cycles whatever the CPU was writing on, so the four slips a 6502
+/// can produce answer the *same* number and the parity item 1c claimed is not there.
 ///
-/// NesHawk lowers `RDY` on the request cycle whatever the CPU is doing there and its write
-/// microstep runs anyway; `RunCpuOne`'s `+2` then gives the fetch two cycles back once the CPU has
-/// been writing for three cycles. The arithmetic (`timing_profile.rs`) is that NesHawk's stalled
-/// read runs `slip + 3` cycles after the request for an odd slip and `slip + 4` for an even one,
-/// where this core waits for the first read cycle and always spends `slip + 4`.
+/// Item 1c said an **odd** slip costs one cycle less, reading `DMCUnit.Run()`'s unconditional
+/// `RDY` and `MOS6502X`'s write microstep. What the reading missed is `RunCpuOne`'s closing
+/// `if (!cpu.RDY && !dmc_dma_exec && !oam_dma_exec) cpu.RDY = true;`: `dmc_dma_exec` is still false
+/// on the request cycle, so `RDY` goes back up at the end of it and the write microstep decides
+/// nothing. BizHawk's own bus stream charges the slip-1 reload of *Kirby*'s frame 11 four cycles,
+/// bracketed by two CPU accesses that need no calibration — see the progress note.
 ///
-/// Slips 1 to 4 — a 6502 never writes on more than three cycles in a row, so 4 is past anything a
-/// program can produce and is measured only to show the rule is the slip's parity and nothing
-/// else.
+/// Slips 1 to 4: a 6502 never writes on more than three cycles in a row (the three pushes of an
+/// interrupt or `BRK`; `JSR` and a read-modify-write make two), so 4 is past anything a program can
+/// produce and is measured only to show the answer does not turn on the slip at all.
+///
+/// Differential: `Standard`'s own four answers are pinned beside them, so a change to *its* rule
+/// fails here too and a regression of either profile is told apart from a change of the item.
 #[test]
-fn item_1c_an_odd_run_of_write_cycles_costs_the_fetch_one_cycle_less() {
+fn the_reload_costs_four_cycles_at_every_slip_item_1c_retracted() {
     let neshawk: Vec<i64> = (1..5)
         .map(cost_with_the_read_displaced::<NesHawkCompat>)
         .collect();
@@ -213,17 +220,17 @@ fn item_1c_an_odd_run_of_write_cycles_costs_the_fetch_one_cycle_less() {
         .collect();
 
     assert_eq!(
-        vec![4, 5, 4, 5],
+        vec![5, 5, 5, 5],
         neshawk,
-        "neshawk: three halted cycles and the read at an odd slip, four and the read at an even one"
+        "neshawk: four halted cycles and the read, at every slip a 6502 can produce"
     );
     assert_ne!(
         neshawk, standard,
-        "the item must be visible: the two profiles answer the same four slips differently"
+        "item 1b must still be visible: the two profiles answer the same four slips differently"
     );
-    // What `Standard` does instead, pinned so that a change to *its* rule fails here too: the
-    // halt lands on the first read cycle and the alignment cycle is spent or not by **that
-    // cycle's** parity, which is a different function of the slip from the one above.
+    // What `Standard` does instead: the halt lands on the first read cycle and the alignment cycle
+    // is spent or not by **that cycle's** parity, which is a function of the slip where NesHawk's
+    // is a constant.
     assert_eq!(
         vec![5, 4, 5, 4],
         standard,
@@ -585,12 +592,9 @@ fn item_10_the_ppu_runs_a_start_up_frame_after_a_power_on_and_a_reset() {
 /// hundred cycles after the power-on, and the cycle of the **second** fetch — the first one the
 /// output unit asks for, as against the one the `$4015` write starts — is the phase.
 ///
-/// **The item is implemented and switched off** — `NesHawkCompat::DMC_POWER_ON_TIMER` is `0`,
-/// because enabled on its own item 11 costs the *Kirby* `.bk2` 7 080 frames and buys nothing
-/// anywhere else (the constant's own note, and Q-182). So the mechanism is measured here through
-/// [`ItemElevenOn`], a profile of this test's own that is `NesHawkCompat` with the item's value in
-/// place: that keeps the item covered to the cycle while the shipped profile does not carry it, and
-/// the last assertion is the record of the choice itself.
+/// **The item is on** since lot NESHAWK-PROFILE-6 answered Q-182 against item 1c, which is what
+/// lot NESHAWK-PROFILE-5 shipped it off and waiting for. The test profile that carried it while it
+/// was off is gone with the wait; `NesHawkCompat` is measured directly.
 #[test]
 fn item_11_the_dmc_timer_powers_on_1020_cycles_from_its_first_bit() {
     /// The CPU cycle the memory reader next runs dry on, counted from the power-on itself.
@@ -636,19 +640,15 @@ fn item_11_the_dmc_timer_powers_on_1020_cycles_from_its_first_bit() {
     }
 
     let plain = second_request::<Standard>();
-    let hawk = second_request::<ItemElevenOn>();
-    let shipped = second_request::<NesHawkCompat>();
-    println!(
-        "  standard {plain}, item 11 on {hawk}, apart {}; the shipped neshawk profile {shipped}",
-        hawk - plain
-    );
+    let hawk = second_request::<NesHawkCompat>();
+    println!("  standard {plain}, neshawk {hawk}, apart {}", hawk - plain);
 
     // The output unit takes the buffer on its eighth clock, so with the timer started at `T` the
     // second fetch is a cycle or two after `T + 1 + 7 * 428`. `Standard`'s `T` is `428 - 1`.
     let expected = |timer: i32| i64::from(timer) + 1 + 7 * 428;
     for (name, measured, timer) in [
         ("standard", plain, 428 - 1),
-        ("item 11 on", hawk, ItemElevenOn::DMC_POWER_ON_TIMER),
+        ("neshawk", hawk, NesHawkCompat::DMC_POWER_ON_TIMER),
     ] {
         let want = expected(timer);
         assert!(
@@ -675,47 +675,18 @@ fn item_11_the_dmc_timer_powers_on_1020_cycles_from_its_first_bit() {
         "the item moves the phase by an even number of cycles"
     );
 
-    // **The record of the choice, and the one line to change to undo it.** Item 11 is off on the
-    // shipped profile: on its own it takes the *Kirby* `.bk2` from no live difference until frame
-    // 8 005 to frame 925 — where the movie parted before this profile existed — and moves no other
-    // measurement on either profile at all. Q-182 is the gate; see the constant's own note.
+    // **The record of the choice.** The item ships ON, which is `1019` here and NesHawk's own
+    // `timer = 1020` under the convention this core's timer runs one lower than NesHawk's at every
+    // instant (`DmcChannel::clock_timer`, and the parity trap in `docs/review/NESHAWK-PROFILE.md`).
     assert_eq!(
-        0,
+        1019,
         NesHawkCompat::DMC_POWER_ON_TIMER,
-        "item 11 ships OFF pending Q-182: setting this to {} is the whole of enabling it",
-        ItemElevenOn::DMC_POWER_ON_TIMER
+        "item 11 ships ON: this is NesHawk's `timer = 1020` in this core's convention"
     );
-    assert_eq!(
-        plain, shipped,
-        "so the shipped NesHawk profile powers its DMC timer on exactly as `Standard` does"
+    assert_ne!(
+        plain, hawk,
+        "and the two profiles do not power their DMC timer on alike"
     );
-}
-
-/// `NesHawkCompat` with **item 11 in place**, so that the item stays measured to the cycle while
-/// the shipped profile does not carry it (see the test above and
-/// `NesHawkCompat::DMC_POWER_ON_TIMER`'s note).
-///
-/// Every other constant is `NesHawkCompat`'s, read from it rather than restated, so this profile
-/// cannot drift away from the one it stands for. It is a test type and nothing outside this file
-/// instantiates it.
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-struct ItemElevenOn;
-
-impl TimingProfile for ItemElevenOn {
-    const NAME: &'static str = "neshawk-item-11";
-    const STATE_ID: u8 = NesHawkCompat::STATE_ID;
-    const STATE_CORE_NAME: &'static str = NesHawkCompat::STATE_CORE_NAME;
-
-    const DMC_HALT_ON_REQUEST_CYCLE: bool = NesHawkCompat::DMC_HALT_ON_REQUEST_CYCLE;
-    const DMC_FETCH_HAS_TWO_DUMMIES: bool = NesHawkCompat::DMC_FETCH_HAS_TWO_DUMMIES;
-    const DMC_LENGTH_LAGS_THE_FETCH: bool = NesHawkCompat::DMC_LENGTH_LAGS_THE_FETCH;
-    const DMC_ENABLE_WRITES_MID_SAMPLE: bool = NesHawkCompat::DMC_ENABLE_WRITES_MID_SAMPLE;
-    const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool = NesHawkCompat::DMC_HALT_LANDS_ON_A_WRITE_CYCLE;
-    const DMC_FETCH_STALLS_AN_OAM_TRANSFER: bool = NesHawkCompat::DMC_FETCH_STALLS_AN_OAM_TRANSFER;
-    const PPU_START_UP_DOTS_SKIPPED: i64 = NesHawkCompat::PPU_START_UP_DOTS_SKIPPED;
-
-    /// The item, and the only line of this profile that is not `NesHawkCompat`'s.
-    const DMC_POWER_ON_TIMER: i32 = 1019;
 }
 
 // ---------------------------------------------------------------- the interrupt-phase ROM

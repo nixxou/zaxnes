@@ -709,30 +709,15 @@ impl<P: TimingProfile> NesBusOf<P> {
         }
         if self.apu.needs_dmc_dma() {
             if P::DMC_FETCH_HAS_TWO_DUMMIES && !self.dmc_from_write {
-                // **Item 1c.** The slip — how many cycles the halt waited for a read cycle — is
-                // how many cycles in a row the CPU was writing on. NesHawk halts from the request
-                // cycle instead and lets those writes through, and its `+2` then costs it two
-                // cycles back, so the two machines agree on an even slip and NesHawk is one cycle
-                // ahead on an odd one; dropping the second re-read is exactly that cycle. The
-                // `DMA_OAM` test is because inside an OAM transfer the CPU is not writing at all:
-                // it is already halted, and the slip is the transfer's, not the opcode's.
-                //
-                // Q-182: once item 11 put the DMC's power-on phase on NesHawk's, *Kirby*'s frame 11
-                // measures one cycle better with this arm removed. The derivation above was
-                // re-checked verbatim against `APU.cs`, `NES.Core.cs` and `MOS 6502X/Execute.cs`
-                // and holds, so the arm stays and the ticket names the one number that would
-                // settle it.
-                if P::DMC_HALT_LANDS_ON_A_WRITE_CYCLE
-                    && (self.dma & DMA_OAM) == 0
-                    && ((halt_cycle - self.dmc_ready_cycle) & 1) == 1
-                {
-                    self.dma |= DMA_DMC | DMA_DUMMY | DMA_HALT;
-                    return;
-                }
                 // **Item 1b.** A reload is a fixed four cycles — the halt, two re-reads of the
                 // CPU's own address, the fetch — so it owes one re-read more than the `Standard`
                 // profile does, and no alignment. A fetch a `$4015` write started is item 3's
                 // three cycles instead and keeps the single re-read.
+                //
+                // **Four at every slip**, which is lot NESHAWK-PROFILE-6 step 1's measurement and
+                // the retraction of item 1c: this arm used to drop the second re-read when the
+                // request fell on an *odd* run of write cycles. It does not. See
+                // `timing_profile.rs`, where the retracted item's note now stands.
                 self.dma |= DMA_DMC | DMA_DUMMY | DMA_DUMMY2 | DMA_HALT;
                 return;
             }
@@ -1666,11 +1651,8 @@ impl<P: TimingProfile> NesBusOf<P> {
     #[inline(always)]
     fn is_a_lone_dmc_fetch(&self) -> bool {
         if P::DMC_FETCH_HAS_TWO_DUMMIES && !self.dmc_from_write {
-            // Item 1c gives a reload whose request landed on an odd run of write cycles the
-            // single re-read instead of two, so on that profile either pattern is a lone fetch.
-            if P::DMC_HALT_LANDS_ON_A_WRITE_CYCLE && self.dma == (DMA_DMC | DMA_DUMMY | DMA_HALT) {
-                return true;
-            }
+            // One pattern and not two since lot NESHAWK-PROFILE-6 retracted item 1c: a reload is
+            // four cycles at every slip, so it always owes `DMA_DUMMY2`.
             return self.dma == (DMA_DMC | DMA_DUMMY | DMA_DUMMY2 | DMA_HALT);
         }
         self.dma == (DMA_DMC | DMA_DUMMY | DMA_HALT)

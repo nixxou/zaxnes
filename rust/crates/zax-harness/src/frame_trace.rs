@@ -344,6 +344,16 @@ pub struct CensusLine {
     /// cycle between and the fetch cycle. `None` for every other kind, and for a fetch whose halt
     /// is not in this frame's census.
     pub cost: Option<i64>,
+    /// The PC of the instruction the event happened inside, and the cycles from that instruction's
+    /// first to the next instruction's first — its **opcode-to-opcode gap**, cost included.
+    ///
+    /// This is here for one reason (lot NESHAWK-PROFILE-6 step 1): a BizHawk Lua script can read
+    /// the same two numbers off its own bus stream, and `gap - cost` is the instruction's
+    /// undisturbed length, which both machines must agree on. So `gap_bizhawk - (gap - cost)` is
+    /// **what NesHawk charged the same fetch**, with no opcode cycle table and no calibration of
+    /// the cycle a DMA read is reported on — the question Q-182 could not answer. `None` for the
+    /// last instruction of a frame, which has no next.
+    pub gap: Option<(u16, i64)>,
 }
 
 /// Where inside a frame a run's work RAM comes closest to a reference's recorded 2 KiB.
@@ -1065,9 +1075,16 @@ fn census_report(lines: &[CensusLine]) -> String {
             Some(cost) => format!("{cost:>4}"),
             None => "   -".to_owned(),
         };
+        // The gap is printed on a fetch alone: it is there to be compared with BizHawk's own
+        // opcode-to-opcode gap for the same instruction, and only a fetch carries the cost that
+        // comparison subtracts.
+        let gap = match (line.event.kind, line.gap) {
+            (DmaEventKind::DmcFetch, Some((pc, gap))) => format!("  pc${pc:04X} gap={gap}"),
+            _ => String::new(),
+        };
         let _ = writeln!(
             text,
-            "      {:<9} {} {:>6} {:>3}:{:<4} ${:04X} {:02X}  {ready} {cost}  ({},{},{}){}",
+            "      {:<9} {} {:>6} {:>3}:{:<4} ${:04X} {:02X}  {ready} {cost}  ({},{},{}){}{gap}",
             line.cycle,
             line.event.kind.tag(),
             line.index,
@@ -1200,9 +1217,15 @@ fn census_lines(
     let mut halt: Option<i64> = None;
     for event in events {
         let at = steps.partition_point(|step| step.cycle <= event.cycle);
-        let (index, scanline, dot) = steps
-            .get(at.saturating_sub(1))
-            .map_or((0, -1, -1), |step| (step.index, step.scanline, step.dot));
+        let inside = steps.get(at.saturating_sub(1));
+        let (index, scanline, dot) =
+            inside.map_or((0, -1, -1), |step| (step.index, step.scanline, step.dot));
+        // The instruction's PC is the first field of `nestest.log`'s own shape, which is what
+        // `Step::line` carries.
+        let gap = inside.zip(steps.get(at)).and_then(|(step, next)| {
+            let pc = u16::from_str_radix(step.line.get(..4)?, 16).ok()?;
+            Some((pc, next.cycle - step.cycle))
+        });
         let cost = match event.kind {
             DmaEventKind::DmcHalt => {
                 halt = Some(event.cycle);
@@ -1222,6 +1245,7 @@ fn census_lines(
             scanline,
             dot,
             cost,
+            gap,
         });
     }
     lines
