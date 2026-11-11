@@ -1476,6 +1476,13 @@ impl<P: TimingProfile> NesBusOf<P> {
                 0x4016 => {
                     self.input.write(value, self.cycles);
                     self.write_vs_port(value);
+                    #[cfg(feature = "dma-census")]
+                    self.note_dma(
+                        crate::dma_census::DmaEventKind::PortStrobe,
+                        address,
+                        value,
+                        0,
+                    );
                 }
                 _ => {
                     self.sync_apu();

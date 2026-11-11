@@ -75,7 +75,17 @@ pub const USAGE: &str = "zax-harness frame-trace <movie.fm2|.bk2> <rom.nes> --fr
                            (reload or started by a $4015 write) and its cost, every OAM transfer,
                            every APU register write and every $4015 and $2002 read, placed against
                            the instruction each happened inside. Needs the `dma-census` feature
-                           (an instrument: `cargo build -p zax-harness --features dma-census`)";
+                           (an instrument: `cargo build -p zax-harness --features dma-census`)
+      --event-log <file>   the CYCLE LEDGER: one line per frame carrying the CPU cycle the frame
+                           started on, its length, its instruction count and its DMA bill, then one
+                           line per event with the cycle it happened on COUNTED FROM THE FRAME'S
+                           START -- each NMI and IRQ handler entry, each --event-pc, and (with
+                           --dmc-census) each $4015/$4016/$4017 and other register access. This is
+                           the format a BizHawk Lua script can be made to write, so that the two
+                           machines can be aligned event for event. It captures no instruction and
+                           disassembles nothing, which is what makes a span of thousands of frames
+                           affordable; --out and --watch are refused with it for that reason
+      --event-pc <addr>    a hex PC whose every execution --event-log records, repeatable";
 
 /// Instructions one traced frame is allowed, before the loop is called broken rather than slow.
 ///
@@ -158,6 +168,11 @@ pub struct Options {
     /// Print the DMA census of every traced frame (`--dmc-census`), which needs the
     /// `dma-census` feature.
     pub dmc_census: bool,
+    /// Where the cycle ledger goes (`--event-log`), and the mode it selects: with it the trace
+    /// captures no instruction at all. See [`Event`].
+    pub event_log: Option<PathBuf>,
+    /// PCs whose every execution the cycle ledger records (`--event-pc`).
+    pub event_pc: Vec<u16>,
 }
 
 /// One traced instruction.
@@ -196,6 +211,44 @@ impl Step {
     }
 }
 
+/// One line of the **cycle ledger** (`--event-log`): something that happened at a known cycle of
+/// a frame, named the same way on both machines.
+///
+/// This is the whole instrument lot NESHAWK-PROFILE-3 step 1 is built on, and its shape is chosen
+/// for one purpose: a BizHawk Lua script can write exactly these lines
+/// (`emu.totalexecutedcycles()` minus the frame's own start, `event.onmemoryexecute` for a PC,
+/// `event.onmemorywrite` for a register), so that two machines can be compared **event for
+/// event** instead of only frame for frame. A count of differing bytes says two machines parted;
+/// the first event whose cycle differs says *where*.
+///
+/// The cycle is counted **from the frame's first cycle**, not absolutely: the two machines start
+/// their runs at different absolute cycles (a power-on offset, and NesHawk's own counter is not
+/// this core's), and nothing about that offset is interesting.
+#[derive(Debug, Clone)]
+pub struct Event {
+    /// Cycles from the frame's first.
+    pub offset: i64,
+    /// The PPU scanline when it happened, or -1 when the event carries none.
+    pub scanline: i32,
+    /// The PPU dot when it happened, or -1.
+    pub dot: i32,
+    /// What it is: `nmi`, `irq`, `pc$XXXX`, or a census tag such as `w$4017`.
+    pub tag: String,
+    /// Whatever the kind carries beside the cycle: the registers for a PC, the byte for a write.
+    pub detail: String,
+}
+
+impl Event {
+    /// The line the ledger file writes.
+    #[must_use]
+    pub fn text(&self, frame: u32) -> String {
+        format!(
+            "  {frame} {:>6} {:<8} {:>3}:{:<4} {}",
+            self.offset, self.tag, self.scanline, self.dot, self.detail
+        )
+    }
+}
+
 /// A watched address changing, with the instruction that changed it.
 #[derive(Debug, Clone)]
 pub struct Change {
@@ -214,8 +267,18 @@ pub struct Change {
 pub struct FrameTrace {
     /// The frame's number, as `movie-sync` counts them.
     pub frame: u32,
-    /// Every instruction of the frame.
+    /// Every instruction of the frame. **Empty in `--event-log` mode**, which captures none.
     pub steps: Vec<Step>,
+    /// The cycle ledger's events, in the order they happened. Empty without `--event-log`.
+    pub events: Vec<Event>,
+    /// The absolute bus cycle the frame started on, which the ledger's header line carries so
+    /// that a frame of a different *length* shows up as a difference of its own.
+    pub start_cycle: i64,
+    /// Instructions the frame ran, which the ledger counts even when it captures none of them.
+    pub instructions: usize,
+    /// Cycles the frame's DMC fetches charged the CPU in all; only under the `dma-census`
+    /// feature, and 0 without it.
+    pub dmc_cost: i64,
     /// Every change of a watched address.
     pub changes: Vec<Change>,
     /// The work-RAM checksum after the traced frame.
@@ -497,7 +560,7 @@ impl Report {
                 text,
                 "  frame {}: {} instructions, input word {:04X}{}",
                 frame.frame,
-                frame.steps.len(),
+                frame.instructions,
                 frame.word,
                 if frame.overran {
                     " -- OVERRAN: the frame boundary was never reached"
@@ -551,6 +614,42 @@ impl Report {
                     let marker = if step.index == change.index { '>' } else { ' ' };
                     let _ = writeln!(text, "    {marker} {}", step.text());
                 }
+            }
+        }
+        text
+    }
+
+    /// The **cycle ledger** (`--event-log`): a header line per frame and a line per event.
+    ///
+    /// The format is the contract between the two machines, so it is written down here rather
+    /// than left implicit in a `writeln!`:
+    ///
+    /// ```text
+    /// F <frame> start=<abs cycle> len=<cycles> instr=<n> dmc=<fetches>/<cycles> oam=<n>
+    ///   <frame> <cycle from the frame's start> <tag> <SL>:<dot> <detail>
+    /// ```
+    ///
+    /// `start` is absolute and the two machines' absolute counters have no reason to agree; it is
+    /// carried because its **difference between consecutive frames** is the frame's length, and a
+    /// frame of a different length on one machine is an immediate pointer. Every event's own
+    /// cycle is counted from the frame's start, which is what makes the two comparable.
+    #[must_use]
+    pub fn ledger_text(&self) -> String {
+        let mut text = String::new();
+        for frame in &self.frames {
+            let _ = writeln!(
+                text,
+                "F {} start={} len={} instr={} dmc={}/{} oam={}",
+                frame.frame,
+                frame.start_cycle,
+                frame.cycles,
+                frame.instructions,
+                frame.dmc_fetches,
+                frame.dmc_cost,
+                frame.oam_transfers
+            );
+            for event in &frame.events {
+                let _ = writeln!(text, "{}", event.text(frame.frame));
             }
         }
         text
@@ -716,6 +815,10 @@ fn trace_on<P: TimingProfile>(
             probing.map(|bytes| (bytes.as_slice(), options.extra)),
             options.converge_window,
             options.dmc_census,
+            options
+                .event_log
+                .as_ref()
+                .map(|_| options.event_pc.as_slice()),
         );
         traced.frame = frame;
         report.frames.push(traced);
@@ -727,6 +830,9 @@ fn trace_on<P: TimingProfile>(
 
     if let Some(path) = &options.out {
         fs::write(path, report.trace_text())?;
+    }
+    if let Some(path) = &options.event_log {
+        fs::write(path, report.ledger_text())?;
     }
     Ok(report)
 }
@@ -755,10 +861,64 @@ fn play<P: TimingProfile>(
     Ok(())
 }
 
+/// What one instruction of the loop below records, which is the one thing the two modes differ in.
+///
+/// Without `ledger`: a full [`Step`], disassembled as `nestest.log` writes it. With it: a bare
+/// `Step` carrying only the cycle and the PPU position — kept so that a census event can still be
+/// placed against the instruction it happened inside, dropped with the frame — plus an [`Event`]
+/// when this instruction is an interrupt handler's first or one of the watched PCs. No
+/// `CpuTracer::capture` and no disassembly in that mode, which is what lets it run over thousands
+/// of frames.
+fn note_instruction<P: TimingProfile>(
+    out: &mut FrameTrace,
+    cpu: &zax_nes::cpu::Cpu6502,
+    bus: &zax_nes::NesBusOf<P>,
+    index: usize,
+    interrupt: Option<&'static str>,
+    ledger: Option<&[u16]>,
+    first_cycle: i64,
+) {
+    let (scanline, dot, cycle) = (bus.ppu().scanline(), bus.ppu().dot(), bus.cycle_count());
+    out.steps.push(Step {
+        index,
+        scanline,
+        dot,
+        cycle,
+        line: match ledger {
+            None => CpuTracer::capture(cpu, bus).format(),
+            Some(_) => String::new(),
+        },
+        interrupt,
+    });
+    let Some(watched) = ledger else { return };
+    let pc = cpu.pc;
+    if interrupt.is_none() && !watched.contains(&pc) {
+        return;
+    }
+    out.events.push(Event {
+        offset: cycle - first_cycle,
+        scanline,
+        dot,
+        tag: match interrupt {
+            Some(which) => which.to_ascii_lowercase(),
+            None => format!("pc${pc:04X}"),
+        },
+        detail: format!(
+            "A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} i={index}",
+            cpu.a,
+            cpu.x,
+            cpu.y,
+            cpu.p(),
+            cpu.s
+        ),
+    });
+}
+
 /// Drives one frame instruction by instruction, which is `NesCore::run_frame`'s own loop.
 ///
 /// `probe` is the reference's own 2 KiB for this frame and how many instructions to carry on
 /// past the frame boundary; see [`Converge`].
+#[allow(clippy::too_many_arguments)] // Each is one of the modes the one loop below has to serve.
 fn trace_frame<P: TimingProfile>(
     core: &mut NesCoreOf<P>,
     word: u16,
@@ -766,6 +926,7 @@ fn trace_frame<P: TimingProfile>(
     probe: Option<(&[u8], usize)>,
     window_half: usize,
     census: bool,
+    ledger: Option<&[u16]>,
 ) -> FrameTrace {
     let mut out = FrameTrace {
         word,
@@ -778,6 +939,7 @@ fn trace_frame<P: TimingProfile>(
     bus.ppu_mut().clear_frame_boundary();
     out.unlocked = bus.ppu().wide().unlocked();
     let first = (bus.cycle_count(), bus.dmc_dma_count(), bus.oam_dma_count());
+    out.start_cycle = first.0;
     // The census is a per-frame record, so it starts empty here and is read at the boundary.
     #[cfg(feature = "dma-census")]
     if census {
@@ -798,23 +960,16 @@ fn trace_frame<P: TimingProfile>(
     });
     let mut boundary: Option<usize> = None;
     for index in 0..MAX_INSTRUCTIONS {
-        let captured = CpuTracer::capture(cpu, bus);
-        let interrupt = match captured.pc {
+        let pc = cpu.pc;
+        let interrupt = match pc {
             // The handler's first instruction: the vector was just taken. Reported rather than
             // inferred from the stack, because the two vectors are what the ROM itself names.
-            pc if pc == nmi_vector => Some("NMI"),
-            pc if pc == irq_vector && irq_vector != nmi_vector => Some("IRQ"),
+            _ if pc == nmi_vector => Some("NMI"),
+            _ if pc == irq_vector && irq_vector != nmi_vector => Some("IRQ"),
             _ => None,
         };
         if boundary.is_none() {
-            out.steps.push(Step {
-                index,
-                scanline: bus.ppu().scanline(),
-                dot: bus.ppu().dot(),
-                cycle: bus.cycle_count(),
-                line: captured.format(),
-                interrupt,
-            });
+            note_instruction(&mut out, cpu, bus, index, interrupt, ledger, first.0);
         }
         if cpu.step(bus) == 0 {
             out.stalled += 1;
@@ -843,6 +998,7 @@ fn trace_frame<P: TimingProfile>(
             .map(|(wanted, _, found)| found.take(index, bus.ram(), wanted));
 
         if boundary.is_none() && bus.ppu().vblank_just_started() {
+            out.instructions = index + 1;
             close_frame(&mut out, bus, first, census);
             boundary = Some(index);
             if let Some((_, _, found)) = converge.as_mut() {
@@ -856,7 +1012,7 @@ fn trace_frame<P: TimingProfile>(
         }
         match (boundary, converge.as_ref()) {
             // No probe: the frame ends at its own boundary, as `run_frame` does.
-            (Some(_), None) => return out,
+            (Some(_), None) => break,
             // A probe: carry on for the instructions it asked for.
             (Some(at), Some((_, extra, _))) if index >= at + *extra => break,
             _ => {}
@@ -864,12 +1020,18 @@ fn trace_frame<P: TimingProfile>(
     }
     if boundary.is_none() {
         out.overran = true;
+        out.instructions = MAX_INSTRUCTIONS;
         close_frame(&mut out, bus, first, census);
     }
     out.converge = converge.map(|(_, _, mut found)| {
         found.extra = found.compared.saturating_sub(found.boundary + 1);
         found
     });
+    // A ledger run keeps thousands of frames at once, and nothing past this point reads the bare
+    // steps a ledger frame pushed: they are the frame's own scaffolding and go with it.
+    if ledger.is_some() {
+        out.steps = Vec::new();
+    }
     out
 }
 
@@ -972,9 +1134,51 @@ fn close_frame<P: TimingProfile>(
     #[cfg(feature = "dma-census")]
     if census {
         out.census = census_lines(bus.dma_census(), &out.steps, first.0);
+        out.dmc_cost = out.census.iter().filter_map(|line| line.cost).sum();
+        // The ledger's own events are in cycle order and so are the census's, so a *stable* sort
+        // on the cycle merges the two without reordering either.
+        out.events.extend(ledger_events(&out.census));
+        out.events.sort_by_key(|event| event.offset);
     }
     #[cfg(not(feature = "dma-census"))]
     let _ = census;
+}
+
+/// The census events the cycle ledger carries, which are exactly the ones a BizHawk Lua script
+/// can also see: a register access and an OAM request.
+///
+/// The DMC's own request, halt and fetch are **left out on purpose**. There are two hundred of
+/// them in a *Kirby* frame and no documented Lua hook reports them, so a ledger line for one could
+/// never be compared with anything; the frame's header carries their count and their total cost
+/// instead, which is the comparable quantity (a frame is a fixed 29 780 cycles, so two machines
+/// that get different amounts of work done differ by what the DMA charged them).
+#[cfg(feature = "dma-census")]
+fn ledger_events(lines: &[CensusLine]) -> Vec<Event> {
+    use zax_nes::dma_census::DmaEventKind;
+
+    lines
+        .iter()
+        .filter_map(|line| {
+            let tag = match line.event.kind {
+                DmaEventKind::ApuWrite | DmaEventKind::PortStrobe => {
+                    format!("w${:04X}", line.event.address)
+                }
+                DmaEventKind::ApuStatusRead => "r$4015".to_owned(),
+                DmaEventKind::PpuStatusRead => format!("r${:04X}", line.event.address),
+                DmaEventKind::OamRequest => "oam".to_owned(),
+                DmaEventKind::DmcRequest | DmaEventKind::DmcHalt | DmaEventKind::DmcFetch => {
+                    return None
+                }
+            };
+            Some(Event {
+                offset: line.cycle,
+                scanline: line.scanline,
+                dot: line.dot,
+                tag,
+                detail: format!("={:02X} i={}", line.event.value, line.index),
+            })
+        })
+        .collect()
 }
 
 /// Places every core event against the instruction it happened inside, and gives each `DmcFetch`
@@ -1083,17 +1287,12 @@ fn parse(args: &[String]) -> Result<Options, HarnessError> {
                 options.context =
                     usize::try_from(number(&value(&mut index), "--context")?).unwrap_or(0);
             }
-            "--watch" => {
-                let text = value(&mut index);
-                let address =
-                    u16::from_str_radix(text.trim_start_matches("0x"), 16).map_err(|_| {
-                        HarnessError::Usage(format!(
-                            "--watch {text:?} is not a hex address\n{USAGE}"
-                        ))
-                    })?;
-                options.watch.push(address);
-            }
+            "--watch" => options.watch.push(address(&value(&mut index), "--watch")?),
             "--out" => options.out = Some(PathBuf::from(value(&mut index))),
+            "--event-log" => options.event_log = Some(PathBuf::from(value(&mut index))),
+            "--event-pc" => options
+                .event_pc
+                .push(address(&value(&mut index), "--event-pc")?),
             "--converge" => options.converge = Some(PathBuf::from(value(&mut index))),
             "--converge-window" => {
                 let text = value(&mut index);
@@ -1151,12 +1350,32 @@ fn parse(args: &[String]) -> Result<Options, HarnessError> {
             "frame-trace needs a movie, a ROM and --frame\n{USAGE}"
         )));
     }
+    // The ledger mode captures no instruction, so neither the trace file nor a watched
+    // address's context can be produced from it. Refusing the combination is the honest answer:
+    // an empty `--out` file or a change with no context around it would read as a result.
+    if options.event_log.is_some() && (options.out.is_some() || !options.watch.is_empty()) {
+        return Err(HarnessError::Usage(format!(
+            "--event-log captures no instruction, so --out and --watch cannot be served from it; \
+             run them as a second command\n{USAGE}"
+        )));
+    }
+    if options.event_log.is_none() && !options.event_pc.is_empty() {
+        return Err(HarnessError::Usage(format!(
+            "--event-pc is recorded by --event-log, which is not asked for\n{USAGE}"
+        )));
+    }
     Ok(options)
 }
 
 fn number(text: &str, flag: &str) -> Result<u32, HarnessError> {
     text.parse()
         .map_err(|_| HarnessError::Usage(format!("{flag} {text:?} is not a number\n{USAGE}")))
+}
+
+/// A hex address, for the two options that take one (`--watch` and `--event-pc`).
+fn address(text: &str, flag: &str) -> Result<u16, HarnessError> {
+    u16::from_str_radix(text.trim_start_matches("0x"), 16)
+        .map_err(|_| HarnessError::Usage(format!("{flag} {text:?} is not a hex address\n{USAGE}")))
 }
 
 #[cfg(test)]
@@ -1246,6 +1465,9 @@ mod tests {
             frames: vec![FrameTrace {
                 frame: 246,
                 steps: (0..5).map(step).collect(),
+                // Not `steps.len()`: the ledger mode captures no step and still counts them,
+                // which is why the report reads this field and not the vector.
+                instructions: 5,
                 changes: vec![Change {
                     address: 0x004B,
                     index: 3,
@@ -1280,6 +1502,114 @@ mod tests {
         assert_eq!(file.lines().filter(|line| line.contains("LDA")).count(), 5);
         assert!(file.contains("=== frame 246"), "{file}");
         assert!(file.contains("--- $004B: 00 -> 01"), "{file}");
+    }
+
+    /// The cycle ledger's own two halves: the file format the BizHawk script has to match, and
+    /// the two option combinations it must refuse.
+    ///
+    /// The format is a contract between two machines, so a change to it is a change to the Lua
+    /// script in `docs/review/` as well; pinning it here is what makes that visible.
+    #[test]
+    fn the_cycle_ledger_writes_the_format_the_other_machine_is_read_in() {
+        let report = Report {
+            frames: vec![FrameTrace {
+                frame: 1100,
+                start_cycle: 32_728_781,
+                cycles: 29_779,
+                instructions: 9335,
+                dmc_fetches: 3,
+                dmc_cost: 11,
+                oam_transfers: 1,
+                events: vec![
+                    Event {
+                        offset: 7,
+                        scanline: 241,
+                        dot: 27,
+                        tag: "nmi".to_owned(),
+                        detail: "A:00 X:00 Y:00 P:27 SP:F9 i=1".to_owned(),
+                    },
+                    Event {
+                        offset: 1715,
+                        scanline: 256,
+                        dot: 36,
+                        tag: "w$4017".to_owned(),
+                        detail: "=C0 i=393".to_owned(),
+                    },
+                ],
+                ..FrameTrace::default()
+            }],
+            ..Report::default()
+        };
+        let text = report.ledger_text();
+        assert_eq!(text.lines().count(), 3, "{text}");
+        assert_eq!(
+            text.lines().next(),
+            Some("F 1100 start=32728781 len=29779 instr=9335 dmc=3/11 oam=1"),
+            "{text}"
+        );
+        // The frame number is repeated on every event line, so that `grep` on one frame of a
+        // ledger of nine thousand gives something readable on its own.
+        assert!(
+            text.contains("  1100      7 nmi      241:27   A:00 X:00 Y:00 P:27 SP:F9 i=1"),
+            "{text}"
+        );
+        assert!(
+            text.contains("  1100   1715 w$4017   256:36   =C0 i=393"),
+            "{text}"
+        );
+
+        let base = || {
+            vec![
+                "a.bk2".to_owned(),
+                "b.nes".to_owned(),
+                "--frame".to_owned(),
+                "1100".to_owned(),
+            ]
+        };
+        let mut good = base();
+        good.extend(["--event-log".to_owned(), "l.txt".to_owned()]);
+        good.extend(["--event-pc".to_owned(), "C06E".to_owned()]);
+        let options = parse(&good).unwrap_or_default();
+        assert_eq!(options.event_pc, [0xC06E]);
+        assert!(options.event_log.is_some());
+
+        for (bad, why) in [
+            (
+                vec!["--event-pc".to_owned(), "C06E".to_owned()],
+                "no --event-log",
+            ),
+            (
+                vec![
+                    "--event-log".to_owned(),
+                    "l.txt".to_owned(),
+                    "--out".to_owned(),
+                    "t.txt".to_owned(),
+                ],
+                "--out captures instructions the ledger has none of",
+            ),
+            (
+                vec![
+                    "--event-log".to_owned(),
+                    "l.txt".to_owned(),
+                    "--watch".to_owned(),
+                    "0039".to_owned(),
+                ],
+                "--watch needs the context the ledger has none of",
+            ),
+            (
+                vec![
+                    "--event-log".to_owned(),
+                    "l.txt".to_owned(),
+                    "--event-pc".to_owned(),
+                    "zz".to_owned(),
+                ],
+                "not a hex address",
+            ),
+        ] {
+            let mut args = base();
+            args.extend(bad);
+            assert!(parse(&args).is_err(), "should be refused: {why}");
+        }
     }
 
     /// `--converge-window`'s two halves: which addresses are *live*, and the line that says on

@@ -27,6 +27,13 @@ pub enum DmaEventKind {
     OamRequest,
     /// A write to `$4000`-`$4013`, `$4015` or `$4017`.
     ApuWrite,
+    /// A write to `$4016`: the controller ports' strobe.
+    ///
+    /// Not an APU register and not a DMA, but on NesHawk it is on the same per-cycle path — its
+    /// `APU.RunOneLast` applies a strobe on the first cycle with `dmc.timer % 2 == 1` rather than
+    /// at the write — so a census that places the DMC's fetches against the cycle has to place
+    /// this beside them. Lot NESHAWK-PROFILE-3 step 1 asks for it by name.
+    PortStrobe,
     /// A read of `$4015`, whichever unit made it.
     ApuStatusRead,
     /// A read of `$2002`, whichever unit made it.
@@ -43,6 +50,7 @@ impl DmaEventKind {
             Self::DmcFetch => "fetch  ",
             Self::OamRequest => "oam    ",
             Self::ApuWrite => "write  ",
+            Self::PortStrobe => "strobe ",
             Self::ApuStatusRead => "r4015  ",
             Self::PpuStatusRead => "r2002  ",
         }
