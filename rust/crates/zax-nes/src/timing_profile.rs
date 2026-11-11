@@ -90,24 +90,76 @@ pub trait TimingProfile: Copy + Clone + Default + core::fmt::Debug + Send + Sync
     /// (`bytes_remaining == 0`), and a mid-sample write leaves the plain four-cycle reload alone.
     const DMC_ENABLE_WRITES_MID_SAMPLE: bool;
 
-    // **Item 1c is retracted** (lot NESHAWK-PROFILE-6 step 1), as item 8 was by
-    // NESHAWK-PROFILE-4, and for the same reason: it was a reading of the source that the
-    // measurement refuses. It said the halt landing on the request cycle *even when the CPU is
-    // writing on it* makes an **odd** run of write cycles cost a reload one cycle less than an even
-    // one. NesHawk charges a reload **four** cycles at every slip, 0 to 3, which is the `else` arm
-    // — item 1b — on its own, so there is no constant here any more.
-    //
-    // What the derivation missed is `RunCpuOne`'s closing
-    // `if (!cpu.RDY && !dmc_dma_exec && !oam_dma_exec) cpu.RDY = true;`: `DMCUnit.Run()` lowers
-    // `RDY` from `RunOneFirst()`, before `cpu.ExecuteOne()`, but `dmc_dma_exec` is still false on
-    // the request cycle, so `RDY` goes straight back up at the end of it and the write microstep the
-    // odd-slip cycle hung on decides nothing. The `+2` still fires while the CPU writes through the
-    // countdown, and it buys back exactly what letting those writes through cost.
-    //
-    // `docs/progress/NESHAWK-PROFILE-6.md` step 1 has the measurement, which is **Q-182's answer**
-    // and is calibration-free: of frame 11's `$40xx` accesses every write lands at residual 0
-    // against BizHawk's own up to and including the `$4007` write the disputed request falls on, and
-    // the `$4015` read 252 cycles later lands at +1, with exactly one fetch between them.
+    /// **Item 1c** (lot NESHAWK-PROFILE-2 step 3; retracted by NESHAWK-PROFILE-6 and **restored by
+    /// NESHAWK-PROFILE-8, which measured it**). The halt lands on the request cycle **even when the
+    /// CPU is writing on it**, so a request that falls on a run of an *odd* number of write cycles
+    /// gives the CPU its cycle back **one cycle earlier** than waiting for the next read cycle does.
+    ///
+    /// This is item 1's third half, which NESHAWK-PROFILE named in its step 1 and did not
+    /// implement. NesHawk has it in two pieces: `DMCUnit.Run()` lowers `RDY` whatever the CPU is
+    /// doing on the request cycle, and `MOS6502X`'s write microstep runs unconditionally and never
+    /// sets `rdy_freeze`; then `RunCpuOne`'s
+    /// `if (!cpu.RDY && !cpu.rdy_freeze && dmc_dma_countdown == DMC_RDY_check) countdown += 2`
+    /// gives the fetch two more cycles when no read microstep has stalled by then — that is, when
+    /// the CPU has been writing throughout.
+    ///
+    /// **Why one bit of the slip is the whole of it.** Let the request fall on a run of `w`
+    /// consecutive write cycles. NesHawk's stalled read then executes `w + 4` cycles after the
+    /// request for `w` of 0 or 2, and `w + 3` for `w` of 1 or 3 (the `+2` fires for `w >= 2`, and
+    /// the run ends before the countdown needs it for `w <= 1`). Zaxnes halts the first read cycle
+    /// instead, `w` cycles on, and spends four — `w + 4` always. So the two agree on an even `w`
+    /// and differ by exactly one cycle on an odd one, and **a 6502 never writes on more than three
+    /// cycles in a row** (the three pushes of an interrupt or `BRK`; `JSR` and a read-modify-write
+    /// make two), so `w <= 3` and the rule below is exact rather than an approximation.
+    ///
+    /// **The measurement, which is the reason the item is back** (lot NESHAWK-PROFILE-8 step 1).
+    /// Over tree frames 11 to 46 of the *Kirby* `.bk2`, **705** sample fetches read off BizHawk's
+    /// own bus stream with **no cross-machine calibration anywhere** — the stall is an
+    /// instruction's duration minus the shortest duration that PC is ever seen to take, and the
+    /// writes that passed through the DMA are the cycles carrying a `w` **and** an `r`, NesHawk's
+    /// write microstep ignoring `RDY` being exactly what puts two accesses on one cycle:
+    ///
+    /// | slip | stall 3 | stall 4 |
+    /// |---|---|---|
+    /// | 0 | 0 | **648** |
+    /// | 1 | **46** | 0 |
+    /// | 2 | 0 | **11** |
+    ///
+    /// No exceptions, so `stall = 4 − (slip mod 2)`. Lot NESHAWK-PROFILE-6 retracted the item on a
+    /// table that read the slip off **this core's** census and the stall off BizHawk's stream; the
+    /// slip is a property of what the **CPU** is doing on the request cycle, and the two machines'
+    /// CPUs are 2 cycles apart inside the instruction from the movie's reset onwards (the reset
+    /// lands 3 cycles late here — NESHAWK-PROFILE-8 step 1), so a fetch this core calls slip 1 is
+    /// one NesHawk calls slip 0 or 2. Lot 6's own table said so and was read the other way round:
+    /// "slip 1 came out 4 six times and **3 ten times**", and the ten were the measurement.
+    ///
+    /// Read at `nes_bus.rs` `promote_dmc_wait` and `is_a_lone_dmc_fetch`. Only a **reload** is
+    /// affected: a fetch item 3's `$4015` write started is not halted on its request cycle at all.
+    ///
+    /// **The shipped value is `false`, and the gate is written down** (lot NESHAWK-PROFILE-8 step
+    /// 2), which is the shape item 11 shipped in for a lot: the item is exactly right and costs
+    /// the one movie the profile exists for. On its own it takes the *Kirby* `.bk2` from no live
+    /// difference until frame **45 095** back to **925**, because the slip it fires on is read off
+    /// **this core's** CPU position and this core's CPU is 2 cycles further into the instruction
+    /// than NesHawk's from the movie's reset onwards — so the right rule fires on the wrong
+    /// fetches. The gate is therefore the *other* difference NESHAWK-PROFILE-8 step 1 measured:
+    /// **the movie's reset lands 3 CPU cycles late here**, because NesHawk's frame ends at a fixed
+    /// PPU dot, mid-instruction, where `NesCoreOf::run_frame_profiled`'s loop breaks after the
+    /// instruction that straddles it. Fix that and this item's own measurement says it must go
+    /// back on; `tests/neshawk_profile_tests.rs`'s `ItemOneCOn` keeps it measured to the cycle
+    /// while it is off, and setting this to `true` on [`NesHawkCompat`] is the whole of enabling
+    /// it.
+    ///
+    /// Measured, so that the next lot does not re-measure it: with the item on **and** the reset's
+    /// phase moved by the one knob that can move it (item 10's dot count at the reset alone, `+9`
+    /// dots) the movie reaches 1 100 and parts at **9 353** — better than the item alone by 8 428
+    /// frames and still 35 742 short of the shipped 45 095. The dot knob is **not** the reset fix:
+    /// a dot bias moves the PPU against the CPU, so the post-reset boot's 7-cycle `$2002` polling
+    /// loop re-quantises it (the residual reads +2, +2, +2, +1, −5 over biases of 0, 3, 6, 9 and
+    /// 12 dots and never reaches the −1 the frames before the reset read), where applying the
+    /// reset 3 cycles earlier moves the whole machine and leaves the code's position against the
+    /// PPU alone.
+    const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool;
 
     /// **Item 7** (lot NESHAWK-PROFILE-2 step 3), NesHawk's `dmc_realign`: a DMC fetch that falls
     /// **inside an OAM transfer** makes that transfer one cycle longer than the fetch alone does.
@@ -220,6 +272,7 @@ impl TimingProfile for Standard {
     const DMC_FETCH_HAS_TWO_DUMMIES: bool = false;
     const DMC_LENGTH_LAGS_THE_FETCH: bool = false;
     const DMC_ENABLE_WRITES_MID_SAMPLE: bool = false;
+    const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool = false;
     const DMC_FETCH_STALLS_AN_OAM_TRANSFER: bool = false;
     const PPU_START_UP_DOTS_SKIPPED: i64 = 0;
     const DMC_POWER_ON_TIMER: i32 = 0;
@@ -243,6 +296,8 @@ impl TimingProfile for NesHawkCompat {
     const DMC_FETCH_HAS_TWO_DUMMIES: bool = true;
     const DMC_LENGTH_LAGS_THE_FETCH: bool = true;
     const DMC_ENABLE_WRITES_MID_SAMPLE: bool = true;
+    /// **Off, with the gate**: see the constant's own note. `true` is the whole of enabling it.
+    const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool = false;
     const DMC_FETCH_STALLS_AN_OAM_TRANSFER: bool = true;
     const PPU_START_UP_DOTS_SKIPPED: i64 = 7165;
 
