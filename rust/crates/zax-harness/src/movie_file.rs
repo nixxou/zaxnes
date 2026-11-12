@@ -235,6 +235,22 @@ impl MovieFile {
         }
     }
 
+    /// The **engine** this movie should be replayed on, `None` when nothing in the header asks
+    /// for a particular one.
+    ///
+    /// The sibling of [`Self::recorded_profile`]: that one picks a *timing chip* for Zaxnes's own
+    /// core, this one picks the core. A `.bk2` names it in `Header.txt`, and
+    /// [`zax_core_api::EngineKind::for_bizhawk_core`] is the one place the mapping lives — so
+    /// `movie-sync`'s default engine and any future importer agree. `NesHawk` is the one name
+    /// this build answers; `QuickNes` has no port here.
+    #[must_use]
+    pub fn recorded_engine(&self) -> Option<zax_core_api::EngineKind> {
+        if self.kind != "bk2" {
+            return None;
+        }
+        zax_core_api::EngineKind::for_bizhawk_core(self.header.get("Core")?)
+    }
+
     /// Reads an `.fm2`.
     ///
     /// `rom_is_cartridge` is whether the image the movie will be played on is an iNES cartridge.

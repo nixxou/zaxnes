@@ -39,6 +39,9 @@ fceux-core = ["dep:zax-fceux", "zax-fceux/fceux-core"]
 [dependencies]
 zax-core-api = { path = "../zax-core-api" }
 zax-fceux = { path = "../zax-fceux", optional = true }
+# The NesHawk port: safe Rust, no feature gate, so the engine row is a real choice in every
+# build (lot NESHAWK-REWRITE).
+zax-neshawk = { path = "../zax-neshawk" }
 zax-nes = { path = "../zax-nes" }
 zax-settings = { path = "../zax-settings" }
 zax-profiles = { path = "../zax-profiles" }

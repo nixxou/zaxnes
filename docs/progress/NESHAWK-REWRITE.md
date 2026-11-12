@@ -539,3 +539,50 @@ says `Background`), and four-screen nametables (the console's 2 KiB and the cart
 them are two memories here where in Zaxnes they are one).
 
 *Kirby* frames 1-400 re-run after the load path changed: still **400 of 400 byte-identical**.
+
+### Resumption 2, step C — the application, and the `.bk2` default engine
+
+`emu.engine` is now a choice of **three** (`Zaxnes`, `FCEUX`, `NesHawk`), with the row shown in
+**every** build: it was gated on the `fceux-core` feature because without it the row was a choice
+of one, and `zax-neshawk` is safe Rust behind no feature at all, so that is no longer true.
+`EngineHandle::of_kind` gained a `NesHawk` arm with no fallback (the crate keeps no
+process-global state and so cannot refuse to be created the way FCEUX can) and the tile capture
+**on**, since the records are what the 3D renderer reads. A load with no copy of BizHawk's
+`gamedb` logs a line saying the board was chosen from the iNES header alone.
+
+**The greying test is now "is the engine Zaxnes", not "is the engine FCEUX".** The widescreen
+rows, the hack packs, the sprite limit and the run-ahead are greyed on NesHawk for exactly the
+reason they are greyed on FCEUX — all four are patches to *Zaxnes's* bus or PPU, and
+`Capabilities::NESHAWK` and `Capabilities::FCEUX` agree on every one of them. The four hint texts
+were rewritten engine-neutrally in both languages ("this engine has no widescreen…"), their keys
+kept so an older translation still resolves, and `detail.emu.engine` now describes all three
+engines and says what NesHawk is *for*. A new `status.engine_neshawk` marker joins
+`status.engine_fceux`, in English and French.
+
+#### `.bk2` playback: what was asked, and what the application can actually do
+
+The brief asks for "`.bk2` playback in the application defaulting to `neshawk` for movies whose
+`Core` is `NesHawk`". **The application has no `.bk2` reader at all** — it opens `.fm2`, `.fcm`
+and Zaxnes's own `.mv<n>`/`.zmv`, and the `.bk2` reader is the harness's. Adding one is a feature
+lot, not a wiring change, so what this step delivered is the *rule* and its one live use:
+
+* `EngineKind::for_bizhawk_core(core)` in `zax-core-api` — the single place the mapping lives, so
+  that every reader agrees. `NesHawk` → the port; `QuickNes` (BizHawk's *default* core, which is
+  why `coin-neshawk.txt` turned out not to be a NesHawk run) → `None`.
+* `MovieFile::recorded_engine()`, the sibling of `recorded_profile()`: that one picks a timing
+  chip for Zaxnes's core, this one picks the core.
+* **`movie-sync`'s `--engine` now defaults to `neshawk` for a `.bk2` whose `Core` is NesHawk**,
+  and to `both` for everything else. `--engine` always wins, and the choice is printed, so nobody
+  reads a `neshawk` run as a `both` run. Verified on the Kirby `.bk2`: with no `--engine` at all
+  it now prints the note and runs `neshawk`.
+
+An application `.bk2` importer therefore has the rule waiting for it; the gap table says so.
+
+#### One pre-existing break this step found and fixed
+
+`cargo clippy -p zax-app --all-features` did not compile, and not because of this lot:
+`ControllerPortType::Empty` was added by lot NESHAWK-PROFILE-13 and `zax-fceux`'s
+`set_port_type` was never given its arm, so the **`fceux-core` configuration had not compiled
+since**. Fixed by refusing `Empty` as it refuses `Zapper`, which is the right answer and not a
+convenience: `Empty` is BizHawk's `UnpluggedNES`, whose read answers 0 for ever where a pad
+answers 1 from the ninth read, and accepting it would hand back a pad while reporting a socket.

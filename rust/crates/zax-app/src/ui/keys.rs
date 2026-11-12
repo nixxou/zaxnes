@@ -187,7 +187,10 @@ pub const HINT_NEEDS_CURVATURE: &str = "hint.needs_curvature";
 pub const HINT_REGION_AUTOMATIC: &str = "hint.region_automatic";
 /// `emu.core`: this version has one core, so the value is always 0.
 pub const HINT_SINGLE_CORE: &str = "hint.single_core";
-/// The widescreen rows while FCEUX is the engine chosen for the game (lot FCEUX-23 step 5).
+/// The widescreen rows while an engine other than Zaxnes's own is chosen for the game (lot
+/// FCEUX-23 step 5; lot NESHAWK-REWRITE made the text engine-neutral, because NesHawk has none of
+/// the four either and `Capabilities::NESHAWK` says so). The key keeps its name so that a
+/// translation written before that lot still resolves.
 pub const HINT_FCEUX_NO_WIDESCREEN: &str = "hint.fceux_no_widescreen";
 /// The hack-pack rows, likewise.
 pub const HINT_FCEUX_NO_HACKS: &str = "hint.fceux_no_hacks";
@@ -197,6 +200,8 @@ pub const HINT_FCEUX_NO_SPRITE_LIMIT: &str = "hint.fceux_no_sprite_limit";
 pub const HINT_FCEUX_NO_RUN_AHEAD: &str = "hint.fceux_no_run_ahead";
 /// The marker the status line and the game's options show while FCEUX is the engine.
 pub const STATUS_ENGINE_FCEUX: &str = "status.engine_fceux";
+/// The same, while the NesHawk port is the engine (lot NESHAWK-REWRITE).
+pub const STATUS_ENGINE_NESHAWK: &str = "status.engine_neshawk";
 /// The engine row, while FCEUX is chosen for a game lot FCEUX-6 validated for 3D on it
 /// (lot FCEUX-48 step 2).
 pub const HINT_FCEUX_VALIDATED: &str = "hint.fceux_validated";
@@ -713,6 +718,7 @@ pub const PUBLISHED: &[&str] = &[
     HINT_FCEUX_NO_SPRITE_LIMIT,
     HINT_FCEUX_NO_RUN_AHEAD,
     STATUS_ENGINE_FCEUX,
+    STATUS_ENGINE_NESHAWK,
     HINT_FCEUX_VALIDATED,
     HINT_FCEUX_NOT_VALIDATED,
     HINT_NEEDS_ACHIEVEMENTS,

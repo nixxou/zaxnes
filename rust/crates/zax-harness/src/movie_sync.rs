@@ -87,7 +87,9 @@ use crate::HarnessError;
 pub const USAGE: &str = "zax-harness movie-sync <movie.fm2|.bk2> <rom.nes> [options]
     Plays a TAS movie and says where the two engines part, frame by frame. With `both` it runs
     them in lockstep and compares the work RAM, the picture and each frame's input sensitivity.
-      --engine zaxnes|fceux|neshawk|both   which machine(s) (default: both)
+      --engine zaxnes|fceux|neshawk|both   which machine(s) (default: `neshawk` for a .bk2
+                           whose `Core` header is NesHawk -- a movie replays exactly only on
+                           the machine that recorded it -- and `both` for everything else)
                            `neshawk` is `zax-neshawk`, the Rust port of BizHawk's own core
       --frames <n>         stop after n frames (default: the whole movie)
       --from <n>           start comparing at frame n (both engines still run every frame)
@@ -240,6 +242,9 @@ pub struct Options {
     pub rom: PathBuf,
     /// Which machine(s).
     pub engine: Engines,
+    /// Whether `--engine` was given. Without it a `.bk2` recorded on NesHawk defaults to the port
+    /// of that core rather than to `both`; see [`default_engine_for`].
+    pub engine_was_chosen: bool,
     /// A frame cap, or the whole movie.
     pub frames: Option<u32>,
     /// The first frame compared.
@@ -339,6 +344,7 @@ impl Default for Options {
             movie: PathBuf::new(),
             rom: PathBuf::new(),
             engine: Engines::Both,
+            engine_was_chosen: false,
             neshawk_gamedb: None,
             neshawk_event_log: None,
             neshawk_watch_pc: Vec::new(),
@@ -394,7 +400,10 @@ impl Options {
             let argument = args[index].clone();
             index += 1;
             match argument.as_str() {
-                "--engine" => options.engine = parse_engine(&value_at(args, &mut index))?,
+                "--engine" => {
+                    options.engine = parse_engine(&value_at(args, &mut index))?;
+                    options.engine_was_chosen = true;
+                }
                 "--neshawk-gamedb" => {
                     options.neshawk_gamedb = Some(PathBuf::from(value_at(args, &mut index)));
                 }
@@ -511,6 +520,29 @@ impl Options {
             Err(HarnessError::Usage(USAGE.to_owned()))
         }
     }
+}
+
+/// The engine to run, which is `--engine` when it was given and otherwise the one the **movie**
+/// asks for.
+///
+/// A movie only replays exactly on the machine that recorded it, and a `.bk2` says in its own
+/// header which core that was. So a `.bk2` whose `Core` is `NesHawk` defaults to `neshawk`, the
+/// port of that core — which is the whole reason `zax-neshawk` exists — rather than to the `both`
+/// an `.fm2` or a Zaxnes movie gets. `--engine` always wins, and the choice is printed so that
+/// nobody reads a `neshawk` run as a `both` run.
+fn default_engine_for(options: &Options, movie: &MovieFile) -> Engines {
+    if options.engine_was_chosen {
+        return options.engine;
+    }
+    if movie.recorded_engine() == Some(zax_core_api::EngineKind::NesHawk) {
+        println!(
+            "  note: the movie's own header says it was recorded on BizHawk's NesHawk, so it is \
+             played on `--engine neshawk`, the port of that core -- a movie replays exactly only \
+             on the machine that recorded it. Pass --engine both (or zaxnes) to override."
+        );
+        return Engines::Neshawk;
+    }
+    options.engine
 }
 
 fn parse_engine(text: &str) -> Result<Engines, HarnessError> {
@@ -1752,7 +1784,7 @@ pub fn run(options: &Options) -> Result<Measurement, HarnessError> {
         region,
         ram,
     };
-    match options.engine {
+    match default_engine_for(options, &movie) {
         Engines::Both => run_lockstep(options, &movie, &machines, &mut measurement)?,
         Engines::Zaxnes => {
             let mut machine = zaxnes_machine(options, &movie, &machines)?;
@@ -3244,6 +3276,7 @@ mod tests {
             // `run` refuses before it loads anything, so the paths need not exist.
             let error = run(&Options {
                 engine: Engines::Both,
+                engine_was_chosen: false,
                 ..options
             })
             .err()

@@ -141,11 +141,12 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HINT_NEEDS_CURVATURE, "(sans effet : aucune courbure n'est réglée)"),
     (keys::HINT_REGION_AUTOMATIC, "(fixée par la détection au prochain chargement de ROM)"),
     (keys::HINT_SINGLE_CORE, "(cette version n'a qu'un cœur : la valeur est toujours 0)"),
-    (keys::HINT_FCEUX_NO_WIDESCREEN, "(le moteur FCEUX n'a pas de panoramique : choisissez le moteur Zaxnes pour ce jeu)"),
-    (keys::HINT_FCEUX_NO_HACKS, "(le moteur FCEUX n'applique aucun pack de hack : choisissez le moteur Zaxnes pour ce jeu)"),
-    (keys::HINT_FCEUX_NO_SPRITE_LIMIT, "(le moteur FCEUX garde les 8 sprites par ligne : choisissez le moteur Zaxnes pour ce jeu)"),
-    (keys::HINT_FCEUX_NO_RUN_AHEAD, "(l'avance de trames n'est pas implémentée sur le moteur FCEUX)"),
+    (keys::HINT_FCEUX_NO_WIDESCREEN, "(ce moteur n'a pas de panoramique : choisissez le moteur Zaxnes pour ce jeu)"),
+    (keys::HINT_FCEUX_NO_HACKS, "(ce moteur n'applique aucun pack de hack : choisissez le moteur Zaxnes pour ce jeu)"),
+    (keys::HINT_FCEUX_NO_SPRITE_LIMIT, "(ce moteur garde les 8 sprites par ligne : choisissez le moteur Zaxnes pour ce jeu)"),
+    (keys::HINT_FCEUX_NO_RUN_AHEAD, "(l'avance de trames n'est pas implémentée sur ce moteur)"),
     (keys::STATUS_ENGINE_FCEUX, "moteur FCEUX"),
+    (keys::STATUS_ENGINE_NESHAWK, "moteur NesHawk"),
     (keys::HINT_FCEUX_VALIDATED, "(cette ROM est validée pour la 3D sur le moteur FCEUX)"),
     (keys::HINT_FCEUX_NOT_VALIDATED, "(cette ROM n'est pas validée pour la 3D sur le moteur FCEUX : la 3D peut différer de celle de Zaxnes)"),
     (keys::HINT_CLASSIC_AUDIO, "(sans effet : la sortie audio classique a sa propre réserve fixe)"),
@@ -1096,14 +1097,17 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.engine",
-        "Quel émulateur exécute ce jeu : le cœur de Zaxnes, ou FCEUX. C'est un choix par jeu et \
-         non une préférence, parce que la raison de passer à FCEUX est toujours un jeu précis — \
-         un jeu que Zaxnes exécute mal, ou dont la carte lui manque. Il prend effet au prochain \
-         chargement, changer de moteur voulant dire redémarrer la machine. FCEUX n'a ni \
-         panoramique, ni pack de hack, ni réglage de la limite de sprites, ni avance de trames : \
-         ce sont des pièces de la machine de Zaxnes, et leurs lignes le disent tant que FCEUX est \
-         choisi. Une sauvegarde d'état faite sur un moteur ne se charge pas sur l'autre. Par \
-         défaut : Zaxnes.",
+        "Quel émulateur exécute ce jeu : le cœur de Zaxnes, FCEUX, ou NesHawk. C'est un choix par \
+         jeu et non une préférence, parce que la raison de passer à un autre moteur est toujours \
+         un jeu précis. FCEUX est là pour la couverture — un jeu que Zaxnes exécute mal, ou dont \
+         la carte lui manque. NesHawk est le portage en Rust du cœur de BizHawk, et c'est lui qui \
+         fait rejouer un film de BizHawk à l'identique : un .bk2 enregistré sur NesHawk s'y \
+         rejoue trame pour trame, ce qu'aucun autre moteur ne peut promettre. Il prend effet au \
+         prochain chargement, changer de moteur voulant dire redémarrer la machine. Ni FCEUX ni \
+         NesHawk n'a de panoramique, de pack de hack, de réglage de la limite de sprites ni \
+         d'avance de trames : ce sont des pièces de la machine de Zaxnes, et leurs lignes le \
+         disent tant qu'un autre moteur est choisi. Une sauvegarde d'état faite sur un moteur ne \
+         se charge pas sur un autre. Par défaut : Zaxnes.",
     ),
 
     // -------------------------------------------------------- onglet Interface

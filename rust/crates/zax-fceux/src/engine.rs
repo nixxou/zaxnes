@@ -678,7 +678,16 @@ impl Engine for FceuxEngine {
         }
         match kind {
             ControllerPortType::Controller => Ok(()),
-            ControllerPortType::Zapper => Err(InvalidPort(port)),
+            // Refused rather than silently accepted. The Zapper is a device FCEUX has and this
+            // shim does not drive; `Empty` is `BizHawk`'s `UnpluggedNES`, which a `.bk2` names
+            // per port and which FCEUX's own port model has no equivalent of — a read of an
+            // empty socket answers 0 for ever where a pad answers 1 from the ninth read, and
+            // accepting it here would give a pad while reporting a socket.
+            //
+            // `Empty` was added to `ControllerPortType` by lot NESHAWK-PROFILE-13 without this
+            // arm, which left the `fceux-core` configuration not compiling; lot NESHAWK-REWRITE
+            // found that in its final pass and this is the fix.
+            ControllerPortType::Zapper | ControllerPortType::Empty => Err(InvalidPort(port)),
         }
     }
 

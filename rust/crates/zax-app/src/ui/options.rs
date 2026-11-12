@@ -670,18 +670,28 @@ pub fn inert_reason(id: SettingId, model: &SettingsModel) -> Option<&'static str
     })
 }
 
-/// Whether the engine in force for the game in play is FCEUX, which is what greys the four
-/// groups of controls above.
+/// The engine chosen for the game in play, from the setting.
 ///
 /// Reads the setting rather than the live engine, deliberately: the options window is drawn from
-/// the model, the setting is what the *next* load will use, and a user who has just chosen FCEUX
-/// should see the consequence at once rather than after reloading. A build without `fceux-core`
-/// never shows the row and ignores the value, so this is always false there.
+/// the model, the setting is what the *next* load will use, and a user who has just chosen another
+/// engine should see the consequence at once rather than after reloading.
+fn chosen_engine(model: &SettingsModel) -> zax_core_api::EngineKind {
+    zax_core_api::EngineKind::from_u8(
+        u8::try_from(model.get(SettingId::EmuEngine).as_int()).unwrap_or(0),
+    )
+    .unwrap_or_default()
+}
+
+/// Whether the engine in force for the game in play is **not** Zaxnes's own core, which is what
+/// greys the four groups of controls above.
+///
+/// The widescreen extension, the hack packs, the sprite limit and the run-ahead are all patches to
+/// *Zaxnes's* bus or PPU rather than features of an emulator, so neither FCEUX nor NesHawk has
+/// them (`Capabilities::FCEUX` and `Capabilities::NESHAWK` agree on all four). The test is
+/// therefore "is the engine Zaxnes" and not "is the engine FCEUX": a lot that adds a third engine
+/// without those features needs no change here.
 fn fceux_is_the_engine(model: &SettingsModel) -> bool {
-    cfg!(feature = "fceux-core")
-        && zax_core_api::EngineKind::from_u8(
-            u8::try_from(model.get(SettingId::EmuEngine).as_int()).unwrap_or(0),
-        ) == Some(zax_core_api::EngineKind::Fceux)
+    chosen_engine(model) != zax_core_api::EngineKind::Zaxnes
 }
 
 /// Whether any of the three curvature angles of AMD-043 is set.
@@ -928,12 +938,12 @@ pub fn is_shown(descriptor: &SettingDescriptor) -> bool {
     if id == SettingId::VideoBackend && !cfg!(feature = "wgpu") {
         return false;
     }
-    // And the engine only where there is a second one (lot FCEUX-23 step 5): a build without
-    // `fceux-core` has one engine, so the row would be a choice of one. The *key* is still in the
-    // catalogue in every build, so a `games.json` that carries it loads and saves without error.
-    if id == SettingId::EmuEngine && !cfg!(feature = "fceux-core") {
-        return false;
-    }
+    // The engine row was gated on `fceux-core` by lot FCEUX-23 step 5, because a build without it
+    // had one engine and the row would have been a choice of one. Lot NESHAWK-REWRITE added
+    // `zax-neshawk`, which is safe Rust behind no feature at all, so **every** build now has at
+    // least two engines and the row is always a real choice. In a build without `fceux-core` the
+    // FCEUX value is still offered and `EngineHandle::of_kind` falls back to Zaxnes with a line in
+    // the log saying why, which is the mechanism that lot already built.
     if INCLUDED_PROFILE.contains(&id) {
         return true;
     }
@@ -1042,7 +1052,9 @@ pub fn fceux_validation_note(
     model: &SettingsModel,
     status: fceux_validated::Status,
 ) -> Option<String> {
-    if id != SettingId::EmuEngine || !fceux_is_the_engine(model) {
+    // FCEUX in particular: the validated-games list of lot FCEUX-48 is FCEUX's own, and says
+    // nothing about any other engine.
+    if id != SettingId::EmuEngine || chosen_engine(model) != zax_core_api::EngineKind::Fceux {
         return None;
     }
     match status {

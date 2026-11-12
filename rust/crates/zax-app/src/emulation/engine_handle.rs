@@ -172,7 +172,28 @@ impl EngineHandle {
         match kind {
             EngineKind::Zaxnes => Self::zaxnes_core(),
             EngineKind::Fceux => Self::fceux_core(),
+            EngineKind::NesHawk => Self::neshawk_core(),
         }
+    }
+
+    /// A handle over `zax-neshawk`, the Rust port of BizHawk's NesHawk core (lot
+    /// NESHAWK-REWRITE).
+    ///
+    /// No feature gate and no fallback: the crate is safe Rust in every build, keeps no
+    /// process-global state, and so cannot refuse to be created the way FCEUX can.
+    ///
+    /// The tile capture is turned **on**, because the records are what the 3D renderer reads —
+    /// the harness's tools, which only want a picture, use `zax_neshawk::Nes` directly and pay
+    /// nothing for it.
+    fn neshawk_core() -> Self {
+        let mut engine = zax_neshawk::NesHawkEngine::new();
+        engine.set_tile_capture(true);
+        if !engine.has_gamedb() {
+            crate::app_log::line(
+                "Zaxnes: the NesHawk engine has no copy of BizHawk's gamedb (set                  ZAXNES_BIZHAWK_GAMEDB), so it picks a cartridge's board from the iNES header                  alone. For some cartridges that is a different board, and so different timing,                  from the one BizHawk picks.",
+            );
+        }
+        Self::new(Box::new(engine))
     }
 
     #[cfg(feature = "fceux-core")]
@@ -588,6 +609,7 @@ impl EngineHandle {
         match self.capabilities.kind {
             EngineKind::Zaxnes => NesCore::STATE_VERSION,
             EngineKind::Fceux => FCEUX_BLOCK_VERSION,
+            EngineKind::NesHawk => zax_neshawk::engine::BLOCK_VERSION,
         }
     }
 

@@ -1086,7 +1086,14 @@ fn emulation_engine(out: &mut Vec<SettingDescriptor>) {
             SettingEffect::NextRomLoad,
             SettingTheme::Emulation,
         )
-        .with_domain(Domain::choice(vec![opt(0, "Zaxnes"), opt(1, "FCEUX")]))
+        .with_domain(Domain::choice(vec![
+            opt(0, "Zaxnes"),
+            opt(1, "FCEUX"),
+            // Lot NESHAWK-REWRITE: the Rust port of BizHawk's NesHawk core, which is in
+            // **every** build (safe Rust, no feature gate) -- so the row is now a real choice
+            // even where `fceux-core` is off.
+            opt(2, "NesHawk"),
+        ]))
         .with_label("Emulation engine"),
     );
 }

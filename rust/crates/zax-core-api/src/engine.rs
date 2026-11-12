@@ -69,6 +69,26 @@ impl EngineKind {
         }
     }
 
+    /// The engine a movie recorded on BizHawk's core named `core` should be replayed on, `None`
+    /// when this build has no port of it.
+    ///
+    /// A `.bk2`'s `Header.txt` carries `Core <name>`, and a movie only replays exactly on the
+    /// machine that recorded it — which is the whole reason `zax-neshawk` exists. `NesHawk` is
+    /// the one name this build can answer; `QuickNes` (BizHawk's other NES core, and its
+    /// *default*, which is why `bizhawk-runs/coin-neshawk.txt` turned out not to be a NesHawk
+    /// run at all) has no port here.
+    ///
+    /// Lives in this crate rather than in the `.bk2` reader so that every reader agrees: the
+    /// harness's `movie-sync` uses it to choose its default engine, and an application importer
+    /// would use the same rule.
+    #[must_use]
+    pub fn for_bizhawk_core(core: &str) -> Option<Self> {
+        match core.trim() {
+            "NesHawk" => Some(Self::NesHawk),
+            _ => None,
+        }
+    }
+
     /// The name to show a user.
     #[must_use]
     pub const fn display_name(self) -> &'static str {

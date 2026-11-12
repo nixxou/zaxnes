@@ -161,21 +161,22 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ),
     (
         keys::HINT_FCEUX_NO_WIDESCREEN,
-        "(the FCEUX engine has no widescreen: choose the Zaxnes engine for this game)",
+        "(this engine has no widescreen: choose the Zaxnes engine for this game)",
     ),
     (
         keys::HINT_FCEUX_NO_HACKS,
-        "(the FCEUX engine applies no hack pack: choose the Zaxnes engine for this game)",
+        "(this engine applies no hack pack: choose the Zaxnes engine for this game)",
     ),
     (
         keys::HINT_FCEUX_NO_SPRITE_LIMIT,
-        "(the FCEUX engine keeps the 8 sprites a line: choose the Zaxnes engine for this game)",
+        "(this engine keeps the 8 sprites a line: choose the Zaxnes engine for this game)",
     ),
     (
         keys::HINT_FCEUX_NO_RUN_AHEAD,
-        "(run-ahead is not implemented on the FCEUX engine)",
+        "(run-ahead is not implemented on this engine)",
     ),
     (keys::STATUS_ENGINE_FCEUX, "FCEUX engine"),
+    (keys::STATUS_ENGINE_NESHAWK, "NesHawk engine"),
     (
         keys::HINT_FCEUX_VALIDATED,
         "(this ROM is validated for 3D on the FCEUX engine)",
@@ -1120,13 +1121,16 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.engine",
-        "Which emulator plays this game: Zaxnes's own core, or FCEUX. It is a choice per game, \
-         not a preference, because the reason to reach for FCEUX is always a particular game — \
-         one Zaxnes runs badly, or on a board it does not have. It takes effect at the next load, \
-         since changing engines means starting the machine again. FCEUX has no widescreen, no \
-         hack pack, no sprite-limit control and no run-ahead: those are part of Zaxnes's own \
-         machine, and their rows say so while FCEUX is chosen. A save state made on one engine \
-         cannot be loaded on the other. Default: Zaxnes.",
+        "Which emulator plays this game: Zaxnes's own core, FCEUX, or NesHawk. It is a choice per \
+         game, not a preference, because the reason to reach for another engine is always a \
+         particular game. FCEUX is for coverage — a game Zaxnes runs badly, or on a board it \
+         does not have. NesHawk is the Rust port of BizHawk's own core, and it is what makes a \
+         BizHawk movie replay exactly: a .bk2 recorded on NesHawk plays back on it frame for \
+         frame, which no other engine can promise. It takes effect at the next load, since \
+         changing engines means starting the machine again. Neither FCEUX nor NesHawk has \
+         widescreen, hack packs, a sprite-limit control or run-ahead: those are part of Zaxnes's \
+         own machine, and their rows say so while another engine is chosen. A save state made on \
+         one engine cannot be loaded on another. Default: Zaxnes.",
     ),
 
     // ----------------------------------------------------------- Interface tab
