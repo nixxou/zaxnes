@@ -28,6 +28,20 @@ const STYLE: &str = "zaxnes_3d_style";
 const REFLECTIONS: &str = "zaxnes_3d_reflections";
 const SKY: &str = "zaxnes_3d_sky";
 const FAST_LUA: &str = "zaxnes_3d_fast_lua";
+const EXTRA: &str = "zaxnes_widescreen_extra";
+const STRICT: &str = "zaxnes_widescreen_strict_edges";
+const FORCE: &str = "zaxnes_widescreen_other_versions";
+const OVERSCAN: [&str; 4] = [
+    "zaxnes_overscan_top",
+    "zaxnes_overscan_bottom",
+    "zaxnes_overscan_left",
+    "zaxnes_overscan_right",
+];
+const OVERSCAN_NAMES: [&str; 4] = ["top", "bottom", "left", "right"];
+/// The pixels a side of the overscan may leave out.
+const OVERSCAN_PIXELS: [u8; 9] = [0, 4, 8, 12, 16, 20, 24, 28, 32];
+/// The application's `WIDESCREEN_EXTRA_PERCENT`.
+const EXTRA_PERCENT: [u16; 14] = [0, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150, 200, 300];
 
 /// The anti-aliasing levels of `video.anti_alias`, by their value, the default first.
 const ANTI_ALIASES: [(&str, i32); 4] = [("MSAA 4x", 1), ("Off", 0), ("MSAA 8x", 2), ("SMAA", 3)];
@@ -124,6 +138,21 @@ pub fn declarations(hacks: &[HackOption]) -> Vec<(String, String)> {
             ADVANCED.to_owned(),
             "Widescreen advanced mode; enabled|disabled".to_owned(),
         ),
+        (
+            EXTRA.to_owned(),
+            format!(
+                "Widescreen extra margin (3D objects whole at the edges); {}",
+                EXTRA_PERCENT.map(|percent| format!("{percent}%")).join("|")
+            ),
+        ),
+        (
+            STRICT.to_owned(),
+            "Widescreen strict edges (3D); disabled|enabled".to_owned(),
+        ),
+        (
+            FORCE.to_owned(),
+            "Widescreen on other versions of a game (restart); disabled|enabled".to_owned(),
+        ),
         (REGION.to_owned(), "Region; Auto|NTSC|PAL|Dendy".to_owned()),
         (
             SPRITE_LIMIT.to_owned(),
@@ -134,6 +163,15 @@ pub fn declarations(hacks: &[HackOption]) -> Vec<(String, String)> {
             format!("Palette; {}", PALETTES.join("|")),
         ),
     ];
+    for (key, name) in OVERSCAN.iter().zip(OVERSCAN_NAMES) {
+        list.push((
+            (*key).to_owned(),
+            format!(
+                "Overscan {name} (left and right without widescreen); {}",
+                OVERSCAN_PIXELS.map(|pixels| format!("{pixels} px")).join("|")
+            ),
+        ));
+    }
     for option in hacks {
         let choices = if option.default {
             "enabled|disabled"
@@ -192,6 +230,18 @@ pub fn read(value: &dyn Fn(&str) -> Option<String>, hacks: &[HackOption]) -> Opt
             skybox: choice(&SKIES, value(SKY), defaults.render.skybox),
         },
         optimized_lua: enabled(FAST_LUA, defaults.optimized_lua),
+        extra_percent: value(EXTRA)
+            .and_then(|text| text.trim_end_matches('%').parse().ok())
+            .filter(|percent| EXTRA_PERCENT.contains(percent))
+            .unwrap_or(defaults.extra_percent),
+        strict_edges: enabled(STRICT, defaults.strict_edges),
+        force_patch: enabled(FORCE, defaults.force_patch),
+        overscan: OVERSCAN.map(|key| {
+            value(key)
+                .and_then(|text| text.trim_end_matches(" px").parse().ok())
+                .filter(|pixels| OVERSCAN_PIXELS.contains(pixels))
+                .unwrap_or(0)
+        }),
         hacks: hacks
             .iter()
             .map(|option| {
@@ -239,6 +289,8 @@ mod tests {
                 "zaxnes_3d_anti_alias" => Some("SMAA".to_owned()),
                 "zaxnes_3d_style" => Some("Enhanced".to_owned()),
                 "zaxnes_3d_sky" => Some("Fantasy".to_owned()),
+                "zaxnes_widescreen_extra" => Some("25%".to_owned()),
+                "zaxnes_overscan_top" => Some("8 px".to_owned()),
                 _ => None,
             },
             &[OPTION],
@@ -248,6 +300,8 @@ mod tests {
         assert_eq!(set.region, RegionChoice::Forced(NesRegion::Pal));
         assert_eq!(set.palette, 1);
         assert_eq!(set.hacks, vec![("invincible".to_owned(), true)]);
+        assert_eq!(set.extra_percent, 25);
+        assert_eq!(set.overscan, [8, 0, 0, 0]);
         assert_eq!(
             set.render,
             RenderOptions {

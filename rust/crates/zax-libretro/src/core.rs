@@ -2,6 +2,7 @@
 //! picture turned into pixels, its sound into 16-bit stereo, its states and memories handed out
 //! as the libretro API asks for them. The C side ([`crate::ffi`]) only moves data in and out.
 
+use crate::overscan::Overscan;
 use zax_nes::builtin_patches::HackOption;
 use zax_nes::ppu::SpriteLimit;
 use zax_nes::{NesCore, NesRegion, RegionTiming};
@@ -50,6 +51,18 @@ pub struct Options {
     pub render: crate::three_d::RenderOptions,
     /// The application's optimised Lua paths, `unsafe` code (at the next load).
     pub optimized_lua: bool,
+    /// `video.widescreen_extra`: the share of the width, in percent, the margins grow by beyond
+    /// the ratio, and the height as much, so that the 3D objects at the edges are whole.
+    pub extra_percent: u16,
+    /// `video.widescreen_strict_edges`: a band of the wider picture the game stopped drawing
+    /// leaves its shapes unfinished in 3D.
+    pub strict_edges: bool,
+    /// The sides a television did not show, left out: top, bottom, left, right, in pixels. The
+    /// left and right ones only without a widescreen margin.
+    pub overscan: [u8; 4],
+    /// The widescreen hack of another version of the game forced on a ROM it is not made for
+    /// (at the next load).
+    pub force_patch: bool,
 }
 
 impl Default for Options {
@@ -66,6 +79,10 @@ impl Default for Options {
             resolution: (1280, 720),
             render: crate::three_d::RenderOptions::default(),
             optimized_lua: false,
+            extra_percent: 0,
+            strict_edges: false,
+            overscan: [0; 4],
+            force_patch: false,
         }
     }
 }
@@ -111,6 +128,12 @@ impl Core {
         let mut nes = NesCore::new();
         nes.set_builtin_patches(options.widescreen);
         nes.set_advanced_patches(options.advanced);
+        if options.force_patch {
+            let stem = std::path::Path::new(name)
+                .file_stem()
+                .map_or_else(String::new, |stem| stem.to_string_lossy().into_owned());
+            nes.set_forced_patch(zax_nes::builtin_patches::for_game_name(&stem));
+        }
         let result = nes.load_rom(image, name);
         if !result.success {
             return Err(result
@@ -165,6 +188,7 @@ impl Core {
             self.options.optimized_lua,
             log,
         )?);
+        self.frame_three_d();
         Ok(())
     }
 
@@ -210,10 +234,10 @@ impl Core {
                 three_d.set_render(&mut self.nes, options.render);
             }
         }
-        let before = self.margin();
+        let before = (self.margin(), self.options.overscan);
         self.options = options;
         let margin = self.margin();
-        changed.geometry = margin != before;
+        changed.geometry = (margin, self.options.overscan) != before;
         if changed.geometry || changed.hack_options {
             self.framed = false;
         }
@@ -222,7 +246,50 @@ impl Core {
         self.nes
             .set_widescreen_vertical_margin(i32::try_from(margin.1).unwrap_or(0));
         self.nes.set_hack_options(self.hack_bits());
+        self.frame_three_d();
         changed
+    }
+
+    /// Tells the 3D the framing the options ask for.
+    fn frame_three_d(&mut self) {
+        let overscan = self.overscan();
+        let strict = self.options.strict_edges;
+        if let Some(three_d) = self.three_d.as_mut() {
+            three_d.overscan = overscan;
+            three_d.strict_edges = strict;
+        }
+    }
+
+    /// The sides the options leave out, all four (`Overscan::in_force` drops the left and right
+    /// ones with a margin).
+    fn overscan(&self) -> Overscan {
+        let [top, bottom, left, right] = self.options.overscan.map(i32::from);
+        Overscan {
+            top,
+            bottom,
+            left,
+            right,
+            resize: false,
+        }
+    }
+
+    /// The part of a picture `width` by `height` (its margins around the screen's 256 by 240)
+    /// that is shown: first column, first row, width and height.
+    fn shown(&self, width: u32, height: u32) -> (u32, u32, u32, u32) {
+        let margin = width.saturating_sub(256) / 2;
+        let margin_y = height.saturating_sub(240) / 2;
+        let cut = self.overscan().in_force(i32::try_from(margin).unwrap_or(0));
+        let side = |pixels: i32| u32::try_from(pixels.clamp(0, 64)).unwrap_or(0);
+        // As `Overscan::leave_out`: a side cut takes the vertical margin past it along.
+        let top = if cut.top > 0 { margin_y + side(cut.top) } else { 0 };
+        let bottom = if cut.bottom > 0 { margin_y + side(cut.bottom) } else { 0 };
+        let (left, right) = (side(cut.left), side(cut.right));
+        (
+            left,
+            top,
+            width.saturating_sub(left + right).max(1),
+            height.saturating_sub(top + bottom).max(1),
+        )
     }
 
     fn region_of(&self, choice: RegionChoice) -> NesRegion {
@@ -274,9 +341,23 @@ impl Core {
             return (0, 0);
         }
         let ratio = self.options.ratio.clamp(4.0 / 3.0, 32.0 / 9.0);
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // Clamped.
-        let tiles = ((240.0 * ratio - 256.0).max(0.0) / 2.0 / 8.0).ceil() as u32;
-        ((tiles * 8).min(zax_nes::wide::MAX_MARGIN.unsigned_abs()), 0)
+        // As the application's `widescreen_margin`: whole tiles, the bonus on both axes.
+        let bonus = 1.0 + f32::from(self.options.extra_percent) / 100.0;
+        let whole_tiles = |pixels: f32, max: i32| {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // Clamped.
+            let tiles = (pixels.max(0.0) / 8.0).ceil() as u32;
+            (tiles * 8).min(max.unsigned_abs())
+        };
+        (
+            whole_tiles(
+                (240.0 * ratio * bonus - 256.0) / 2.0,
+                zax_nes::wide::MAX_MARGIN,
+            ),
+            whole_tiles(
+                240.0 * (bonus - 1.0) / 2.0,
+                zax_nes::wide::MAX_VERTICAL_MARGIN,
+            ),
+        )
     }
 
     /// Whether the game's picture widens: a built-in patch runs, or a margin decoder is made
@@ -333,8 +414,10 @@ impl Core {
         let rows = self.nes.wide_picture_into(&mut self.indices);
         let rows = u32::try_from(rows).unwrap_or(240).max(1);
         let pixels = u32::try_from(self.indices.len()).unwrap_or(0);
-        self.height = rows;
-        self.width = (pixels / rows).max(1);
+        let full_width = (pixels / rows).max(1);
+        let (x, y, width, height) = self.shown(full_width, rows);
+        self.height = height;
+        self.width = width;
         self.framed = true;
         let mut colours = [0_u32; 64];
         for (index, colour) in colours.iter_mut().enumerate() {
@@ -342,11 +425,14 @@ impl Core {
             *colour = (u32::from(rgb.r) << 16) | (u32::from(rgb.g) << 8) | u32::from(rgb.b);
         }
         self.frame.clear();
-        self.frame.extend(
-            self.indices
-                .iter()
-                .map(|index| colours[usize::from(index & 0x3F)]),
-        );
+        let (x, width, full_width) = (x as usize, width as usize, full_width as usize);
+        for row in self.indices.chunks(full_width).skip(y as usize).take(height as usize) {
+            self.frame.extend(
+                row[x..(x + width).min(row.len())]
+                    .iter()
+                    .map(|index| colours[usize::from(index & 0x3F)]),
+            );
+        }
     }
 
     fn make_sound(&mut self) {
@@ -376,7 +462,8 @@ impl Core {
             return (self.width, self.height);
         }
         let margin = self.margin();
-        (256 + 2 * margin.0, 240 + 2 * margin.1)
+        let (_, _, width, height) = self.shown(256 + 2 * margin.0, 240 + 2 * margin.1);
+        (width, height)
     }
 
     /// Whether the picture's size differs from the one the frontend was last told; it counts as

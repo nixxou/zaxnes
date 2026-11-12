@@ -94,6 +94,39 @@ fn the_demo_plays_wide_with_sound_and_switches_while_playing() {
 }
 
 #[test]
+fn the_overscan_crops_and_the_extra_margin_widens() {
+    let Some(rom) = demo() else {
+        eprintln!("skipped: no FlappyZaxNes.nes in zax-app/demo");
+        return;
+    };
+    let mut core = Core::load(&rom, "FlappyZaxNes.nes", widescreen(false)).expect("the demo loads");
+    let mut options = core.options().clone();
+    options.overscan = [8, 8, 8, 8];
+    assert!(core.set_options(options).geometry);
+    assert_eq!(core.picture_size(), (240, 224));
+    play(&mut core, 30);
+    let (pixels, width, height) = core.picture();
+    assert_eq!((width, height, pixels.len()), (240, 224, 240 * 224));
+    shot(&core, "flappy-overscan");
+
+    // Widened, the left and right sides stay: the margin goes on past them.
+    let mut options = core.options().clone();
+    options.widescreen = true;
+    options.overscan = [8, 0, 8, 8];
+    core.set_options(options);
+    play(&mut core, 30);
+    assert_eq!(core.picture().1, 416);
+    assert_eq!(core.picture().2, 232);
+    // 25 % more: the margin asked for grows, the demo drawing 80 pixels at most.
+    let mut options = core.options().clone();
+    options.overscan = [0; 4];
+    options.extra_percent = 25;
+    assert!(core.set_options(options).geometry);
+    play(&mut core, 30);
+    assert_eq!(core.picture().1, 416);
+}
+
+#[test]
 fn a_state_comes_back_to_the_same_picture() {
     let Some(rom) = demo() else {
         eprintln!("skipped: no FlappyZaxNes.nes in zax-app/demo");

@@ -14,6 +14,7 @@ pub mod core;
 pub mod ffi;
 pub mod head_on_pull;
 pub mod options;
+pub mod overscan;
 pub mod profiles;
 pub mod scene_settings;
 pub mod three_d;

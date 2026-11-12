@@ -120,6 +120,10 @@ pub struct ThreeD {
     /// Whether the scene was in 2D at the last frame.
     was_two_dimensional: bool,
     buttons: Buttons,
+    /// The sides a television did not show, left out of the scene and of the 2D picture.
+    pub overscan: crate::overscan::Overscan,
+    /// `video.widescreen_strict_edges`.
+    pub strict_edges: bool,
     /// The 2D view of a profile's 3D game, the player's choice (L3).
     pub flat: bool,
 }
@@ -157,6 +161,8 @@ impl ThreeD {
             pull: HeadOnPull::new(),
             was_two_dimensional: false,
             buttons: Buttons::default(),
+            overscan: crate::overscan::Overscan::default(),
+            strict_edges: false,
             flat: false,
         };
         let mut model = SettingsModel::new();
@@ -228,7 +234,26 @@ impl ThreeD {
     pub fn convert(&mut self, nes: &mut NesCore) {
         let batch = nes.frame_batch();
         self.records.clear();
-        self.records.extend_from_slice(batch.records);
+        let cut = self.overscan.in_force(batch.margin);
+        if cut.is_none() {
+            self.records.extend_from_slice(batch.records);
+        } else {
+            self.records.extend(
+                batch
+                    .records
+                    .iter()
+                    .filter(|record| cut.keeps(record.x, record.y)),
+            );
+        }
+        // As the application: unless the edges are strict, every band counts as drawn across
+        // the whole margin.
+        let visible_rows = if self.strict_edges || batch.margin == 0 {
+            batch.visible_rows
+        } else {
+            #[allow(clippy::cast_possible_truncation)] // At most 512.
+            let margin = batch.margin as i16;
+            [(-margin, 256 + margin); 30]
+        };
         let batch = FrameBatch {
             records: &self.records,
             palette: batch.palette,
@@ -236,7 +261,7 @@ impl ThreeD {
             mask_x: batch.mask_x,
             mask_y: batch.mask_y,
             margin: batch.margin,
-            visible_rows: batch.visible_rows,
+            visible_rows,
             margin_y: batch.margin_y,
         };
         let counter = self.frame;
@@ -263,6 +288,10 @@ impl ThreeD {
         self.sync_settings(nes);
         self.follow_settings();
         self.picture_height = nes.wide_picture_into(&mut self.picture);
+        let width = self.picture.len() / self.picture_height.max(1);
+        self.overscan
+            .in_force(i32::try_from(width.saturating_sub(256) / 2).unwrap_or(0))
+            .leave_out(&mut self.picture, self.picture_height);
         self.follow_frame();
     }
 
