@@ -17,7 +17,9 @@ Branch `feat/neshawk-profile`, worktree `cleanroom/wt-bk2`, base `52dfcbbf` (lot
       tree frames **3 to 40** is now in step. The first difference of any kind is tree frame 40
       and it is **no longer a cycle displacement at all** — this core runs an extra `$4016` input
       pass there.
-- [ ] 4. **No regression** and the final pass.
+- [x] 4. **No regression**: `golden-core` byte-identical, every suite on its documented figure,
+      2 503 passed / 0 failed, *Faxanadu* and every *Kirby* window unmoved, and the bench
+      **faster** than `428c50e6` on both ROMs (-4.23 %, -2.59 %).
 
 ## The environment this lot runs in
 
@@ -266,3 +268,115 @@ stream of frame 40 rather than the event ledger, which cannot walk past it.
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE-12 step 3/4 done: round 2, item 16 closes tree frame 38 and the wall is now frame 40's extra input pass
+
+---
+
+## Step 4 — no regression, and the final pass
+
+### The answer first
+
+**All three items cost nothing, anywhere, and the two deterministic instruments say so.**
+`golden-core` over the 98 originals is byte-identical, every ROM suite is on its documented figure
+on **both** profiles, *Faxanadu* and every *Kirby* window are unmoved, and the bench is **faster**
+than the fixed reference on both ROMs. The lot's whole effect is the clock, which is what it was
+for.
+
+### The suites
+
+| | before this lot | **after** | |
+|---|---|---|---|
+| `golden-core`, 98 ROMs x 1 200 frames | `8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773` | **identical** | ok |
+| `test-roms --profile standard` | 212 pass / 7 fail | **212 / 7** | ok |
+| `test-roms --profile neshawk` | 205 pass / 14 fail | **205 / 14** | ok |
+| `AccuracyCoin`, standard | 128/147 | **128/147** | ok |
+| `AccuracyCoin`, neshawk | 119/147 | **119/147** | ok |
+| `ppu_vbl_nmi` + `vbl_nmi_timing`, both profiles | 18/18 | **18/18** | ok |
+| the NMI ROMs NesHawk passes (`--filter nmi`), both profiles | 20 pass / 0 fail | **20 / 0** | item 8d's gate |
+| `cpu_interrupts_v2` standard / neshawk | 6/6 and 4/6 | **6/6** and **4/6** | ok |
+| `sprdma_and_dmc_dma` standard / neshawk | 2/2 and 0/2 | **2/2** and **0/2** | item 13's own cost |
+| the DMC/DMA ROMs (`--filter dmc`) standard / neshawk | 8 pass, and 4 pass / 4 fail | **8**, and **4 / 4** | ok |
+| *Faxanadu* USA / Rev 1, of 832 | 202 and 210 | **202** and **210** | ok |
+| *Kirby* `step1` / `step1b` / `step1c` identical to the byte | 219 / 342 / 459 | **219 / 342 / 459** | ok |
+| *Kirby* `step1c` with no difference outside the stack page | 8 190 of 8 901 | **8 190** | ok |
+| the parting frame | 9 353 | **9 353** | unmoved |
+| the first difference of any kind, on the clock | tree frame **14** | tree frame **40** | **the lot's result** |
+
+**The NMI row is the one that matters most, and it is deliberate.** It is the gate that refused
+item 8d last lot. Both of this lot's items are on the DMA path rather than the interrupt path, so
+it was not expected to move — but the recipe says to run the public ROMs that measure the quantity
+the item is about, and `sprdma_and_dmc_dma`, `dmc_dma_during_read4`, `apu_test` and
+`cpu_interrupts_v2` are those ROMs for items 15 and 16. **None of them moved in either
+direction**, which is itself a statement about the items: they fire only when a DMC fetch and an
+OAM transfer overlap, and of the whole 331-ROM suite only `sprdma_and_dmc_dma` arranges that — and
+it was already failing on this profile for item 13's reason, with the same two ROMs and the same
+codes.
+
+### The whole test suite
+
+`cargo test --release --workspace --exclude zax-app --exclude zax-platform` (those two do not link
+here), summed per target rather than read off the last line:
+
+| | |
+|---|---|
+| **2 503 passed, 0 failed, 88 ignored** over **144** targets | lot 11's 2 501 plus items 15 and 16's own differential tests |
+| the count of `test result: ok` lines | **144** — every target reported, so the total is not a short one |
+| the ignored ones, with `ZAXNES_ROMS`, `ZAXNES_TEST_ROMS` and `ZAXNES_PROFILES` set | **69 passed, 6 failed** |
+
+**The six failures are environmental, and are named rather than absorbed**: all six are
+`zax-profiles`'s `three_d_sen_real_install_tests`, and all six panic on
+`ZAXNES_3DSEN_INSTALL is not set: it names a 3dSen installation (or a stand-in) folder`. That
+variable names the original program's installation, which this side does not read and was not
+given one for; nothing in the six touches the NES core, the timing profile or the DMA path.
+
+### The speed, and it is inside the budget again
+
+`bench-core --frames 600`, three interleaved rounds against **`428c50e6` itself** — the fixed
+reference the last six lots are measured on — built from `git checkout 428c50e6 -- rust/crates`
+into the same target directory, with the tree restored afterwards:
+
+| | `428c50e6` | this lot | |
+|---|---|---|---|
+| Super Mario Bros. 3 | 1.1705 ms/frame | 1.1210 | **-4.23 %** |
+| Mega Man 3 | 0.8666 ms/frame | 0.8442 | **-2.59 %** |
+
+Both **faster**, and inside the +1 % budget. **The honest caveat is the one lots 10 and 11 wrote
+down**: the two binaries' own spreads over three rounds are +0.68 % and +2.09 % on Super Mario
+Bros. 3 and +2.31 % and +1.52 % on Mega Man 3, the same order as the difference, so this figure is
+layout. What makes that more than an assertion here is that the deterministic instrument agrees —
+`golden-core` is byte-identical — and that although this lot's items *are* on the DMA path, which
+these two ROMs reach, they are on it only inside `NesCoreOf<NesHawkCompat>::run_dma`, a
+monomorphisation `bench-core` never instantiates.
+
+### The final pass
+
+| | |
+|---|---|
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy --release --workspace --exclude zax-app --exclude zax-platform --all-targets -- -D warnings` | clean |
+| `cargo test --release` | 2 503 / 0 / 88 |
+| the ignored ones | 69 / 6, the six as above |
+| disk at the end | `G:` 31 GB free, `C:` 8.4 GB |
+
+### What this lot did not do, said plainly
+
+* **The wall at 9 353 did not move**, and none of the three items was expected to move it: each is
+  exactly inert on the work RAM, measured by building it off and on rather than argued. What they
+  bought is 26 frames of clock, and the reason that is worth a lot is the one the brief gave — an
+  item hunt whose window opens on a machine already out of step measures the drift and not the item.
+* **Item 14's source reading is still open.** It ships on its measurement and on its costing
+  nothing, with `PPU.cs` `Reset()`'s `idleSynch = true` recorded in the constant as the best
+  candidate and the reason it does not yet predict the item written beside it. It is the only item
+  in the table that ships without a reading, and that is said where the item is.
+* **Round 3 was not run.** The brief allowed up to five rounds; two were taken, and the third's
+  window is named and characterised instead: tree frame 40's extra `$4016` input pass, which needs
+  a bus stream of that frame's `$4016` accesses rather than the event ledger, because the ledger's
+  own alignment cannot walk past an event-stream difference.
+* **The `+6` phases of item 15's own sweep are unmeasured.** A fetch due on a transfer's *first*
+  cycles — its halt — costs the NesHawk profile three cycles where `Standard` spends two, and that
+  reads the same with items 15 and 16 off, so it predates both. No BizHawk measurement was taken of
+  it, because the movie's frames 3-40 never arrange it; it is the remaining third of the interleave,
+  and it is written down here rather than fixed by symmetry with the two that were measured.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-12 step 4/4 done: no regression, the bench faster than the reference, the documents
