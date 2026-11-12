@@ -66,7 +66,7 @@ pub fn movie_filters() -> Vec<FileFilter> {
         filter(
             keys::BROWSER_FILTER_MOVIES,
             &[
-                "fm2", "fcm", "mv1", "mv2", "mv3", "mv4", "mv5", "mv6", "mv7", "mv8", "mv9",
+                "fm2", "fcm", "bk2", "mv1", "mv2", "mv3", "mv4", "mv5", "mv6", "mv7", "mv8", "mv9",
             ],
         ),
         filter(keys::BROWSER_FILTER_ALL, &[]),

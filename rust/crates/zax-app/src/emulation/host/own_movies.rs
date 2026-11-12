@@ -263,7 +263,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// with the game where it is otherwise: the same profile, read again, and its `Start` hook
     /// run. Modelled on `script_reload`, without the state restore a movie's own power-on makes
     /// pointless.
-    fn rebuild_session_for_the_movie(
+    pub(super) fn rebuild_session_for_the_movie(
         &mut self,
         game: &crate::emulation::game_catalog::ResolvedGame,
         rom: &rom_file::RomData,

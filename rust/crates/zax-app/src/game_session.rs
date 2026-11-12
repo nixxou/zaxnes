@@ -285,6 +285,9 @@ pub struct GameSession {
     overscan: crate::overscan::Overscan,
     /// The movie being recorded or played (see `zax_nes::movie`).
     movie: Option<MovieRun>,
+    /// The resets and power cycles of a played `.bk2`, each at the movie frame it comes before,
+    /// in order: Zaxnes's movie format has no column for them (`bk2_movies.rs`).
+    movie_commands: Vec<(u32, zax_nes::movie::tas::FrameCommand)>,
     /// Run-ahead N, 0 to `NesCore::MAX_RUN_AHEAD` (AMD-041 REQ-LOOP-064, and `Q-181` for the
     /// bound the owner raised to 10): the frames of a real frame the core runs in
     /// advance of it. 0 — what a freshly created session carries — runs the frame of
@@ -488,6 +491,7 @@ impl GameSession {
             strict_wide_edges: false,
             overscan: crate::overscan::Overscan::default(),
             movie: None,
+            movie_commands: Vec::new(),
             run_ahead: 0,
             run_ahead_forced_to_zero: false,
             run_ahead_held_at_zero: false,
@@ -1018,6 +1022,7 @@ impl GameSession {
     /// The start state does not load.
     pub fn start_movie_playback(&mut self, movie: Movie) -> Result<(), String> {
         self.restore_core(&movie.start_state)?;
+        self.movie_commands.clear();
         self.movie = Some(MovieRun::play(self.core.frame_count(), movie));
         self.hold_run_ahead_for_the_movie();
         Ok(())
@@ -1025,6 +1030,7 @@ impl GameSession {
 
     /// Ends the movie being recorded or played, and gives it.
     pub fn stop_movie(&mut self) -> Option<Movie> {
+        self.movie_commands.clear();
         let movie = self.movie.take().map(MovieRun::into_movie);
         self.hold_run_ahead_for_the_movie();
         movie
@@ -1044,6 +1050,45 @@ impl GameSession {
     #[must_use]
     pub const fn core_follows_the_inputs(&self) -> bool {
         self.core_follows_the_inputs
+    }
+
+    /// The resets and power cycles of the movie being played, each at the movie frame it comes
+    /// before (a `.bk2`'s, owner request).
+    pub fn set_movie_commands(
+        &mut self,
+        mut commands: Vec<(u32, zax_nes::movie::tas::FrameCommand)>,
+    ) {
+        commands.sort_by_key(|(frame, _)| *frame);
+        self.movie_commands = commands;
+    }
+
+    /// Applies the movie's reset or power cycle due before the frame about to run, if any. The
+    /// frame counter is kept, so the movie's frames go on being read where they were.
+    fn apply_movie_command(&mut self) {
+        use zax_nes::movie::tas::FrameCommand;
+        if self.movie_commands.is_empty() {
+            return;
+        }
+        let frame_count = self.core.frame_count();
+        let Some(index) = self
+            .movie
+            .as_ref()
+            .and_then(|movie| movie.frame_at(frame_count))
+        else {
+            return;
+        };
+        let Ok(at) = self
+            .movie_commands
+            .binary_search_by_key(&index, |(frame, _)| *frame)
+        else {
+            return;
+        };
+        match self.movie_commands[at].1 {
+            FrameCommand::SoftReset => self.core.soft_reset(),
+            FrameCommand::HardReset => self.core.reset(),
+            FrameCommand::None => return,
+        }
+        self.core.set_frame_count(frame_count);
     }
 
     /// Runs the frame of the movie being played with the core alone: no input hook, no capture,
@@ -1072,6 +1117,7 @@ impl GameSession {
         else {
             return false;
         };
+        self.apply_movie_command();
         self.core.run_frame(word);
         true
     }
@@ -1443,6 +1489,7 @@ impl GameSession {
             self.core.port_type(1).unwrap_or_default(),
             zapper_byte,
         );
+        self.apply_movie_command();
         let frame_count = self.core.frame_count();
         self.movie
             .as_mut()

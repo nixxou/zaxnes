@@ -1390,7 +1390,10 @@ fn touch(out: &mut Vec<SettingDescriptor>) {
     // Rust-only (owner request): the vibration of a press, the cross apart from the buttons.
     for (id, label) in [
         (SettingId::InputTouchHapticDpad, "Vibration of the cross"),
-        (SettingId::InputTouchHapticButtons, "Vibration of the buttons"),
+        (
+            SettingId::InputTouchHapticButtons,
+            "Vibration of the buttons",
+        ),
     ] {
         out.push(
             SettingDescriptor::new(

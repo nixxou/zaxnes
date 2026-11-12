@@ -223,7 +223,10 @@ impl OverlayModel {
             }
             OverlayItem::Camera => Some(OverlayCommand::SetCamera(self.step_camera(step))),
             OverlayItem::Speed => {
-                let here = BOOSTS.iter().position(|tenths| *tenths >= self.speed).unwrap_or(0);
+                let here = BOOSTS
+                    .iter()
+                    .position(|tenths| *tenths >= self.speed)
+                    .unwrap_or(0);
                 let next = here
                     .saturating_add_signed(isize::try_from(step).unwrap_or(0))
                     .min(BOOSTS.len() - 1);
@@ -318,14 +321,23 @@ mod tests {
     fn the_speed_row_steps_from_one_to_ten_without_wrapping() {
         let mut model = OverlayModel::new();
         go_to(&mut model, OverlayItem::Speed);
-        assert_eq!(Some(OverlayCommand::SetSpeed(10)), model.handle(PadButton::Left));
+        assert_eq!(
+            Some(OverlayCommand::SetSpeed(10)),
+            model.handle(PadButton::Left)
+        );
         assert_eq!(10, model.speed());
-        assert_eq!(Some(OverlayCommand::SetSpeed(15)), model.handle(PadButton::Right));
+        assert_eq!(
+            Some(OverlayCommand::SetSpeed(15)),
+            model.handle(PadButton::Right)
+        );
         for _ in 0..20 {
             model.handle(PadButton::Right);
         }
         assert_eq!(100, model.speed());
-        assert_eq!(Some(OverlayCommand::SetSpeed(10)), model.handle(PadButton::A));
+        assert_eq!(
+            Some(OverlayCommand::SetSpeed(10)),
+            model.handle(PadButton::A)
+        );
     }
 
     #[test]

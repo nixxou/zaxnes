@@ -149,7 +149,12 @@ fn with_fceux_chosen_the_four_controls_are_greyed_with_a_reason() {
     let mut neshawk = SettingsModel::new();
     neshawk.set(SettingId::EmuEngine, SettingValue::Enum(3));
     for (id, reason) in expected {
-        assert_eq!(options::inert_reason(id, &neshawk), Some(reason), "{}", id.key());
+        assert_eq!(
+            options::inert_reason(id, &neshawk),
+            Some(reason),
+            "{}",
+            id.key()
+        );
     }
 
     // With Zaxnes chosen — the default — none of them is greyed on that account.

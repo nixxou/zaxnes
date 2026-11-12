@@ -1295,7 +1295,9 @@ impl HandheldUi {
             OverlayItem::Camera => format!("< {} >", options::camera_label(self.overlay.camera())),
             OverlayItem::Speed => format!(
                 "< {} >",
-                crate::emulation::speed_setting::factor_text(f64::from(self.overlay.speed()) / 10.0)
+                crate::emulation::speed_setting::factor_text(
+                    f64::from(self.overlay.speed()) / 10.0
+                )
             ),
             OverlayItem::Widescreen | OverlayItem::Hacks if !playing_on_zaxnes(frame.host) => {
                 strings::get(keys::HANDHELD_ZAXNES_ONLY)

@@ -59,7 +59,7 @@ sha1 = { version = "0.11.0", default-features = false }
 zip = { version = "7.3.0", default-features = false, features = ["deflate"] }
 zax-engine3d = { path = "../zax-engine3d" }
 zax-fceux = { path = "../zax-fceux", optional = true }
-zax-nes = { path = "../zax-nes" }
+zax-nes = { path = "../zax-nes", features = ["bk2"] }
 # `movie-sync --engine neshawk`: the Rust port of BizHawk's own NES core (lot
 # NESHAWK-REWRITE). A leaf crate with no dependencies of its own.
 zax-neshawk = { path = "../zax-neshawk" }

@@ -6,6 +6,7 @@
 //! interface drives the host through [`Command`]s and reads it through [`HostEvent`]s.
 
 mod achievements;
+mod bk2_movies;
 mod commands;
 mod game_options;
 mod games;

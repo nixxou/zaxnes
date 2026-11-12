@@ -78,6 +78,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         // Lot FCEUX-48 step 4: an `.fm2` plays on the engine that recorded it, which is the only
         // engine it stays in sync on (§5). Without that engine in the build, and for a `.fcm`
         // whose format FCEUX's own movie code refuses, Zaxnes's clean-room importer below.
+        // Owner request: a BizHawk `.bk2`, on the NesHawk port when it was recorded on NesHawk.
+        if super::bk2_movies::is_bk2(Path::new(path)) {
+            self.play_bk2(path);
+            return;
+        }
         if Self::plays_fm2_on_its_own_engine(Path::new(path)) {
             self.play_fm2_on_its_own_engine(path);
             return;
@@ -222,7 +227,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
 
     /// The timeline of the movie that has just started playing: its start state is the first
     /// checkpoint (EDITOR-1).
-    fn start_movie_timeline(&mut self) {
+    pub(super) fn start_movie_timeline(&mut self) {
         self.movie_explorer = None;
         self.movie_timeline = self.session.as_ref().and_then(|session| {
             let movie = session.movie()?;

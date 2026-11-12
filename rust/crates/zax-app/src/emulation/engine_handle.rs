@@ -757,7 +757,8 @@ impl EngineHandle {
     /// an engine they cannot patch.
     #[must_use]
     pub fn patch_switches(&self) -> (bool, bool) {
-        self.zaxnes().map_or((false, false), NesCore::patch_switches)
+        self.zaxnes()
+            .map_or((false, false), NesCore::patch_switches)
     }
 
     /// Whether the savestate block at `offset` of `data` fits the built-in patches as they are

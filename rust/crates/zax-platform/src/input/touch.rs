@@ -462,9 +462,15 @@ impl TouchLayout {
             Some(TouchControl::Lock)
         } else if self.recenter.contains(point, 1.3) {
             Some(TouchControl::Recenter)
-        } else if self.rewind.is_some_and(|circle| circle.contains(point, 1.3)) {
+        } else if self
+            .rewind
+            .is_some_and(|circle| circle.contains(point, 1.3))
+        {
             Some(TouchControl::Rewind)
-        } else if self.forward.is_some_and(|circle| circle.contains(point, 1.3)) {
+        } else if self
+            .forward
+            .is_some_and(|circle| circle.contains(point, 1.3))
+        {
             Some(TouchControl::FastForward)
         } else {
             None
@@ -1099,7 +1105,10 @@ mod tests {
         // The rewind and fast forward, under the 2D/3D switch and the lock (owner request).
         let (rewind, forward) = (layout.rewind.unwrap(), layout.forward.unwrap());
         assert_eq!(Some(TouchControl::Rewind), layout.button_at(rewind.center));
-        assert_eq!(Some(TouchControl::FastForward), layout.button_at(forward.center));
+        assert_eq!(
+            Some(TouchControl::FastForward),
+            layout.button_at(forward.center)
+        );
         assert!(rewind.center[1] > layout.flat.center[1]);
         assert!((rewind.center[0] - layout.flat.center[0]).abs() < 1e-3);
         assert!((forward.center[0] - layout.lock.center[0]).abs() < 1e-3);
@@ -1179,7 +1188,9 @@ mod tests {
             assert_eq!(Some(control), layout.button_at(point));
         }
         // They keep clear of the menu.
-        assert!(layout.forward.unwrap().center[0] < layout.menu.center[0] - layout.menu.radius * 2.0);
+        assert!(
+            layout.forward.unwrap().center[0] < layout.menu.center[0] - layout.menu.radius * 2.0
+        );
         assert_eq!(None, layout.button_at([width * 0.5, top * 0.5]));
         assert!(!layout.takes_dpad([width * 0.5, top * 0.5]));
         // Larger, the small buttons stay on the band's top edge.
