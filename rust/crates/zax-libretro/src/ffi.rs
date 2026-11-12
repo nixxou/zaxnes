@@ -348,9 +348,7 @@ fn follow_options(core: &mut Core) {
     if changed.timing {
         let mut av = av_info(Some(core));
         environment(ENVIRONMENT_SET_SYSTEM_AV_INFO, &mut av);
-    } else if changed.geometry || changed.hack_options {
-        let mut geometry = av_info(Some(core)).geometry;
-        environment(ENVIRONMENT_SET_GEOMETRY, &mut geometry);
+        core.take_new_size();
     }
 }
 
@@ -384,6 +382,10 @@ pub extern "C" fn retro_run() {
         unsafe { poll() };
     }
     core.run(input_word(&frontend));
+    if core.take_new_size() {
+        let mut geometry = av_info(Some(core)).geometry;
+        environment(ENVIRONMENT_SET_GEOMETRY, &mut geometry);
+    }
     if let Some(refresh) = frontend.video_refresh {
         let (pixels, width, height) = core.picture();
         // SAFETY: `pixels` holds `width * height` pixels of 4 bytes, alive for the call.

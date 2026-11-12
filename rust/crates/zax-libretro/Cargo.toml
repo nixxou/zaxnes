@@ -17,3 +17,6 @@ workspace = true
 [dependencies]
 zax-nes = { path = "../zax-nes" }
 zax-engine3d = { path = "../zax-engine3d" }
+
+[dev-dependencies]
+png = "0.17"

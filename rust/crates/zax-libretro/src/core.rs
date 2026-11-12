@@ -79,6 +79,11 @@ pub struct Core {
     height: u32,
     mono: Vec<f32>,
     audio: Vec<i16>,
+    /// Whether a frame has run since the options last changed the picture: its size is then
+    /// the picture's, which a game may make narrower than the options ask (its hack's widest).
+    framed: bool,
+    /// The size the frontend was last told.
+    announced: (u32, u32),
 }
 
 impl Core {
@@ -114,12 +119,13 @@ impl Core {
             height: 240,
             mono: Vec::new(),
             audio: Vec::new(),
+            framed: false,
+            announced: (256, 240),
         };
         core.options.widescreen = options.widescreen;
         core.options.advanced = options.advanced;
         core.set_options(options);
-        core.width = 256 + 2 * core.margin().0;
-        core.height = 240 + 2 * core.margin().1;
+        core.announced = core.picture_size();
         Ok(core)
     }
 
@@ -147,6 +153,9 @@ impl Core {
         self.options = options;
         let margin = self.margin();
         changed.geometry = margin != before;
+        if changed.geometry || changed.hack_options {
+            self.framed = false;
+        }
         self.nes.set_widescreen_margin(i32::try_from(margin.0).unwrap_or(0));
         self.nes
             .set_widescreen_vertical_margin(i32::try_from(margin.1).unwrap_or(0));
@@ -260,6 +269,7 @@ impl Core {
         let pixels = u32::try_from(self.indices.len()).unwrap_or(0);
         self.height = rows;
         self.width = (pixels / rows).max(1);
+        self.framed = true;
         let mut colours = [0_u32; 64];
         for (index, colour) in colours.iter_mut().enumerate() {
             let rgb = zax_engine3d::palette::nes_color(index);
@@ -292,11 +302,24 @@ impl Core {
         (&self.frame, self.width, self.height)
     }
 
-    /// The width and height of the picture the options give, before a frame has run.
+    /// The width and height of the picture: the last frame's, or before a frame has run with
+    /// the options in force, the one they ask for.
     #[must_use]
     pub fn picture_size(&self) -> (u32, u32) {
+        if self.framed {
+            return (self.width, self.height);
+        }
         let margin = self.margin();
         (256 + 2 * margin.0, 240 + 2 * margin.1)
+    }
+
+    /// Whether the picture's size differs from the one the frontend was last told; it counts as
+    /// told from now on.
+    pub fn take_new_size(&mut self) -> bool {
+        let size = self.picture_size();
+        let new = size != self.announced;
+        self.announced = size;
+        new
     }
 
     /// The width over the height of the picture as shown: the NES's 4:3 for 256 x 240, widened

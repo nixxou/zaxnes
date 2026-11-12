@@ -2865,6 +2865,7 @@ dependencies = [
 name = "zax-libretro"
 version = "0.5.0"
 dependencies = [
+ "png 0.17.16",
  "zax-engine3d",
  "zax-nes",
 ]

@@ -39,6 +39,15 @@ lto = "fat"
 codegen-units = 1
 strip = true
 
+# The libretro core (zax-libretro), a cdylib: cargo builds its dependencies to machine code rather
+# than LTO bitcode, and rustc 1.99.1 crashes (access violation in LLVM) generating zax-engine3d's
+# at opt-level 3. cargo build --profile libretro -p zax-libretro.
+[profile.libretro]
+inherits = "release"
+
+[profile.libretro.package.zax-engine3d]
+opt-level = 2
+
 # librashader-runtime-wgpu with the naga module handed to wgpu directly (Mega Bezel), see
 # vendor/librashader-runtime-wgpu/README.md.
 [patch.crates-io]
