@@ -659,3 +659,74 @@ One instrument bug of this step's own: `test-roms`'s new `board` detail key **co
 `neshawk_board`.
 
 *Kirby* frames 1-400 re-run after the registry changed: still **400 of 400 byte-identical**.
+
+### Resumption 2, step E — `neshawk-tiles`, and the capture parity measured
+
+`zax-harness neshawk-tiles` is lot FCEUX-6's `fceux-tiles` pointed at the NesHawk port, and
+deliberately the **same measuring stick**: the engine-neutral half of that tool — the ten-field
+mask, the multiset count, the OAM-rotation check, the row histograms, the readable record pairs —
+moved into `src/tile_diff.rs`, which carries no feature gate, and `fceux_tiles` now uses it.
+Nothing in it was redesigned in the move; lot FCEUX-6's arguments stay at their sites.
+
+`compare_frame_full` was split so that two lists of the *shared* `TileRecord` go through the same
+body: `compare_records` for this tool, `compare_frame_full` for FCEUX's own `Tile`, both two
+`map`s and one `compare_keys`.
+
+#### The class column, and why it is the one to read
+
+`identical` (nothing differs) / `capture` (the two 256×240 pictures agree, so only the capture
+disagrees — **ours to answer for**) / `emulation` (the pictures already differ, so the cores are
+not showing the same frame) / `uniform` (Zaxnes's picture is one colour, so identical pictures
+prove little).
+
+#### The profiled games — what step 5 asks for
+
+| | |
+|---|---|
+| 18 originals x frames 60, 300, 1200 | **44 of 54 frames identical on all ten fields** |
+| `capture`-class frames | **0** |
+| `emulation`-class frames | 10 — SMB3 (3), both Zelda IIs (3 each), Excitebike at 1200 (1) |
+
+So **on every sampled frame where the two engines show the same picture, their records are
+identical on all ten fields**. There is no frame in the set where the machines agree and the
+capture does not.
+
+The power-on fill was ruled out rather than assumed: NesHawk's `HardReset` fills work RAM with
+FCEUX's `00 00 00 00 FF FF FF FF` where `zax-nes` fills **zeros**, and lot FCEUX-6 found that
+difference alone worth six originals. So `NesHawkEngine::set_initial_wram_pattern` and
+`--ram neshawk|zero` exist, the default is `zero` (matching `zax-nes`), and the measurement is
+**the same with either** — these ten frames are not the power-on.
+
+What they are: on SMB3 frame 60 the only differing field is **`y`**, on 192 background records of
+the bottom seven rows, with `plane0`, `plane1`, `index` and `palette` matching exactly and NesHawk
+emitting 32 records more — the mid-screen split landing a line or two apart because the MMC3 IRQ
+fires at a different dot on the two cores. That is the two machines differing, which is the point
+of the lot; the port's agreement with **NesHawk** is what Kirby, Faxanadu and the cycle ledger
+establish.
+
+#### The whole 330-ROM collection, for breadth
+
+| class | frames |
+|---|---|
+| `identical` | **566** |
+| `emulation` | 88 |
+| `uniform` | 4 |
+| **`capture`** | **2** |
+| error | 1 (`other/LINUSMUS.NES`, which **Zaxnes** refuses — a headerless image) |
+
+**Of the capture-class records, 2 048 of 2 050 are identical in order (99.90 %)**, and both frames
+are the same ROM: `other/window_old_ntsc.nes`, where the port's capture emits **one extra
+background record** on `y = 233`, the last row of the frame, with **no field differing on any
+record** (`by_fields` is empty; `unmatched_neshawk` is 1).
+
+The mechanism, named rather than patched: a background row carries 33 records instead of 32 only
+when fine X is not 0 (REQ-CORE-038), and `window_old_ntsc` rewrites the scroll every scanline, so
+the fine X the two cores hold **at the capture instant** differs by a cycle's worth of dot
+alignment on the frame's last line. Making it agree would mean moving when the capture samples
+fine X to suit one torture-test ROM, which is the tuning constant this lot's rules forbid. One
+edge record in 2 050 on 1 ROM of 330 is reported instead.
+
+One more fact the sweep turned up and is worth recording: `first_pixel_diff` is **2 for every one
+of the 18 originals**, including the fourteen whose sampled frames are all identical. The two
+engines part on frame 2 and come back together — the PPU warm-up (`ppudead`) differs — which is an
+engine difference of long standing and not this lot's to fix.

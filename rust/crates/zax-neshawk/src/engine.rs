@@ -90,6 +90,10 @@ pub struct NesHawkEngine {
     /// Whether the 3D tile capture runs. Kept here as well as on the machine because a load or
     /// a power-on builds a new machine, whose capture is off by default.
     capture_tiles: bool,
+    /// `NESSyncSettings.InitialWRamStatePattern`, kept here for the same reason: `HardReset`
+    /// reads it, and a load builds a new machine. Empty means NesHawk's own default, which is
+    /// FCEUX's `00 00 00 00 FF FF FF FF`.
+    wram_pattern: Vec<u8>,
     /// The frame's tile records (REQ-CORE-030), copied off the machine once a frame.
     records: Vec<TileRecord>,
     /// The frame's palette (REQ-CORE-045).
@@ -149,6 +153,7 @@ impl NesHawkEngine {
             ports: [ControllerPortType::Controller; 2],
             frame_offset: 0,
             capture_tiles: false,
+            wram_pattern: Vec::new(),
             records: Vec::new(),
             palette: [0; 32],
             audio: RefCell::new(VecDeque::new()),
@@ -250,9 +255,11 @@ impl NesHawkEngine {
     fn build(&mut self) -> Result<Nes, LoadError> {
         let ports = [Self::device(self.ports[0]), Self::device(self.ports[1])];
         let mut nes = Nes::load(&self.image, &self.db, ports[0], ports[1])?;
-        // `_display_type` is read by `HardReset`, so the region is set and the machine powered on
-        // again rather than the timing being patched afterwards.
+        // `_display_type` and `InitialWRamStatePattern` are both read by `HardReset`, so they are
+        // set and the machine powered on again rather than patched over afterwards.
         nes.set_display_type(Self::display_type(self.region));
+        nes.initial_wram_state_pattern
+            .clone_from(&self.wram_pattern);
         nes.hard_reset();
         nes.set_tile_capture(self.capture_tiles);
         Ok(nes)
@@ -274,6 +281,19 @@ impl NesHawkEngine {
     #[must_use]
     pub fn tile_capture(&self) -> bool {
         self.nes.as_ref().is_some_and(Nes::tile_capture_enabled)
+    }
+
+    /// What the power-on writes into the 2 KiB of work RAM, `NESSyncSettings`'s
+    /// `InitialWRamStatePattern` repeated to fill it.
+    ///
+    /// Empty — the default — is NesHawk's own: FCEUX's `00 00 00 00 FF FF FF FF`, which
+    /// `HardReset` writes when the setting names no pattern. `zax-nes` fills **zeros**, so two
+    /// engines compared without this agree about nothing a game reads out of uninitialised
+    /// memory; lot FCEUX-6 measured that difference alone as worth six originals' worth of
+    /// record differences. Takes effect at the next load or power-on, because `HardReset` is
+    /// what reads it.
+    pub fn set_initial_wram_pattern(&mut self, pattern: Vec<u8>) {
+        self.wram_pattern = pattern;
     }
 
     /// Turns the 3D tile capture on or off. The application's engine has it **on** — the records

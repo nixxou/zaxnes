@@ -8,8 +8,8 @@ use std::process::ExitCode;
 #[cfg(feature = "vs-system")]
 use zax_harness::vs;
 use zax_harness::{
-    bench_core, classify, compare, frame_trace, golden_core, lua_api, meshes, movie_sync, packs,
-    profile_tool, render, test_roms, HarnessError,
+    bench_core, classify, compare, frame_trace, golden_core, lua_api, meshes, movie_sync,
+    neshawk_tiles, packs, profile_tool, render, test_roms, HarnessError,
 };
 #[cfg(feature = "fceux-core")]
 use zax_harness::{fceux_bench, fceux_compare, fceux_run, fceux_tiles};
@@ -115,6 +115,7 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
         }
         [command, rest @ ..] if command == "movie-sync" => movie_sync::command(rest),
         [command, rest @ ..] if command == "frame-trace" => frame_trace::command(rest),
+        [command, rest @ ..] if command == "neshawk-tiles" => neshawk_tiles::command(rest),
         [command, rest @ ..] if command == "compare" => {
             let options = compare::Options::parse(rest)?;
             println!("{}", compare::run(&options)?);
@@ -181,7 +182,7 @@ fn print_help() {
     #[cfg(not(feature = "fceux-core"))]
     let fceux_usage = String::new();
     println!(
-        "{USAGE}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}{vs_usage}{fceux_usage}",
+        "{USAGE}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}{vs_usage}{fceux_usage}",
         test_roms::USAGE,
         meshes::USAGE,
         lua_api::USAGE,
@@ -191,7 +192,8 @@ fn print_help() {
         profile_tool::USAGE,
         classify::USAGE,
         movie_sync::USAGE,
-        frame_trace::USAGE
+        frame_trace::USAGE,
+        neshawk_tiles::USAGE
     );
 }
 
