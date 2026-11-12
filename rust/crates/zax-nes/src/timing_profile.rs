@@ -383,16 +383,16 @@ impl TimingProfile for NesHawkCompat {
     const DMC_FETCH_HAS_TWO_DUMMIES: bool = true;
     const DMC_LENGTH_LAGS_THE_FETCH: bool = true;
     const DMC_ENABLE_WRITES_MID_SAMPLE: bool = true;
-    /// **Still off, and lot NESHAWK-PROFILE-9 moved its gate rather than opening it.** That lot's
-    /// step 1 did what the note below asks — item 12 puts the movie's reset on NesHawk's own cycle,
-    /// so this item's slip is now read off a CPU in the same place inside the instruction as
-    /// NesHawk's — and with the two on the *Kirby* `.bk2` parts at **9 353** against the shipped
-    /// pair's 45 095. 9 353 is lot NESHAWK-PROFILE-3's own wall, so **one more difference stands
-    /// between this item and shipping**, and the three measured-right items wait together: `true`
-    /// here, on `RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT` and on `OAM_DMA_WAITS_AT_THE_END` is the
-    /// whole of turning them on. It is **inert** on both *Faxanadu* dumps (247 and 314 either way),
-    /// so nothing but that movie is waiting on it.
-    const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool = false;
+    /// **ON since lot NESHAWK-PROFILE-10**, with item 12 and item 13 beside it. Lot
+    /// NESHAWK-PROFILE-9's step 1 opened the gate the note below asks for — item 12 puts the
+    /// movie's reset on NesHawk's own cycle, so this item's slip is read off a CPU in the same
+    /// place inside the instruction as NesHawk's — and lot 10 ships the three **measured** items
+    /// together rather than the pair of cancelling errors that reached a further frame. The three
+    /// part the *Kirby* `.bk2` at **9 353** where the all-off profile reaches 45 095 only because
+    /// two errors cancel; every one of the three is measured right on its own stream, and the
+    /// residual at 9 353 is a further difference and not a reason to retract one of them. It is
+    /// **inert** on both *Faxanadu* dumps (247 and 314 either way).
+    const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool = true;
     const DMC_FETCH_STALLS_AN_OAM_TRANSFER: bool = true;
     const PPU_START_UP_DOTS_SKIPPED: i64 = 7165;
 
@@ -427,27 +427,27 @@ impl TimingProfile for NesHawkCompat {
     /// mechanism at `1019` through a profile of its own, so the item stays covered while it is off.
     const DMC_POWER_ON_TIMER: i32 = 1019;
 
-    /// **Item 13 is implemented and shipped OFF** (lot NESHAWK-PROFILE-9 step 3), the shape item 11
-    /// and item 1c both shipped in: the measurement is not in doubt — BizHawk's own bus stream puts
-    /// the hardware's 513 and 514 cycles on the opposite phases of the `$4014` write, and the
-    /// constant's note has the table — and it **costs the second movie**. On its own it takes
-    /// *Faxanadu* `[USA]` from **247** of 832 checksum lines to **202** and the `[Rev 1]` dump from
-    /// 314 to 210, and the *Kirby* `.bk2` from 45 095 to 9 353; item 1c is inert on *Faxanadu*, so
-    /// those 45 and 104 lines are this item's alone.
+    /// **ON since lot NESHAWK-PROFILE-10** (implemented by lot NESHAWK-PROFILE-9 step 3). The
+    /// measurement has never been in doubt — BizHawk's own bus stream puts the hardware's 513 and
+    /// 514 cycles on the opposite phases of the `$4014` write, and the table above is read off that
+    /// stream with no cross-machine calibration — and it is the movie's **first difference of any
+    /// kind**, which is why lot 10 ships it rather than the configuration that cancels it.
     ///
-    /// **What is probably missing is the half the measurement could not reach**: NesHawk's
-    /// behaviour when a DMC fetch is owed on the transfer's own halt cycle, which `run_dma` leaves
-    /// as this core's halt plus the trailing cycle because no transfer of the measured window does
-    /// it. A game with DPCM under a transfer — which *Faxanadu* has and *Kirby*'s measured frames
-    /// do not — meets that case every frame. The window to measure it in is named in the progress
-    /// note.
-    const OAM_DMA_WAITS_AT_THE_END: bool = false;
+    /// **What it costs, recorded rather than hidden**: on its own it takes *Faxanadu* `[USA]` from
+    /// **247** of 832 checksum lines to **202** and the `[Rev 1]` dump from 314 to 210 (item 1c is
+    /// inert on *Faxanadu*, so those 45 and 104 lines are this item's alone). The half the
+    /// measurement could not reach is the likely cause: NesHawk's behaviour when a DMC fetch is
+    /// owed on the transfer's **own halt cycle**, which `run_dma` leaves as this core's halt plus
+    /// the trailing cycle because no transfer of the measured window does it. A game with DPCM
+    /// under a transfer — which *Faxanadu* has and *Kirby*'s measured frames do not — meets that
+    /// case every frame.
+    const OAM_DMA_WAITS_AT_THE_END: bool = true;
 
-    /// **Item 12 is implemented and shipped OFF**, with the rest of the group (lot
-    /// NESHAWK-PROFILE-9 step 1). It is the one of the three whose *own* measurement is a clean
-    /// pass — the four once-a-frame marks read the same −1 either side of the movie's reset where
-    /// they read −1 and then +2 — and it is off because it is worth something only with item 1c
-    /// beside it, and the pair parts at 9 353. On its own it takes the movie from 45 095 to
-    /// **4 665**, which is the two-errors-cancelling arithmetic and not a fault of the item.
-    const RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT: bool = false;
+    /// **ON since lot NESHAWK-PROFILE-10** (implemented by lot NESHAWK-PROFILE-9 step 1). It is the
+    /// one of the three whose *own* measurement is a clean pass — the four once-a-frame marks read
+    /// the same −1 either side of the movie's reset where they read −1 and then +2 — and it is
+    /// worth something only with item 1c beside it, which is why the three move together. On its
+    /// own it takes the movie from 45 095 to **4 665**, which is the two-errors-cancelling
+    /// arithmetic and not a fault of the item.
+    const RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT: bool = true;
 }

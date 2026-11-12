@@ -211,15 +211,15 @@ fn item_1b_the_fetch_is_a_fixed_four_cycles_whatever_the_parity() {
 /// program can produce and is measured only to show the rule is the slip's parity and nothing
 /// else.
 ///
-/// **The item is on** since lot NESHAWK-PROFILE-9 step 1 closed its gate: with item 12 the movie's
-/// reset lands on NesHawk's own cycle, so the slip this item fires on is read off a CPU in the same
-/// place inside the instruction as NesHawk's. The profile of this test's own that carried the
-/// mechanism while it was off is gone with the wait, as item 11's was; `NesHawkCompat` is measured
-/// directly.
+/// **The item is on** since lot NESHAWK-PROFILE-10 (its gate closed by lot NESHAWK-PROFILE-9
+/// step 1: with item 12 the movie's reset lands on NesHawk's own cycle, so the slip this item
+/// fires on is read off a CPU in the same place inside the instruction as NesHawk's). The test
+/// profile that carried the mechanism while it waited is gone, as item 11's was; `NesHawkCompat`
+/// is measured directly.
 #[test]
 fn item_1c_an_odd_run_of_write_cycles_costs_the_fetch_one_cycle_less() {
     let neshawk: Vec<i64> = (1..5)
-        .map(cost_with_the_read_displaced::<ItemsWaiting>)
+        .map(cost_with_the_read_displaced::<NesHawkCompat>)
         .collect();
     let standard: Vec<i64> = (1..5)
         .map(cost_with_the_read_displaced::<Standard>)
@@ -242,48 +242,6 @@ fn item_1c_an_odd_run_of_write_cycles_costs_the_fetch_one_cycle_less() {
         standard,
         "standard: the alignment follows the halted read's own parity"
     );
-    // **The record of the choice, and the one line to change to undo it.** The item ships off while
-    // the movie's wall at frame 9 353 stands (the constant's note is the gate), so the shipped
-    // profile charges four cycles at every slip — item 1b on its own. Written as the behaviour and
-    // not as `assert!(!P::ITEM)`, which clippy reads as an assertion on a constant.
-    assert_eq!(
-        vec![5, 5, 5, 5],
-        (1..5)
-            .map(cost_with_the_read_displaced::<NesHawkCompat>)
-            .collect::<Vec<i64>>(),
-        "the shipped neshawk profile charges a reload four cycles at every slip"
-    );
-}
-
-/// `NesHawkCompat` with the **three items lot NESHAWK-PROFILE-9 left waiting** in place — item 1c,
-/// item 12 and item 13 — so that each stays measured to the cycle while the shipped profile does
-/// not carry it (`timing_profile.rs` has the gate: the *Kirby* `.bk2`'s wall at frame 9 353).
-///
-/// One profile for the three because the three tests that use it are independent: item 12 only acts
-/// in `run_frame_before_soft_reset`, item 13 only inside an OAM transfer, item 1c only on a DMC
-/// reload, and no test below sets up two of those at once. Every other constant is
-/// `NesHawkCompat`'s, read from it rather than restated, so this profile cannot drift away from the
-/// one it stands for. It is a test type and nothing outside this file instantiates it.
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-struct ItemsWaiting;
-
-impl TimingProfile for ItemsWaiting {
-    const NAME: &'static str = "neshawk-items-waiting";
-    const STATE_ID: u8 = NesHawkCompat::STATE_ID;
-    const STATE_CORE_NAME: &'static str = NesHawkCompat::STATE_CORE_NAME;
-
-    const DMC_HALT_ON_REQUEST_CYCLE: bool = NesHawkCompat::DMC_HALT_ON_REQUEST_CYCLE;
-    const DMC_FETCH_HAS_TWO_DUMMIES: bool = NesHawkCompat::DMC_FETCH_HAS_TWO_DUMMIES;
-    const DMC_LENGTH_LAGS_THE_FETCH: bool = NesHawkCompat::DMC_LENGTH_LAGS_THE_FETCH;
-    const DMC_ENABLE_WRITES_MID_SAMPLE: bool = NesHawkCompat::DMC_ENABLE_WRITES_MID_SAMPLE;
-    const DMC_FETCH_STALLS_AN_OAM_TRANSFER: bool = NesHawkCompat::DMC_FETCH_STALLS_AN_OAM_TRANSFER;
-    const PPU_START_UP_DOTS_SKIPPED: i64 = NesHawkCompat::PPU_START_UP_DOTS_SKIPPED;
-    const DMC_POWER_ON_TIMER: i32 = NesHawkCompat::DMC_POWER_ON_TIMER;
-
-    /// The three items, and the only lines of this profile that are not `NesHawkCompat`'s.
-    const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool = true;
-    const OAM_DMA_WAITS_AT_THE_END: bool = true;
-    const RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT: bool = true;
 }
 
 /// The four values a program reads out of `$4015` on the four cycles after a sample's last fetch.
@@ -816,15 +774,8 @@ fn item_13_an_oam_transfer_pays_its_wait_cycle_at_the_end() {
     }
 
     let standard: Vec<i64> = (0..4).map(transfer::<Standard>).collect();
-    let neshawk: Vec<i64> = (0..4).map(transfer::<ItemsWaiting>).collect();
-    let shipped: Vec<i64> = (0..4).map(transfer::<NesHawkCompat>).collect();
-    println!("  standard {standard:?}  item 13 on {neshawk:?}  shipped {shipped:?}");
-    // The record of the choice: the item ships off, so the shipped profile is `Standard`'s own
-    // rule here (`timing_profile.rs` has the gate — it costs *Faxanadu* 45 and 104 lines).
-    assert_eq!(
-        standard, shipped,
-        "the shipped neshawk profile takes this core's own phases"
-    );
+    let neshawk: Vec<i64> = (0..4).map(transfer::<NesHawkCompat>).collect();
+    println!("  standard {standard:?}  neshawk {neshawk:?}");
 
     // Both machines take one of the hardware's own two figures on every phase (nesdev, "DMA").
     for (name, costs) in [("standard", &standard), ("neshawk", &neshawk)] {
@@ -897,15 +848,7 @@ fn item_12_the_frame_before_a_reset_ends_at_the_boundary_dot() {
     let mut gaps = (Vec::new(), Vec::new());
     for frames in 0..8 {
         let plain = pair::<Standard>(frames);
-        let hawk = pair::<ItemsWaiting>(frames);
-        // The record of the choice: the item ships off, so the shipped profile's before-reset
-        // frame is the frame it always was (`timing_profile.rs` has the gate).
-        let shipped = pair::<NesHawkCompat>(frames);
-        assert_eq!(
-            (shipped.0, shipped.2),
-            (shipped.1, shipped.3),
-            "the shipped neshawk profile ends a frame before a reset where it always did"
-        );
+        let hawk = pair::<NesHawkCompat>(frames);
         println!("  after {frames} frame(s): standard {plain:?}  neshawk {hawk:?}");
 
         // `Standard`: the two calls are the same frame, to the cycle and to the flag.
