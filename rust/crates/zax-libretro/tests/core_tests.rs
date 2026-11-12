@@ -145,7 +145,11 @@ fn the_demo_makes_sound() {
     let mut frames = 0_usize;
     // The title is silent: the game starts at Start.
     for frame in 0..600_u32 {
-        core.run(if (300..306).contains(&frame) { 1 << 3 } else { 0 });
+        core.run(if (300..306).contains(&frame) {
+            1 << 3
+        } else {
+            0
+        });
         frames += core.sound().len() / 2;
         loudest = core
             .sound()

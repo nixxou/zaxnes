@@ -31,7 +31,13 @@ fn three_d(name: &str) -> Option<Core> {
         return None;
     };
     let mut core = Core::load(&image, name, Options::default()).ok()?;
-    let Some(document) = profiles::find(name, &image, None) else {
+    // FlappyZaxNes's profile is not in the core (owner decision): the tests take the demo's.
+    let demo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../zax-app/demo/flappyzaxnes.3dn");
+    let own = (name == "FlappyZaxNes.nes")
+        .then(|| std::fs::read(&demo).ok())
+        .flatten()
+        .and_then(|bytes| zax_profiles::format::load(&bytes, None, None).ok());
+    let Some(document) = own.or_else(|| profiles::find(name, &image, None)) else {
         eprintln!("skipped: no profile for {name}");
         return None;
     };

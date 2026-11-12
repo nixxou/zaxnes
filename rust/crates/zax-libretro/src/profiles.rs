@@ -1,14 +1,12 @@
-//! The 3D profile of a game: the ones the core carries (`FlappyZaxNes`'s, and the profiles made
-//! for Zaxnes that `build.rs` finds), then the `.3dn` files of the frontend's system folder
+//! The 3D profile of a game: the ones the core carries (the profiles made for Zaxnes that
+//! `build.rs` finds; the core ships no game, `FlappyZaxNes` included, owner decision), then the
+//! `.3dn` files of the frontend's system folder
 //! (`<system>/Zaxnes/profiles`). A profile suits a ROM whose file name is its title, or starts
 //! with it, as the application's ROM list matches them (`rom_list::matching_profiles`).
 
 use std::path::Path;
 
 use zax_profiles::format::{self, ProfileDocument};
-
-/// The profile of `FlappyZaxNes`, the game shipped with Zaxnes.
-const FLAPPY: &[u8] = include_bytes!("../../zax-app/demo/flappyzaxnes.3dn");
 
 /// The profiles made for Zaxnes (`zaxnes_3dn`), as `build.rs` found them.
 const BUNDLED: &[(&str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/bundled-profiles.rs"));
@@ -69,7 +67,6 @@ pub fn find(rom_name: &str, image: &[u8], system: Option<&Path>) -> Option<Profi
             best = Some((rank, document));
         }
     };
-    consider(FLAPPY, "flappyzaxnes.3dn");
     for (name, bytes) in BUNDLED {
         consider(bytes, name);
     }
@@ -112,12 +109,9 @@ mod tests {
         assert_eq!(rank("Zelda II", "Metroid (USA)"), None);
     }
 
+    /// Owner decision: the core ships no game, so not `FlappyZaxNes`'s profile either.
     #[test]
-    fn the_demo_finds_its_own_profile() {
-        let document = find("FlappyZaxNes.nes", &[], None);
-        assert!(
-            document.is_some_and(|document| !document.profile.permanent_patterns.is_empty()
-                || !document.profile.temporary_patterns.is_empty())
-        );
+    fn the_core_carries_no_profile_of_flappyzaxnes() {
+        assert!(find("FlappyZaxNes.nes", &[], None).is_none());
     }
 }
