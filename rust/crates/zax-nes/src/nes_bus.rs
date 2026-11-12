@@ -879,16 +879,33 @@ impl<P: TimingProfile> NesBusOf<P> {
         // The halt cycle has already run: it is the cycle the caller ticked, the one the CPU was
         // about to read on (see [`NesBus::read_cycle`]). What is left of it is its read, which
         // happens with the CPU's address still on the bus.
-        self.dma &= !DMA_HALT;
-        if !halt_is_invisible {
-            self.dma_repeat_read::<ZONE>(read_address);
-        }
-
         // Bytes read and written so far, counted the way the hardware's pair counter is: even
         // means the next get cycle reads, odd means the next put cycle writes.
         let mut oam_steps: u16 = 0;
         let mut oam_index: u8 = 0;
         let mut oam_byte: u8 = 0;
+
+        // **Item 13**, the first of its two halves: NesHawk spends no halt cycle of its own on an
+        // OAM transfer — its dead cycles carry no bus access at all — so when the halt cycle is
+        // itself a read-phase cycle the transfer's first byte is read **on it**, two cycles before
+        // this core would, and the CPU's own read is not repeated. `self.cycles` is the halt
+        // cycle's own count where the loop below reads the cycle it is **about to** run, which is
+        // why the parity tested here is the other one. A DMC fetch owed on this cycle wins the bus
+        // on both machines (`RunCpuOne`'s `dmc_dma_countdown != 1` gate), so it keeps the halt.
+        let halt_reads_the_first_byte = P::OAM_DMA_WAITS_AT_THE_END
+            && (self.dma & (DMA_DMC | DMA_DUMMY | DMA_DUMMY2)) == 0
+            && (self.dma & DMA_OAM) != 0
+            && (self.cycles & 1) == 0;
+
+        self.dma &= !DMA_HALT;
+        if halt_reads_the_first_byte {
+            let address = u16::from(self.dma_oam_page) << 8;
+            oam_byte = self.dma_read(address, internal, &mut decoded_before);
+            oam_index = 1;
+            oam_steps = 1;
+        } else if !halt_is_invisible {
+            self.dma_repeat_read::<ZONE>(read_address);
+        }
 
         // Whether the fast loop below may be used at all for this transfer, which depends only on
         // the halted address and the page and so is asked once (see [`NesBus::copy_oam_pairs`]).
@@ -980,6 +997,15 @@ impl<P: TimingProfile> NesBusOf<P> {
                     self.dma_repeat_read::<ZONE>(read_address);
                 }
             }
+        }
+
+        // **Item 13**, the second half: NesHawk holds the CPU for one more cycle after the last
+        // `$2004` write — `oam_dma_exec` goes false on that write's own cycle and the CPU runs
+        // again only on the cycle after the next — and that cycle carries no bus access, so it is
+        // a plain tick and not another re-read. `oam_steps` counts this transfer's own accesses,
+        // so a `run_dma` entered for a DMC fetch alone never reaches it.
+        if P::OAM_DMA_WAITS_AT_THE_END && oam_steps == 0x200 {
+            self.tick();
         }
     }
 

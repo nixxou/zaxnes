@@ -417,9 +417,19 @@ fn item_3_a_mid_sample_4015_enable_displaces_the_fetch_and_shortens_it() {
 /// `513/514 + 1` per fetch on `Standard` and `+ 2` per fetch on `NesHawkCompat`.
 #[test]
 fn item_7_a_fetch_inside_an_oam_transfer_costs_the_transfer_a_cycle_more() {
-    /// `(the halted read's cost, the fetches that ran inside it)`.
-    fn transfer_with_a_fetch_inside<P: TimingProfile>() -> (i64, i64) {
+    /// `(the halted read's cost, the fetches that ran inside it, the parity of the `$4014` write's
+    /// own cycle)`.
+    ///
+    /// `shift` write cycles are burnt first, which moves the whole set-up — and so the cycle the
+    /// inside fetch lands on — by that many cycles: one of the two phases is the one this core
+    /// spends an alignment cycle on and the other is not, and that is what makes the test
+    /// differential. Without the sweep both profiles answer two cycles at this set-up's own phase
+    /// and the item cannot be seen.
+    fn transfer_with_a_fetch_inside<P: TimingProfile>(shift: u32) -> (i64, i64, i64) {
         let mut bus = loaded_bus::<P>();
+        for _ in 0..shift {
+            bus.write(0x0000, 0x00);
+        }
         bus.write(0x4010, 0x0F); // The fastest rate: 54 cycles a bit, 432 a byte.
         bus.write(0x4012, 0x00);
         bus.write(0x4013, 0x0F);
@@ -436,31 +446,75 @@ fn item_7_a_fetch_inside_an_oam_transfer_costs_the_transfer_a_cycle_more() {
         }
         let fetches = bus.dmc_dma_count();
         assert_eq!(3, fetches, "{}: the sample is playing", P::NAME);
+        let parity = bus.cycle_count() % 2;
         bus.write(0x4014, 0x02); // The transfer: it halts the next read cycle.
         let cost = cost_of_a_read(&mut bus, 0x8000);
-        (cost, bus.dmc_dma_count() - fetches)
+        (cost, bus.dmc_dma_count() - fetches, parity)
     }
 
-    let (standard, standard_fetches) = transfer_with_a_fetch_inside::<Standard>();
-    let (neshawk, neshawk_fetches) = transfer_with_a_fetch_inside::<NesHawkCompat>();
+    /// The same transfer with **no** DPCM sample at all, its `$4014` write lined up on the same
+    /// parity: each profile's own base, which is what the inside fetch is charged against.
+    ///
+    /// It has to be each profile's own, and at that parity, since item 13: the two profiles take
+    /// the hardware's 513 and 514 cycles on **opposite** phases of the write's own cycle, so a
+    /// base read off the other profile — which is how this test was written until lot
+    /// NESHAWK-PROFILE-9 — is the wrong figure by one.
+    fn transfer_alone<P: TimingProfile>(parity: i64) -> i64 {
+        let mut bus = loaded_bus::<P>();
+        while bus.cycle_count() % 2 != parity {
+            bus.write(0x0000, 0x00); // No DMA unit may halt a write cycle.
+        }
+        bus.write(0x4014, 0x02);
+        cost_of_a_read(&mut bus, 0x8000)
+    }
 
-    assert!(
-        standard_fetches > 0 && neshawk_fetches > 0,
-        "the test needs a fetch inside the transfer: {standard_fetches} fetch(es) in {standard} \
-         cycles and {neshawk_fetches} in {neshawk}"
-    );
-    // 513 or 514 for the transfer, the CPU's own read, and the fetch cycles taken from it.
-    let base = standard - standard_fetches;
-    assert!(
-        (514..=515).contains(&base),
-        "standard: a transfer plus one cycle per inside fetch, got {standard} with \
-         {standard_fetches} fetch(es)"
-    );
+    /// What one inside fetch costs the transfer, on profile `P`, at both phases.
+    fn per_fetch<P: TimingProfile>() -> Vec<i64> {
+        (0..2)
+            .map(|shift| {
+                let (cost, fetches, parity) = transfer_with_a_fetch_inside::<P>(shift);
+                let base = transfer_alone::<P>(parity);
+                assert_eq!(
+                    1,
+                    fetches,
+                    "{}, shift {shift}: one fetch inside the transfer, got {fetches} in {cost} \
+                     cycles",
+                    P::NAME
+                );
+                // 513 or 514 for the transfer and one cycle for the CPU's own read.
+                assert!(
+                    (514..=515).contains(&base),
+                    "{}, shift {shift}: a transfer with no fetch inside it is 513 or 514 cycles, \
+                     got {base}",
+                    P::NAME
+                );
+                cost - base
+            })
+            .collect()
+    }
+
+    let standard = per_fetch::<Standard>();
+    let neshawk = per_fetch::<NesHawkCompat>();
+    println!("  cycles per inside fetch: standard {standard:?}  neshawk {neshawk:?}");
+
+    // **The item**: NesHawk's `dmc_realign` skips the OAM cycle *after* the fetch as well, so its
+    // transfer loses **two** cycles to a fetch that falls inside it, at both phases.
+    assert_eq!(vec![2, 2], neshawk, "neshawk: two cycles per inside fetch");
+    // **And `Standard` loses two here as well, which is the honest reading of this set-up** (lot
+    // NESHAWK-PROFILE-9 step 3): its fetch may only read on a **get** cycle, so it takes the cycle
+    // the transfer would have read on and the pair that follows moves by two. The two profiles
+    // arrive at the same figure by different routes, which is why item 7 was measured *exactly
+    // inert* on the *Kirby* movie in lot NESHAWK-PROFILE-2 step 4.
+    //
+    // Until this lot the test read the base off `Standard` and asserted NesHawk was two cycles
+    // above it, which looked like a difference of one cycle between the profiles. It was **item
+    // 13's** cycle: the two transfers are 513 and 514 on opposite phases of the `$4014` write, so
+    // a base taken from the other profile is the wrong figure by one. The base is now each
+    // profile's own, at the same phase, and the difference it was pinning is gone.
     assert_eq!(
-        base + 2 * neshawk_fetches,
-        neshawk,
-        "neshawk: two cycles per inside fetch, got {neshawk} with {neshawk_fetches} fetch(es) \
-         against a {base}-cycle transfer"
+        vec![2, 2],
+        standard,
+        "standard: the get cycle the fetch takes and the one the pair moves by"
     );
 }
 
@@ -693,6 +747,56 @@ fn item_11_the_dmc_timer_powers_on_1020_cycles_from_its_first_bit() {
         plain, hawk,
         "and the two profiles do not power their DMC timer on alike"
     );
+}
+
+/// **Item 13** — an OAM transfer's wait cycle is at the **end**, so the two profiles charge the
+/// hardware's own 513 and 514 cycles on **opposite** phases.
+///
+/// Measured first, from BizHawk's own bus stream over the frames where the two machines are in step
+/// (lot NESHAWK-PROFILE-9 step 3, round 1): every transfer of that window reads on an even reported
+/// cycle, spends one leading dead cycle when the `$4014` write lands on an even one and none when
+/// it lands on an odd one, and ends with **one cycle carrying no bus access at all**. This core
+/// reads on the same cycles — a reported cycle is this core's plus one — and instead spends the
+/// halt cycle and an alignment cycle when it needs one, with nothing at the end. The totals are
+/// therefore not offset but **swapped**, which is the one thing neither a cycle at the boot nor a
+/// parity flip can produce, and this test is that swap.
+#[test]
+fn item_13_an_oam_transfer_pays_its_wait_cycle_at_the_end() {
+    /// The transfer's own cost in CPU cycles, the `$4014` write displaced by `phase` write cycles.
+    fn transfer<P: TimingProfile>(phase: u32) -> i64 {
+        let mut bus = loaded_bus::<P>();
+        for _ in 0..phase {
+            bus.write(0x0000, 0x00);
+        }
+        bus.write(0x4014, 0x02);
+        // The halted read's cost, less the CPU's own read, is the transfer.
+        cost_of_a_read(&mut bus, 0x8000) - 1
+    }
+
+    let standard: Vec<i64> = (0..4).map(transfer::<Standard>).collect();
+    let neshawk: Vec<i64> = (0..4).map(transfer::<NesHawkCompat>).collect();
+    println!("  standard {standard:?}  neshawk {neshawk:?}");
+
+    // Both machines take one of the hardware's own two figures on every phase (nesdev, "DMA").
+    for (name, costs) in [("standard", &standard), ("neshawk", &neshawk)] {
+        assert!(
+            costs.iter().all(|cost| (513..=514).contains(cost)),
+            "{name}: a transfer is 513 or 514 cycles, got {costs:?}"
+        );
+        assert!(
+            costs.contains(&513) && costs.contains(&514),
+            "{name}: both figures are reachable by moving the write's own cycle, got {costs:?}"
+        );
+    }
+    // And on each phase they take the other one: that is the item.
+    for (phase, (plain, hawk)) in standard.iter().zip(&neshawk).enumerate() {
+        assert_eq!(
+            1027,
+            plain + hawk,
+            "phase {phase}: the two profiles take the two figures the other way round, \
+             got standard {plain} and neshawk {hawk}"
+        );
+    }
 }
 
 /// **Item 12** — a frame the movie taps RESET after ends at the PPU dot the frame boundary falls

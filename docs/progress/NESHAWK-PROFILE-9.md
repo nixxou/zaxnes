@@ -11,7 +11,9 @@ Branch `feat/neshawk-profile`, worktree `cleanroom/wt-bk2`, base `f1c0faa8` (lot
       40's collision is closed, frame 55's is not, and the movie parts at **9 353**. The cycle
       residual is nevertheless −1 three frames further than before, and the first difference has
       moved from frame 55 to tree frame **13**.
-- [ ] 3. Rounds, to frame 156 312 or five of them.
+- [x] 3. **One round of five**: item 13, the OAM transfer's wait cycle, measured from BizHawk's
+      own stream. The movie's first difference moves from tree frame 11 to the wall at **9 353**,
+      which is lot 3's own wall and the next lot's named window.
 - [ ] 4. No regression, report, final pass.
 
 ## The environment this lot runs in
@@ -200,3 +202,104 @@ at tree frame 16, and that is round 1's window.
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE-9 step 2 done: item 1c on, the pair parts at 9 353, the first difference is tree frame 13
+
+---
+
+## Step 3 — round 1: item 13, the OAM transfer's wait cycle
+
+### The answer first
+
+1. **The movie's first difference of any kind is tree frame 11's OAM transfer**, the first one it
+   makes: BizHawk charges the CPU **514** cycles and this core **513**. Found by aligning the two
+   instruction streams execute to execute over tree frames 11 to 17 (`q184.lua`, 4.8 MB) — the
+   residual is a constant −1 for 18 instructions and leaves it at `$C360 STA $4014`.
+2. **BizHawk's own stream says what the shape is**, with no cross-machine calibration: the 512
+   accesses read on an **even reported cycle** and the transfer ends with **one cycle carrying no
+   bus access at all**, the leading dead cycle being spent only when the `$4014` write itself lands
+   on an even reported cycle.
+3. **This core's accesses land on the same cycles** — a reported cycle is this core's plus one —
+   and it spends the halt cycle plus an alignment cycle when it needs one, with nothing at the end.
+   So the two take the hardware's own 513 and 514 (nesdev, "DMA") on **opposite phases**: not
+   offset, **swapped**. That is why neither a cycle at the boot nor a parity flip can produce it,
+   and both were considered and discarded before the item was written.
+4. **Item 13 is that**, and with it the transfer agrees to the cycle: the aligned streams now hold
+   −1 across it, and the four marks read −1 on every frame to BizHawk frame **12** and again on
+   **16 to 26**.
+
+### What BizHawk charges, and what this core did
+
+| the `$4014` write | leading dead | the 512 accesses | trailing dead | NesHawk | this core, before |
+|---|---|---|---|---|---|
+| reported even, 293 092 | 1 | 293 094 … 293 605 | **1** (293 606) | **514** | **513** |
+| reported odd, 352 651 | **0** | 352 652 … 353 165 | **1** (353 166) | **513** | **514** |
+
+The other five transfers of the window all carry a DMC fetch inside and read 515 or 516, which is
+the same two figures plus item 7's two cycles.
+
+### The item, and its test
+
+`TimingProfile::OAM_DMA_WAITS_AT_THE_END`, read twice in `nes_bus.rs` `run_dma`: the halt cycle
+reads the transfer's first byte when it is itself a read-phase cycle (and then does **not** repeat
+the CPU's read, which NesHawk never does), and one cycle with no access follows the last `$2004`
+write. `item_13_an_oam_transfer_pays_its_wait_cycle_at_the_end` measures the four phases of the
+write's own cycle on both profiles:
+
+| phase | 0 | 1 | 2 | 3 |
+|---|---|---|---|---|
+| `Standard` | 513 | 514 | 513 | 514 |
+| `NesHawkCompat` | **514** | **513** | **514** | **513** |
+
+and asserts the two sum to 1 027 on every phase, which no offset could satisfy.
+
+### Round 1
+
+| | |
+|---|---|
+| parting frame before | **9 353** (step 2's pair) |
+| the first difference of any kind | tree frame **11**'s OAM transfer, 514 against 513 |
+| the item | **13**, measured from BizHawk's stream first and the source second |
+| the marks after | −1 on every mark of BizHawk frames 2 to 12 and 16 to 26, against 2 to 12 before |
+| `step1` identical to the byte | 288 → **318** of 400 |
+| parting frame after | **9 353**, unchanged |
+
+### And the wall at 9 353 is where this lot stops
+
+Every configuration that changes anything parts at the same frame: item 13 alone, items 12 + 1c,
+items 12 + 13, and all three. The shipped pair reaches 45 095 **because its two errors cancel**,
+which lot 8 predicted in writing.
+
+| configuration | `step1b` | `step1c` | `step1e` |
+|---|---|---|---|
+| shipped (12, 1c, 13 all off) | 1 100 | **10 000** | **45 095** |
+| 13 alone | 1 100 | 9 353 | — |
+| 12 + 1c | 1 100 | 9 353 | — |
+| 12 + 13 | 1 100 | 9 353 | — |
+| **12 + 1c + 13** | 1 100 | **9 353** | — |
+
+Frame 9 353 is **lot NESHAWK-PROFILE-3's own wall**: it is the frame item 8 — the retracted
+one-cycle lag of the whole /NMI line — was introduced to get past, and the frame the movie parted
+at before item 10 replaced it. So what is left is almost certainly one more difference around the
+NMI's own cycle or the frame boundary, and the next lot has a named window rather than a guess:
+tree frame 9 353, the four marks and the bus stream across it.
+
+### Traps this round met, both worth writing down
+
+* **A residual of −1 is the two machines *in step*, and the proof is inside BizHawk**: its
+  `emu.totalexecutedcycles()` is a **1-based** count of cycles run where this core's
+  `cycle_count()` is the 0-based index of the cycle about to run. NesHawk's own OAM rule is the
+  proof — `cpu_deadcounter` is 2 when `apu.dmc.timer % 2 == 0`, the timer powers on at 1 020 and
+  every rate is even, so its parity is the parity of the cycles **elapsed**, and the leading dead
+  cycle of the first transfer lands where that makes it. Without this, a one-cycle counter
+  convention and a one-cycle boot difference are indistinguishable, and the whole round turns on
+  which it is.
+* **A differential test can be pinning another item's cycle.** Item 7's test took its base
+  transfer cost from the **`Standard`** profile and asserted NesHawk was two cycles above it, which
+  reads as "item 7 costs one cycle more than this core" — and item 13 is that cycle. Measured
+  against each profile's **own** transfer at the same phase, the two profiles charge an inside
+  fetch the same two cycles (by different routes: `Standard`'s fetch may only read on a get cycle,
+  so the pair that follows moves by two), which is exactly why lot 2 measured item 7 *inert* on 81
+  frames. The test now says that instead.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-9 step 3 done: round 1, item 13 measured and shipped, the wall at 9 353 named

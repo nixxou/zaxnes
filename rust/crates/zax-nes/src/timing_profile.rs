@@ -247,6 +247,46 @@ pub trait TimingProfile: Copy + Clone + Default + core::fmt::Debug + Send + Sync
     /// Read at `apu/dmc_channel.rs` `reset`, reached from `nes_core.rs` `power_on` alone.
     const DMC_POWER_ON_TIMER: i32;
 
+    // ------------------------------------------------------- the OAM transfer's wait cycle
+
+    /// **Item 13** (lot NESHAWK-PROFILE-9 step 3, round 1). An OAM transfer's wait cycle is at the
+    /// **end**: the transfer's 512 accesses start on the first read-phase cycle **at or after** the
+    /// halt cycle — the halt cycle itself doing the first read when it is one — and the CPU loses
+    /// **one more cycle after the last `$2004` write**.
+    ///
+    /// **Measured first, from BizHawk's own bus stream** (`q184.lua`, tree frames 11 to 17 of the
+    /// *Kirby* `.bk2`, the two machines in step at a residual of −1). Every transfer of that window
+    /// reads on an **even** reported cycle and ends with one cycle carrying no bus access at all:
+    ///
+    /// | the `$4014` write | leading dead cycles | the 512 accesses | trailing | total |
+    /// |---|---|---|---|---|
+    /// | reported **even** (293 092) | 1 | 293 094 … 293 605 | **1** (293 606) | **514** |
+    /// | reported **odd** (352 651) | **0** | 352 652 … 353 165 | **1** (353 166) | **513** |
+    ///
+    /// This core's accesses land on exactly the same cycles — a reported cycle is this core's plus
+    /// one, so both machines read on the odd cycles of this core's count — and it spends the halt
+    /// cycle and then an alignment cycle when it needs one, with nothing at the end: **513 where
+    /// NesHawk charges 514, and 514 where NesHawk charges 513**. The totals are not offset, they
+    /// are swapped, which is why neither a cycle at the boot nor a parity flip reproduces it.
+    ///
+    /// **Where it comes from.** NesHawk's `$4014` handler sets `sprdma_countdown = 1`, and
+    /// `NES.Core.cs` `RunCpuOne` spends it: `if (apu.dmc.timer % 2 == 0) cpu_deadcounter = 2; else
+    /// cpu_deadcounter = 1;` with `oam_dma_exec = true` and `cpu.RDY = false`, then the OAM block
+    /// reads or writes on each cycle `cpu_deadcounter` is 0 on. There is no halted re-read of the
+    /// CPU's own address anywhere in it — the dead cycles carry no bus access in the stream, where
+    /// this core repeats the read the hardware repeats (`dmc_dma_during_read4/dma_4016_read`) — and
+    /// the CPU does not run again until the cycle after `oam_dma_exec` goes false.
+    ///
+    /// **It is not the more accurate chip, as usual**: 513 and 514 are the hardware's own two
+    /// figures (nesdev, "DMA"), and `Standard`'s phase is the one blargg's `sprdma_and_dmc_dma`
+    /// measures and passes. NesHawk takes the same two figures on the opposite phases.
+    ///
+    /// Read at `nes_bus.rs` `run_dma`, twice: the first read at the top and the trailing cycle at
+    /// the bottom. A fetch owed on the halt cycle keeps the halt (the DMC wins the bus on both
+    /// machines, `RunCpuOne`'s `dmc_dma_countdown != 1` gate), so the first half is the no-fetch
+    /// case alone.
+    const OAM_DMA_WAITS_AT_THE_END: bool;
+
     // ------------------------------------------------------- where a frame ends
 
     /// **Item 12** (lot NESHAWK-PROFILE-9 step 1). A frame the movie taps RESET after ends **at
@@ -321,6 +361,7 @@ impl TimingProfile for Standard {
     const DMC_FETCH_STALLS_AN_OAM_TRANSFER: bool = false;
     const PPU_START_UP_DOTS_SKIPPED: i64 = 0;
     const DMC_POWER_ON_TIMER: i32 = 0;
+    const OAM_DMA_WAITS_AT_THE_END: bool = false;
     const RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT: bool = false;
 }
 
@@ -377,5 +418,6 @@ impl TimingProfile for NesHawkCompat {
     /// mechanism at `1019` through a profile of its own, so the item stays covered while it is off.
     const DMC_POWER_ON_TIMER: i32 = 1019;
 
+    const OAM_DMA_WAITS_AT_THE_END: bool = true;
     const RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT: bool = true;
 }
