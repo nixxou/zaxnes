@@ -165,6 +165,21 @@ impl BoardBase {
         }
     }
 
+    /// `NesBoardBase.PeekPPU`, whose default is `ReadPpu`. Split out as a `&self` method so
+    /// that a screen reader can see the nametables without clocking anything: `AddressPpu` is
+    /// not called, and the one board in scope whose `ReadPpu` has a side effect (SNROM's
+    /// `chr_wram_enable`, tied to PPU A12) does not apply it here.
+    #[must_use]
+    pub fn peek_ppu(&self, addr: i32, ciram: &[u8; 0x800]) -> u8 {
+        if addr < 0x2000 {
+            if !self.vrom.is_empty() {
+                return self.vrom[addr as usize];
+            }
+            return self.vram.get(addr as usize).copied().unwrap_or(0);
+        }
+        ciram[self.apply_mirroring(addr) as usize]
+    }
+
     /// `AssertMemType`, reduced to a boolean: a board whose assert fails does not configure.
     /// The C# throws out of `FindBoard`, which aborts the load; refusing the board instead lets a
     /// later one try, and the load fails with "no class implements the board type" if none does.
@@ -235,6 +250,11 @@ pub trait Board {
         self.base_mut().write_ppu(addr, value, env);
     }
     fn address_ppu(&mut self, _addr: i32) {}
+
+    /// `NesBoardBase.PeekPPU`: the board's CHR and nametable mapping with no side effect.
+    fn peek_ppu(&self, addr: i32, ciram: &[u8; 0x800]) -> u8 {
+        self.base().peek_ppu(addr, ciram)
+    }
 
     /// `NesBoardBase.PeekCart`, which the debugger and the trace use.
     fn peek_cart(&self, addr: i32, db: u8) -> u8 {

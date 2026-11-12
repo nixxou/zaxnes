@@ -27,6 +27,8 @@ cycle-dated bus events.
 | **the cycle ledger**, Kirby frames 2-1 200 | `kirby-jp-cyc0.txt` | **34 026 event lines** and every frame's absolute CPU-cycle count | **every line identical** |
 | `nestest.nes` | blargg's reference log | 8 991 instructions: `PC`, `A`, `X`, `Y`, `SP`, cycle count | exact (`P` bit 4 is NesHawk's own convention; §6) |
 | `instr_test-v5`, all 16 | the ROMs' own `$6000` verdict | 16 | **16 Passed**, the verdict NesHawk gives them |
+| **AccuracyCoin**, same instrument on both machines | `bizhawk-runs/nhr3-coin-neshawk.txt`, taken this lot | **147 tests** | **all 147 verdicts identical**; 130/147 pass on both, the port in 4 166 frames and NesHawk in 4 161 |
+| the five DMC/DMA ROMs the port "fails" | `bizhawk-runs/nhr1-*.txt`, `nhr2-*.txt`, taken this lot | 5 | **NesHawk fails all five identically** — same message, same code, same on-screen CRC |
 
 The cycle ledger is the strongest of these and is worth saying plainly: every write to
 `$4000-$401F`, every read of `$2002` and `$4015`, every NMI and IRQ entry and every watched PC
@@ -149,12 +151,60 @@ this lot did not reach.
 |---|---|---|
 | **The `Engine` trait is not implemented** | `zax-neshawk` is reachable from `movie-sync --engine neshawk` through the harness's own small `Machine` trait, but not from the application: there is no `EngineKind::NesHawk`, no `emu.engine = "neshawk"`, and no `.bk2` default-engine choice | a `NesHawkEngine` over the 30-method trait of `zax-core-api`; the only real work in it is a **savestate**, since the port has no `SyncState` yet and currently snapshots by cloning the whole machine |
 | **No savestate format** | rollback, run-ahead and cross-engine refusal all need a serialised block. `Nes: Clone` is exact and is what the harness's input-sensitivity probe uses, but it is not a format | port `SyncState` from each C# class, in the C#'s field order |
-| **AccuracyCoin and the screen-reading suites are not scored** | the brief asks for NesHawk's own verdicts including the `$8B ANE` hang (`bizhawk-runs/coin-neshawk.txt`, 67/147). The `$6000` protocol cannot read them: for those ROMs the board has no WRAM, so `$6000` is open bus on BizHawk *and* here, and the verdict is only on the screen | make `test_roms`'s four readers (`blargg`, `screen`, `coin`, `mapperel`) generic over a five-method trait — they use only `read_memory`, `run_frame`, `soft_reset`, PPUCTRL's low two bits and a nametable-byte peek — then `test-roms --engine neshawk` |
 | **No tile capture, so no 3D** | the renderer needs the per-frame tile records `zax-nes` and `zax-fceux` produce | the capture of `docs/review/FCEUX-ENGINE.md` §2 and lot FCEUX-6's `fceux-tiles` parity tool |
 | **The second board set is not ported** | MMC2/MMC4 (9/10), Color Dreams (11), GxROM (66), Camerica (71), MMC5 (5), FME-7 (69), VRC2/4 (23/25). The six ported boards cover NROM, MMC1, UxROM, CNROM, MMC3 and AxROM | each is a short file; MMC5 is the one that would widen the `Board` trait, because its `ReadReg2xxx` is a *mutable* read |
 | **No fallback to Zaxnes's boards** | the owner's decision of 2026-11-12 is that any unported mapper falls back on `zax-nes` through an adapter, marked "board from Zaxnes, not NesHawk-exact". Today an unported mapper is a load error naming the board type, which is honest but is not the decision | the adapter, plus the marker in capabilities, the log and the harness output |
 | **VS. System, FDS, NSF, UNIF, the light gun, the cheat engine, the code-data logger, the memory domains, `Palettes.cs`** | not ported; a UNIF/FDS/NSF image is refused by name rather than guessed at | — |
 | **Audio is deltas, not samples** | `RunCpuOne` records every `blip.AddDelta(sampleclock, delta)` into `Nes::audio_deltas`; nothing resamples them yet | a `BlipBuffer` port or the host's own resampler |
+
+## 7b. The ROM suites, and the correction they forced
+
+`test-roms --engine neshawk` runs the whole 331-ROM collection on the port through the **same four
+readers** that score Zaxnes (`test_roms/machine.rs` names the five operations they need). Same
+readers on both machines is the only way a verdict comparison means anything.
+
+| | pass | fail | unsupported | manual |
+|---|---|---|---|---|
+| `--engine neshawk` | 183 | 18 | **31** | 99 |
+| `--engine zaxnes` (unchanged by this lot) | 212 | 7 | 1 | 111 |
+
+The 31 unsupported are the **unported boards** — mappers 11, 28, 5, 34, 10, 180, 69, 118, 66, 78,
+9, 22 and two mapper-4 variants that go to a different MMC3 board class. That is the gap table's
+last-but-one row, not a defect.
+
+Of the 18 failures, three also fail on Zaxnes. The other 15 were each run down, and **none is a
+port defect**:
+
+* **Ten `holy-mapperel` MMC1 ROMs**, all reporting "WRAM 1: `$E000` bit 4 does not disable WRAM".
+  `SxROM.cs` honours `mmc1.wram_disable` **only when `_is_snrom`**, which only `NES-SNROM` sets,
+  and says so: *"different MMC1 revisions handle wram_disable differently; on some it doesn't work
+  at all… we only emulate the first case"*. These boards are SKROM/SJROM/SUROM/SXROM, so NesHawk
+  does not disable WRAM either. The port is **faithful**, and Zaxnes passing them is Zaxnes being
+  more accurate than NesHawk.
+* **Five DMC/DMA ROMs** (`apu_test/7-dmc_basics` and its combined ROM,
+  `dmc_dma_during_read4/dma_4016_read`, `sprdma_and_dmc_dma` and its `_512`). Each was put to
+  NesHawk itself on BizHawk this lot. **NesHawk fails every one of them identically** — the same
+  `Failed #19` and the same "There should be a one-byte buffer that's filled immediately if empty"
+  for `7-dmc_basics`, and for `dma_4016_read` the same on-screen `08 08 08 08 07` and the same
+  ROM-computed CRC `6B48DA20`, character for character.
+
+### The correction: `bizhawk-runs/coin-neshawk.txt` is not a NesHawk run
+
+The lot's brief asks the port to reproduce NesHawk's AccuracyCoin result — *"67/147, it hangs at
+`$8B ANE`"* — from `bizhawk-runs/coin-neshawk.txt`. It does not, and it should not: **that file
+was not taken on NesHawk.**
+
+The evidence is direct. Launching `EmuHawk.exe` with a ROM and a Lua script and no `--config`
+loads the NES with BizHawk's *default* core, which this installation reports as
+`[QuickerNES] Cart Mapper Info` — the trap was hit in this very session, on the first attempt at
+`7-dmc_basics`. Re-run with `--config=ext-tools/scripts/config-neshawk.ini` (whose
+`PreferredCores` names `"NES": "NesHawk"`), the same `coin_bizhawk.lua` protocol and a larger
+frame cap, NesHawk scores **130/147 in 4 161 frames** — its run-all completes, nothing hangs at
+`$8B ANE`, and `$8B ANE` **passes**. The port scores 130/147 in 4 166 frames, and **all 147
+verdicts are identical**. The old file disagrees with NesHawk's own run on **80 of 147** tests.
+
+The new reference is `bizhawk-runs/nhr3-coin-neshawk.txt` (nothing was deleted). Anything else
+measured against `coin-neshawk.txt` should be re-read in this light.
 
 ## 8. Running it
 
@@ -178,6 +228,7 @@ reference log, the 16 `instr_test-v5` ROMs, a power-on smoke test and the speed 
 | | result |
 |---|---|
 | `golden-core`, 98 originals x 1 200 frames, **Zaxnes** engine | `8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773` — **byte-identical**; `zax-nes` was not touched |
+| `test-roms --engine zaxnes` | **212 pass / 7 fail**, the documented figure — so making the four readers engine-generic changed nothing for Zaxnes |
 | `cargo test --release --workspace` | all green, excluding three **pre-existing environment gaps**: `zax-platform` and `zax-app` need `SDL2.lib`, which this worktree has not got, and `zax-harness`'s `bench_core_tests` need the untracked `rust/test-roms/nestest.nes` (supplied from `assets-free` to run them) |
 | `cargo fmt --all --check` | clean |
 | `cargo clippy --workspace --all-targets -- -D warnings` | clean (same two crates excluded, for the same link reason) |

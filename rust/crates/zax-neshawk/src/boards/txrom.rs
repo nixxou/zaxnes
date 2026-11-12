@@ -219,6 +219,17 @@ impl Board for TxRom {
         self.base.rom[addr as usize]
     }
 
+    fn peek_ppu(&self, addr: i32, ciram: &[u8; 0x800]) -> u8 {
+        if addr < 0x2000 {
+            let addr = self.m.map_chr(addr);
+            if !self.base.vrom.is_empty() {
+                return self.base.vrom[(addr + self.m.extra_vrom) as usize];
+            }
+            return self.base.vram[addr as usize];
+        }
+        self.base.peek_ppu(addr, ciram)
+    }
+
     fn read_ppu(&mut self, addr: i32, env: &mut BoardEnv<'_>) -> u8 {
         if addr < 0x2000 {
             let addr = self.m.map_chr(addr);

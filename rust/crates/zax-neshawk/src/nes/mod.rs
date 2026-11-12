@@ -911,10 +911,10 @@ impl Bus {
         self.db = value;
     }
 
-    /// `NES.PeekMemory`, for a debugger or the harness. `&mut` because a board's `ReadWram` is
-    /// not `const` in the C# either; nothing here changes machine state.
+    /// `NES.PeekMemory`, for a debugger or the harness: no side effect anywhere in it, which is
+    /// why it is `&self` where the C# needs `&mut` for its board hooks.
     #[must_use]
-    pub fn peek_memory(&mut self, addr: u16) -> u8 {
+    pub fn peek_memory(&self, addr: u16) -> u8 {
         let iaddr = i32::from(addr);
         if addr >= 0x4020 {
             let db = self.db;
@@ -944,6 +944,13 @@ impl Bus {
             self.board.write_wram(addr - 0x6000, value);
         }
         // a cheat on non-writable memory is not ported
+    }
+
+    /// `NES.ppubus_peek`: the PPU bus with no side effect, which a screen reader needs so that
+    /// it can read the nametables without clocking the board's A12 filter.
+    #[must_use]
+    pub fn peek_ppu(&self, addr: i32) -> u8 {
+        self.board.peek_ppu(addr, &self.ciram)
     }
 
     /// `NES.ppubus_read`'s board side, with the PPU's `PPUON` guard.

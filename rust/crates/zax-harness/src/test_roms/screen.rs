@@ -20,8 +20,8 @@
 //! Anything the mapping does not cover becomes a space, so a decoded row is the text of the
 //! row and nothing else.
 
+use super::machine::TestMachine;
 use serde_json::json;
-use zax_nes::{NesCoreOf, RunFrame, TimingProfile};
 
 use super::{Outcome, Verdict};
 
@@ -59,21 +59,21 @@ impl Font {
 /// The 30 rows of 32 characters of the nametable whose first byte is at PPU address `base`
 /// (`$2000`, `$2400`, `$2800` or `$2C00`), with trailing spaces trimmed.
 ///
-/// The bytes come from [`Ppu2C02::read_nametable_byte`](zax_nes::ppu::Ppu2C02::read_nametable_byte),
-/// the accessor the tile capture already uses, so a board that serves its own nametables — an
-/// MMC5's `ExRAM` or its fill mode — reads correctly instead of through console VRAM that it
-/// never wrote. The accessor is documented as having no side effect.
+/// The bytes come from [`TestMachine::nametable_byte`], which on `zax-nes` is
+/// `Ppu2C02::read_nametable_byte` (the accessor the tile capture already uses, so a board that
+/// serves its own nametables — an MMC5's `ExRAM` or its fill mode — reads correctly instead of
+/// through console VRAM that it never wrote) and on `zax-neshawk` is the board's `PeekPPU`.
+/// Neither has a side effect, which matters: an MMC3 would otherwise count the reader's own PPU
+/// A12 edges.
 #[must_use]
-pub fn rows_at<P: TimingProfile>(core: &NesCoreOf<P>, base: u16, font: Font) -> Vec<String> {
-    let ppu = core.ppu();
-    let cartridge = core.cartridge();
+pub fn rows_at<M: TestMachine>(core: &M, base: u16, font: Font) -> Vec<String> {
     (0..ROWS)
         .map(|row| {
             let line: String = (0..COLUMNS)
                 .map(|column| {
                     let address =
                         base.wrapping_add(u16::try_from(row * COLUMNS + column).unwrap_or(0));
-                    font.character(ppu.read_nametable_byte(address, cartridge))
+                    font.character(core.nametable_byte(address))
                 })
                 .collect();
             line.trim_end().to_owned()
@@ -90,8 +90,8 @@ pub fn rows_at<P: TimingProfile>(core: &NesCoreOf<P>, base: u16, font: Font) -> 
 /// test on the other, and the debris wins on character count. The other three pages are only
 /// tried when the shown one is blank.
 #[must_use]
-pub fn rows<P: TimingProfile>(core: &NesCoreOf<P>, font: Font) -> Vec<String> {
-    let shown = 0x2000u16 + 0x400 * u16::from(core.ppu().control() & 0x03);
+pub fn rows<M: TestMachine>(core: &M, font: Font) -> Vec<String> {
+    let shown = core.nametable_base();
     let rows = rows_at(core, shown, font);
     if score(&rows) > 0 {
         return rows;
@@ -113,7 +113,7 @@ pub fn rows<P: TimingProfile>(core: &NesCoreOf<P>, font: Font) -> Vec<String> {
 /// gaps rather than words, so the count of alphanumeric characters separates them cleanly. The
 /// chosen font is recorded in the row, so a reader of the report can check the call.
 #[must_use]
-pub fn best<P: TimingProfile>(core: &NesCoreOf<P>) -> (Font, Vec<String>) {
+pub fn best<M: TestMachine>(core: &M) -> (Font, Vec<String>) {
     [Font::Ascii, Font::Ascii6]
         .into_iter()
         .map(|font| (font, rows(core, font)))
@@ -147,7 +147,7 @@ pub fn joined(rows: &[String]) -> String {
 /// leaves an almost blank screen up for seconds while the CHR and WRAM passes buzz, and a
 /// reader that stops at the first stable frame reads that blank screen instead of the result.
 /// Returns the frames run.
-pub fn run_until_settled<P: TimingProfile>(core: &mut NesCoreOf<P>, budget: u32) -> u32 {
+pub fn run_until_settled<M: TestMachine>(core: &mut M, budget: u32) -> u32 {
     /// Frames of an unchanging screen that mean the ROM has finished drawing. Two seconds:
     /// Holy Mapperel leaves a part-drawn screen up while the CHR and WRAM passes buzz.
     const SETTLED: u32 = 120;
@@ -264,7 +264,7 @@ impl Kind {
 }
 
 /// Runs `core` for `budget` frames and reads the verdict off its screen the way `kind` says.
-pub fn run<P: TimingProfile>(nes: &mut NesCoreOf<P>, budget: u32, kind: Kind) -> Verdict {
+pub fn run<M: TestMachine>(nes: &mut M, budget: u32, kind: Kind) -> Verdict {
     let frames = run_until_settled(nes, budget);
     let (font, rows) = best(nes);
     let text = joined(&rows);

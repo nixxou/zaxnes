@@ -23,8 +23,8 @@
 //!   ([`NesCore::soft_reset`], AMD-044 REQ-CORE-122), not a power cycle, which is what
 //!   `cpu_reset/ram_after_reset` tells apart.
 
+use super::machine::TestMachine;
 use serde_json::json;
-use zax_nes::{NesCoreOf, RunFrame, TimingProfile};
 
 use super::{one_line, Outcome, Verdict};
 
@@ -91,7 +91,7 @@ pub enum Read {
 ///
 /// Returns [`Read::NoProtocol`] — after only [`PROBE`] frames — when the ROM never writes `$80`
 /// at `$6000` behind the signature, so the caller can read its screen instead.
-pub fn run<P: TimingProfile>(core: &mut NesCoreOf<P>, budget: u32) -> Read {
+pub fn run<M: TestMachine>(core: &mut M, budget: u32) -> Read {
     let mut seen_running = false;
     let mut resets = 0u32;
     let mut reset_at: Option<u32> = None;
@@ -154,7 +154,7 @@ pub fn run<P: TimingProfile>(core: &mut NesCoreOf<P>, budget: u32) -> Read {
 /// Whether a ROM uses the protocol at all, used to decide between this reader and the screen
 /// one without running a second time.
 #[must_use]
-pub fn signed<P: TimingProfile>(core: &NesCoreOf<P>) -> bool {
+pub fn signed<M: TestMachine>(core: &M) -> bool {
     (0..3).all(|offset| core.read_memory(0x6001 + offset) == SIGNATURE[usize::from(offset)])
 }
 
@@ -173,7 +173,7 @@ fn says_done(text: &str) -> bool {
 
 /// The zero-terminated text the ROM wrote from `$6004`.
 #[must_use]
-pub fn text_of<P: TimingProfile>(core: &NesCoreOf<P>) -> String {
+pub fn text_of<M: TestMachine>(core: &M) -> String {
     (TEXT..TEXT_END)
         .map(|address| core.read_memory(address))
         .take_while(|&byte| byte != 0)
@@ -181,7 +181,7 @@ pub fn text_of<P: TimingProfile>(core: &NesCoreOf<P>) -> String {
         .collect()
 }
 
-fn finish<P: TimingProfile>(nes: &NesCoreOf<P>, status: u8, frame: u32, resets: u32) -> Verdict {
+fn finish<M: TestMachine>(nes: &M, status: u8, frame: u32, resets: u32) -> Verdict {
     let text = one_line(&text_of(nes));
     let outcome = match status {
         0 if says_done(&text) => Outcome::Manual,

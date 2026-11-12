@@ -693,6 +693,18 @@ impl Board for SxRom {
         self.base.rom[addr as usize]
     }
 
+    fn peek_ppu(&self, addr: i32, ciram: &[u8; 0x800]) -> u8 {
+        if addr < 0x2000 {
+            // the SNROM `chr_wram_enable` side effect of `ReadPpu` is deliberately not applied
+            let addr = self.gen_chr_address(addr);
+            if self.base.cart.vram_size != 0 {
+                return self.base.vram[(addr & self.vram_mask) as usize];
+            }
+            return self.base.vrom[addr as usize];
+        }
+        self.base.peek_ppu(addr, ciram)
+    }
+
     fn read_ppu(&mut self, addr: i32, env: &mut BoardEnv<'_>) -> u8 {
         if addr < 0x2000 {
             if self.is_snrom {

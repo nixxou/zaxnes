@@ -91,7 +91,7 @@ step 2. If a file you ported was fetched before the clone, it is the same tag; n
 - [~] 3. The `Engine` implementation (`EngineKind::NesHawk`, savestates tagged and refusing other
       engines), wired into `zax-harness` (`movie-sync`/`frame-trace`/`test-roms --engine
       neshawk`), the application's `emu.engine = "neshawk"`, and `.bk2` playback.
-- [~] 4. Verification against BizHawk: the *Kirby* `.bk2` to the last frame (156 312) against the
+- [x] 4. Verification against BizHawk: the *Kirby* `.bk2` to the last frame (156 312) against the
       per-frame references and the cycle ledger; *Faxanadu*; AccuracyCoin and the blargg suites
       with the **same verdicts as NesHawk** (including the `$8B ANE` hang).
 - [ ] 5. 3D: the tile capture the renderer needs, as `zax-fceux` does; capture parity measured on
@@ -362,3 +362,55 @@ AccuracyCoin and every screen-reading suite at once).
 What this lot did deliver is the thing the lot exists for: **the port and BizHawk are the same
 machine**, on 156 312 frames of work RAM, two whole Faxanadu movies, and 34 026 cycle-dated bus
 events.
+
+### Step 4, closed — `test-roms --engine neshawk`, AccuracyCoin, and a correction to the brief
+
+`test_roms`'s four readers (`blargg`, `screen`, `coin`, `mapperel`) are now generic over a
+five-method `TestMachine` (`src/test_roms/machine.rs`): `read_memory`, `run_frame`, `soft_reset`,
+`power`, PPUCTRL's low two bits and a side-effect-free nametable-byte peek. Same readers on both
+machines is the only way a verdict comparison means anything. `--engine zaxnes` is still
+**212 pass / 7 fail**, its documented figure, so the refactor changed nothing for Zaxnes.
+
+**`--engine neshawk`: 183 pass / 18 fail / 31 unsupported / 99 manual.** The 31 unsupported are
+the unported boards. Of the 18 failures three also fail on Zaxnes, and the other 15 were each run
+down — **none is a port defect**: ten are `holy-mapperel` MMC1 ROMs whose `$E000` bit 4 NesHawk
+does not honour either (only `_is_snrom` does, and `SxROM.cs` says so), and five are DMC/DMA ROMs
+that **NesHawk fails identically**, verified on BizHawk this lot down to the on-screen CRC.
+
+#### AccuracyCoin: 147 of 147 identical — and `coin-neshawk.txt` is not a NesHawk run
+
+The brief asks the port to reproduce NesHawk's AccuracyCoin result from
+`bizhawk-runs/coin-neshawk.txt` (*"67/147, it hangs at `$8B ANE`"*). It does not, and it should
+not: **that file was not taken on NesHawk.** `EmuHawk.exe` with a ROM and a Lua script and no
+`--config` loads the NES on BizHawk's *default* core, which this installation reports as
+`[QuickerNES] Cart Mapper Info` — the trap was hit in this session on the first attempt at
+`7-dmc_basics` and is what sent this step looking. With
+`--config=ext-tools/scripts/config-neshawk.ini` (`PreferredCores` → `"NES": "NesHawk"`), the same
+`coin_bizhawk.lua` protocol and a larger frame cap:
+
+| | pass | frames | `$8B ANE` |
+|---|---|---|---|
+| **NesHawk** (`nhr3-coin-neshawk.txt`, this lot) | **130/147** | 4 161, run-all completes | **PASS** |
+| **the port** (`--coin-run-all`) | **130/147** | 4 166, run-all completes | PASS |
+| the old `coin-neshawk.txt` | 67/147 | 100 001, never completed | NOT RUN |
+
+**All 147 verdicts are identical** between the port and NesHawk. The old file disagrees with
+NesHawk's own run on **80 of 147**. Anything else measured against it should be re-read.
+
+Two instruments, and the difference matters: `coin::run` walks the menu and runs each test from a
+freshly powered machine (that is what `test-roms` reports, 130/147 here too), while
+`--coin-run-all` presses Start once and lets the ROM run itself, which is what the Lua does. A
+figure from one is not comparable with a figure from the other.
+
+New BizHawk references written this lot (new files only; nothing was deleted):
+`nhr1-7-dmc-basics.txt`, `nhr1-apu-test.txt`, `nhr1-dma-4016-read.txt`,
+`nhr1-sprdma-and-dmc-dma.txt`, `nhr1-sprdma-and-dmc-dma-512.txt`, `nhr2-dma-4016-read.txt`,
+`nhr3-coin-neshawk.txt`, with their scripts `ext-tools/scripts/nhr1.lua`, `nhr2.lua`, `nhr3.lua`.
+**Every future BizHawk run must pass `--config=scripts/config-neshawk.ini`.**
+
+#### One instrument bug of this step's own, found and fixed
+
+`run_one_neshawk` first skipped the harness's `region_of` rule, so the seven `pal_apu_tests` ROMs
+ran as NTSC and failed. The harness's rule is that a ROM made for one console must be *run* on
+that console; `_display_type` is read by `HardReset`, so the port now sets it and powers on again.
+183 pass, up from 176.

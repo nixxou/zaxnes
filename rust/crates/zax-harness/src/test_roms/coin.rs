@@ -51,8 +51,8 @@
 //! campaign a few seconds instead of 60 results. The skipped tests are reported as such, never
 //! as passes, and the row names each one.
 
+use super::machine::TestMachine;
 use serde_json::{json, Map, Value};
-use zax_nes::{NesCoreOf, RunFrame, TimingProfile};
 
 use super::screen::{self, Font};
 use super::{Outcome, Verdict};
@@ -1184,7 +1184,7 @@ impl TestResult {
 
 /// Runs the ROM's "run every test" path, retiring any test it hangs on, and reads the 147
 /// result bytes.
-pub fn run<P: TimingProfile>(nes: &mut NesCoreOf<P>, budget: u32) -> Verdict {
+pub fn run<M: TestMachine>(nes: &mut M, budget: u32) -> Verdict {
     let mut retired: Vec<Retired> = Vec::new();
     let mut frames = 0u32;
     let mut attempts = 0u32;
@@ -1218,7 +1218,7 @@ pub fn run<P: TimingProfile>(nes: &mut NesCoreOf<P>, budget: u32) -> Verdict {
         }
         // A power cycle, not the RESET button: the result bytes have to go back to zero, and
         // the menu has to be at the top of page 0 again for the walk to the next test.
-        nes.reset();
+        nes.power();
     }
 
     let mut passed = 0usize;
@@ -1338,7 +1338,7 @@ fn verdict_of(
 ///
 /// In the all-test mode the ROM writes nothing before a test and its result afterwards, so
 /// this is the test it never came back from.
-fn first_not_run<P: TimingProfile>(core: &NesCoreOf<P>) -> Option<Test> {
+fn first_not_run<M: TestMachine>(core: &M) -> Option<Test> {
     TESTS
         .iter()
         .find(|test| TestResult::of(core.read_memory(test.result)) == TestResult::NotRun)
@@ -1368,7 +1368,7 @@ struct Run {
 /// README says to ("Pressing A will run the highlighted test"), and watching seven of them pass.
 ///
 /// The result bytes are at `$0403`-`$0498`, in page 4, which no test touches but its own.
-fn run_count<P: TimingProfile>(core: &NesCoreOf<P>) -> usize {
+fn run_count<M: TestMachine>(core: &M) -> usize {
     TESTS
         .iter()
         .filter(|test| TestResult::of(core.read_memory(test.result)) != TestResult::NotRun)
@@ -1384,7 +1384,7 @@ fn run_count<P: TimingProfile>(core: &NesCoreOf<P>) -> usize {
 /// frames the run will not finish. Which of the two ways it ended is told apart by
 /// `RunningAllTests`: a test that took the CPU out of the loop leaves it at zero for the whole
 /// wait, where a test that is merely looping inside the loop does not.
-fn drive<P: TimingProfile>(core: &mut NesCoreOf<P>, budget: u32, retired: &[Test]) -> Run {
+fn drive<M: TestMachine>(core: &mut M, budget: u32, retired: &[Test]) -> Run {
     /// Frames run after the ROM clears `RunningAllTests`, so that it finishes drawing its
     /// result table and recomputing the two tallies.
     const AFTER: u32 = 30;
@@ -1518,4 +1518,60 @@ impl Script {
     fn frames(&self) -> u32 {
         u32::try_from(self.frames.len()).unwrap_or(u32::MAX)
     }
+}
+
+/// `AccuracyCoin` driven **exactly as `ext-tools/scripts/coin_bizhawk.lua` drives BizHawk**, so
+/// that a verdict can be held against `bizhawk-runs/coin-neshawk.txt` line for line.
+///
+/// This is not how [`run`] above drives it, and the difference is the whole point of having both.
+/// `run` walks the menu and runs each test from a freshly powered machine, which reaches all 147;
+/// the Lua presses Start once at frame 120 to start the ROM's own **run-all**, waits for every
+/// result byte to go non-zero, and gives up at frame 100 000. A test that passes from a clean
+/// machine can fail inside a long run-all that left state behind, and a run-all that stalls
+/// leaves every later test at `NOT RUN` — so the two instruments give different numbers on the
+/// same machine, and only the same instrument on both machines compares anything.
+///
+/// Returns `(lines, passed, frames)` where each line is the Lua's own
+/// `<suite> | <name> | PASS|FAIL <n>|NOT RUN`.
+pub fn run_all<M: TestMachine>(core: &mut M, budget: u32) -> (Vec<String>, usize, u32) {
+    let mut frame = 0u32;
+    let mut done: Option<u32> = None;
+    let cap = budget.max(1);
+    loop {
+        frame += 1;
+        // `if n >= 120 and n < 124 then joypad.set({Start = true}, 1) end`
+        let input = if (120..124).contains(&frame) {
+            START
+        } else {
+            0
+        };
+        core.run_frame(input);
+
+        let filled = TESTS
+            .iter()
+            .filter(|test| core.read_memory(test.result) != 0)
+            .count();
+        if frame > 130 && filled == TESTS.len() && done.is_none() {
+            done = Some(frame);
+        }
+        if done.is_some_and(|at| frame > at + 120) || frame > cap {
+            break;
+        }
+    }
+
+    let mut lines = Vec::with_capacity(TESTS.len());
+    let mut passed = 0usize;
+    for test in &TESTS {
+        let byte = core.read_memory(test.result);
+        let verdict = if byte == 0 {
+            "NOT RUN".to_owned()
+        } else if byte % 2 == 1 {
+            passed += 1;
+            "PASS".to_owned()
+        } else {
+            format!("FAIL {}", byte / 4)
+        };
+        lines.push(format!("{} | {} | {verdict}", test.suite, test.name));
+    }
+    (lines, passed, frame)
 }

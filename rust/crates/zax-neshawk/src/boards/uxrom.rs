@@ -111,6 +111,14 @@ impl Board for UxRom {
         self.prg = adjusted & self.prg_mask;
     }
 
+    fn peek_ppu(&self, addr: i32, ciram: &[u8; 0x800]) -> u8 {
+        if addr < 0x2000 {
+            self.base.vram[(addr & self.vram_byte_mask) as usize]
+        } else {
+            self.base.peek_ppu(addr, ciram)
+        }
+    }
+
     fn read_ppu(&mut self, addr: i32, env: &mut BoardEnv<'_>) -> u8 {
         if addr < 0x2000 {
             self.base.vram[(addr & self.vram_byte_mask) as usize]

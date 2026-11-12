@@ -162,6 +162,17 @@ impl Board for CnRom {
         }
     }
 
+    fn peek_ppu(&self, addr: i32, ciram: &[u8; 0x800]) -> u8 {
+        if !self.chr_enabled {
+            return 0x12;
+        }
+        if addr < 0x2000 {
+            self.base.vrom[(addr + (self.chr << 13)) as usize]
+        } else {
+            self.base.peek_ppu(addr, ciram)
+        }
+    }
+
     fn read_ppu(&mut self, addr: i32, env: &mut BoardEnv<'_>) -> u8 {
         if !self.chr_enabled {
             return 0x12;

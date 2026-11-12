@@ -24,6 +24,7 @@
 
 pub mod blargg;
 pub mod coin;
+pub mod machine;
 pub mod mapperel;
 pub mod report;
 pub mod screen;
@@ -51,7 +52,17 @@ pub const USAGE: &str = "zax-harness test-roms <roms dir> <out.json> [options]
                         (with --filter, re-measures one suite without re-running the rest)
   --frames <n>          cap the frame budget of every ROM at n (default: per suite)
   --quiet               do not print one line per ROM
-  --profile <name>      timing profile: standard|neshawk (default standard)";
+  --profile <name>      timing profile: standard|neshawk (default standard)
+  --engine <name>       which core: zaxnes|neshawk (default zaxnes). `neshawk` is
+                        `zax-neshawk`, the Rust port of BizHawk's own core, so that a verdict
+                        can be held against NesHawk's by the same readers on the same ROMs
+  --neshawk-gamedb <d>  BizHawk's gamedb directory, which `--engine neshawk` needs to pick the
+                        board BizHawk picks; defaults to $ZAXNES_BIZHAWK_GAMEDB
+  --coin-run-all <f>    AccuracyCoin only: drive it as `scripts/coin_bizhawk.lua` drives BizHawk
+                        (press Start at frame 120, wait for every result byte, give up at frame
+                        100000) and write the Lua's own lines to <f>, so that the run can be
+                        diffed against `bizhawk-runs/coin-neshawk.txt`. A DIFFERENT instrument
+                        from the menu walk, which is why it is a separate flag";
 
 /// The environment variable the gated `cargo test` subset reads.
 pub const ROMS_DIR_VARIABLE: &str = "ZAXNES_TEST_ROMS";
@@ -71,6 +82,12 @@ pub struct Options {
     quiet: bool,
     /// Which 2A03 to run every ROM on (lot NESHAWK-PROFILE step 3's matrix).
     profile: ProfileChoice,
+    /// Which core runs the collection.
+    engine: TestEngine,
+    /// BizHawk's `gamedb` directory, for `--engine neshawk`.
+    neshawk_gamedb: Option<PathBuf>,
+    /// Where `--coin-run-all` writes the Lua-shaped lines.
+    coin_run_all: Option<PathBuf>,
 }
 
 impl Options {
@@ -98,6 +115,9 @@ impl Options {
             frame_cap: None,
             quiet: false,
             profile: ProfileChoice::Standard,
+            engine: TestEngine::Zaxnes,
+            neshawk_gamedb: None,
+            coin_run_all: None,
         };
         while let Some((name, tail)) = rest.split_first() {
             if matches!(name.as_str(), "--no-shots" | "--quiet" | "--reuse") {
@@ -114,6 +134,19 @@ impl Options {
                 "--markdown" => options.markdown = Some(PathBuf::from(value)),
                 "--merge" => options.merge = Some(PathBuf::from(value)),
                 "--profile" => options.profile = ProfileChoice::parse(value)?,
+                "--engine" => {
+                    options.engine = match value.as_str() {
+                        "zaxnes" => TestEngine::Zaxnes,
+                        "neshawk" => TestEngine::Neshawk,
+                        other => {
+                            return Err(HarnessError::Usage(format!(
+                                "--engine {other:?} is not zaxnes or neshawk\n{USAGE}"
+                            )))
+                        }
+                    };
+                }
+                "--neshawk-gamedb" => options.neshawk_gamedb = Some(PathBuf::from(value)),
+                "--coin-run-all" => options.coin_run_all = Some(PathBuf::from(value)),
                 "--frames" => {
                     options.frame_cap = Some(
                         value
@@ -433,12 +466,39 @@ pub fn collect(options: &Options) -> Result<Vec<RomResult>, HarnessError> {
     named.sort_by(|left, right| left.0.cmp(&right.0));
 
     let shots = options.shots_dir();
+    // One database load for the whole collection: `NesCarts.xml` is 2 MB and parsing it per ROM
+    // would dominate a 290-ROM run.
+    let neshawk_db = match options.engine {
+        TestEngine::Zaxnes => None,
+        TestEngine::Neshawk => Some(
+            match options
+                .neshawk_gamedb
+                .clone()
+                .or_else(|| std::env::var_os("ZAXNES_BIZHAWK_GAMEDB").map(PathBuf::from))
+            {
+                Some(dir) => zax_neshawk::gamedb::GameDb::load_from_dir(&dir),
+                None => zax_neshawk::gamedb::GameDb::empty(),
+            },
+        ),
+    };
+    let run_all = options.coin_run_all.as_deref();
     let mut results = Vec::with_capacity(named.len());
     for (name, file) in named {
         let image = fs::read(&file)?;
-        let mut result = match options.profile {
-            ProfileChoice::Standard => run_one::<Standard>(&name, &image, options.frame_cap),
-            ProfileChoice::NesHawk => run_one::<NesHawkCompat>(&name, &image, options.frame_cap),
+        let mut result = match (options.engine, options.profile) {
+            (TestEngine::Zaxnes, ProfileChoice::Standard) => {
+                run_one_zaxnes::<Standard>(&name, &image, options.frame_cap, run_all)
+            }
+            (TestEngine::Zaxnes, ProfileChoice::NesHawk) => {
+                run_one_zaxnes::<NesHawkCompat>(&name, &image, options.frame_cap, run_all)
+            }
+            (TestEngine::Neshawk, _) => run_one_neshawk(
+                &name,
+                &image,
+                options.frame_cap,
+                run_all,
+                neshawk_db.as_ref(),
+            ),
         };
         if let Some(dir) = &shots {
             result.result.shot = write_shot(dir, &name, &result.frame)?;
@@ -457,6 +517,29 @@ pub fn collect(options: &Options) -> Result<Vec<RomResult>, HarnessError> {
     Ok(results)
 }
 
+/// `zax-neshawk`'s region as the harness's own enumeration.
+fn neshawk_region(nes: &zax_neshawk::Nes) -> NesRegion {
+    match nes.region() {
+        zax_neshawk::DisplayType::Pal => NesRegion::Pal,
+        zax_neshawk::DisplayType::Dendy => NesRegion::Dendy,
+        zax_neshawk::DisplayType::Ntsc => NesRegion::Ntsc,
+    }
+}
+
+/// The database a `--engine neshawk` run with no `gamedb` directory uses: empty, so every lookup
+/// misses and detection falls through to the iNES header.
+static EMPTY_DB: std::sync::OnceLock<zax_neshawk::gamedb::GameDb> = std::sync::OnceLock::new();
+
+/// Which core `--engine` names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TestEngine {
+    /// Zaxnes's own core, on whichever `--profile` says.
+    Zaxnes,
+    /// `zax-neshawk`, the Rust port of BizHawk's NesHawk (lot NESHAWK-REWRITE). `--profile` does
+    /// not apply to it: it *is* NesHawk, not a chip configured to resemble one.
+    Neshawk,
+}
+
 /// A finished run: the row and the final frame, kept so the caller can write the PNG.
 struct Finished {
     result: RomResult,
@@ -468,7 +551,12 @@ struct Finished {
 ///
 /// Generic over the timing profile so that `--profile neshawk` runs the whole collection on the
 /// NesHawk-compatible chip; `ProfileChoice` above is where the one dispatch happens.
-fn run_one<P: TimingProfile>(name: &str, image: &[u8], frame_cap: Option<u32>) -> Finished {
+fn run_one_zaxnes<P: TimingProfile>(
+    name: &str,
+    image: &[u8],
+    frame_cap: Option<u32>,
+    run_all: Option<&Path>,
+) -> Finished {
     let started = Instant::now();
     let header = InesHeader::try_parse(image).ok();
     let mut result = RomResult {
@@ -516,16 +604,97 @@ fn run_one<P: TimingProfile>(name: &str, image: &[u8], frame_cap: Option<u32>) -
         .insert("region".into(), json!(format!("{region:?}")));
 
     core.reset();
+    read_verdict(name, frame_cap, run_all, &mut core, result, started)
+}
+
+/// The same for `zax-neshawk`. Loading is all that differs: the port detects its board from
+/// BizHawk's own databases and powers on inside `Nes::load`, where `NesCore` separates the two.
+fn run_one_neshawk(
+    name: &str,
+    image: &[u8],
+    frame_cap: Option<u32>,
+    run_all: Option<&Path>,
+    db: Option<&zax_neshawk::gamedb::GameDb>,
+) -> Finished {
+    let started = Instant::now();
+    let header = InesHeader::try_parse(image).ok();
+    let mut result = RomResult {
+        rom: name.to_owned(),
+        suite: suite_of(name),
+        mapper: header.as_ref().map(|header| header.mapper),
+        submapper: header
+            .as_ref()
+            .filter(|header| header.is_nes20)
+            .map(|header| header.submapper),
+        outcome: Outcome::Unsupported,
+        code: None,
+        message: String::new(),
+        protocol: "none",
+        frames: 0,
+        milliseconds: 0,
+        detail: Map::new(),
+        shot: None,
+    };
+    result.detail.insert("engine".into(), json!("neshawk"));
+
+    let db = db.unwrap_or_else(|| EMPTY_DB.get_or_init(zax_neshawk::gamedb::GameDb::empty));
+    let nes = match zax_neshawk::Nes::load(
+        image,
+        db,
+        zax_neshawk::controllers::PortDevice::ControllerNes,
+        zax_neshawk::controllers::PortDevice::ControllerNes,
+    ) {
+        Ok(nes) => nes,
+        Err(why) => {
+            result.message = why.to_string();
+            result.milliseconds = elapsed_ms(started);
+            return Finished {
+                result,
+                frame: Vec::new(),
+            };
+        }
+    };
+    let mut core = machine::NeshawkTestMachine::new(nes);
+    // `Nes::load` applied the region off the header, which is the port's own contract — but a ROM
+    // made for one console has to be *run* on that console or its result means nothing, and
+    // `pal_apu_tests`'s ROMs state nothing in their iNES v1 headers. `region_of` is the harness's
+    // own rule, so the port follows it too; `_display_type` is read by `HardReset`, so the
+    // machine is powered on again after the change.
+    let wanted = region_of(name, neshawk_region(&core.nes));
+    if wanted != neshawk_region(&core.nes) {
+        core.nes.set_display_type(match wanted {
+            NesRegion::Pal => zax_neshawk::DisplayType::Pal,
+            NesRegion::Dendy => zax_neshawk::DisplayType::Dendy,
+            _ => zax_neshawk::DisplayType::Ntsc,
+        });
+        core.nes.hard_reset();
+    }
+    result
+        .detail
+        .insert("region".into(), json!(format!("{wanted:?}")));
+
+    read_verdict(name, frame_cap, run_all, &mut core, result, started)
+}
+
+/// The half that does not care which core it is: the plan, the reader, the row.
+fn read_verdict<M: machine::TestMachine>(
+    name: &str,
+    frame_cap: Option<u32>,
+    run_all: Option<&Path>,
+    core: &mut M,
+    mut result: RomResult,
+    started: Instant,
+) -> Finished {
     let plan = Plan::of(name, frame_cap);
     let verdict = match plan.protocol {
-        Protocol::BlarggThenScreen => match blargg::run(&mut core, plan.frames) {
+        Protocol::BlarggThenScreen => match blargg::run(core, plan.frames) {
             blargg::Read::Verdict(verdict) => verdict,
             // The ROM never armed the protocol, so it is one of the suites that only draws its
             // result. The frames already spent probing count towards the budget, and the rest
             // is capped: a result screen appears in seconds, while the demos of
             // `nes-test-roms/other/` never settle at all and would each eat the full budget.
             blargg::Read::NoProtocol { frames } => screen::run(
-                &mut core,
+                core,
                 plan.frames
                     .saturating_sub(frames)
                     .min(screen::FALLBACK_BUDGET),
@@ -533,9 +702,35 @@ fn run_one<P: TimingProfile>(name: &str, image: &[u8], frame_cap: Option<u32>) -
             )
             .after(frames),
         },
-        Protocol::Screen => screen::run(&mut core, plan.frames, plan.screen),
-        Protocol::Mapperel => mapperel::run(&mut core, result.mapper, plan.frames),
-        Protocol::AccuracyCoin => coin::run(&mut core, plan.frames),
+        Protocol::Screen => screen::run(core, plan.frames, plan.screen),
+        Protocol::Mapperel => mapperel::run(core, result.mapper, plan.frames),
+        Protocol::AccuracyCoin => match run_all {
+            Some(path) => {
+                let (lines, passed, frames) = coin::run_all(core, 100_000);
+                let text = format!(
+                    "{}
+pass {passed}/{} frames {frames}
+",
+                    lines.join(
+                        "
+"
+                    ),
+                    lines.len()
+                );
+                if let Err(why) = fs::write(path, text) {
+                    eprintln!("test-roms: --coin-run-all: {why}");
+                }
+                let mut verdict = coin::run(core, plan.frames);
+                verdict
+                    .detail
+                    .insert("coin_run_all_passed".into(), json!(passed));
+                verdict
+                    .detail
+                    .insert("coin_run_all_frames".into(), json!(frames));
+                verdict
+            }
+            None => coin::run(core, plan.frames),
+        },
     };
 
     result.protocol = verdict.protocol;
@@ -547,7 +742,7 @@ fn run_one<P: TimingProfile>(name: &str, image: &[u8], frame_cap: Option<u32>) -
     result.milliseconds = elapsed_ms(started);
 
     let mut frame = Vec::new();
-    core.pixel_frame_indices_into(&mut frame);
+    core.picture_into(&mut frame);
     Finished { result, frame }
 }
 
