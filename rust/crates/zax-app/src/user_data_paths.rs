@@ -186,19 +186,15 @@ impl UserDataPaths {
         let mut paths = match explicit_root {
             Some(root) => Self::new(absolute(root), UserDataRootKind::Explicit, base),
             None if base.join(PORTABLE_MARKER_NAME).is_file() => {
-                // Owner request: the Windows package is portable by default. Its first start
-                // takes along what the per-user folder holds, so that the saves of a version
-                // that was not portable are still there; a folder that takes no writes (Program
-                // Files) leaves the data in the per-user folder.
+                // Owner request: the Windows package is portable by default, and a portable
+                // folder starts on its own: nothing is read from the per-user folder (owner
+                // request, 2026-11-12). A folder that takes no writes (Program Files) leaves the
+                // data in the per-user folder.
                 let mut paths = Self::new(
                     base.join(PORTABLE_FOLDER_NAME),
                     UserDataRootKind::Portable,
                     base.clone(),
                 );
-                let per_user = local().join(PRODUCT_NAME);
-                if try_copy_legacy_root(&per_user, &paths.root) {
-                    paths.migrated_from = Some(per_user);
-                }
                 paths.ensure_directories();
                 if paths.is_writable {
                     return paths;

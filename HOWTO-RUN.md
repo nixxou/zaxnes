@@ -796,9 +796,10 @@ mouvement ; la visée continue de fonctionner curseur masqué.
 ## 6. Où Zaxnes écrit ses fichiers
 
 La version Windows publiée est **portable** : elle contient un fichier `portable.txt`, à côté de
-`zaxnes.exe`, qui place la racine utilisateur dans `userdata\`, au même endroit. Au premier
-lancement portable, le contenu de `%LOCALAPPDATA%\Zaxnes\`, s'il existe, y est **copié** (sans
-toucher à l'original), pour retrouver les sauvegardes d'une version précédente.
+`zaxnes.exe`, qui place la racine utilisateur dans `userdata\`, au même endroit. Le dossier
+portable part de zéro : rien n'est repris de `%LOCALAPPDATA%\Zaxnes\`. Pour garder les
+sauvegardes d'une version précédente, copiez son dossier `userdata\` (ou le contenu de
+`%LOCALAPPDATA%\Zaxnes\`) dans celui de la nouvelle.
 
 Sans `portable.txt` (supprimez-le pour ça), la racine est `%LOCALAPPDATA%\Zaxnes\`. Elle l'est
 aussi quand le dossier de `zaxnes.exe` refuse l'écriture (dans `Program Files`, par exemple) :

@@ -125,7 +125,6 @@ if ($LASTEXITCODE -ne 0) { throw "package: zaxnes.exe --list-profiles exited wit
 Set-Content -Path (Join-Path $Output 'portable.txt') -Encoding utf8 -Value @"
 Ce fichier rend Zaxnes portable : ses données (réglages, sauvegardes, profils importés)
 vont dans le dossier userdata, à côté de zaxnes.exe.
-Au premier lancement, celles de %LOCALAPPDATA%\Zaxnes, s'il y en a, y sont copiées.
 
 Supprimez-le pour les garder dans %LOCALAPPDATA%\Zaxnes, comme une installation classique
 (déplacez alors le contenu de userdata dans ce dossier pour les retrouver).
