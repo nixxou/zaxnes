@@ -25,3 +25,5 @@ glow = "0.16"
 
 [dev-dependencies]
 png = "0.17"
+# The tests draw the 3D into an offscreen OpenGL context.
+zax-render = { path = "../zax-render", features = ["offscreen"] }
