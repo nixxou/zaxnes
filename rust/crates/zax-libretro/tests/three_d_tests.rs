@@ -241,6 +241,36 @@ fn the_optimised_lua_plays_the_same() {
     assert_eq!(fast.system_ram(), plain.system_ram());
 }
 
+/// `RetroArch`'s run-ahead of one frame: each frame runs, is saved, the next one runs ahead
+/// with the same buttons and is shown, and the state comes back.
+#[test]
+fn the_frontends_run_ahead_keeps_the_game_on_its_course() {
+    let name = "Faxanadu [USA][!!].nes";
+    let (Some(mut ahead), Some(mut plain)) = (three_d(name), three_d(name)) else {
+        return;
+    };
+    let input = |frame: u32| {
+        let start = matches!(frame % 300, 250..=255);
+        let right = frame >= 1000;
+        u16::from(start) << 3 | u16::from(right) << 7
+    };
+    let mut state = vec![0; ahead.state_size()];
+    for frame in 0..1500 {
+        plain.run(input(frame));
+        ahead.run(input(frame));
+        assert!(ahead.save_state(&mut state));
+        ahead.run(input(frame));
+        assert!(ahead.load_state(&state));
+    }
+    assert_eq!(ahead.system_ram(), plain.system_ram());
+    let Some(mut gpu) = gpu() else {
+        return;
+    };
+    let picture = draw(&mut gpu, &mut ahead);
+    assert!(varied(&picture));
+    shot(&picture, "3d-faxanadu-run-ahead");
+}
+
 #[test]
 fn a_3d_state_comes_back() {
     let Some(mut core) = three_d("FlappyZaxNes.nes") else {
