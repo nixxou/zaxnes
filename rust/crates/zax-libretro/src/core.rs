@@ -45,6 +45,8 @@ pub struct Options {
     pub three_d: bool,
     /// The size the 3D is drawn at (at the next load).
     pub resolution: (u32, u32),
+    /// The render settings of the 3D (at once).
+    pub render: crate::three_d::RenderOptions,
 }
 
 impl Default for Options {
@@ -59,6 +61,7 @@ impl Default for Options {
             hacks: Vec::new(),
             three_d: true,
             resolution: (1280, 720),
+            render: crate::three_d::RenderOptions::default(),
         }
     }
 }
@@ -154,6 +157,7 @@ impl Core {
             &mut self.nes,
             profile,
             tiles,
+            self.options.render,
             log,
         )?);
         Ok(())
@@ -196,6 +200,11 @@ impl Core {
         }
         zax_engine3d::palette::select_nes_palette(options.palette);
         self.nes.set_sprite_limit(options.sprite_limit);
+        if options.render != self.options.render {
+            if let Some(three_d) = self.three_d.as_mut() {
+                three_d.set_render(&mut self.nes, options.render);
+            }
+        }
         let before = self.margin();
         self.options = options;
         let margin = self.margin();

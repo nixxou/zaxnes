@@ -6,6 +6,13 @@ use zax_nes::ppu::SpriteLimit;
 use zax_nes::NesRegion;
 
 use crate::core::{Options, RegionChoice};
+use crate::three_d::RenderOptions;
+
+/// The value of the choice named `text` among `choices`, `default` for none.
+fn choice(choices: &[(&str, i32)], text: Option<String>, default: i32) -> i32 {
+    text.and_then(|text| choices.iter().find(|(name, _)| *name == text))
+        .map_or(default, |(_, value)| *value)
+}
 
 const WIDESCREEN: &str = "zaxnes_widescreen";
 const RATIO: &str = "zaxnes_widescreen_ratio";
@@ -15,6 +22,21 @@ const SPRITE_LIMIT: &str = "zaxnes_sprite_limit";
 const PALETTE: &str = "zaxnes_palette";
 const RENDERER: &str = "zaxnes_renderer";
 const RESOLUTION: &str = "zaxnes_3d_resolution";
+const ANTI_ALIAS: &str = "zaxnes_3d_anti_alias";
+const SHADOWS: &str = "zaxnes_3d_shadows";
+const STYLE: &str = "zaxnes_3d_style";
+const REFLECTIONS: &str = "zaxnes_3d_reflections";
+const SKY: &str = "zaxnes_3d_sky";
+
+/// The anti-aliasing levels of `video.anti_alias`, by their value, the default first.
+const ANTI_ALIASES: [(&str, i32); 4] = [("MSAA 4x", 1), ("Off", 0), ("MSAA 8x", 2), ("SMAA", 3)];
+/// The skies of `scene.skybox`, by their value, the default first.
+const SKIES: [(&str, i32); 4] = [
+    ("Default", -1),
+    ("Colour", 0),
+    ("Gradient", 1),
+    ("Fantasy", 2),
+];
 
 const RESOLUTIONS: [(u32, u32); 5] = [
     (1280, 720),
@@ -64,6 +86,23 @@ pub fn declarations(hacks: &[HackOption]) -> Vec<(String, String)> {
         (
             RESOLUTION.to_owned(),
             format!("3D resolution (restart); {}", resolutions.join("|")),
+        ),
+        (
+            ANTI_ALIAS.to_owned(),
+            format!(
+                "3D anti-aliasing; {}",
+                ANTI_ALIASES.map(|(name, _)| name).join("|")
+            ),
+        ),
+        (SHADOWS.to_owned(), "3D shadows; enabled|disabled".to_owned()),
+        (STYLE.to_owned(), "3D visual style; Classic|Enhanced".to_owned()),
+        (
+            REFLECTIONS.to_owned(),
+            "3D reflections (Enhanced style); disabled|enabled".to_owned(),
+        ),
+        (
+            SKY.to_owned(),
+            format!("3D sky; {}", SKIES.map(|(name, _)| name).join("|")),
         ),
         (
             WIDESCREEN.to_owned(),
@@ -140,6 +179,13 @@ pub fn read(value: &dyn Fn(&str) -> Option<String>, hacks: &[HackOption]) -> Opt
                     .copied()
             })
             .unwrap_or(defaults.resolution),
+        render: RenderOptions {
+            anti_alias: choice(&ANTI_ALIASES, value(ANTI_ALIAS), defaults.render.anti_alias),
+            shadows: enabled(SHADOWS, defaults.render.shadows),
+            enhanced: value(STYLE).map_or(defaults.render.enhanced, |text| text == "Enhanced"),
+            reflections: enabled(REFLECTIONS, defaults.render.reflections),
+            skybox: choice(&SKIES, value(SKY), defaults.render.skybox),
+        },
         hacks: hacks
             .iter()
             .map(|option| {
@@ -184,6 +230,9 @@ mod tests {
                 "zaxnes_region" => Some("PAL".to_owned()),
                 "zaxnes_palette" => Some("Mesen".to_owned()),
                 "zaxnes_hack_invincible" => Some("enabled".to_owned()),
+                "zaxnes_3d_anti_alias" => Some("SMAA".to_owned()),
+                "zaxnes_3d_style" => Some("Enhanced".to_owned()),
+                "zaxnes_3d_sky" => Some("Fantasy".to_owned()),
                 _ => None,
             },
             &[OPTION],
@@ -193,5 +242,14 @@ mod tests {
         assert_eq!(set.region, RegionChoice::Forced(NesRegion::Pal));
         assert_eq!(set.palette, 1);
         assert_eq!(set.hacks, vec![("invincible".to_owned(), true)]);
+        assert_eq!(
+            set.render,
+            RenderOptions {
+                anti_alias: 3,
+                enhanced: true,
+                skybox: 2,
+                ..RenderOptions::default()
+            }
+        );
     }
 }

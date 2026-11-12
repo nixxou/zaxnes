@@ -14,4 +14,5 @@ pub mod core;
 pub mod ffi;
 pub mod options;
 pub mod profiles;
+pub mod scene_settings;
 pub mod three_d;

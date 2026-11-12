@@ -11,7 +11,9 @@ use zax_nes::{ControllerPortType, FrameBatch, NesCore, TileRecord};
 use zax_profiles::hash::tiles::TileResolver;
 use zax_profiles::profile::GameProfile;
 use zax_render::camera::{CameraMode, SceneCamera};
-use zax_render::scene::{BackdropState, SceneFrame, SceneState, SkyboxKind};
+use std::sync::{Arc, Mutex};
+
+use zax_render::scene::{BackdropState, SceneFrame, SceneState};
 use zax_scripting::{
     lend_context, LuaColor, ProfileScriptRuntime, ScriptBackdrop, ScriptCamera, ScriptContext,
     ScriptEnvironment, ScriptInput, ScriptLight, ScriptLog, ScriptMemory, ScriptProfileInfo,
@@ -19,12 +21,59 @@ use zax_scripting::{
 };
 use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
+use zax_settings::values::SettingValue;
+
+use crate::scene_settings;
 
 /// How fast the right stick turns the camera, in degrees a second at full tilt.
 const TURN_SPEED: f32 = 90.0;
 /// How fast the shoulder triggers bring the camera nearer or farther, a share of the distance
 /// a second.
 const ZOOM_SPEED: f32 = 1.0;
+
+/// The render settings the core options choose, written in the user layer of the settings as
+/// the application's options window writes them: a profile or a script may still change them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RenderOptions {
+    /// `video.anti_alias`: 0 none, 1 MSAA 4x, 2 MSAA 8x, 3 SMAA.
+    pub anti_alias: i32,
+    /// `render.shadow`.
+    pub shadows: bool,
+    /// `render.visual_style` Enhanced (else Classic).
+    pub enhanced: bool,
+    /// `render.style.reflections` (the Enhanced style's).
+    pub reflections: bool,
+    /// `scene.skybox`: -1 the default, 0 colour, 1 gradient, 2 fantasy.
+    pub skybox: i32,
+}
+
+impl Default for RenderOptions {
+    fn default() -> Self {
+        Self {
+            anti_alias: 1,
+            shadows: true,
+            enhanced: false,
+            reflections: false,
+            skybox: -1,
+        }
+    }
+}
+
+impl RenderOptions {
+    fn write(self, model: &mut SettingsModel) {
+        model.set(SettingId::VideoAntiAlias, SettingValue::Enum(self.anti_alias));
+        model.set(SettingId::RenderShadow, self.shadows);
+        model.set(
+            SettingId::RenderVisualStyle,
+            SettingValue::Int(if self.enhanced { 4 } else { 0 }),
+        );
+        model.set(
+            SettingId::RenderStyleReflections,
+            SettingValue::Int(i32::from(self.reflections)),
+        );
+        model.set(SettingId::SceneSkybox, SettingValue::Enum(self.skybox));
+    }
+}
 
 /// The 3D of the game in play.
 pub struct ThreeD {
@@ -35,6 +84,8 @@ pub struct ThreeD {
     picture: Vec<u8>,
     picture_height: usize,
     frame: i32,
+    /// The settings changed since the scene last followed them (the scripts', the options').
+    changes: Arc<Mutex<Vec<SettingId>>>,
     /// The 2D view of a profile's 3D game, the player's choice (L3).
     pub flat: bool,
 }
@@ -51,6 +102,7 @@ impl ThreeD {
         nes: &mut NesCore,
         profile: &GameProfile,
         tiles: Option<TileResolver>,
+        render: RenderOptions,
         log: fn(&str),
     ) -> Result<Self, String> {
         let mut engine = ConversionEngine::new();
@@ -65,12 +117,20 @@ impl ThreeD {
             picture: Vec::new(),
             picture_height: 240,
             frame: 0,
+            changes: Arc::default(),
             flat: false,
         };
-        let model = SettingsModel::new();
-        push_settings(&model, &mut three.scene);
+        let mut model = SettingsModel::new();
+        render.write(&mut model);
+        let mut settings = ScriptSettings::new(model, ScriptLight::Model);
+        let changes = Arc::clone(&three.changes);
+        settings.set_on_changed(move |id| {
+            if let Ok(mut changes) = changes.lock() {
+                changes.push(id);
+            }
+        });
         let environment = ScriptEnvironment {
-            settings: ScriptSettings::new(model, ScriptLight::Model),
+            settings,
             log: Box::new(Log(log)),
             profile: ScriptProfileInfo {
                 title: profile.title.clone().unwrap_or_default(),
@@ -101,9 +161,14 @@ impl ThreeD {
         });
         loaded.map_err(|error| error.to_string())?;
         three.sync_settings(nes);
-        if let Some(model) = three.model() {
-            let model = model.clone();
-            push_settings(&model, &mut three.scene);
+        three.take_changes();
+        if let Some(runtime) = three.engine.script_host_as::<ProfileScriptRuntime>() {
+            let model = runtime.settings().model();
+            scene_settings::push_settings(model, &mut three.scene);
+            three
+                .scene
+                .settings
+                .set_anti_alias(model.get(SettingId::VideoAntiAlias).as_int());
         }
         three.with_runtime(nes, ProfileScriptRuntime::invoke_start);
         nes.reset();
@@ -150,6 +215,7 @@ impl ThreeD {
         });
         self.engine.publish();
         self.sync_settings(nes);
+        self.follow_settings();
         self.picture_height = nes.wide_picture_into(&mut self.picture);
         self.follow_frame();
     }
@@ -194,6 +260,43 @@ impl ThreeD {
         self.scene.real_time += real_seconds;
     }
 
+    /// Puts the render settings `render` chooses in force at once.
+    pub fn set_render(&mut self, nes: &mut NesCore, render: RenderOptions) {
+        let Some(runtime) = self.engine.script_host_as_mut::<ProfileScriptRuntime>() else {
+            return;
+        };
+        render.write(runtime.settings_mut().model_mut());
+        self.sync_settings(nes);
+        self.follow_settings();
+    }
+
+    fn take_changes(&self) -> Vec<SettingId> {
+        self.changes
+            .lock()
+            .map(|mut changes| std::mem::take(&mut *changes))
+            .unwrap_or_default()
+    }
+
+    /// Brings the scene to the settings that changed (the light, the field of view... that a
+    /// script wrote), as the application does after each frame.
+    fn follow_settings(&mut self) {
+        let changes = self.take_changes();
+        if changes.is_empty() {
+            return;
+        }
+        let Some(runtime) = self.engine.script_host_as::<ProfileScriptRuntime>() else {
+            return;
+        };
+        let model = runtime.settings().model();
+        for id in changes {
+            if id == SettingId::VideoAntiAlias {
+                self.scene.settings.set_anti_alias(model.get(id).as_int());
+            } else {
+                scene_settings::apply_setting(id, model, &mut self.scene);
+            }
+        }
+    }
+
     /// The scripts' 64 `PData` values, the block a state carries (REQ-LUA-071).
     #[must_use]
     pub fn persistent_data(&self) -> Option<[u8; zax_scripting::persistent::BLOCK_SIZE]> {
@@ -236,12 +339,6 @@ impl ThreeD {
             &self.scene,
             SceneFrame::with_draw_list(self.engine.build_draw_list()),
         )
-    }
-
-    fn model(&self) -> Option<&SettingsModel> {
-        self.engine
-            .script_host_as::<ProfileScriptRuntime>()
-            .map(|runtime| runtime.settings().model())
     }
 
     fn scripted(&mut self, nes: &mut NesCore, operation: impl FnOnce(&mut ConversionEngine)) {
@@ -478,36 +575,4 @@ impl ScriptBackdrop for SceneBackdropBridge<'_> {
     fn reset(&mut self) {
         self.0.reset();
     }
-}
-
-const fn skybox_of(value: i32) -> SkyboxKind {
-    match value {
-        0 => SkyboxKind::Color,
-        1 => SkyboxKind::Gradient,
-        2 => SkyboxKind::Fantasy,
-        _ => SkyboxKind::Default,
-    }
-}
-
-fn color_of(model: &SettingsModel, id: SettingId) -> zax_engine3d::palette::Rgb24 {
-    let color = model.get(id).as_color();
-    LuaColor::new(color.r, color.g, color.b, color.a).to_rgb24()
-}
-
-/// The scene-owned settings a profile or a script set (as the harness pushes them): the field
-/// of view, the camera smoothing, the shadows, the sky, the background and the light.
-fn push_settings(model: &SettingsModel, scene: &mut SceneState) {
-    let fov = model.get(SettingId::CameraFov).as_float();
-    scene.settings.fov = fov;
-    scene.camera.set_fov(fov);
-    scene.camera.smooth_time = model.get(SettingId::CameraSmoothTime).as_float();
-    scene.camera.local_camera = model.get(SettingId::CameraLocalCam).as_bool();
-    scene.settings.shadows = model.get(SettingId::RenderShadow).as_bool();
-    scene.settings.skybox = skybox_of(model.get(SettingId::SceneSkybox).as_int());
-    scene.settings.custom_background_color = color_of(model, SettingId::SceneCustomBgColor);
-    scene.use_nes_background_color = model.get(SettingId::SceneUseNesBgColor).as_bool();
-    let direction = model.get(SettingId::LightDirection).as_vector3();
-    scene.light.direction =
-        zax_render::numerics::Vector3::new(direction.x, direction.y, direction.z);
-    scene.light.color = color_of(model, SettingId::LightColor);
 }

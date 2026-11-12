@@ -150,6 +150,32 @@ fn faxanadu_plays_in_3d() {
 }
 
 #[test]
+fn the_render_options_reach_the_scene_at_once() {
+    let Some(mut core) = three_d("FlappyZaxNes.nes") else {
+        return;
+    };
+    play(&mut core, 60, |_| 0);
+    let mut options = core.options().clone();
+    options.render.anti_alias = 3;
+    options.render.enhanced = true;
+    options.render.reflections = true;
+    options.render.skybox = 2;
+    core.set_options(options);
+    let scene = core.three_d_mut().expect("in 3D").scene();
+    assert_eq!(scene.settings.anti_alias(), 3);
+    assert!(scene.settings.style.enhanced && scene.settings.style.reflections);
+    assert_eq!(scene.settings.skybox, zax_render::scene::SkyboxKind::Fantasy);
+    // Drawn so, without an error.
+    let Some(mut gpu) = gpu() else {
+        return;
+    };
+    play(&mut core, 60, |_| 0);
+    let picture = draw(&mut gpu, &mut core);
+    assert!(varied(&picture));
+    shot(&picture, "3d-flappy-enhanced");
+}
+
+#[test]
 fn a_3d_state_comes_back() {
     let Some(mut core) = three_d("FlappyZaxNes.nes") else {
         return;
