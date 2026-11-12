@@ -41,6 +41,10 @@ struct NestestBus {
     /// point, which is `Fetch1_Real`'s `OnExecFetch` call in the C# and is where BizHawk's own
     /// `TraceCallback` fires.
     fetch: Option<u16>,
+
+    /// The 16-bit address bus, which lives on the machine side; see
+    /// [`Mos6502xLink::set_address_bus`].
+    address_bus: u16,
 }
 
 impl NestestBus {
@@ -77,6 +81,10 @@ impl Mos6502xLink for NestestBus {
 
     fn on_exec_fetch(&mut self, address: u16) {
         self.fetch = Some(address);
+    }
+
+    fn set_address_bus(&mut self, address: u16) {
+        self.address_bus = address;
     }
 }
 
@@ -127,6 +135,7 @@ fn nestest_matches_the_reference_log_instruction_for_instruction() {
         ram: [0; 0x800],
         prg,
         fetch: None,
+        address_bus: 0,
     };
 
     // The power-on reset sequence is run rather than assumed, because it is the thing that

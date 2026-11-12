@@ -154,7 +154,7 @@ impl Mos6502x {
             // If the next cycle is the start of a new instruction, the address bus needs to be
             // set to the PC now, so a DMC DMA's halt cycles don't use the wrong address bus
             // value.
-            self.address_bus = self.PC;
+            bus.set_address_bus(self.PC);
         }
     }
 
@@ -469,7 +469,7 @@ impl Mos6502x {
             self.opcode = usize::from(bus.read_memory(pc));
             self.mi = -1;
         }
-        self.address_bus = self.PC;
+        bus.set_address_bus(self.PC);
     }
 
     fn Fetch2(&mut self, bus: &mut impl Mos6502xLink) {
@@ -483,7 +483,7 @@ impl Mos6502x {
         if self.rdy_gate() {
             let pc = self.pc_pp();
             self.opcode3 = bus.read_memory(pc);
-            self.address_bus = (u16::from(self.opcode3) << 8) | u16::from(self.opcode2);
+            bus.set_address_bus((u16::from(self.opcode3) << 8) | u16::from(self.opcode2));
         }
     }
 
@@ -1268,7 +1268,7 @@ impl Mos6502x {
     fn IdxInd_Stage4(&mut self, bus: &mut impl Mos6502xLink) {
         if self.rdy_gate() {
             self.ea = i32::from(bus.read_memory(self.alu_temp as u16));
-            self.address_bus = self.ea16();
+            bus.set_address_bus(self.ea16());
         }
     }
 
@@ -1424,7 +1424,7 @@ impl Mos6502x {
             self.alu_temp = self.ea + i32::from(self.Y);
             let addr = u16::from(self.opcode2.wrapping_add(1));
             self.ea = (i32::from(bus.read_memory(addr)) << 8) | (self.alu_temp & 0xFF);
-            self.address_bus = self.ea16();
+            bus.set_address_bus(self.ea16());
             self.H = 0; // In preparation for SHA (indirect, X), set H to 0.
         }
     }
@@ -1617,7 +1617,7 @@ impl Mos6502x {
             self.opcode3 = bus.read_memory(pc);
             self.alu_temp = i32::from(self.opcode2) + i32::from(self.Y);
             self.ea = (i32::from(self.opcode3) << 8) + (self.alu_temp & 0xFF);
-            self.address_bus = self.ea16();
+            bus.set_address_bus(self.ea16());
             self.H = 0; // In preparation for SHA, SHS, and SHX, set H to 0.
         }
     }
@@ -1628,7 +1628,7 @@ impl Mos6502x {
             self.opcode3 = bus.read_memory(pc);
             self.alu_temp = i32::from(self.opcode2) + i32::from(self.X);
             self.ea = (i32::from(self.opcode3) << 8) + (self.alu_temp & 0xFF);
-            self.address_bus = self.ea16();
+            bus.set_address_bus(self.ea16());
             self.H = 0; // In preparation for SHY, set H to 0.
         }
     }

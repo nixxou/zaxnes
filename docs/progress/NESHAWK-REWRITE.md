@@ -30,6 +30,37 @@ reports for it. All 21 files matched exactly on the first fetch.
 
 The mirror lives in the session scratchpad, **outside the repository**, and is never staged.
 
+**Owner decision, 2026-11-12: a full local clone now exists and is THE reference from here on.**
+`G:/3DSen/ext-tools/bizhawk-src` — BizHawk tag 2.11.1 (commit `bdddf4a`), sparse checkout of the
+NES core, `CPUs/MOS 6502X`, `BizHawk.Emulation.Common`, `BizHawk.Client.Common/movie` and
+`Assets/gamedb` (incl. `NesCarts.xml`, which NesHawk uses to pick *Kirby*'s `HVC-TKROM` board).
+Read and grep it directly; no more curl or WebFetch. A reference map with file/line pointers to
+every function the port needs is at `G:/3DSen/ext-tools/BIZHAWK-SRC-INDEX.md` — read it before
+step 2. If a file you ported was fetched before the clone, it is the same tag; no re-port needed.
+
+## Porting precision rules (owner, 2026-11-12 — "a single cycle divergence costs hours later")
+
+* **Translate, do not redesign.** Keep NesHawk's structure, the **order of every statement inside
+  a cycle** (`RunCpuOne`, `runppu`, `RunOneFirst`/`RunOneLast`, the microcode steps), its state
+  variables and their names. No batching, no "equivalent" shortcut, no reordering for speed —
+  speed comes later, and only behind a measured equivalence.
+* **Keep C# semantics exactly**: integer widths and wrapping (`byte`/`ushort`/`int` casts,
+  `(byte)PC + (sbyte)op` style arithmetic), signedness, pre/post increments, `&&`/`||`
+  short-circuits that skip a side effect, integer division and `%` on negatives, the default
+  values fields get at construction, `switch` fall-through order. When a line is not obviously
+  equivalent in Rust, transcribe it literally and comment the C# line next to it.
+* **Diff against BizHawk component by component, as soon as each one runs**, before building on
+  it: the 6502 per instruction **and per cycle** (bus address, read/write, value) on `nestest`
+  and a few `cpu_*` ROMs; then the whole machine on the *Kirby* `.bk2` frames 1-60 with a
+  per-instruction bus stream (`q186/q187.lua` style, `event.onmemoryexecuteany` +
+  `onmemoryread/write`, `emu.totalexecutedcycles()`) against the same stream from
+  `zax-neshawk`, cycle for cycle, **zero divergence** before porting the next layer. The cycle
+  ledger `bizhawk-runs/kirby-jp-cyc0.txt` (frames 2-1 201) is the second check.
+* **Never fix a divergence with a tuning constant.** A divergence means a line was mistranslated:
+  find the line.
+* Record every divergence found and the line that caused it in this file (one line each), so a
+  pattern of translation mistakes is visible.
+
 ## Licence obligations
 
 * `rust/crates/zax-neshawk/LICENSE-BizHawk` — BizHawk's MIT copyright notice and licence text.
@@ -42,7 +73,7 @@ The mirror lives in the session scratchpad, **outside the repository**, and is n
       `MOS 6502X` — microcode tables, the `Execute.cs` state machine, `RDY`/`rdy_freeze`,
       `branch_irq_hack`, interrupts, the unofficial opcodes, `NESSoftReset`. Passes `nestest`
       (log compare) and the `cpu_*`/`instr_*` ROMs NesHawk itself passes.
-- [ ] 2. The machine: `NES.Core.cs` (`RunCpuOne`, the OAM/DMC DMA blocks, `dmc_realign`,
+- [~] 2. The machine: `NES.Core.cs` (`RunCpuOne`, the OAM/DMC DMA blocks, `dmc_realign`,
       `cpu_deadcounter`, `FrameAdvance`, `HardReset`/`SoftReset`, power-on RAM fill, frame-done),
       `PPU*.cs` (per-dot `runppu`, `TickPPU_VBL`/`preVBL`, `NewDeadPPU`, `NMI_offset`,
       `idleSynch`, sprite evaluation, registers, open bus), `APU.cs` (all channels, `DMCUnit`
@@ -143,3 +174,74 @@ application is written against the same tree and will need those assets to be co
 | 510-518 | `VOP_Fetch1` = 256 … `VOP_NUM` = 264 | the same consts |
 | 520-3035 | the uop bodies | one method each, same names |
 | 3037+ | `ExecuteOneRetry`'s dispatch, `ExecuteOne` | `match` on `Uop` |
+
+### Step 2 — the machine (part 1 of 2: everything but the second board set)
+
+`zax-neshawk` is now a whole NES. 16 of 16 `instr_test-v5` ROMs report **Passed** (`$6000 = 0`,
+the same verdict NesHawk gives them), and `nestest` still matches its reference log on all 8 991
+instructions after the one structural change below.
+
+Files, each naming its C# source in its header:
+
+| Rust | C# |
+|---|---|
+| `src/nes/mod.rs` | `NES.Core.cs` (`RunCpuOne`, the DMA blocks, `FrameAdvance`, `HardReset`, the memory map, `ReadReg`/`WriteReg`, the joypad ports), `NES.CpuLink.cs` |
+| `src/nes/load.rs` | `NES.cs`'s `Init` and `DetectRegion`, plus SHA-1 and MD5 (no dependency is allowed here) |
+| `src/nes/apu.rs` | `APU.cs`'s `DMCUnit.Run`, `DMCUnit.Fetch`, `RunOneFirst`, `RunOneLast` — the members that reach the machine |
+| `src/apu.rs` | the rest of `APU.cs`: the five channels, `set_lenctr_en`, the frame sequencer, the mixer |
+| `src/ppu/mod.rs` | `PPU.cs` state, `PPUREGS`, `Reg_2000`, `Reg_2001`, `PpuOpenBusDecay`, `pipeline` |
+| `src/ppu/run.rs` | `PPU.run.cs` + `PPU.cs`'s `runppu` |
+| `src/ppu/regs.rs` | `PPU.regs.cs`'s `$2000-$2007` |
+| `src/boards/*` | `NesBoardBase.cs`, `NROM`, `UxROM`, `CNROM`, `AxROM`, `SxROM` (MMC1, with SuROM/SXROM/SoROM), `MMC3.cs`, `TxROM` |
+| `src/cart.rs` | `CartInfo.cs`, `NES.iNES.cs` |
+| `src/gamedb.rs` | `BootGodDB.cs` (`NesCarts.xml`), `IdentifyFromGameDB`, `Database.cs`'s record format |
+| `src/controllers.rs` | `NESControllers.cs`'s `StrobeInfo`, `NesDeck`, `ControllerNES`, `UnpluggedNES` |
+
+#### How the C#'s mutual references are kept, and the three places the shape had to change
+
+The C# has `NES`, `PPU`, `APU` and the board all pointing at each other. The rule here is: a
+member that reaches the machine is `impl Nes`, in the module of the component it belongs to, with
+the C# method's name and body. So `runppu`, every `TickPPU_*`, every `$2000-$2007` handler,
+`DMCUnit.Run`/`Fetch` and `RunOneLast` are `impl Nes`; the components hold state and the members
+that need nothing else. No statement moved across a cycle boundary to make that work.
+
+Three deviations, each documented at its site:
+
+1. **`address_bus` moved from the CPU to the machine**, reached by the seven micro-operations that
+   drive it through a new `Mos6502xLink::set_address_bus`. It has to be one register: the CPU
+   writes it, `NES.ReadMemory` overwrites it with the address being read, and the DMC DMA's halt
+   cycles read it back. Rust cannot lend the machine to the CPU the machine owns, so the register
+   lives on the machine side. Same register, same write order. `nestest` re-run after the change
+   and still exact.
+2. **`BoardEnv`**: a board reaches `NES.CIRAM` and `NES.DB` and nothing else, so those two travel
+   in a struct built from disjoint fields of `Nes` at each call.
+3. **The CPU is lifted out of `Nes` for the duration of one `execute_one`** (`mem::take`, put back
+   after), which is what lets the link hold the rest of the machine. It costs three copies of a
+   ~100-byte struct per CPU cycle; if step 6's bench shows that mattering the fix is
+   `Option<Box<Mos6502x>>`, and it is a pure speed question with no behaviour in it.
+
+#### Three C# details that a tidy-up would have silently changed
+
+* `MMC3Board_Base.WritePpu` returns **before** `base.WritePpu` when the board has no VRAM, so on a
+  CHR-ROM board (Kirby's) a PPU write below `$2000` does nothing at all; and when there *is* VRAM
+  it reassigns `addr` to the mapped address, so the base writes the same mapped byte a second
+  time. Both transcribed.
+* `DMCUnit.Fetch` tests `(sample_address & 0x1F) == 0x4017`, which after the mask can never hold.
+  It is a defect of the reference (it means `0x17`); kept, with `#[allow(clippy::bad_bit_mask)]`
+  and a note, because "the same bug" is the requirement.
+* `NoiseUnit.clock_env` tests `env_divider != 0` and then `env_divider == 0` in two **separate**
+  ifs, so a divider that reaches zero is reloaded in the same call — unlike `PulseUnit.clock_env`,
+  which uses `else if`. The two channels really do differ.
+
+#### Why the game databases had to be ported too
+
+Board choice is not a cosmetic matter for a timing port. *Faxanadu* is `NES-SGROM` with **no**
+WRAM in NesCartDB where its iNES header implies the generic 8 KiB, and an MMC3 cart names its
+revision chip there (`MMC3A`/`MMC3C`…), which changes `oldIrqType` and so the IRQ edge. So
+`gamedb.rs` ports both `BootGodDB.cs`'s `NesCarts.xml` state machine and the BizHawk game
+database's record format, read at load time from a `gamedb` directory
+(`ZAXNES_BIZHAWK_GAMEDB` in the tests). Checked against the clone: Kirby (JP) is chosen as
+`HVC-TKROM` with chip `MMC3C`, exactly as the index says, and Faxanadu as `NES-SGROM`.
+
+Not ported, stated rather than faked: VS. System, FDS, NSF, UNIF, the light gun, the cheat
+engine, the code-data logger, the memory domains, `Palettes.cs`.

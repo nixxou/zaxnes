@@ -45,6 +45,16 @@ pub trait Mos6502xLink {
 
     /// Called only when the **first** byte of an instruction is fetched.
     fn on_exec_fetch(&mut self, address: u16);
+
+    /// Put a value on the 16-bit address bus.
+    ///
+    /// **The one structural deviation from `MOS6502X.cs`.** There, `address_bus` is a field of
+    /// the CPU written both by the CPU's own micro-operations and by `NES.ReadMemory`
+    /// (`cpu.address_bus = addr`), and read from outside the CPU by the DMC DMA's halt cycles.
+    /// Rust cannot lend the machine to the CPU while the machine owns it, so the register lives
+    /// on the machine side and the seven micro-operations that drive it do so through here. It is
+    /// the same single register, written in the same order; nothing else about it changes.
+    fn set_address_bus(&mut self, address: u16);
 }
 
 /// The interrupt vectors.
@@ -131,8 +141,6 @@ pub struct Mos6502x {
     pub rdy_freeze: bool,
     /// The scratch byte of the "unstable high byte" group of unofficial instructions.
     pub(crate) H: u8,
-    /// The 16-bit address bus, which a DMC DMA's halt cycles read.
-    pub address_bus: u16,
 
     /// Whether an interrupt condition has come up recently. The C# is unsure whether this is
     /// real; it is what makes `branch_irq_hack` work.
@@ -189,7 +197,6 @@ impl Mos6502x {
             iflag_pending: false,
             rdy_freeze: false,
             H: 0,
-            address_bus: 0,
             interrupt_pending: false,
             branch_irq_hack: false,
             value8: 0,
