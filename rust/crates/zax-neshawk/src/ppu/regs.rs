@@ -168,6 +168,8 @@ impl Bus {
         let rendering = self.ppu.ppur.status.rendering() && self.ppu.ppuon();
         let by32 = self.ppu.reg_2000.vram_incr32 != 0;
         self.ppu.ppur.increment2007(rendering, by32);
+        // A $2007 access reaches the row of the line it is made in (R2-005).
+        self.ppu.capture_shadow_both();
 
         //see comments in $2006
         if self.ppu.ppur.status.sl >= 241 || !self.ppu.ppuon() {
@@ -195,6 +197,8 @@ impl Bus {
         let rendering = self.ppu.ppur.status.rendering() && self.ppu.ppuon();
         let by32 = self.ppu.reg_2000.vram_incr32 != 0;
         self.ppu.ppur.increment2007(rendering, by32);
+        // A $2007 access reaches the row of the line it is made in (R2-005).
+        self.ppu.capture_shadow_both();
 
         //see comments in $2006
         if self.ppu.ppur.status.sl >= 241 || !self.ppu.ppuon() {

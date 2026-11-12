@@ -414,3 +414,81 @@ New BizHawk references written this lot (new files only; nothing was deleted):
 ran as NTSC and failed. The harness's rule is that a ROM made for one console must be *run* on
 that console; `_display_type` is read by `HardReset`, so the port now sets it and powers on again.
 183 pass, up from 176.
+
+### Resumption 2, step A — the `Engine` implementation, a real savestate, and the 3D capture
+
+Three of the five open items in one pass, because the engine needs the other two to exist.
+
+#### The savestate: `SyncState`, and one guarantee the C# has not got
+
+`src/state.rs` is the port of BizHawk's `SyncState` members. The C#'s `Serializer` is a single
+visitor that both reads and writes, so a class lists its fields once; this port cannot do that in
+one method, because `Engine::save_state_to` takes `&self` and `try_load_state` a `&mut self`. So
+`sync_struct!` generates **both halves from one field list** — the same token sequence, so the
+write order and the read order cannot drift apart.
+
+What the macro adds over the reference is worth recording: each generated body begins with an
+**exhaustive** destructuring (`let Self { a, b, c } = self`, no `..`), so a field added to a struct
+later and named in neither the saved list nor the `skip:` list is a **compile error**. A savestate
+that silently forgets a new field is the classic emulator defect — a game comes back from a state
+with the wrong banks mapped — and here it cannot happen. The `skip:` groups are the `&'static`
+lookup tables, the ROM image, the load-time metadata and the tracing instruments, each with its
+reason at the site. `Board::write_state`/`read_state` are **required** trait methods for the same
+reason: a new board does not compile until it has answered the question.
+
+The block carries the engine's magic (`ZXNH`), the version, the **board class** and the host's
+region, and refuses a block of another engine with REQ-CORE-120's own message, a block of another
+board class, and a payload whose length the machine does not read exactly.
+
+**The frame buffer is in the block only when the host asks for a self-contained state.** A
+rollback slot leaves it out, which is what REQ-CORE-121's own in-memory snapshot does ("leaves out
+the half of the PPU state that *is* the frame just run") and is 120 KiB a slot.
+
+#### The engine
+
+`src/engine.rs`, `EngineKind::NesHawk = 2`, `Capabilities::NESHAWK`. Two deviations, both stated
+at their site rather than papered over:
+
+1. **`set_region` powers the machine on again** when the region really changes. `_display_type` is
+   read by `HardReset` (it picks the APU's tables, the PPU's region and `cpu_sequence`), so
+   NesHawk cannot change region without a reboot — in BizHawk it needs a core reboot too. The
+   host's own sequence is `load_rom` then `set_region`, where there is no state to lose.
+2. **Audio is resampled here, not by `blip_buf`.** `BlipBuffer.cs` is a `DllImport` shim over
+   Blargg's native `blip_buf`, so **there is no C# to port**: the band-limited synthesis is in a C
+   library this lot may not fetch. The deltas' *timing* is NesHawk's to the cycle, which is what
+   the port is verified on; the reconstruction filter is a box filter over each output sample
+   window, which has a zero at every multiple of the output rate. The waveform is therefore this
+   engine's own and not bit-identical to BizHawk's.
+
+One defect of the first draft, found by the test rather than by reading: the resampler only ran
+when a frame had deltas, so a **silent** game produced no samples at all and would starve the
+host's audio device. It now advances to the end of every frame whether or not the APU moved. The
+step is `clock.wrapping_sub(last)` rather than a difference of absolute positions, because
+`APU.sampleclock` is a `uint` the port never resets and so wraps after about forty minutes of
+play — with absolute positions that moment would be a negative span and four billion samples of
+silence.
+
+#### The 3D tile capture (step 5's first half)
+
+`src/tiles.rs`. **Not a port of anything**: NesHawk has no tile capture, so what is ported is the
+machine the capture reads and the rule is the spec's (SPEC-02 §4.1, REQ-CORE-030 to 046), followed
+as `zax_nes::ppu::tiles` implements it so that the two engines agree. Sprites at the first dot of
+a visible line when `line & 7 == 7`; the background row at the **last** dot, when the fine Y of
+the row-start shadow is 1 (AMD-021 R2-005). The shadow is `v` shorn of the two end-of-line
+reloads, which meant mirroring six sites of NesHawk's dot loop: the `$2006` install, the `$2007`
+auto-increment and the pre-render vertical reload reach both halves; the dot-256 vertical increment
+and the dot-257 horizontal reload reach only `v_row_next`; a coarse-X increment reaches neither.
+
+Every read goes through `Board::peek_ppu`, so a frame runs identically whether records are built or
+not — asserted rather than assumed: `the_tile_capture_produces_records_and_changes_nothing`
+compares 120 frames of work RAM, the frame buffer and the cycle count with the capture on and off.
+
+#### The machine is still the same machine
+
+| | result |
+|---|---|
+| `nestest`, after the capture hooks were cut into the PPU's dot loop | still exact on all 8 991 instructions |
+| the 16 `instr_test-v5` ROMs | still all Passed |
+| *Kirby* `.bk2` frames 1-400 against `kirby-jp-step1.txt` | **400 of 400 byte-identical** |
+| `cargo test -p zax-neshawk --release` | 21 pass, 1 ignored (needs `ZAXNES_ROMS`) |
+| `fmt`, `clippy -D warnings` on `zax-neshawk` and `zax-core-api` | clean |

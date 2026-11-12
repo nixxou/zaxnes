@@ -376,6 +376,10 @@ pub struct Ppu {
     pub disp_background: bool,
     pub disp_sprites: bool,
     pub allow_more_than_eight_sprites: bool,
+
+    /// The 3D tile capture's state (`crate::tiles`). Not NesHawk's: Zaxnes's own addition, which
+    /// reads the PPU and changes nothing in it.
+    pub tiles: crate::tiles::TileCapture,
 }
 
 impl Default for Ppu {
@@ -480,6 +484,7 @@ impl Ppu {
             disp_background: true,
             disp_sprites: true,
             allow_more_than_eight_sprites: false,
+            tiles: crate::tiles::TileCapture::default(),
         };
         ppu.sync_region();
         ppu.reset();
@@ -639,5 +644,124 @@ impl Ppu {
         }
 
         self.pixelcolor_latch_1 = pixelcolor;
+    }
+}
+
+// -------------------------------------------------------------------- the savestate
+
+// `PPU.SyncState`, `PPUREGS.SyncState` and the register sub-objects'. Nothing here is skipped
+// except the frame buffer, which is handled below for the reason given there.
+crate::state::sync_enum!(Region {
+    0 => Region::Ntsc,
+    1 => Region::Pal,
+    2 => Region::Dendy,
+    3 => Region::Rgb,
+});
+
+crate::state::sync_struct!(PpuStatus { sl, cycle });
+
+crate::state::sync_struct!(PpuRegs {
+    fv,
+    v,
+    h,
+    vt,
+    ht,
+    _fv,
+    _vt,
+    _v,
+    _h,
+    _ht,
+    fh,
+    status,
+});
+
+crate::state::sync_struct!(Reg2000 {
+    vram_incr32,
+    obj_pattern_hi,
+    bg_pattern_hi,
+    obj_size_16,
+    ppu_layer,
+    vblank_nmi_gen,
+});
+
+crate::state::sync_struct!(Reg2001 {
+    color_disable,
+    show_bg_leftmost,
+    show_obj_leftmost,
+    show_bg,
+    show_obj,
+    intense_green,
+    intense_blue,
+    intense_red,
+    intensity_lsl_6,
+});
+
+crate::state::sync_struct!(BgDataRecord { nt, at, pt_0, pt_1 });
+
+crate::state::sync_struct!(TempOam {
+    oam_y,
+    oam_ind,
+    oam_attr,
+    oam_x,
+    patterns_0,
+    patterns_1
+});
+
+// Every field of `PPU` but the frame buffer, which `SyncState for Ppu` below handles itself.
+crate::state::sync_struct!(inherent Ppu {
+    cpu_step, cpu_stepcounter, has_clock_ppu,
+    pre_nmi_lines, post_nmi_lines, chopdot, region,
+    ppuphase, ppudead, idle_synch, nmi_pending_instructions,
+    ppu_gen_latch, vtoggle, vram_buffer,
+    oam, palram, total_cycles, bgdata,
+    spr_true_count, sprite_eval_write, read_value,
+    soam_index, soam_index_prev, oam_index, oam_index_aux, soam_index_aux,
+    is_even_cycle, sprite_zero_in_range, sprite_zero_go,
+    yp, target, sprite_height, soam, ppu_was_on, ppu_was_on_spr, sl_sprites,
+    install_2006, race_2006, race_2006_2, install_2001, show_bg_new, show_obj_new,
+    t_oam, ppu_addr_temp, pixelcolor_latch_1,
+    do_vbl, do_active_sl, do_pre_vbl, nmi_destiny, even_odd_destiny,
+    start_up_offset, nmi_offset, yp_shift, sprite_eval_cycle,
+    xt, xp, xstart, rasterpos, renderspritenow, s, ppu_aux_index, junksprite,
+    line, pattern_number, pattern_address, temp_addr,
+    ppu_open_bus, double_2007_read, ppu_open_bus_decay_timer, glitchy_reads_2003,
+    reg2002_objoverflow, reg2002_objhit, reg2002_vblank_active,
+    reg2002_vblank_active_pending, reg2002_vblank_clear_pending,
+    ppur, reg_2000, reg_2001, reg_2003, reg_2006_2,
+    disp_background, disp_sprites, allow_more_than_eight_sprites,
+    tiles,
+} skip: {
+    xbuf,
+});
+
+impl crate::state::SyncState for Ppu {
+    /// Written by hand rather than generated for one field only: `xbuf`.
+    ///
+    /// The frame buffer is 120 KiB and **is** the frame just run, so a rollback block leaves it
+    /// out — the next frame overwrites every pixel of it, and that is what REQ-CORE-121's own
+    /// in-memory snapshot does ("leaves out the half of the PPU state that is the frame just
+    /// run"). A state the user saves carries it, so that the picture comes back at once instead
+    /// of on the next frame. Which of the two a block is, is written in its header and the
+    /// reader is told before it starts, so the two paths cannot disagree about the layout.
+    ///
+    /// Everything else goes through the generated `write_sync_fields`/`read_sync_fields`, so the
+    /// exhaustive check still covers it: a field added to `Ppu` and named in neither list will
+    /// not compile.
+    fn write_state(&self, w: &mut crate::state::StateWriter) {
+        self.write_sync_fields(w);
+        if w.full() {
+            for pixel in &*self.xbuf {
+                crate::state::SyncState::write_state(pixel, w);
+            }
+        }
+    }
+
+    fn read_state(&mut self, r: &mut crate::state::StateReader<'_>) {
+        self.read_sync_fields(r);
+        if r.full() {
+            for pixel in &mut *self.xbuf {
+                crate::state::SyncState::read_state(pixel, r);
+            }
+        }
     }
 }

@@ -18,7 +18,7 @@ use crate::{
 /// Which engine a handle, a savestate or a per-game option names.
 ///
 /// Numeric values are persisted (the per-game option of step 5 and the engine stamp of a
-/// savestate), so they must not change: Zaxnes = 0, FCEUX = 1.
+/// savestate), so they must not change: Zaxnes = 0, FCEUX = 1, NesHawk = 2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(u8)]
 pub enum EngineKind {
@@ -28,15 +28,22 @@ pub enum EngineKind {
     Zaxnes = 0,
     /// FCEUX's core through `zax-fceux`.
     Fceux = 1,
+    /// BizHawk's NesHawk core, ported to Rust in `zax-neshawk`. The engine a `.bk2` movie
+    /// recorded on NesHawk plays back on frame for frame; lot NESHAWK-REWRITE.
+    NesHawk = 2,
 }
 
 impl EngineKind {
+    /// Every engine this build knows, in the order a chooser should offer them.
+    pub const ALL: [Self; 3] = [Self::Zaxnes, Self::Fceux, Self::NesHawk];
+
     /// The kind of numeric value `value`, `None` otherwise.
     #[must_use]
     pub const fn from_u8(value: u8) -> Option<Self> {
         match value {
             0 => Some(Self::Zaxnes),
             1 => Some(Self::Fceux),
+            2 => Some(Self::NesHawk),
             _ => None,
         }
     }
@@ -47,6 +54,7 @@ impl EngineKind {
         match self {
             Self::Zaxnes => "zaxnes",
             Self::Fceux => "fceux",
+            Self::NesHawk => "neshawk",
         }
     }
 
@@ -56,6 +64,7 @@ impl EngineKind {
         match text.trim().to_ascii_lowercase().as_str() {
             "zaxnes" => Some(Self::Zaxnes),
             "fceux" => Some(Self::Fceux),
+            "neshawk" => Some(Self::NesHawk),
             _ => None,
         }
     }
@@ -66,6 +75,7 @@ impl EngineKind {
         match self {
             Self::Zaxnes => "Zaxnes",
             Self::Fceux => "FCEUX",
+            Self::NesHawk => "NesHawk",
         }
     }
 }
@@ -143,6 +153,27 @@ impl Capabilities {
         machine_internals: false,
     };
 
+    /// What `zax-neshawk` offers: the trait, and rollback over the serialised block of its
+    /// `SyncState` port.
+    ///
+    /// The four `false`s are the same as FCEUX's and for the same reason — the widescreen
+    /// extension, the hack packs and the margin decoders are patches to *Zaxnes's* bus, and
+    /// `cartridge()`/`bus()`/`ppu()` are Zaxnes's own types. `sprite_limit` is `false` although
+    /// NesHawk does have the flag (`PPU.allow_more_than_eight_sprites`, which the port carries),
+    /// because the control the application draws drives `NesCore::set_sprite_limit`, which is not
+    /// on this trait: raising the flag here would enable a control that reaches nothing.
+    /// `run_ahead` is `false` because it would mean a save and a load every frame, as on FCEUX.
+    pub const NESHAWK: Self = Self {
+        kind: EngineKind::NesHawk,
+        widescreen: false,
+        hack_packs: false,
+        sprite_limit: false,
+        run_ahead: false,
+        rollback: true,
+        fast_core_snapshot: false,
+        machine_internals: false,
+    };
+
     /// Why a control is disabled, for the interface to show beside it; `None` when `capability`
     /// is supported. `capability` names the field, as [`Capability`] does.
     #[must_use]
@@ -151,9 +182,17 @@ impl Capabilities {
             return None;
         }
         Some(match (self.kind, capability) {
+            (EngineKind::NesHawk, Capability::Widescreen) => {
+                "Widescreen is part of Zaxnes's own machine, not of an emulator; NesHawk cannot \
+                 provide it. Choose the Zaxnes engine for this game to use it."
+            }
             (_, Capability::Widescreen) => {
                 "Widescreen is part of Zaxnes's own machine, not of an emulator; FCEUX cannot \
                  provide it. Choose the Zaxnes engine for this game to use it."
+            }
+            (EngineKind::NesHawk, Capability::HackPacks) => {
+                "The hack packs patch Zaxnes's bus as the game runs; NesHawk cannot apply them. \
+                 Choose the Zaxnes engine for this game to use them."
             }
             (_, Capability::HackPacks) => {
                 "The hack packs patch Zaxnes's bus as the game runs; FCEUX cannot apply them. \
@@ -162,6 +201,10 @@ impl Capabilities {
             (_, Capability::SpriteLimit) => {
                 "Changing the 8-sprites-per-line limit needs Zaxnes's PPU. Choose the Zaxnes \
                  engine for this game to use it."
+            }
+            (EngineKind::NesHawk, Capability::RunAhead) => {
+                "Run-ahead on NesHawk would save and restore a state every frame; it is not \
+                 implemented. Choose the Zaxnes engine for this game to use it."
             }
             (_, Capability::RunAhead) => {
                 "Run-ahead on FCEUX would save and restore a state every frame; it is not \

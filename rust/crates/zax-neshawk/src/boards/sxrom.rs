@@ -626,6 +626,8 @@ impl Board for SxRom {
         Box::new(self.clone())
     }
 
+    crate::boards::board_sync!(SxRom);
+
     fn name(&self) -> &'static str {
         match self.variant {
             SxVariant::SxRom => "SxROM",
@@ -738,3 +740,31 @@ impl Board for SxRom {
         }
     }
 }
+
+// `SxROM.SyncState` and `MMC1.SyncState`. `ppuclock` is the SNROM A12 counter, which is state.
+crate::state::sync_enum!(SxVariant {
+    0 => SxVariant::SxRom,
+    1 => SxVariant::SuRom,
+    2 => SxVariant::SxRom512,
+    3 => SxVariant::SoRom,
+});
+
+crate::state::sync_struct!(Mmc1 {
+    shift_count,
+    shift_val,
+    chr_mode,
+    prg_mode,
+    prg_slot,
+    mirror,
+    chr_0,
+    chr_1,
+    wram_disable,
+    prg,
+    chr_banks_4k,
+    prg_banks_16k,
+});
+
+crate::state::sync_struct!(SxRom {
+    mmc1, ppuclock, chr_wram_enable,
+    variant, prg_mask, chr_mask, vram_mask, disablemirror, is_snrom,
+} skip: { base });

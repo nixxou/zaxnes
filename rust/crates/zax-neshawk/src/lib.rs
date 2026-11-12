@@ -80,9 +80,13 @@ pub mod boards;
 pub mod cart;
 pub mod controllers;
 pub mod cpu;
+pub mod engine;
 pub mod gamedb;
 pub mod nes;
 pub mod ppu;
+pub mod state;
+pub mod tiles;
 
 pub use cpu::{Mos6502x, Mos6502xLink};
+pub use engine::NesHawkEngine;
 pub use nes::{BusEvent, BusEventKind, BusLog, DisplayType, LoadError, LoadReport, Nes};

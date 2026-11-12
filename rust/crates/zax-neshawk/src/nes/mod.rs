@@ -446,6 +446,7 @@ impl Nes {
     /// `reset` and `power` are the two console buttons; the controller state itself is set with
     /// [`crate::controllers::ControllerDeck`] before the call.
     pub fn frame_advance(&mut self, reset: bool, power: bool) {
+        self.begin_capture_frame();
         self.b.lagged = true;
         if self.b.reset_signal {
             self.b.board.nes_soft_reset();
@@ -642,6 +643,19 @@ impl Nes {
     /// also the only time the C# can change it.
     pub fn set_display_type(&mut self, display_type: DisplayType) {
         self.b.display_type = display_type;
+    }
+
+    /// The region the machine was configured for, which [`Self::hard_reset`] read.
+    #[must_use]
+    pub const fn display_type(&self) -> DisplayType {
+        self.b.display_type
+    }
+
+    /// Presses RESET: the line is latched and `FrameAdvance` applies it at the **start of the
+    /// next frame**, which is where NesHawk applies it (`FrameAdvance` acts on the previous
+    /// call's `resetSignal`). The RAM is kept, as REQ-CORE-014 requires of a soft reset.
+    pub const fn soft_reset(&mut self) {
+        self.b.reset_signal = true;
     }
 }
 
@@ -999,5 +1013,93 @@ impl Bus {
     #[must_use]
     pub fn vsync_rate(&self) -> (i32, i32) {
         (self.vsync_num, self.vsync_den)
+    }
+}
+
+// -------------------------------------------------------------------- the savestate
+
+crate::state::sync_enum!(DisplayType {
+    0 => DisplayType::Ntsc,
+    1 => DisplayType::Pal,
+    2 => DisplayType::Dendy,
+});
+
+// `NES.SyncState`. The `skip:` group is everything that is not machine state, and each entry is
+// restored by the *load* rather than by the block: `game_name` and `cart` are the cartridge's
+// metadata, `board_kind` and `origin` are what detection decided (the block's header carries
+// `board_kind` and refuses a mismatch), `load_report` is the log of that detection,
+// `initial_wram_state_pattern` is a load-time setting, and `bus_log` is a tracing instrument of
+// the harness, not part of the machine at all. `board` is not here either: a `Box<dyn Board>`
+// cannot go through `SyncState`'s generic impls, so [`Bus`]'s own impl below calls the board's
+// two trait methods at the point the C# calls `board.SyncState(ser)`.
+crate::state::sync_struct!(inherent Bus {
+    ppu, apu, ram, ciram,
+    sprdma_countdown, irq_apu, cpuclockrate,
+    controller_deck, latched4016,
+    display_type, vsync_num, vsync_den,
+    old_s,
+    double_controller_read, double_controller_read_address,
+    previous_controller1_read, previous_controller2_read,
+    dmc_dma_controller_conflict, joypad_strobed, joypad_strobe_value,
+    cpu_sequence, cpu_deadcounter,
+    oam_dma_index, oam_dma_exec, oam_dma_addr, oam_dma_byte,
+    dmc_dma_exec, dmc_realign, db,
+    address_bus, rdy, rdy_freeze, total_executed_cycles,
+    frame, lagged, islag, lagcount,
+    controller_was_latched, frame_is_done, current_strobe, new_strobe,
+    reset_signal, hard_reset_signal,
+    audio_deltas,
+} skip: {
+    game_name, cart, board_kind, origin, load_report, initial_wram_state_pattern, bus_log,
+    board,
+});
+
+impl crate::state::SyncState for Bus {
+    /// The generated field list, then the board — which is where the C# calls
+    /// `board.SyncState(ser)`.
+    fn write_state(&self, w: &mut crate::state::StateWriter) {
+        self.write_sync_fields(w);
+        self.board.write_state(w);
+    }
+
+    fn read_state(&mut self, r: &mut crate::state::StateReader<'_>) {
+        self.read_sync_fields(r);
+        // The board is borrowed out and put back so that `read_sync_fields`'s exhaustive
+        // destructuring and the board's own read do not want `&mut self` at once. Same board,
+        // same bytes; only the borrow differs.
+        let mut board = std::mem::replace(
+            &mut self.board,
+            crate::boards::create_board(self.board_kind),
+        );
+        board.read_state(r);
+        self.board = board;
+    }
+}
+
+crate::state::sync_struct!(Nes { cpu, b });
+
+impl Nes {
+    /// The board class this machine is running, which a savestate's header records so that a
+    /// block cannot be restored onto a different mapper.
+    #[must_use]
+    pub fn board_kind(&self) -> crate::boards::BoardKind {
+        self.b.board_kind
+    }
+
+    /// Writes this machine's state into `writer` (`NES.SyncState`'s write direction).
+    ///
+    /// `writer`'s `full` flag decides whether the frame buffer is included; see
+    /// [`crate::state::StateWriter::new`].
+    pub fn write_state(&self, writer: &mut crate::state::StateWriter) {
+        crate::state::SyncState::write_state(self, writer);
+    }
+
+    /// Reads a machine state back out of `reader`.
+    ///
+    /// The caller checks [`crate::state::StateReader::failed`] afterwards: on a truncated or
+    /// corrupt block this machine is left half-restored, and the caller must throw it away (the
+    /// engine reloads the ROM, as REQ-CORE-091 requires).
+    pub fn read_state(&mut self, reader: &mut crate::state::StateReader<'_>) {
+        crate::state::SyncState::read_state(self, reader);
     }
 }

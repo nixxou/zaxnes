@@ -33,6 +33,8 @@ impl Board for TxRom {
         Box::new(self.clone())
     }
 
+    crate::boards::board_sync!(TxRom);
+
     fn name(&self) -> &'static str {
         "TxROM"
     }
@@ -259,3 +261,6 @@ impl Board for TxRom {
         self.base.write_ppu(addr, value, env);
     }
 }
+
+// `TxROM.SyncState`: the MMC3 and its base's banks.
+crate::state::sync_struct!(TxRom { m } skip: { base });

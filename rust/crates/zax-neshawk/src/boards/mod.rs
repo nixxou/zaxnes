@@ -191,10 +191,13 @@ impl BoardBase {
 
 /// Every board hook `INesBoard` declares that the ported machine calls.
 ///
+/// `Send` because `zax_core_api::Engine` is: the application's emulation thread owns the machine,
+/// board and all. Every board here is plain data, so the bound costs nothing.
+///
 /// The read hooks take `&self` where every board in scope leaves no trace on a read, which is
 /// what lets `peek_cart` share their bodies. A board that needs a mutable read (MMC5's
 /// `ReadReg2xxx` does) will have to widen this.
-pub trait Board {
+pub trait Board: Send {
     fn base(&self) -> &BoardBase;
     fn base_mut(&mut self) -> &mut BoardBase;
 
@@ -203,10 +206,22 @@ pub trait Board {
 
     /// A copy of this board, state and all.
     ///
-    /// The C# serialises a board through `SyncState`; a port with no serialiser yet needs the
-    /// same thing for the harness's input-sensitivity probe and for the engine's savestate, and
-    /// a clone is what a `Box<dyn Board>` can offer. Every implementation is one line.
+    /// The C# serialises a board through `SyncState`; the harness's input-sensitivity probe wants
+    /// a whole second machine rather than a block, which is what a `Box<dyn Board>` can offer.
+    /// Every implementation is one line. The savestate goes through [`Board::write_state`].
     fn clone_box(&self) -> Box<dyn Board>;
+
+    /// `SyncState`'s write half: this board's own state, after [`BoardBase`]'s.
+    ///
+    /// Required rather than defaulted on purpose. A board added later that forgot its state would
+    /// savestate as a *reset* mapper — the game would come back from a state with the wrong banks
+    /// mapped, which looks like a core bug and is not one. Making it required means a new board
+    /// does not compile until it has answered the question. Both halves are one line each,
+    /// delegating to the `sync_struct!`-generated impl.
+    fn write_state(&self, writer: &mut crate::state::StateWriter);
+
+    /// `SyncState`'s read half; see [`Board::write_state`].
+    fn read_state(&mut self, reader: &mut crate::state::StateReader<'_>);
 
     /// `Configure(origin)`. Reads and writes `self.base_mut().cart`.
     fn configure(&mut self, origin: DetectionOrigin) -> bool;
@@ -365,3 +380,54 @@ pub fn find_board(
     }
     None
 }
+
+// -------------------------------------------------------------------- the savestate
+
+// `NesBoardBase.SyncState`. The `skip:` group is the cartridge itself: `cart` is load-time
+// metadata the machine restores from the image, and `rom`/`vrom` are the image's own bytes. A
+// savestate carries neither (REQ-CORE-090's self-contained block carries the *image*, once, in
+// the engine's header). `wram` and `vram` are state and are here.
+crate::state::sync_struct!(BoardBase {
+    wram, vram, mirroring, wram_mask, irq_signal,
+} skip: {
+    cart, rom, vrom,
+});
+
+crate::state::sync_enum!(MirrorType {
+    0 => MirrorType::Vertical,
+    1 => MirrorType::Horizontal,
+    2 => MirrorType::OneScreenA,
+    3 => MirrorType::OneScreenB,
+});
+
+crate::state::sync_enum!(BoardKind {
+    0 => BoardKind::Nrom,
+    1 => BoardKind::UxRom,
+    2 => BoardKind::CnRom,
+    3 => BoardKind::AxRom,
+    4 => BoardKind::SxRom,
+    5 => BoardKind::SuRom,
+    6 => BoardKind::SxRom512,
+    7 => BoardKind::SoRom,
+    8 => BoardKind::TxRom,
+});
+
+/// `impl Board::write_state`/`read_state` for a board whose own `SyncState` impl is generated:
+/// `BoardBase`'s state first, then the board's, which is the C#'s order (`base.SyncState(ser)`
+/// then the subclass's fields).
+macro_rules! board_sync {
+    ($ty:ty) => {
+        fn write_state(&self, writer: &mut $crate::state::StateWriter) {
+            $crate::state::SyncState::write_state(&self.base, writer);
+            $crate::state::SyncState::write_state(self, writer);
+        }
+        fn read_state(&mut self, reader: &mut $crate::state::StateReader<'_>) {
+            let mut base = std::mem::take(&mut self.base);
+            $crate::state::SyncState::read_state(&mut base, reader);
+            $crate::state::SyncState::read_state(self, reader);
+            self.base = base;
+        }
+    };
+}
+
+pub(crate) use board_sync;

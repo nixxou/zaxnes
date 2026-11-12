@@ -92,6 +92,8 @@ impl Nes {
             if self.b.ppu.install_2006 == 0 {
                 if !self.b.ppu.race_2006 {
                     self.b.ppu.ppur.install_latches();
+                    // The $2006 install reaches the row of the line it is made in (R2-005).
+                    self.b.ppu.capture_shadow_both();
                 } else {
                     self.b.ppu.race_2006_2 = true;
                 }
@@ -329,6 +331,8 @@ impl Nes {
 
         if p.ppur.status.cycle == 256 && p.ppu_was_on {
             p.ppur.increment_vs();
+            // The dot-256 vertical increment belongs to the next line's row (R2-005).
+            p.capture_shadow_next();
         }
 
         if p.race_2006_2 {
@@ -368,6 +372,12 @@ impl Nes {
 
                 self.b.ppu.yp = self.b.ppu.ppur.status.sl - 1;
                 self.b.ppu.ppuphase = PPU_PHASE_BG;
+
+                // The 3D tile capture's sprite band, at the first dot of a visible line. `sl` 0
+                // is the pre-render line (`yp == -1`), so the visible lines are `sl` 1 to 240.
+                if self.b.ppu.yp >= 0 {
+                    self.begin_capture_line(self.b.ppu.yp);
+                }
 
                 // "If PPUADDR is not less then 8 when rendering starts, the first 8 bytes in OAM
                 // are written to from the current location of PPUADDR"
@@ -579,6 +589,7 @@ impl Nes {
 
                 if self.b.ppu.ppur.status.cycle == 256 && !self.b.ppu.race_2006 {
                     self.b.ppu.ppur.increment_vs();
+                    self.b.ppu.capture_shadow_next();
                 }
 
                 self.b.ppu.ppu_was_on = false;
@@ -608,6 +619,13 @@ impl Nes {
                 self.b.ppu.ppur.status.cycle += 1; // increment cycle without running ppu
             } else {
                 self.runppu();
+            }
+
+            // The 3D tile capture's background row, at the last dot of a visible line, so that
+            // it shows what every CPU write made during the line left (R2-005).
+            let yp = self.b.ppu.ppur.status.sl - 1;
+            if (0..240).contains(&yp) {
+                self.end_capture_line(yp);
             }
 
             self.b.ppu.ppur.status.cycle = 0;
@@ -696,6 +714,9 @@ impl Nes {
                     && self.b.ppu.ppuon()
                 {
                     self.b.ppu.ppur.install_latches();
+                    // The vertical reload is on the pre-render line, which captures nothing, so
+                    // it may as well reach both halves at once.
+                    self.b.ppu.capture_shadow_both();
 
                     self.b.ppu.read_value = self.b.ppu.t_oam[self.b.ppu.s as usize].oam_ind;
                     self.runppu();
@@ -711,6 +732,8 @@ impl Nes {
                     //at 257: 3d world runner is ugly if we do this at 256
                     if self.b.ppu.ppuon() {
                         self.b.ppu.ppur.install_h_latches();
+                        // The dot-257 horizontal reload belongs to the next line (R2-005).
+                        self.b.ppu.capture_shadow_next();
                     }
                     self.b.ppu.race_2006_2 = false;
                     self.b.ppu.read_value = self.b.ppu.t_oam[self.b.ppu.s as usize].oam_ind;

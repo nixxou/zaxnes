@@ -96,6 +96,23 @@ impl ControllerDeck {
         }
     }
 
+    /// Plugs a device into port 0 or 1, clearing that port's shift register — which is what
+    /// `NES.PutSyncSettings` does by rebuilding the deck. Out-of-range ports are ignored; the
+    /// engine checks them and reports [`zax_core_api::InvalidPort`].
+    pub fn set_device(&mut self, port: usize, device: PortDevice) {
+        match port {
+            0 => {
+                self.left = device;
+                self.left_state = ControllerNes::default();
+            }
+            1 => {
+                self.right = device;
+                self.right_state = ControllerNes::default();
+            }
+            _ => {}
+        }
+    }
+
     /// `NesDeck.Strobe`, with `StrobeInfo(oldValue, newValue)` decomposed inline: only `OUT0`
     /// reaches a standard pad.
     pub fn strobe(&mut self, old_value: u8, new_value: u8) {
@@ -175,3 +192,27 @@ mod tests {
         assert_eq!(deck.read_b(), 0);
     }
 }
+
+// -------------------------------------------------------------------- the savestate
+
+// `NESControllers.cs`: `ControllerNES.SyncState` and the deck's. The two `PortDevice`s are the
+// deck's configuration rather than its state, but they are cheap and a block that carries them
+// restores the machine the state was taken on rather than the one the host happens to hold.
+crate::state::sync_enum!(PortDevice {
+    0 => PortDevice::Unplugged,
+    1 => PortDevice::ControllerNes,
+    2 => PortDevice::ControllerNesFamicomP2,
+});
+
+crate::state::sync_struct!(ControllerNes {
+    resetting,
+    latched_value
+});
+
+crate::state::sync_struct!(ControllerDeck {
+    left,
+    right,
+    pad,
+    left_state,
+    right_state
+});

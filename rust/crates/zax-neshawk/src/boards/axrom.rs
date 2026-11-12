@@ -27,6 +27,8 @@ impl Board for AxRom {
         Box::new(self.clone())
     }
 
+    crate::boards::board_sync!(AxRom);
+
     fn name(&self) -> &'static str {
         "AxROM"
     }
@@ -118,3 +120,6 @@ impl Board for AxRom {
         });
     }
 }
+
+// `AxROM.SyncState`.
+crate::state::sync_struct!(AxRom { prg, bus_conflict, prg_mask_32k } skip: { base });

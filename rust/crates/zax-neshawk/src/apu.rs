@@ -1151,3 +1151,82 @@ impl Apu {
         self.oldmix
     }
 }
+
+// -------------------------------------------------------------------- the savestate
+
+// `APU.SyncState` and the four units' own. The `skip:` groups are the three `&'static` lookup
+// tables the C# holds as `static readonly` arrays — constants, not state.
+crate::state::sync_struct!(PulseUnit {
+    unit,
+    duty_cnt,
+    env_loop,
+    env_constant,
+    env_cnt_value,
+    len_halt,
+    sweep_en,
+    sweep_divider_cnt,
+    sweep_negate,
+    sweep_shiftcount,
+    sweep_reload,
+    len_cnt,
+    timer_raw_reload_value,
+    timer_reload_value,
+    lenctr_en,
+    swp_divider_counter,
+    swp_silence,
+    duty_step,
+    timer_counter,
+    sample,
+    duty_value,
+    env_start_flag,
+    env_divider,
+    env_counter,
+    env_output,
+});
+
+crate::state::sync_struct!(NoiseUnit {
+    env_cnt_value, env_loop, env_constant, len_halt, mode_cnt, period_cnt,
+    len_cnt, lenctr_en, shift_register, timer_counter, sample, env_output,
+    env_start_flag, env_divider, env_counter, noise_bit,
+} skip: {
+    noise_table,
+});
+
+crate::state::sync_struct!(TriangleUnit {
+    linear_counter_reload,
+    control_flag,
+    timer_cnt,
+    reload_flag,
+    len_cnt,
+    halt_2,
+    lenctr_en,
+    linear_counter,
+    timer,
+    timer_cnt_reload,
+    seq,
+    sample,
+});
+
+crate::state::sync_struct!(DmcUnit {
+    irq_enabled, loop_flag, timer_reload, delay, timer,
+    user_address, user_length, sample_length, sample_address,
+    sample_buffer, sample_buffer_filled,
+    out_shift, out_bits_remaining, out_deltacounter, out_silence,
+    fill_glitch, fill_glitch_2, fill_glitch_2_end, pending_disable, timer_just_reloaded,
+} skip: {
+    dmc_rate,
+});
+
+crate::state::sync_struct!(Apu {
+    m_vol, dmc_dma_countdown, dmc_rdy_check, call_from_write, recalculate,
+    pulse, triangle, noise, dmc,
+    irq_pending, dmc_reload_countdown, dmc_irq, dmc_irq_glitch,
+    pending_reg, doing_tick_quarter, pending_val, seq_tick, seq_val, len_clock_active,
+    sequencer_counter, sequencer_step, sequencer_mode, sequencer_irq_inhibit,
+    sequencer_irq_assert, sequencer_irq, sequence_reset_pending,
+    sequencer_irq_clear_pending, sequencer_irq_flag,
+    sequencer_check_1, sequencer_check_2,
+    sampleclock, oldmix, cart_sound, old_cart_sound,
+} skip: {
+    sequencer_lut,
+});

@@ -38,6 +38,8 @@ impl Board for UxRom {
         Box::new(self.clone())
     }
 
+    crate::boards::board_sync!(UxRom);
+
     fn name(&self) -> &'static str {
         "UxROM"
     }
@@ -136,3 +138,13 @@ impl Board for UxRom {
         }
     }
 }
+
+// `UxROM.SyncState`: `prg` is the bank register; the rest is `Configure`'s.
+crate::state::sync_enum!(AdjustPrg {
+    0 => AdjustPrg::Identity,
+    1 => AdjustPrg::Un1Rom,
+});
+
+crate::state::sync_struct!(UxRom {
+    prg, prg_mask, vram_byte_mask, adjust_prg,
+} skip: { base });

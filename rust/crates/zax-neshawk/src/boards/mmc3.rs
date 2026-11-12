@@ -379,3 +379,49 @@ impl Mmc3BoardBase {
         (bank_1k << 10) | (addr & 0x3FF)
     }
 }
+
+// `MMC3.SyncState` and `MMC3Board_Base`'s. `mmc3type` and `old_irq_type` come from the cart's
+// chip name at load time, but a block that carries them cannot be restored onto the wrong
+// revision silently.
+crate::state::sync_enum!(Mmc3Type {
+    0 => Mmc3Type::None,
+    1 => Mmc3Type::Mmc3A,
+    2 => Mmc3Type::Mmc3BSharp,
+    3 => Mmc3Type::Mmc3BNonSharp,
+    4 => Mmc3Type::Mmc3C,
+    5 => Mmc3Type::Mmc6,
+});
+
+crate::state::sync_struct!(Mmc3 {
+    reg_addr,
+    chr_mode,
+    prg_mode,
+    regs,
+    mirror,
+    a12_old,
+    irq_reload,
+    irq_counter,
+    irq_pending,
+    irq_enable,
+    irq_reload_flag,
+    wram_enable,
+    wram_write_protect,
+    just_cleared_pending,
+    just_cleared,
+    separator_counter,
+    irq_countdown,
+    chr_regs_1k,
+    prg_regs_8k,
+    mmc3type,
+    old_irq_type,
+    cmd,
+    mirror_mask,
+    irq_signal_out,
+});
+
+crate::state::sync_struct!(Mmc3BoardBase {
+    mmc3,
+    extra_vrom,
+    prg_mask,
+    chr_mask
+});

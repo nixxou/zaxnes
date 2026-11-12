@@ -26,6 +26,7 @@ pub const fn state_core_name(engine: EngineKind) -> &'static str {
     match engine {
         EngineKind::Zaxnes => "Zaxnes",
         EngineKind::Fceux => "FCEUX",
+        EngineKind::NesHawk => "NesHawk",
     }
 }
 
@@ -43,6 +44,8 @@ pub const fn state_magic(engine: EngineKind) -> u32 {
         EngineKind::Zaxnes => 0x304E_4553,
         // `ZXFX` little-endian.
         EngineKind::Fceux => 0x5846_585A,
+        // `ZXNH` little-endian, new with lot NESHAWK-REWRITE.
+        EngineKind::NesHawk => 0x484E_585A,
     }
 }
 
@@ -52,7 +55,7 @@ pub const fn state_magic(engine: EngineKind) -> u32 {
 pub fn engine_of_state(data: &[u8], offset: usize) -> Option<EngineKind> {
     let head = data.get(offset..offset.checked_add(4)?)?;
     let magic = u32::from_le_bytes([head[0], head[1], head[2], head[3]]);
-    [EngineKind::Zaxnes, EngineKind::Fceux]
+    EngineKind::ALL
         .into_iter()
         .find(|&engine| state_magic(engine) == magic)
 }

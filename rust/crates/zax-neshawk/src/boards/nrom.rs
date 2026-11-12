@@ -24,6 +24,8 @@ impl Board for Nrom {
         Box::new(self.clone())
     }
 
+    crate::boards::board_sync!(Nrom);
+
     fn name(&self) -> &'static str {
         "NROM"
     }
@@ -97,3 +99,8 @@ impl Board for Nrom {
         self.base.rom[addr as usize]
     }
 }
+
+// `NROM.SyncState`: the board has no state of its own beyond the base's. `prg_byte_mask` is
+// `Configure`'s, restored by the load rather than by the block, but it is one `i32` and a block
+// that carries it cannot disagree with the machine it came from.
+crate::state::sync_struct!(Nrom { prg_byte_mask } skip: { base });

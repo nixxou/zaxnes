@@ -8,6 +8,9 @@ publish.workspace = true
 description = "BizHawk's NesHawk NES core, ported to Rust. See LICENSE-BizHawk."
 
 [dependencies]
+# The shared engine types: the `Engine` trait, `TileRecord`, `FrameBatch`, the savestate
+# errors. No third-party dependency, and `zax-core-api` has none of its own.
+zax-core-api = { path = "../zax-core-api" }
 
 [lints]
 workspace = true

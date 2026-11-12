@@ -49,6 +49,8 @@ impl Board for CnRom {
         Box::new(self.clone())
     }
 
+    crate::boards::board_sync!(CnRom);
+
     fn name(&self) -> &'static str {
         "CNROM"
     }
@@ -188,3 +190,9 @@ impl Board for CnRom {
         self.base.rom[(addr & self.prg_byte_mask) as usize]
     }
 }
+
+// `CNROM.SyncState`: `chr` and `chr_enabled` are the state (`chr_enabled` is the bus-conflict
+// board's latch); the rest is `Configure`'s.
+crate::state::sync_struct!(CnRom {
+    chr, chr_enabled, prg_byte_mask, chr_mask, copyprotection, bus_conflict, seicross,
+} skip: { base });

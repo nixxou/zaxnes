@@ -359,3 +359,41 @@ impl Mos6502x {
         self.nmi || (self.irq && !self.flag_i())
     }
 }
+
+// -------------------------------------------------------------------- the savestate
+
+// `MOS6502X.SyncState`. Every field of the C# class is here; the port has no `Serializer`, so
+// `sync_struct!` generates the writer and the reader from this one list (see `crate::state`).
+crate::state::sync_struct!(Mos6502x {
+    A,
+    X,
+    Y,
+    P,
+    PC,
+    S,
+    irq,
+    nmi,
+    ext_ppu_cycle,
+    bcd_enabled,
+    opcode,
+    opcode2,
+    opcode3,
+    ea,
+    alu_temp,
+    mi,
+    iflag_pending,
+    H,
+    interrupt_pending,
+    branch_irq_hack,
+    value8,
+    temp8,
+    value16,
+    branch_taken,
+    my_iflag,
+    booltemp,
+    tempint,
+    lo,
+    hi,
+    ane_constant,
+    lxa_constant,
+});
