@@ -2127,6 +2127,7 @@ dependencies = [
  "zax-fceux",
  "zax-goldens",
  "zax-nes",
+ "zax-neshawk",
  "zax-profiles",
  "zax-render",
  "zax-scripting",

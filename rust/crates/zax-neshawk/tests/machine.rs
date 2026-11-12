@@ -150,3 +150,40 @@ fn the_blargg_cpu_suites_report_their_verdicts() {
         failures.join("\n")
     );
 }
+
+#[test]
+#[ignore = "needs ZAXNES_ROMS"]
+fn the_speed_of_the_port_in_frames_a_second() {
+    // Not a budget — the brief asks for the figure, not a threshold. `--release` only; a debug
+    // build of a per-dot PPU is two orders of magnitude slower and the number would mean nothing.
+    let Some(dir) = std::env::var_os("ZAXNES_ROMS").map(PathBuf::from) else {
+        return;
+    };
+    let db = gamedb();
+    for name in [
+        "Super Mario Bros. 3 (USA).nes",
+        "Mega Man 2 (USA).nes",
+        "Super Mario Bros. (World).nes",
+    ] {
+        let path = dir.join(name);
+        if !path.exists() {
+            continue;
+        }
+        let mut nes = load(&path, &db);
+        // 60 frames of warm-up, so the boot's PPU-off frames do not flatter the figure.
+        for _ in 0..60 {
+            nes.frame_advance(false, false);
+        }
+        let frames = 600;
+        let started = std::time::Instant::now();
+        for _ in 0..frames {
+            nes.frame_advance(false, false);
+        }
+        let elapsed = started.elapsed().as_secs_f64();
+        println!(
+            "{name}: {:.0} frames/s ({:.3} ms a frame) over {frames} frames",
+            f64::from(frames) / elapsed,
+            elapsed * 1000.0 / f64::from(frames),
+        );
+    }
+}

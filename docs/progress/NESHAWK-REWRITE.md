@@ -73,7 +73,7 @@ step 2. If a file you ported was fetched before the clone, it is the same tag; n
       `MOS 6502X` — microcode tables, the `Execute.cs` state machine, `RDY`/`rdy_freeze`,
       `branch_irq_hack`, interrupts, the unofficial opcodes, `NESSoftReset`. Passes `nestest`
       (log compare) and the `cpu_*`/`instr_*` ROMs NesHawk itself passes.
-- [~] 2. The machine: `NES.Core.cs` (`RunCpuOne`, the OAM/DMC DMA blocks, `dmc_realign`,
+- [x] 2. The machine: `NES.Core.cs` (`RunCpuOne`, the OAM/DMC DMA blocks, `dmc_realign`,
       `cpu_deadcounter`, `FrameAdvance`, `HardReset`/`SoftReset`, power-on RAM fill, frame-done),
       `PPU*.cs` (per-dot `runppu`, `TickPPU_VBL`/`preVBL`, `NewDeadPPU`, `NMI_offset`,
       `idleSynch`, sprite evaluation, registers, open bus), `APU.cs` (all channels, `DMCUnit`
@@ -88,15 +88,15 @@ step 2. If a file you ported was fetched before the clone, it is the same tag; n
       Namco 163 are out of scope. For any other mapper, **fall back on Zaxnes's own boards** from
       `zax-nes` through an adapter, accepting the loss of NesHawk timing fidelity; mark that case
       explicitly (capabilities/log/harness output: "board from Zaxnes, not NesHawk-exact").
-- [ ] 3. The `Engine` implementation (`EngineKind::NesHawk`, savestates tagged and refusing other
+- [~] 3. The `Engine` implementation (`EngineKind::NesHawk`, savestates tagged and refusing other
       engines), wired into `zax-harness` (`movie-sync`/`frame-trace`/`test-roms --engine
       neshawk`), the application's `emu.engine = "neshawk"`, and `.bk2` playback.
-- [ ] 4. Verification against BizHawk: the *Kirby* `.bk2` to the last frame (156 312) against the
+- [~] 4. Verification against BizHawk: the *Kirby* `.bk2` to the last frame (156 312) against the
       per-frame references and the cycle ledger; *Faxanadu*; AccuracyCoin and the blargg suites
       with the **same verdicts as NesHawk** (including the `$8B ANE` hang).
 - [ ] 5. 3D: the tile capture the renderer needs, as `zax-fceux` does; capture parity measured on
       the profiled games.
-- [ ] 6. Speed and final pass: bench, fmt, clippy `-D warnings`, `cargo test --release`,
+- [x] 6. Speed and final pass: bench, fmt, clippy `-D warnings`, `cargo test --release`,
       golden-core unchanged for the Zaxnes engine, and `docs/review/NESHAWK-REWRITE.md`.
 
 ## Log
@@ -331,3 +331,34 @@ the comparison worth stating so that nobody re-finds them:
 Kirby's vectors, for whoever reads a ledger next: NMI `$C341`, RESET `$FFF0`, IRQ `$0029` — the
 IRQ vector points into **work RAM**, a trampoline the game writes, which is why the ledgers tag
 `$0029` as `irq`.
+
+### Step 6 — the final pass (steps 3 and 5 are partly open; see the gap table)
+
+| | result |
+|---|---|
+| speed, release, 600 frames after 60 of warm-up | SMB3 **594 f/s** (1.68 ms), Mega Man 2 **556 f/s** (1.80 ms), SMB **622 f/s** (1.61 ms). Mega Man **3** is not in `ZAXNES_ROMS`; Mega Man 2 (MMC1) stands in and SMB (NROM) is the third point |
+| `golden-core`, 98 originals x 1 200 frames, Zaxnes engine | `8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773` — **byte-identical**. `zax-nes` was not touched by this lot |
+| `cargo test --release --workspace` | green, less three **pre-existing** environment gaps (below) |
+| `cargo fmt --all --check` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+
+**The three environment gaps, each shown to be pre-existing rather than caused here.**
+`zax-platform` and `zax-app` fail to *link* (`LNK1181: SDL2.lib`), which no change of this lot can
+reach — neither crate is a dependency of anything this lot touched. `zax-harness`'s
+`bench_core_tests` read `rust/test-roms/nestest.nes`, which `git ls-files` shows is **tracked by
+nothing** and `.gitignore:102` ignores, so it is a per-worktree asset like `zax-app`'s two demo
+files; it was copied in from `assets-free` (untracked, never staged) and the four tests then pass.
+
+### What is left, and why — the honest list
+
+The gap table of `docs/review/NESHAWK-REWRITE.md` §7 is the full statement. In short: step 3's
+`Engine` implementation and application wiring are **not** done (the harness is, which is what
+the verification needed), step 4's AccuracyCoin and screen-read suites are **not** scored, and
+step 5 (the 3D tile capture) is **not** started. Each entry names what it would take; the two
+that are cheapest and unblock the rest are a `SyncState` port (for savestates, which the `Engine`
+trait needs) and making `test_roms`'s four readers generic over a five-method trait (which gets
+AccuracyCoin and every screen-reading suite at once).
+
+What this lot did deliver is the thing the lot exists for: **the port and BizHawk are the same
+machine**, on 156 312 frames of work RAM, two whole Faxanadu movies, and 34 026 cycle-dated bus
+events.

@@ -2591,7 +2591,13 @@ impl Machine for NeshawkMachine {
         out.reserve(PICTURE_LEN);
         // `xbuf` holds `pixel | intensity << 6`, with bit 15 marking a pixel the backdrop shows
         // through; the harness's picture is one NES colour index a pixel, which is the low six.
-        out.extend(self.nes.ppu.xbuf.iter().map(|&p| u8::try_from(p & 0x3F).unwrap_or(0)));
+        out.extend(
+            self.nes
+                .ppu
+                .xbuf
+                .iter()
+                .map(|&p| u8::try_from(p & 0x3F).unwrap_or(0)),
+        );
         Ok(())
     }
 
