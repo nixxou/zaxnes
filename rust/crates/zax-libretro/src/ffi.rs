@@ -40,7 +40,7 @@ const HW_CONTEXT_OPENGL_CORE: c_uint = 3;
 const DEVICE_JOYPAD: c_uint = 1;
 const DEVICE_ANALOG: c_uint = 5;
 const ANALOG_RIGHT: c_uint = 1;
-/// The RetroPad's west and north buttons, and its shoulders.
+/// The `RetroPad`'s west and north buttons, and its shoulders.
 const JOYPAD_Y: c_uint = 1;
 const JOYPAD_X: c_uint = 9;
 const JOYPAD_L: c_uint = 10;
