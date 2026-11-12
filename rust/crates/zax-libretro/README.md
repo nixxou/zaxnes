@@ -29,12 +29,12 @@ A profile suits a ROM whose file name is its title, or starts with it, as in the
 ROM list. A game without one plays in 2D, as does every game with the renderer option on "2D
 only".
 
-| Control (pad 1) | 3D |
+| RetroPad (pad 1) | 3D, at the places of the application |
 |---|---|
 | Right stick | turn and tilt the camera |
-| L2 / R2 | bring the camera nearer / farther |
-| L3 | the 2D picture / the 3D |
-| R3 | the camera back where the profile puts it |
+| L / R | the camera farther / nearer |
+| Y (west) | the 2D picture / the 3D |
+| X (north) | the default view, where the profile puts the camera |
 
 In 3D a state carries the machine and the scripts' 64 `PData` values, as the application's
 rollback does. The editor mode is the application's only.

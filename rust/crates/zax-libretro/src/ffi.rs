@@ -40,10 +40,11 @@ const HW_CONTEXT_OPENGL_CORE: c_uint = 3;
 const DEVICE_JOYPAD: c_uint = 1;
 const DEVICE_ANALOG: c_uint = 5;
 const ANALOG_RIGHT: c_uint = 1;
-const JOYPAD_L2: c_uint = 12;
-const JOYPAD_R2: c_uint = 13;
-const JOYPAD_L3: c_uint = 14;
-const JOYPAD_R3: c_uint = 15;
+/// The RetroPad's west and north buttons, and its shoulders.
+const JOYPAD_Y: c_uint = 1;
+const JOYPAD_X: c_uint = 9;
+const JOYPAD_L: c_uint = 10;
+const JOYPAD_R: c_uint = 11;
 const MEMORY_SAVE_RAM: c_uint = 0;
 const MEMORY_SYSTEM_RAM: c_uint = 2;
 const REGION_NTSC: c_uint = 0;
@@ -66,14 +67,16 @@ const PAD: [(c_uint, &CStr); 8] = [
     (7, c"Right"),
 ];
 
-/// The other controls of the 3D, named in the frontend's input menu.
+/// The other controls of the 3D, named in the frontend's input menu: the application's own
+/// places (HOWTO-RUN, the gamepad table): west 2D / 3D, north the default view, LB / RB the
+/// camera farther / nearer, the right stick turns it.
 const CAMERA: [(c_uint, c_uint, c_uint, &CStr); 6] = [
     (DEVICE_ANALOG, ANALOG_RIGHT, 0, c"Camera: turn"),
     (DEVICE_ANALOG, ANALOG_RIGHT, 1, c"Camera: tilt"),
-    (DEVICE_JOYPAD, 0, JOYPAD_L2, c"Camera: nearer"),
-    (DEVICE_JOYPAD, 0, JOYPAD_R2, c"Camera: farther"),
-    (DEVICE_JOYPAD, 0, JOYPAD_L3, c"2D / 3D"),
-    (DEVICE_JOYPAD, 0, JOYPAD_R3, c"Camera: reset"),
+    (DEVICE_JOYPAD, 0, JOYPAD_L, c"Camera: farther"),
+    (DEVICE_JOYPAD, 0, JOYPAD_R, c"Camera: nearer"),
+    (DEVICE_JOYPAD, 0, JOYPAD_Y, c"2D / 3D"),
+    (DEVICE_JOYPAD, 0, JOYPAD_X, c"Default view"),
 ];
 
 type EnvironmentFn = unsafe extern "C" fn(cmd: c_uint, data: *mut c_void) -> bool;
@@ -470,8 +473,8 @@ fn steer(frontend: &Frontend, core: &mut Core, seconds: f32) {
     let dead = |value: f32| if value.abs() < 0.2 { 0.0 } else { value };
     let turn = (dead(axis(0)), dead(axis(1)));
     let button = |id| pressed(frontend, 0, DEVICE_JOYPAD, 0, id) != 0;
-    let zoom = f32::from(i8::from(button(JOYPAD_R2)) - i8::from(button(JOYPAD_L2)));
-    let flat = button(JOYPAD_L3);
+    let zoom = f32::from(i8::from(button(JOYPAD_L)) - i8::from(button(JOYPAD_R)));
+    let flat = button(JOYPAD_Y);
     let flat_pressed = flat && !FLAT_HELD.with(|held| held.replace(flat));
     if !flat {
         FLAT_HELD.with(|held| held.set(false));
@@ -480,7 +483,7 @@ fn steer(frontend: &Frontend, core: &mut Core, seconds: f32) {
         if flat_pressed {
             three_d.flat = !three_d.flat;
         }
-        if button(JOYPAD_R3) {
+        if button(JOYPAD_X) {
             three_d.reset_view();
         }
         three_d.advance(seconds, turn, zoom);
