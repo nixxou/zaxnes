@@ -1683,11 +1683,14 @@ impl Ppu2C02 {
     ) {
         let records = self.tiles.records();
         // The frame's last palette, as everywhere in this picture (`Ppu2C02::frame_palette`).
-        // Neither this colour nor the one written below carries the opacity bit of AMD-050
-        // REQ-CORE-049, which is what `dev` wrote here before the merge and is kept to the byte:
-        // changing it would move the picture of the packs that use the second sprite page, and
-        // the owner's rule is that nothing moves for them in this lot. Recorded in
-        // `docs/progress/KIRBY-MERGE.md` §2.4 as found and deliberately left alone.
+        // `backdrop` is the transparent pixel's byte (no opacity bit), which a sprite behind the
+        // background may replace.
+        //
+        // The colour written below carries the opacity bit of AMD-050 REQ-CORE-049, as every
+        // other painted pixel does (`entry_colour`). KIRBY-MERGE had kept `dev`'s bytes here,
+        // without the bit (`docs/progress/KIRBY-MERGE.md` §2.4); the OpenGL 2D picture then drew
+        // these sprites transparent, which is the sky-coloured band FlappyZaxNes showed over its
+        // clouds at the left 4:3 edge (owner report, 2026-11-12; Vulkan ignored the bit).
         let backdrop = self.frame_palette[palette_index(0x3F00)];
         for record in records
             .iter()
@@ -1721,7 +1724,7 @@ impl Ppu2C02 {
                     let entry = 0x3F10 | u16::from(record.palette * 4) | u16::from(pixel);
                     let slot = &mut out[(row * width) + column];
                     if !record.hidden || *slot == backdrop {
-                        *slot = self.frame_palette[palette_index(entry)];
+                        *slot = self.frame_palette[palette_index(entry)] | super::OPAQUE_PIXEL;
                     }
                 }
             }
