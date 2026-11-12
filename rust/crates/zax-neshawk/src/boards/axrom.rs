@@ -6,7 +6,7 @@
 use super::{Board, BoardBase, MirrorType};
 use crate::cart::DetectionOrigin;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct AxRom {
     base: BoardBase,
     // configuration
@@ -23,6 +23,10 @@ impl Board for AxRom {
     fn base_mut(&mut self) -> &mut BoardBase {
         &mut self.base
     }
+    fn clone_box(&self) -> Box<dyn Board> {
+        Box::new(self.clone())
+    }
+
     fn name(&self) -> &'static str {
         "AxROM"
     }

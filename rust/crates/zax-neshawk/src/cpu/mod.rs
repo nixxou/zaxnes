@@ -43,17 +43,33 @@ pub trait Mos6502xLink {
     /// A write, with every side effect the bus has.
     fn write_memory(&mut self, address: u16, value: u8);
 
-    /// Called only when the **first** byte of an instruction is fetched.
-    fn on_exec_fetch(&mut self, address: u16);
+    /// Called only when the **first** byte of an instruction is fetched, with the registers as
+    /// they stand. BizHawk's own `event.onmemoryexecute` callbacks read `A`/`X`/`Y`/`S` off the
+    /// CPU object at that moment, and the cycle ledgers print them; passing them in is how a
+    /// machine that no longer holds the CPU while it executes gets the same four bytes.
+    fn on_exec_fetch(&mut self, address: u16, a: u8, x: u8, y: u8, s: u8);
+
+    /// The RDY line, which the machine drives.
+    fn rdy(&self) -> bool;
+
+    /// Hold the CPU: RDY was low when this cycle wanted to do work.
+    fn set_rdy_freeze(&mut self, value: bool);
+
+    /// Whether this cycle is frozen.
+    fn rdy_freeze(&self) -> bool;
+
+    /// Count one cycle, frozen or not — `TotalExecutedCycles++`.
+    fn add_executed_cycle(&mut self);
 
     /// Put a value on the 16-bit address bus.
     ///
-    /// **The one structural deviation from `MOS6502X.cs`.** There, `address_bus` is a field of
-    /// the CPU written both by the CPU's own micro-operations and by `NES.ReadMemory`
-    /// (`cpu.address_bus = addr`), and read from outside the CPU by the DMC DMA's halt cycles.
-    /// Rust cannot lend the machine to the CPU while the machine owns it, so the register lives
-    /// on the machine side and the seven micro-operations that drive it do so through here. It is
-    /// the same single register, written in the same order; nothing else about it changes.
+    /// **Where the structural deviation from `MOS6502X.cs` is.** Four pieces of the C#'s CPU
+    /// are fields of the *machine* here and are reached through this trait: `address_bus`, `RDY`,
+    /// `rdy_freeze` and `TotalExecutedCycles`. All four are written by the machine as well as by
+    /// the CPU — `NES.ReadMemory` does `cpu.address_bus = addr`, `WriteReg($4014)` does
+    /// `cpu.RDY = false`, the DMC DMA does both, and `read_joyport` reads the cycle counter — and
+    /// Rust cannot lend the machine to the CPU that the machine owns. They are the same four
+    /// registers, written in the same order at the same points; only their home differs.
     fn set_address_bus(&mut self, address: u16);
 }
 
@@ -84,10 +100,10 @@ static TABLE_NZ: [u8; 256] = {
 ///
 /// The field names are `MOS6502X.cs`'s; the module documentation says why.
 #[allow(non_snake_case)]
-// The 6502 has three input lines and eight one-bit pieces of sequencer state, and they are
-// independent: `rdy`, `nmi` and `irq` are driven by the machine, `rdy_freeze` by the current
-// cycle, `iflag_pending` by `CLI`/`SEI`/`PLP`, `branch_irq_hack` by one branch quirk. A state
-// machine would claim they vary together, and `Execute.cs` is the proof that they do not.
+// The 6502's input lines and its one-bit pieces of sequencer state are independent: `nmi` and
+// `irq` are driven by the machine, `iflag_pending` by `CLI`/`SEI`/`PLP`, `branch_irq_hack` by one
+// branch quirk. A state machine would claim they vary together, and `Execute.cs` is the proof
+// that they do not. (`RDY` and `rdy_freeze` are the machine's; see `Mos6502xLink`.)
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone)]
 pub struct Mos6502x {
@@ -109,15 +125,9 @@ pub struct Mos6502x {
     pub irq: bool,
     /// The NMI line, asserted by the machine. Cleared by the CPU when it takes the interrupt.
     pub nmi: bool,
-    /// The RDY line. While it is low the CPU is frozen: a cycle still passes and
-    /// `total_executed_cycles` still counts it, but no micro-operation completes.
-    pub rdy: bool,
 
     /// The PPU cycle, for the trace only. The machine keeps it up to date.
     pub ext_ppu_cycle: i32,
-
-    /// Cycles since the last reset. Counts frozen cycles too — the C# comment says so.
-    pub total_executed_cycles: i64,
 
     /// Whether decimal mode works. `false` on the NES's 2A03, whose BCD is not wired up.
     pub bcd_enabled: bool,
@@ -137,8 +147,6 @@ pub struct Mos6502x {
     pub mi: i32,
     /// The I flag has to be stored *after* it is tested, for `CLI` and `SEI`.
     pub(crate) iflag_pending: bool,
-    /// Set when the CPU must be frozen: RDY was low when the cycle wanted to do work.
-    pub rdy_freeze: bool,
     /// The scratch byte of the "unstable high byte" group of unofficial instructions.
     pub(crate) H: u8,
 
@@ -184,9 +192,7 @@ impl Mos6502x {
             S: 0,
             irq: false,
             nmi: false,
-            rdy: true,
             ext_ppu_cycle: 0,
-            total_executed_cycles: 0,
             bcd_enabled: true,
             opcode: 0,
             opcode2: 0,
@@ -195,7 +201,6 @@ impl Mos6502x {
             alu_temp: 0,
             mi: 0,
             iflag_pending: false,
-            rdy_freeze: false,
             H: 0,
             interrupt_pending: false,
             branch_irq_hack: false,
@@ -224,11 +229,11 @@ impl Mos6502x {
         self.P = 0x20; // 5th bit always set
         self.S = 0;
         self.PC = 0;
-        self.total_executed_cycles = 0;
         self.mi = 0;
         self.opcode = VOP_RESET;
         self.iflag_pending = true;
-        self.rdy = true;
+        // `total_executed_cycles = 0` and `RDY = true` are here in the C#; both now live on the
+        // machine (see [`Mos6502xLink::set_address_bus`]) and `Nes::hard_reset` does them.
     }
 
     /// `MOS6502X.NESSoftReset`: the RESET line, which runs the reset micro-program without

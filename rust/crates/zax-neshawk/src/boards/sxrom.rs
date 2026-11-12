@@ -194,7 +194,7 @@ pub enum SxVariant {
 /// "i don't know if this is right, but anything lower will not boot Bill & Ted"
 const PPUTIMEOUT: u32 = 4;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SxRom {
     base: BoardBase,
     variant: SxVariant,
@@ -622,6 +622,10 @@ impl Board for SxRom {
     fn base_mut(&mut self) -> &mut BoardBase {
         &mut self.base
     }
+    fn clone_box(&self) -> Box<dyn Board> {
+        Box::new(self.clone())
+    }
+
     fn name(&self) -> &'static str {
         match self.variant {
             SxVariant::SxRom => "SxROM",

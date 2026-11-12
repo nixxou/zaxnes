@@ -6,7 +6,7 @@
 use super::{Board, BoardBase};
 use crate::cart::DetectionOrigin;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Nrom {
     base: BoardBase,
     /// configuration
@@ -20,6 +20,10 @@ impl Board for Nrom {
     fn base_mut(&mut self) -> &mut BoardBase {
         &mut self.base
     }
+    fn clone_box(&self) -> Box<dyn Board> {
+        Box::new(self.clone())
+    }
+
     fn name(&self) -> &'static str {
         "NROM"
     }

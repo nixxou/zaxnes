@@ -329,7 +329,7 @@ impl Mmc3 {
 }
 
 /// The state `MMC3Board_Base` adds, with the mapping helpers it defines.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Mmc3BoardBase {
     pub mmc3: Mmc3,
     pub extra_vrom: i32,

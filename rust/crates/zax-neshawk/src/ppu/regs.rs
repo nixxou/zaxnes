@@ -1,14 +1,14 @@
 //! `$2000`-`$2007`.
 //!
-//! Ported from BizHawk 2.11.1 `Consoles/Nintendo/NES/PPU.regs.cs`. These are `impl Nes` rather
+//! Ported from BizHawk 2.11.1 `Consoles/Nintendo/NES/PPU.regs.cs`. These are `impl Bus` rather
 //! than `impl Ppu` because each one of them reaches the board (`nes.Board.AddressPpu`) or the CPU
 //! (`nes.cpu.TotalExecutedCycles`) the way the C# does through its `nes` field.
 //! MIT; see `LICENSE-BizHawk`.
 
 use super::DecayType;
-use crate::nes::Nes;
+use crate::nes::Bus;
 
-impl Nes {
+impl Bus {
     //PPU CONTROL (write)
     fn write_2000(&mut self, value: u8) {
         if self.ppu.reg_2000.vblank_nmi_gen == 0
@@ -238,12 +238,11 @@ impl Nes {
             5 => self.ppu.ppu_open_bus, // read_2005
             6 => self.ppu.ppu_open_bus, // read_2006
             7 => {
-                if self.cpu.total_executed_cycles == self.ppu.double_2007_read && !self.dmc_dma_exec
-                {
+                if self.total_executed_cycles == self.ppu.double_2007_read && !self.dmc_dma_exec {
                     self.ppu.ppu_open_bus
                 } else {
                     let ret_spec = self.read_2007();
-                    self.ppu.double_2007_read = self.cpu.total_executed_cycles + 1;
+                    self.ppu.double_2007_read = self.total_executed_cycles + 1;
                     ret_spec
                 }
             }

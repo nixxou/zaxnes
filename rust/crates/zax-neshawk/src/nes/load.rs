@@ -7,7 +7,7 @@
 
 use std::fmt::Write as _;
 
-use super::{BusLog, DisplayType, Nes};
+use super::{Bus, BusLog, DisplayType, Nes};
 use crate::apu::Apu;
 use crate::boards::{self, BoardKind};
 use crate::cart::{detect_from_ines, CartInfo, DetectionOrigin};
@@ -466,67 +466,73 @@ impl Nes {
 
         let mut nes = Self {
             cpu: Mos6502x::new(),
-            ppu: Ppu::new(),
-            apu: Apu::new(None, false),
-            ram: [0; 0x800],
-            ciram: [0; 0x800],
-            game_name,
-            cart: cart.clone(),
-            board,
-            board_kind,
-            origin,
-            sprdma_countdown: 0,
-            irq_apu: false,
-            cpuclockrate: 1_789_773,
-            controller_deck: ControllerDeck::new(left, right),
-            latched4016: 0,
-            display_type,
-            vsync_num: 0,
-            vsync_den: 1,
-            old_s: 0,
-            double_controller_read: 0,
-            double_controller_read_address: 0,
-            previous_controller1_read: 0,
-            previous_controller2_read: 0,
-            dmc_dma_controller_conflict: false,
-            joypad_strobed: false,
-            joypad_strobe_value: 0,
-            cpu_sequence: [3, 3, 3, 3, 3],
-            cpu_deadcounter: 0,
-            oam_dma_index: 0,
-            oam_dma_exec: false,
-            oam_dma_addr: 0,
-            oam_dma_byte: 0,
-            dmc_dma_exec: false,
-            dmc_realign: false,
-            db: 0,
-            address_bus: 0,
-            frame: 0,
-            lagged: false,
-            islag: false,
-            lagcount: 0,
-            controller_was_latched: false,
-            frame_is_done: false,
-            current_strobe: false,
-            new_strobe: false,
-            reset_signal: false,
-            hard_reset_signal: false,
-            initial_wram_state_pattern: Vec::new(),
-            audio_deltas: Vec::new(),
-            bus_log: BusLog::default(),
-            load_report: None,
+            b: Bus {
+                ppu: Ppu::new(),
+                apu: Apu::new(None, false),
+                ram: [0; 0x800],
+                ciram: [0; 0x800],
+                game_name,
+                cart: cart.clone(),
+                board,
+                board_kind,
+                origin,
+                sprdma_countdown: 0,
+                irq_apu: false,
+                cpuclockrate: 1_789_773,
+                controller_deck: ControllerDeck::new(left, right),
+                latched4016: 0,
+                display_type,
+                vsync_num: 0,
+                vsync_den: 1,
+                old_s: 0,
+                double_controller_read: 0,
+                double_controller_read_address: 0,
+                previous_controller1_read: 0,
+                previous_controller2_read: 0,
+                dmc_dma_controller_conflict: false,
+                joypad_strobed: false,
+                joypad_strobe_value: 0,
+                cpu_sequence: [3, 3, 3, 3, 3],
+                cpu_deadcounter: 0,
+                oam_dma_index: 0,
+                oam_dma_exec: false,
+                oam_dma_addr: 0,
+                oam_dma_byte: 0,
+                dmc_dma_exec: false,
+                dmc_realign: false,
+                db: 0,
+                address_bus: 0,
+                frame: 0,
+                lagged: false,
+                islag: false,
+                lagcount: 0,
+                controller_was_latched: false,
+                frame_is_done: false,
+                current_strobe: false,
+                new_strobe: false,
+                reset_signal: false,
+                hard_reset_signal: false,
+                initial_wram_state_pattern: Vec::new(),
+                audio_deltas: Vec::new(),
+                bus_log: BusLog::default(),
+                load_report: None,
+                // `MOS6502X.Reset` sets these two in the C#; they live on the machine here.
+                rdy: true,
+                rdy_freeze: false,
+                total_executed_cycles: 0,
+            },
         };
-        nes.ppu.has_clock_ppu = has_clock_ppu;
+        nes.b.ppu.has_clock_ppu = has_clock_ppu;
 
         nes.hard_reset();
 
         if let Some(trainer) = trainer {
-            for (i, b) in trainer.iter().enumerate().take(512) {
-                nes.write_memory(0x7000 + i as u16, *b);
+            for (i, byte) in trainer.iter().enumerate().take(512) {
+                nes.b.write_memory(0x7000 + i as u16, *byte);
             }
         }
 
-        nes.load_report = Some(LoadReport {
+        nes.b.load_report = Some(LoadReport {
             lines,
             origin,
             board_name,

@@ -42,9 +42,12 @@ struct NestestBus {
     /// `TraceCallback` fires.
     fetch: Option<u16>,
 
-    /// The 16-bit address bus, which lives on the machine side; see
+    /// The four registers of the C#'s CPU that live on the machine side; see
     /// [`Mos6502xLink::set_address_bus`].
     address_bus: u16,
+    rdy: bool,
+    rdy_freeze: bool,
+    total_executed_cycles: i64,
 }
 
 impl NestestBus {
@@ -79,8 +82,24 @@ impl Mos6502xLink for NestestBus {
         }
     }
 
-    fn on_exec_fetch(&mut self, address: u16) {
+    fn on_exec_fetch(&mut self, address: u16, _a: u8, _x: u8, _y: u8, _s: u8) {
         self.fetch = Some(address);
+    }
+
+    fn rdy(&self) -> bool {
+        self.rdy
+    }
+
+    fn set_rdy_freeze(&mut self, value: bool) {
+        self.rdy_freeze = value;
+    }
+
+    fn rdy_freeze(&self) -> bool {
+        self.rdy_freeze
+    }
+
+    fn add_executed_cycle(&mut self) {
+        self.total_executed_cycles += 1;
     }
 
     fn set_address_bus(&mut self, address: u16) {
@@ -136,6 +155,10 @@ fn nestest_matches_the_reference_log_instruction_for_instruction() {
         prg,
         fetch: None,
         address_bus: 0,
+        // `MOS6502X.Reset` raises RDY in the C#; the machine does it here.
+        rdy: true,
+        rdy_freeze: false,
+        total_executed_cycles: 0,
     };
 
     // The power-on reset sequence is run rather than assumed, because it is the thing that
@@ -155,7 +178,7 @@ fn nestest_matches_the_reference_log_instruction_for_instruction() {
     cpu.PC = 0xC000;
     cpu.opcode = 256; // VOP_Fetch1
     cpu.mi = 0;
-    cpu.total_executed_cycles = 7;
+    bus.total_executed_cycles = 7;
     bus.fetch = None;
 
     let mut checked = 0usize;
@@ -171,7 +194,7 @@ fn nestest_matches_the_reference_log_instruction_for_instruction() {
             // the registers seen here are the instruction's entry state. The log's `CYC` is the
             // count *before* the instruction's first cycle, and the fetch happens inside a cycle
             // that `execute_one` has already counted -- hence the one.
-            let cyc = cpu.total_executed_cycles - 1;
+            let cyc = bus.total_executed_cycles - 1;
 
             assert_eq!(
                 (address, cpu.A, cpu.X, cpu.Y, cpu.P & NOT_B, cpu.S, cyc),

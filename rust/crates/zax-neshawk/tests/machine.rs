@@ -95,9 +95,9 @@ fn the_machine_powers_on_and_runs_sixty_frames() {
     let ppu_cycles = nes.cycle_count();
     assert!(ppu_cycles > 60 * 89_000, "{ppu_cycles} dots in 60 frames");
     assert!(
-        nes.cpu.total_executed_cycles > 60 * 29_000,
+        nes.total_executed_cycles > 60 * 29_000,
         "{} cpu cycles",
-        nes.cpu.total_executed_cycles
+        nes.total_executed_cycles
     );
 }
 

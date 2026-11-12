@@ -36,8 +36,8 @@ impl Nes {
     /// `PPU.get_ptread`: address line 3 relates to the pattern table fetch occuring.
     #[inline]
     fn get_ptread(&self, par: i32) -> i32 {
-        let hi = self.ppu.reg_2000.bg_pattern_hi;
-        (hi << 0xC) | (par << 0x4) | self.ppu.ppur.fv
+        let hi = self.b.ppu.reg_2000.bg_pattern_hi;
+        (hi << 0xC) | (par << 0x4) | self.b.ppu.ppur.fv
     }
 
     /// `PPU.Read_bgdata`.
@@ -45,39 +45,39 @@ impl Nes {
         let i = i as usize;
         match cycle {
             0 => {
-                self.ppu.ppu_addr_temp = self.ppu.ppur.get_ntread();
-                let a = self.ppu.ppu_addr_temp;
-                self.ppu.bgdata[i].nt = self.ppubus_read(a, true, true);
+                self.b.ppu.ppu_addr_temp = self.b.ppu.ppur.get_ntread();
+                let a = self.b.ppu.ppu_addr_temp;
+                self.b.ppu.bgdata[i].nt = self.b.ppubus_read(a, true, true);
             }
             1 => {}
             2 => {
-                self.ppu.ppu_addr_temp = self.ppu.ppur.get_atread();
-                let a = self.ppu.ppu_addr_temp;
-                let mut at = self.ppubus_read(a, true, true);
+                self.b.ppu.ppu_addr_temp = self.b.ppu.ppur.get_atread();
+                let a = self.b.ppu.ppu_addr_temp;
+                let mut at = self.b.ppubus_read(a, true, true);
 
                 //modify at to get appropriate palette shift
-                if (self.ppu.ppur.vt & 2) != 0 {
+                if (self.b.ppu.ppur.vt & 2) != 0 {
                     at >>= 4;
                 }
-                if (self.ppu.ppur.ht & 2) != 0 {
+                if (self.b.ppu.ppur.ht & 2) != 0 {
                     at >>= 2;
                 }
                 at &= 0x03;
                 at <<= 2;
-                self.ppu.bgdata[i].at = at;
+                self.b.ppu.bgdata[i].at = at;
             }
             3 => {}
             4 => {
-                let nt = i32::from(self.ppu.bgdata[i].nt);
-                self.ppu.ppu_addr_temp = self.get_ptread(nt);
-                let a = self.ppu.ppu_addr_temp;
-                self.ppu.bgdata[i].pt_0 = self.ppubus_read(a, true, true);
+                let nt = i32::from(self.b.ppu.bgdata[i].nt);
+                self.b.ppu.ppu_addr_temp = self.get_ptread(nt);
+                let a = self.b.ppu.ppu_addr_temp;
+                self.b.ppu.bgdata[i].pt_0 = self.b.ppubus_read(a, true, true);
             }
             5 => {}
             6 => {
-                self.ppu.ppu_addr_temp |= 8;
-                let a = self.ppu.ppu_addr_temp;
-                self.ppu.bgdata[i].pt_1 = self.ppubus_read(a, true, true);
+                self.b.ppu.ppu_addr_temp |= 8;
+                let a = self.b.ppu.ppu_addr_temp;
+                self.b.ppu.bgdata[i].pt_1 = self.b.ppubus_read(a, true, true);
             }
             _ => {}
         }
@@ -87,132 +87,135 @@ impl Nes {
     pub(crate) fn runppu(&mut self) {
         //run one ppu cycle at a time so we can interact with the ppu and clockPPU at high
         //granularity
-        if self.ppu.install_2006 > 0 {
-            self.ppu.install_2006 -= 1;
-            if self.ppu.install_2006 == 0 {
-                if !self.ppu.race_2006 {
-                    self.ppu.ppur.install_latches();
+        if self.b.ppu.install_2006 > 0 {
+            self.b.ppu.install_2006 -= 1;
+            if self.b.ppu.install_2006 == 0 {
+                if !self.b.ppu.race_2006 {
+                    self.b.ppu.ppur.install_latches();
                 } else {
-                    self.ppu.race_2006_2 = true;
+                    self.b.ppu.race_2006_2 = true;
                 }
 
                 //normally the address isnt observed by the board till it gets clocked by a read
                 //or write, but apparently this shoves it on the address bus too, or else blargg's
                 //mmc3 tests don't pass — ONLY if the ppu is not rendering
-                if self.ppu.ppur.status.sl >= 241 || !self.ppu.ppuon() {
-                    let a = self.ppu.ppur.get_2007access();
-                    self.board.address_ppu(a);
+                if self.b.ppu.ppur.status.sl >= 241 || !self.b.ppu.ppuon() {
+                    let a = self.b.ppu.ppur.get_2007access();
+                    self.b.board.address_ppu(a);
                 }
             }
         }
 
-        self.ppu.race_2006 = false;
+        self.b.ppu.race_2006 = false;
 
-        if self.ppu.install_2001 > 0 {
-            self.ppu.install_2001 -= 1;
-            if self.ppu.install_2001 == 0 {
-                self.ppu.show_bg_new = self.ppu.reg_2001.show_bg != 0;
-                self.ppu.show_obj_new = self.ppu.reg_2001.show_obj != 0;
+        if self.b.ppu.install_2001 > 0 {
+            self.b.ppu.install_2001 -= 1;
+            if self.b.ppu.install_2001 == 0 {
+                self.b.ppu.show_bg_new = self.b.ppu.reg_2001.show_bg != 0;
+                self.b.ppu.show_obj_new = self.b.ppu.reg_2001.show_obj != 0;
             }
         }
 
-        self.ppu.ppur.status.cycle += 1;
-        self.ppu.is_even_cycle = !self.ppu.is_even_cycle;
+        self.b.ppu.ppur.status.cycle += 1;
+        self.b.ppu.is_even_cycle = !self.b.ppu.is_even_cycle;
 
-        if self.ppu.ppur.status.cycle >= 257
-            && self.ppu.ppur.status.cycle <= 320
-            && self.ppu.ppur.status.sl <= 240
-            && self.ppu.ppuon()
+        if self.b.ppu.ppur.status.cycle >= 257
+            && self.b.ppu.ppur.status.cycle <= 320
+            && self.b.ppu.ppur.status.sl <= 240
+            && self.b.ppu.ppuon()
         {
-            self.ppu.reg_2003 = 0;
+            self.b.ppu.reg_2003 = 0;
         }
 
         // Here we execute a CPU instruction if enough PPU cycles have passed
-        self.ppu.cpu_stepcounter += 1;
-        if self.ppu.cpu_stepcounter == i32::from(self.cpu_sequence[self.ppu.cpu_step as usize]) {
-            self.ppu.cpu_step += 1;
-            if self.ppu.cpu_step == 5 {
-                self.ppu.cpu_step = 0;
+        self.b.ppu.cpu_stepcounter += 1;
+        if self.b.ppu.cpu_stepcounter
+            == i32::from(self.b.cpu_sequence[self.b.ppu.cpu_step as usize])
+        {
+            self.b.ppu.cpu_step += 1;
+            if self.b.ppu.cpu_step == 5 {
+                self.b.ppu.cpu_step = 0;
             }
-            self.ppu.cpu_stepcounter = 0;
+            self.b.ppu.cpu_stepcounter = 0;
 
             // this is where the CPU instruction is called
             self.run_cpu_one();
 
             // decay the ppu bus, approximating real behaviour
-            self.ppu.ppu_open_bus_decay(DecayType::None);
+            self.b.ppu.ppu_open_bus_decay(DecayType::None);
 
             // Check for NMIs
-            if self.ppu.nmi_pending_instructions > 0 {
-                self.ppu.nmi_pending_instructions -= 1;
-                if self.ppu.nmi_pending_instructions <= 0 {
+            if self.b.ppu.nmi_pending_instructions > 0 {
+                self.b.ppu.nmi_pending_instructions -= 1;
+                if self.b.ppu.nmi_pending_instructions <= 0 {
                     self.cpu.nmi = true;
                 }
             }
         }
 
-        if self.ppu.has_clock_ppu {
-            self.board.clock_ppu();
+        if self.b.ppu.has_clock_ppu {
+            self.b.board.clock_ppu();
         }
-        self.ppu.total_cycles += 1;
+        self.b.ppu.total_cycles += 1;
         self.cpu.ext_ppu_cycle += 1;
     }
 
     /// `PPU.TickPPU_VBL`.
     pub(crate) fn tick_ppu_vbl(&mut self) {
-        let pre = self.ppu.pre_nmi_lines;
-        let post = self.ppu.post_nmi_lines;
+        let pre = self.b.ppu.pre_nmi_lines;
+        let post = self.b.ppu.post_nmi_lines;
 
-        if self.ppu.ppur.status.cycle == 0 && self.ppu.ppur.status.sl == 241 + pre {
-            self.ppu.nmi_destiny =
-                self.ppu.reg_2000.vblank_nmi_gen != 0 && self.ppu.reg2002_vblank_active;
-            if self.ppu.cpu_stepcounter == 2 {
-                self.ppu.nmi_offset = 1;
-            } else if self.ppu.cpu_stepcounter == 1 {
-                self.ppu.nmi_offset = 2;
+        if self.b.ppu.ppur.status.cycle == 0 && self.b.ppu.ppur.status.sl == 241 + pre {
+            self.b.ppu.nmi_destiny =
+                self.b.ppu.reg_2000.vblank_nmi_gen != 0 && self.b.ppu.reg2002_vblank_active;
+            if self.b.ppu.cpu_stepcounter == 2 {
+                self.b.ppu.nmi_offset = 1;
+            } else if self.b.ppu.cpu_stepcounter == 1 {
+                self.b.ppu.nmi_offset = 2;
             } else {
-                self.ppu.nmi_offset = 0;
+                self.b.ppu.nmi_offset = 0;
             }
-        } else if self.ppu.ppur.status.cycle <= 2 && self.ppu.nmi_destiny {
-            self.ppu.nmi_destiny &=
-                self.ppu.reg_2000.vblank_nmi_gen != 0 && self.ppu.reg2002_vblank_active;
-        } else if self.ppu.ppur.status.cycle == 3 + self.ppu.nmi_offset
-            && self.ppu.ppur.status.sl == 241 + pre
+        } else if self.b.ppu.ppur.status.cycle <= 2 && self.b.ppu.nmi_destiny {
+            self.b.ppu.nmi_destiny &=
+                self.b.ppu.reg_2000.vblank_nmi_gen != 0 && self.b.ppu.reg2002_vblank_active;
+        } else if self.b.ppu.ppur.status.cycle == 3 + self.b.ppu.nmi_offset
+            && self.b.ppu.ppur.status.sl == 241 + pre
         {
-            if self.ppu.nmi_destiny {
+            if self.b.ppu.nmi_destiny {
                 self.cpu.nmi = true;
             }
-            self.board.at_vsync_nmi();
+            self.b.board.at_vsync_nmi();
         }
 
-        if self.ppu.ppur.status.cycle == 340 && self.ppu.ppur.status.sl == 241 + pre + post - 1 {
-            self.ppu.reg2002_vblank_clear_pending = true;
-            self.ppu.idle_synch = !self.ppu.idle_synch;
-            self.ppu.reg2002_objhit = false;
-            self.ppu.reg2002_objoverflow = false;
+        if self.b.ppu.ppur.status.cycle == 340 && self.b.ppu.ppur.status.sl == 241 + pre + post - 1
+        {
+            self.b.ppu.reg2002_vblank_clear_pending = true;
+            self.b.ppu.idle_synch = !self.b.ppu.idle_synch;
+            self.b.ppu.reg2002_objhit = false;
+            self.b.ppu.reg2002_objoverflow = false;
         }
 
         self.runppu(); // note cycle ticks inside runppu
 
-        if self.ppu.ppur.status.cycle == 341 {
-            if self.ppu.reg2002_vblank_clear_pending {
-                self.ppu.reg2002_vblank_active = false;
-                self.ppu.reg2002_vblank_clear_pending = false;
+        if self.b.ppu.ppur.status.cycle == 341 {
+            if self.b.ppu.reg2002_vblank_clear_pending {
+                self.b.ppu.reg2002_vblank_active = false;
+                self.b.ppu.reg2002_vblank_clear_pending = false;
             }
 
-            self.ppu.ppur.status.cycle = 0;
-            self.ppu.ppur.status.sl += 1;
-            if self.ppu.ppur.status.sl == 241 + pre + post {
-                self.ppu.do_vbl = false;
-                self.ppu.ppur.status.sl = 0;
-                self.ppu.do_active_sl = true;
+            self.b.ppu.ppur.status.cycle = 0;
+            self.b.ppu.ppur.status.sl += 1;
+            if self.b.ppu.ppur.status.sl == 241 + pre + post {
+                self.b.ppu.do_vbl = false;
+                self.b.ppu.ppur.status.sl = 0;
+                self.b.ppu.do_active_sl = true;
             }
         }
     }
 
     /// The sprite-evaluation half of `TickPPU_active`'s visible dots.
     fn sprite_evaluation(&mut self) {
-        let p = &mut self.ppu;
+        let p = &mut self.b.ppu;
         if p.sprite_eval_cycle < 64 {
             // the first 64 cycles of each scanline are used to initialize secondary OAM
             if !p.is_even_cycle {
@@ -321,7 +324,7 @@ impl Nes {
 
     /// The `xp == 7` block, which both the visible and the pre-render path run verbatim.
     fn active_increment_block(&mut self) {
-        let p = &mut self.ppu;
+        let p = &mut self.b.ppu;
         p.ppur.increment_hsc();
 
         if p.ppur.status.cycle == 256 && p.ppu_was_on {
@@ -349,243 +352,247 @@ impl Nes {
 
     /// `PPU.TickPPU_active`.
     pub(crate) fn tick_ppu_active(&mut self) {
-        if self.ppu.ppur.status.cycle < 256 {
-            if self.ppu.ppur.status.cycle == 0 {
-                self.ppu.ppur.status.cycle = 0;
+        if self.b.ppu.ppur.status.cycle < 256 {
+            if self.b.ppu.ppur.status.cycle == 0 {
+                self.b.ppu.ppur.status.cycle = 0;
 
-                self.ppu.spr_true_count = 0;
-                self.ppu.soam_index = 0;
-                self.ppu.oam_index_aux = 0;
-                self.ppu.oam_index = 0;
-                self.ppu.is_even_cycle = true;
-                self.ppu.sprite_eval_write = true;
-                self.ppu.sprite_zero_go = self.ppu.sprite_zero_in_range;
+                self.b.ppu.spr_true_count = 0;
+                self.b.ppu.soam_index = 0;
+                self.b.ppu.oam_index_aux = 0;
+                self.b.ppu.oam_index = 0;
+                self.b.ppu.is_even_cycle = true;
+                self.b.ppu.sprite_eval_write = true;
+                self.b.ppu.sprite_zero_go = self.b.ppu.sprite_zero_in_range;
 
-                self.ppu.sprite_zero_in_range = false;
+                self.b.ppu.sprite_zero_in_range = false;
 
-                self.ppu.yp = self.ppu.ppur.status.sl - 1;
-                self.ppu.ppuphase = PPU_PHASE_BG;
+                self.b.ppu.yp = self.b.ppu.ppur.status.sl - 1;
+                self.b.ppu.ppuphase = PPU_PHASE_BG;
 
                 // "If PPUADDR is not less then 8 when rendering starts, the first 8 bytes in OAM
                 // are written to from the current location of PPUADDR"
-                if self.ppu.ppur.status.sl == 0
-                    && self.ppu.ppuon()
-                    && self.ppu.reg_2003 >= 8
-                    && self.ppu.region == super::Region::Ntsc
+                if self.b.ppu.ppur.status.sl == 0
+                    && self.b.ppu.ppuon()
+                    && self.b.ppu.reg_2003 >= 8
+                    && self.b.ppu.region == super::Region::Ntsc
                 {
                     for i in 0..8usize {
-                        self.ppu.oam[i] = self.ppu.oam[(self.ppu.reg_2003 & 0xF8) as usize + i];
+                        self.b.ppu.oam[i] =
+                            self.b.ppu.oam[(self.b.ppu.reg_2003 & 0xF8) as usize + i];
                     }
                 }
 
                 // set up intial values to use later
-                self.ppu.yp_shift = self.ppu.yp << 8;
-                self.ppu.xt = 0;
-                self.ppu.xp = 0;
+                self.b.ppu.yp_shift = self.b.ppu.yp << 8;
+                self.b.ppu.xt = 0;
+                self.b.ppu.xp = 0;
 
-                self.ppu.sprite_eval_cycle = 0;
+                self.b.ppu.sprite_eval_cycle = 0;
 
-                self.ppu.xstart = self.ppu.xt << 3;
-                self.ppu.target = self.ppu.yp_shift + self.ppu.xstart;
-                self.ppu.rasterpos = self.ppu.xstart;
+                self.b.ppu.xstart = self.b.ppu.xt << 3;
+                self.b.ppu.target = self.b.ppu.yp_shift + self.b.ppu.xstart;
+                self.b.ppu.rasterpos = self.b.ppu.xstart;
 
-                self.ppu.sprite_height = if self.ppu.reg_2000.obj_size_16 != 0 {
+                self.b.ppu.sprite_height = if self.b.ppu.reg_2000.obj_size_16 != 0 {
                     16
                 } else {
                     8
                 };
 
                 //check all the conditions that can cause things to render in these 8px
-                self.ppu.renderspritenow = self.ppu.show_obj_new
-                    && (self.ppu.xt > 0 || self.ppu.reg_2001.show_obj_leftmost != 0);
+                self.b.ppu.renderspritenow = self.b.ppu.show_obj_new
+                    && (self.b.ppu.xt > 0 || self.b.ppu.reg_2001.show_obj_leftmost != 0);
             }
 
-            if self.ppu.ppur.status.sl != 0 {
+            if self.b.ppu.ppur.status.sl != 0 {
                 /////////////////////////////////////////////
                 // Sprite Evaluation Start / End
                 /////////////////////////////////////////////
                 self.sprite_evaluation();
 
                 let mut pixel = 0i32;
-                let mut pixelcolor = i32::from(self.ppu.palram[pixel as usize]);
+                let mut pixelcolor = i32::from(self.b.ppu.palram[pixel as usize]);
 
                 //process the current clock's worth of bg data fetching
                 //this needs to be split into 8 pieces or else exact sprite 0 hitting wont work
-                if self.ppu.ppuon() {
-                    let (xp, xt) = (self.ppu.xp, self.ppu.xt);
+                if self.b.ppu.ppuon() {
+                    let (xp, xt) = (self.b.ppu.xp, self.b.ppu.xt);
                     self.read_bgdata(xp, xt + 2);
                 } else {
                     //according to qeed's doc, use palette 0 or $2006's value if it is & 0x3Fxx
-                    let addr = self.ppu.ppur.get_2007access();
+                    let addr = self.b.ppu.ppur.get_2007access();
                     if (addr & 0x3F00) == 0x3F00 {
                         pixel = addr & 0x1F;
                     }
-                    pixelcolor = i32::from(self.ppu.palram[pixel as usize]);
+                    pixelcolor = i32::from(self.b.ppu.palram[pixel as usize]);
                     pixelcolor |= 0x8000;
                 }
 
                 //generate the BG data
-                if self.ppu.show_bg_new
-                    && (self.ppu.xt > 0 || self.ppu.reg_2001.show_bg_leftmost != 0)
+                if self.b.ppu.show_bg_new
+                    && (self.b.ppu.xt > 0 || self.b.ppu.reg_2001.show_bg_leftmost != 0)
                 {
-                    let bgtile = (self.ppu.rasterpos + self.ppu.ppur.fh) >> 3;
-                    let pt_0 = self.ppu.bgdata[bgtile as usize].pt_0;
-                    let pt_1 = self.ppu.bgdata[bgtile as usize].pt_1;
+                    let bgtile = (self.b.ppu.rasterpos + self.b.ppu.ppur.fh) >> 3;
+                    let pt_0 = self.b.ppu.bgdata[bgtile as usize].pt_0;
+                    let pt_1 = self.b.ppu.bgdata[bgtile as usize].pt_1;
                     // the C#'s own precedence: `7 - (rasterpos + fh) & 7`, i.e. the subtraction
                     // binds tighter than the `&`.
-                    let sel = (7 - (self.ppu.rasterpos + self.ppu.ppur.fh)) & 7;
+                    let sel = (7 - (self.b.ppu.rasterpos + self.b.ppu.ppur.fh)) & 7;
                     pixel = ((i32::from(pt_0) >> sel) & 1) | (((i32::from(pt_1) >> sel) & 1) << 1);
                     if pixel != 0 {
-                        pixel |= i32::from(self.ppu.bgdata[bgtile as usize].at);
+                        pixel |= i32::from(self.b.ppu.bgdata[bgtile as usize].at);
                     }
-                    pixelcolor = i32::from(self.ppu.palram[pixel as usize]);
+                    pixelcolor = i32::from(self.b.ppu.palram[pixel as usize]);
                 }
 
-                if !self.ppu.disp_background {
+                if !self.b.ppu.disp_background {
                     pixelcolor = 0x8000;
                 }
 
                 //check if the pixel has a sprite in it
-                let idx = (self.ppu.xt * 8 + self.ppu.xp) as usize;
-                if self.ppu.sl_sprites[256 + idx] != 0 && self.ppu.renderspritenow {
-                    let s = i32::from(self.ppu.sl_sprites[idx]);
-                    let mut spixel = i32::from(self.ppu.sl_sprites[256 + idx]);
-                    let temp_attr = i32::from(self.ppu.sl_sprites[512 + idx]);
+                let idx = (self.b.ppu.xt * 8 + self.b.ppu.xp) as usize;
+                if self.b.ppu.sl_sprites[256 + idx] != 0 && self.b.ppu.renderspritenow {
+                    let s = i32::from(self.b.ppu.sl_sprites[idx]);
+                    let mut spixel = i32::from(self.b.ppu.sl_sprites[256 + idx]);
+                    let temp_attr = i32::from(self.b.ppu.sl_sprites[512 + idx]);
 
                     //spritehit: is it sprite#0, and is the bg pixel nonzero?
-                    self.ppu.reg2002_objhit |= self.ppu.sprite_zero_go
+                    self.b.ppu.reg2002_objhit |= self.b.ppu.sprite_zero_go
                         && s == 0
                         && pixel != 0
-                        && self.ppu.rasterpos < 255
-                        && self.ppu.show_bg_new
-                        && self.ppu.show_obj_new;
+                        && self.b.ppu.rasterpos < 255
+                        && self.b.ppu.show_bg_new
+                        && self.b.ppu.show_obj_new;
                     //priority handling, if in front of BG:
                     let drawsprite = !((temp_attr & 0x20) != 0 && (pixel & 3) != 0);
-                    if drawsprite && self.ppu.disp_sprites {
+                    if drawsprite && self.b.ppu.disp_sprites {
                         //bring in the palette bits and palettize
                         spixel |= (temp_attr & 3) << 2;
                         //save it for use in the framebuffer
-                        pixelcolor = i32::from(self.ppu.palram[(0x10 + spixel) as usize]);
+                        pixelcolor = i32::from(self.b.ppu.palram[(0x10 + spixel) as usize]);
                     }
                 }
 
                 self.runppu();
 
-                if self.ppu.xp == 6 && self.ppu.ppuon() {
-                    self.ppu.ppu_was_on = true;
-                    if self.ppu.ppur.status.cycle == 255 {
-                        self.ppu.race_2006 = true;
+                if self.b.ppu.xp == 6 && self.b.ppu.ppuon() {
+                    self.b.ppu.ppu_was_on = true;
+                    if self.b.ppu.ppur.status.cycle == 255 {
+                        self.b.ppu.race_2006 = true;
                     }
                 }
 
-                if self.ppu.xp == 7 && self.ppu.ppuon() {
+                if self.b.ppu.xp == 7 && self.b.ppu.ppuon() {
                     self.active_increment_block();
                 }
 
-                self.ppu.race_2006_2 = false;
+                self.b.ppu.race_2006_2 = false;
 
-                let row_check = self.ppu.xt * 8 + self.ppu.xp;
-                self.ppu.pipeline(pixelcolor, row_check);
-                self.ppu.target += 1;
+                let row_check = self.b.ppu.xt * 8 + self.b.ppu.xp;
+                self.b.ppu.pipeline(pixelcolor, row_check);
+                self.b.ppu.target += 1;
 
                 // clear out previous sprites from scanline buffer
-                self.ppu.sl_sprites[256 + idx] = 0;
+                self.b.ppu.sl_sprites[256 + idx] = 0;
 
                 // end of visible part of the scanline
-                self.ppu.sprite_eval_cycle += 1;
-                self.ppu.xp += 1;
-                self.ppu.rasterpos += 1;
+                self.b.ppu.sprite_eval_cycle += 1;
+                self.b.ppu.xp += 1;
+                self.b.ppu.rasterpos += 1;
 
-                if self.ppu.xp == 8 {
-                    self.ppu.xp = 0;
-                    self.ppu.xt += 1;
+                if self.b.ppu.xp == 8 {
+                    self.b.ppu.xp = 0;
+                    self.b.ppu.xt += 1;
 
-                    self.ppu.xstart = self.ppu.xt << 3;
-                    self.ppu.target = self.ppu.yp_shift + self.ppu.xstart;
-                    self.ppu.rasterpos = self.ppu.xstart;
+                    self.b.ppu.xstart = self.b.ppu.xt << 3;
+                    self.b.ppu.target = self.b.ppu.yp_shift + self.b.ppu.xstart;
+                    self.b.ppu.rasterpos = self.b.ppu.xstart;
 
-                    self.ppu.sprite_height = if self.ppu.reg_2000.obj_size_16 != 0 {
+                    self.b.ppu.sprite_height = if self.b.ppu.reg_2000.obj_size_16 != 0 {
                         16
                     } else {
                         8
                     };
 
-                    self.ppu.renderspritenow = self.ppu.show_obj_new
-                        && (self.ppu.xt > 0 || self.ppu.reg_2001.show_obj_leftmost != 0);
+                    self.b.ppu.renderspritenow = self.b.ppu.show_obj_new
+                        && (self.b.ppu.xt > 0 || self.b.ppu.reg_2001.show_obj_leftmost != 0);
                 }
 
-                if self.ppu.ppur.status.cycle > 63 && self.ppu.ppu_was_on_spr && !self.ppu.ppuon() {
-                    self.ppu.reg_2003 = self.ppu.reg_2003.wrapping_add(1);
+                if self.b.ppu.ppur.status.cycle > 63
+                    && self.b.ppu.ppu_was_on_spr
+                    && !self.b.ppu.ppuon()
+                {
+                    self.b.ppu.reg_2003 = self.b.ppu.reg_2003.wrapping_add(1);
                 }
 
-                self.ppu.ppu_was_on_spr = self.ppu.ppuon();
+                self.b.ppu.ppu_was_on_spr = self.b.ppu.ppuon();
             } else {
                 // if scanline is the pre-render line, we just read BG data
-                let (xp, xt) = (self.ppu.xp, self.ppu.xt);
+                let (xp, xt) = (self.b.ppu.xp, self.b.ppu.xt);
                 self.read_bgdata(xp, xt + 2);
 
                 self.runppu();
 
-                if self.ppu.xp == 6 && self.ppu.ppuon() {
-                    self.ppu.ppu_was_on = true;
-                    if self.ppu.ppur.status.cycle == 255 {
-                        self.ppu.race_2006 = true;
+                if self.b.ppu.xp == 6 && self.b.ppu.ppuon() {
+                    self.b.ppu.ppu_was_on = true;
+                    if self.b.ppu.ppur.status.cycle == 255 {
+                        self.b.ppu.race_2006 = true;
                     }
                 }
 
-                if self.ppu.xp == 7 && self.ppu.ppuon() {
+                if self.b.ppu.xp == 7 && self.b.ppu.ppuon() {
                     self.active_increment_block();
                 }
 
-                self.ppu.race_2006_2 = false;
+                self.b.ppu.race_2006_2 = false;
 
-                self.ppu.xp += 1;
+                self.b.ppu.xp += 1;
 
-                if self.ppu.xp == 8 {
-                    self.ppu.xp = 0;
-                    self.ppu.xt += 1;
+                if self.b.ppu.xp == 8 {
+                    self.b.ppu.xp = 0;
+                    self.b.ppu.xt += 1;
                 }
             }
-        } else if self.ppu.ppur.status.cycle < 320 {
+        } else if self.b.ppu.ppur.status.cycle < 320 {
             self.tick_ppu_active_sprite_fetch();
-        } else if self.ppu.ppur.status.cycle < 336 {
-            if self.ppu.ppur.status.cycle == 320 {
-                self.ppu.ppuphase = PPU_PHASE_BG;
-                self.ppu.xt = 0;
-                self.ppu.xp = 0;
+        } else if self.b.ppu.ppur.status.cycle < 336 {
+            if self.b.ppu.ppur.status.cycle == 320 {
+                self.b.ppu.ppuphase = PPU_PHASE_BG;
+                self.b.ppu.xt = 0;
+                self.b.ppu.xp = 0;
             }
 
             // if scanline is the pre-render line, we just read BG data
-            let (xp, xt) = (self.ppu.xp, self.ppu.xt);
+            let (xp, xt) = (self.b.ppu.xp, self.b.ppu.xt);
             self.read_bgdata(xp, xt);
 
             self.runppu();
 
-            if self.ppu.xp == 6 && self.ppu.ppuon() {
-                self.ppu.ppu_was_on = true;
+            if self.b.ppu.xp == 6 && self.b.ppu.ppuon() {
+                self.b.ppu.ppu_was_on = true;
             }
 
-            if self.ppu.xp == 7 && self.ppu.ppuon() {
-                if !self.ppu.race_2006 {
-                    self.ppu.ppur.increment_hsc();
+            if self.b.ppu.xp == 7 && self.b.ppu.ppuon() {
+                if !self.b.ppu.race_2006 {
+                    self.b.ppu.ppur.increment_hsc();
                 }
 
-                if self.ppu.ppur.status.cycle == 256 && !self.ppu.race_2006 {
-                    self.ppu.ppur.increment_vs();
+                if self.b.ppu.ppur.status.cycle == 256 && !self.b.ppu.race_2006 {
+                    self.b.ppu.ppur.increment_vs();
                 }
 
-                self.ppu.ppu_was_on = false;
+                self.b.ppu.ppu_was_on = false;
             }
 
-            self.ppu.xp += 1;
+            self.b.ppu.xp += 1;
 
-            if self.ppu.xp == 8 {
-                self.ppu.xp = 0;
-                self.ppu.xt += 1;
+            if self.b.ppu.xp == 8 {
+                self.b.ppu.xp = 0;
+                self.b.ppu.xt += 1;
             }
-        } else if self.ppu.ppur.status.cycle < 340 {
-            if self.ppu.ppur.status.cycle == 339 {
-                self.ppu.even_odd_destiny = self.ppu.ppuon();
+        } else if self.b.ppu.ppur.status.cycle < 340 {
+            if self.b.ppu.ppur.status.cycle == 339 {
+                self.b.ppu.even_odd_destiny = self.b.ppu.ppuon();
             }
 
             self.runppu();
@@ -593,22 +600,22 @@ impl Nes {
             // After memory access 170, the PPU simply rests for 4 cycles before repeating the
             // whole pixel/scanline rendering process. If the scanline being rendered is the very
             // first one on every second frame, then this delay simply doesn't exist.
-            if self.ppu.ppur.status.sl == 0
-                && self.ppu.idle_synch
-                && self.ppu.even_odd_destiny
-                && self.ppu.chopdot
+            if self.b.ppu.ppur.status.sl == 0
+                && self.b.ppu.idle_synch
+                && self.b.ppu.even_odd_destiny
+                && self.b.ppu.chopdot
             {
-                self.ppu.ppur.status.cycle += 1; // increment cycle without running ppu
+                self.b.ppu.ppur.status.cycle += 1; // increment cycle without running ppu
             } else {
                 self.runppu();
             }
 
-            self.ppu.ppur.status.cycle = 0;
-            self.ppu.ppur.status.sl += 1;
+            self.b.ppu.ppur.status.cycle = 0;
+            self.b.ppu.ppur.status.sl += 1;
 
-            if self.ppu.ppur.status.sl == 241 {
-                self.ppu.do_active_sl = false;
-                self.ppu.do_pre_vbl = true;
+            if self.b.ppu.ppur.status.sl == 241 {
+                self.b.ppu.do_active_sl = false;
+                self.b.ppu.do_pre_vbl = true;
             }
         }
     }
@@ -616,190 +623,190 @@ impl Nes {
     /// Dots 256-319 of `TickPPU_active`: the transfer into the temporary OAM and the sprite
     /// pattern fetches.
     fn tick_ppu_active_sprite_fetch(&mut self) {
-        if self.ppu.ppur.status.cycle == 256 {
+        if self.b.ppu.ppur.status.cycle == 256 {
             // do the more then 8 sprites stuff here where it is convenient
-            self.ppu.soam_index_aux = 8;
+            self.b.ppu.soam_index_aux = 8;
 
-            if self.ppu.allow_more_than_eight_sprites {
-                while self.ppu.oam_index_aux < 64 && self.ppu.soam_index_aux < 64 {
+            if self.b.ppu.allow_more_than_eight_sprites {
+                while self.b.ppu.oam_index_aux < 64 && self.b.ppu.soam_index_aux < 64 {
                     //look for sprites
-                    let oi = self.ppu.oam_index_aux as usize;
-                    let si = self.ppu.soam_index_aux as usize;
-                    self.ppu.soam[si * 4] = self.ppu.oam[oi * 4];
-                    let y = i32::from(self.ppu.oam[oi * 4]);
-                    if self.ppu.yp >= y && self.ppu.yp < y + self.ppu.sprite_height {
-                        self.ppu.soam[si * 4 + 1] = self.ppu.oam[oi * 4 + 1];
-                        self.ppu.soam[si * 4 + 2] = self.ppu.oam[oi * 4 + 2];
-                        self.ppu.soam[si * 4 + 3] = self.ppu.oam[oi * 4 + 3];
-                        self.ppu.soam_index_aux += 1;
-                        self.ppu.oam_index_aux += 1;
+                    let oi = self.b.ppu.oam_index_aux as usize;
+                    let si = self.b.ppu.soam_index_aux as usize;
+                    self.b.ppu.soam[si * 4] = self.b.ppu.oam[oi * 4];
+                    let y = i32::from(self.b.ppu.oam[oi * 4]);
+                    if self.b.ppu.yp >= y && self.b.ppu.yp < y + self.b.ppu.sprite_height {
+                        self.b.ppu.soam[si * 4 + 1] = self.b.ppu.oam[oi * 4 + 1];
+                        self.b.ppu.soam[si * 4 + 2] = self.b.ppu.oam[oi * 4 + 2];
+                        self.b.ppu.soam[si * 4 + 3] = self.b.ppu.oam[oi * 4 + 3];
+                        self.b.ppu.soam_index_aux += 1;
+                        self.b.ppu.oam_index_aux += 1;
                     } else {
-                        self.ppu.oam_index_aux += 1;
+                        self.b.ppu.oam_index_aux += 1;
                     }
                 }
             }
 
-            self.ppu.soam_index_prev = self.ppu.soam_index_aux;
+            self.b.ppu.soam_index_prev = self.b.ppu.soam_index_aux;
 
-            if self.ppu.soam_index_prev > 8 && !self.ppu.allow_more_than_eight_sprites {
-                self.ppu.soam_index_prev = 8;
+            if self.b.ppu.soam_index_prev > 8 && !self.b.ppu.allow_more_than_eight_sprites {
+                self.b.ppu.soam_index_prev = 8;
             }
 
-            self.ppu.ppuphase = PPU_PHASE_OBJ;
+            self.b.ppu.ppuphase = PPU_PHASE_OBJ;
 
-            self.ppu.sprite_height = if self.ppu.reg_2000.obj_size_16 != 0 {
+            self.b.ppu.sprite_height = if self.b.ppu.reg_2000.obj_size_16 != 0 {
                 16
             } else {
                 8
             };
 
-            self.ppu.s = 0;
-            self.ppu.ppu_aux_index = 0;
+            self.b.ppu.s = 0;
+            self.b.ppu.ppu_aux_index = 0;
 
-            self.ppu.junksprite = !self.ppu.ppuon();
+            self.b.ppu.junksprite = !self.b.ppu.ppuon();
 
             self.load_t_oam_from_soam();
         }
 
-        match self.ppu.ppu_aux_index {
+        match self.b.ppu.ppu_aux_index {
             0 => {
                 //8x16 sprite handling:
-                if self.ppu.reg_2000.obj_size_16 != 0 {
-                    let bank = (self.ppu.pattern_number & 1) << 12;
-                    self.ppu.pattern_number &= !1;
-                    self.ppu.pattern_number |= (self.ppu.line >> 3) & 1;
-                    self.ppu.pattern_address = (self.ppu.pattern_number << 4) | bank;
+                if self.b.ppu.reg_2000.obj_size_16 != 0 {
+                    let bank = (self.b.ppu.pattern_number & 1) << 12;
+                    self.b.ppu.pattern_number &= !1;
+                    self.b.ppu.pattern_number |= (self.b.ppu.line >> 3) & 1;
+                    self.b.ppu.pattern_address = (self.b.ppu.pattern_number << 4) | bank;
                 } else {
-                    self.ppu.pattern_address =
-                        (self.ppu.pattern_number << 4) | (self.ppu.reg_2000.obj_pattern_hi << 12);
+                    self.b.ppu.pattern_address = (self.b.ppu.pattern_number << 4)
+                        | (self.b.ppu.reg_2000.obj_pattern_hi << 12);
                 }
 
                 //offset into the pattern for the current line.
-                self.ppu.pattern_address += self.ppu.line & 7;
+                self.b.ppu.pattern_address += self.b.ppu.line & 7;
 
-                let a = self.ppu.ppur.get_ntread();
-                self.ppubus_read(a, true, true);
+                let a = self.b.ppu.ppur.get_ntread();
+                self.b.ppubus_read(a, true, true);
 
-                self.ppu.read_value = self.ppu.t_oam[self.ppu.s as usize].oam_y;
+                self.b.ppu.read_value = self.b.ppu.t_oam[self.b.ppu.s as usize].oam_y;
                 self.runppu();
             }
             1 => {
-                if self.ppu.ppur.status.sl == 0
-                    && self.ppu.ppur.status.cycle == 305
-                    && self.ppu.ppuon()
+                if self.b.ppu.ppur.status.sl == 0
+                    && self.b.ppu.ppur.status.cycle == 305
+                    && self.b.ppu.ppuon()
                 {
-                    self.ppu.ppur.install_latches();
+                    self.b.ppu.ppur.install_latches();
 
-                    self.ppu.read_value = self.ppu.t_oam[self.ppu.s as usize].oam_ind;
+                    self.b.ppu.read_value = self.b.ppu.t_oam[self.b.ppu.s as usize].oam_ind;
                     self.runppu();
-                } else if self.ppu.ppur.status.sl != 0
-                    && self.ppu.ppur.status.cycle == 257
-                    && self.ppu.ppuon()
+                } else if self.b.ppu.ppur.status.sl != 0
+                    && self.b.ppu.ppur.status.cycle == 257
+                    && self.b.ppu.ppuon()
                 {
-                    if self.ppu.target <= 61441 && self.ppu.target > 0 && self.ppu.s == 0 {
-                        self.ppu.pipeline(0, 256); //  last pipeline call option 1 of 2
-                        self.ppu.target += 1;
+                    if self.b.ppu.target <= 61441 && self.b.ppu.target > 0 && self.b.ppu.s == 0 {
+                        self.b.ppu.pipeline(0, 256); //  last pipeline call option 1 of 2
+                        self.b.ppu.target += 1;
                     }
 
                     //at 257: 3d world runner is ugly if we do this at 256
-                    if self.ppu.ppuon() {
-                        self.ppu.ppur.install_h_latches();
+                    if self.b.ppu.ppuon() {
+                        self.b.ppu.ppur.install_h_latches();
                     }
-                    self.ppu.race_2006_2 = false;
-                    self.ppu.read_value = self.ppu.t_oam[self.ppu.s as usize].oam_ind;
+                    self.b.ppu.race_2006_2 = false;
+                    self.b.ppu.read_value = self.b.ppu.t_oam[self.b.ppu.s as usize].oam_ind;
                     self.runppu();
                 } else {
-                    if self.ppu.target <= 61441 && self.ppu.target > 0 && self.ppu.s == 0 {
-                        self.ppu.pipeline(0, 256); //  last pipeline call option 2 of 2
-                        self.ppu.target += 1;
+                    if self.b.ppu.target <= 61441 && self.b.ppu.target > 0 && self.b.ppu.s == 0 {
+                        self.b.ppu.pipeline(0, 256); //  last pipeline call option 2 of 2
+                        self.b.ppu.target += 1;
                     }
 
-                    self.ppu.read_value = self.ppu.t_oam[self.ppu.s as usize].oam_ind;
+                    self.b.ppu.read_value = self.b.ppu.t_oam[self.b.ppu.s as usize].oam_ind;
                     self.runppu();
                 }
             }
             2 => {
-                let a = self.ppu.ppur.get_atread();
-                self.ppubus_read(a, true, true); //at or nt?
-                self.ppu.read_value = self.ppu.t_oam[self.ppu.s as usize].oam_attr;
+                let a = self.b.ppu.ppur.get_atread();
+                self.b.ppubus_read(a, true, true); //at or nt?
+                self.b.ppu.read_value = self.b.ppu.t_oam[self.b.ppu.s as usize].oam_attr;
                 self.runppu();
             }
             3 => {
-                self.ppu.read_value = self.ppu.t_oam[self.ppu.s as usize].oam_x;
+                self.b.ppu.read_value = self.b.ppu.t_oam[self.b.ppu.s as usize].oam_x;
                 self.runppu();
             }
             4 => {
                 // if the PPU is off, we don't put anything on the bus
-                if self.ppu.junksprite {
-                    let a = self.ppu.pattern_address;
-                    self.ppubus_read(a, true, false);
+                if self.b.ppu.junksprite {
+                    let a = self.b.ppu.pattern_address;
+                    self.b.ppubus_read(a, true, false);
                     self.runppu();
                 } else {
-                    self.ppu.temp_addr = self.ppu.pattern_address;
-                    let a = self.ppu.temp_addr;
-                    let v = self.ppubus_read(a, true, true);
-                    self.ppu.t_oam[self.ppu.s as usize].patterns_0 = v;
-                    self.ppu.read_value = self.ppu.t_oam[self.ppu.s as usize].oam_x;
+                    self.b.ppu.temp_addr = self.b.ppu.pattern_address;
+                    let a = self.b.ppu.temp_addr;
+                    let v = self.b.ppubus_read(a, true, true);
+                    self.b.ppu.t_oam[self.b.ppu.s as usize].patterns_0 = v;
+                    self.b.ppu.read_value = self.b.ppu.t_oam[self.b.ppu.s as usize].oam_x;
                     self.runppu();
                 }
             }
             5 => self.runppu(),
             6 => {
-                if self.ppu.junksprite {
-                    let a = self.ppu.pattern_address;
-                    self.ppubus_read(a, true, false);
+                if self.b.ppu.junksprite {
+                    let a = self.b.ppu.pattern_address;
+                    self.b.ppubus_read(a, true, false);
                     self.runppu();
                 } else {
-                    self.ppu.temp_addr += 8;
-                    let a = self.ppu.temp_addr;
-                    let v = self.ppubus_read(a, true, true);
-                    self.ppu.t_oam[self.ppu.s as usize].patterns_1 = v;
-                    self.ppu.read_value = self.ppu.t_oam[self.ppu.s as usize].oam_x;
+                    self.b.ppu.temp_addr += 8;
+                    let a = self.b.ppu.temp_addr;
+                    let v = self.b.ppubus_read(a, true, true);
+                    self.b.ppu.t_oam[self.b.ppu.s as usize].patterns_1 = v;
+                    self.b.ppu.read_value = self.b.ppu.t_oam[self.b.ppu.s as usize].oam_x;
                     self.runppu();
                 }
             }
             _ => {
                 // case 7
-                if self.ppu.junksprite {
+                if self.b.ppu.junksprite {
                     self.runppu();
                 } else {
                     self.runppu();
 
-                    let s = self.ppu.s as usize;
+                    let s = self.b.ppu.s as usize;
                     // hflip
-                    if (self.ppu.t_oam[s].oam_attr & 0x40) == 0 {
-                        self.ppu.t_oam[s].patterns_0 =
-                            BIT_REVERSE_BYTE8[self.ppu.t_oam[s].patterns_0 as usize];
-                        self.ppu.t_oam[s].patterns_1 =
-                            BIT_REVERSE_BYTE8[self.ppu.t_oam[s].patterns_1 as usize];
+                    if (self.b.ppu.t_oam[s].oam_attr & 0x40) == 0 {
+                        self.b.ppu.t_oam[s].patterns_0 =
+                            BIT_REVERSE_BYTE8[self.b.ppu.t_oam[s].patterns_0 as usize];
+                        self.b.ppu.t_oam[s].patterns_1 =
+                            BIT_REVERSE_BYTE8[self.b.ppu.t_oam[s].patterns_1 as usize];
                     }
 
                     // if the sprite's attribute is 0xFF then this indicates a non-existent sprite
-                    if self.ppu.t_oam[s].oam_attr == 0xFF {
-                        self.ppu.t_oam[s].patterns_0 = 0;
-                        self.ppu.t_oam[s].patterns_1 = 0;
+                    if self.b.ppu.t_oam[s].oam_attr == 0xFF {
+                        self.b.ppu.t_oam[s].patterns_0 = 0;
+                        self.b.ppu.t_oam[s].patterns_1 = 0;
                     }
                 }
             }
         }
 
-        self.ppu.ppu_aux_index += 1;
-        if self.ppu.ppu_aux_index == 8 {
+        self.b.ppu.ppu_aux_index += 1;
+        if self.b.ppu.ppu_aux_index == 8 {
             // now that we have a sprite, we can fill in the next scanline's sprite pixels with it
-            if self.ppu.s < self.ppu.soam_index_prev
-                && self.ppu.ppur.status.sl != 0
-                && self.ppu.ppur.status.sl != 240
+            if self.b.ppu.s < self.b.ppu.soam_index_prev
+                && self.b.ppu.ppur.status.sl != 0
+                && self.b.ppu.ppur.status.sl != 240
             {
-                self.fill_sl_sprites(self.ppu.s);
+                self.fill_sl_sprites(self.b.ppu.s);
             }
 
-            self.ppu.ppu_aux_index = 0;
-            self.ppu.s += 1;
+            self.b.ppu.ppu_aux_index = 0;
+            self.b.ppu.s += 1;
 
-            if self.ppu.s < 8 {
-                self.ppu.junksprite = !self.ppu.ppuon();
+            if self.b.ppu.s < 8 {
+                self.b.ppu.junksprite = !self.b.ppu.ppuon();
                 self.load_t_oam_from_soam();
-            } else if self.ppu.soam_index_aux > 8 {
+            } else if self.b.ppu.soam_index_aux > 8 {
                 // repeat all the above steps for more then 8 sprites but don't run any cycles
                 self.extra_sprites();
             }
@@ -809,24 +816,24 @@ impl Nes {
     /// The four `t_oam[s]` loads plus `line` and `patternNumber`, which `TickPPU_active` does in
     /// two places with the same six statements.
     fn load_t_oam_from_soam(&mut self) {
-        let s = self.ppu.s as usize;
-        self.ppu.t_oam[s].oam_y = self.ppu.soam[s * 4];
-        self.ppu.t_oam[s].oam_ind = self.ppu.soam[s * 4 + 1];
-        self.ppu.t_oam[s].oam_attr = self.ppu.soam[s * 4 + 2];
-        self.ppu.t_oam[s].oam_x = self.ppu.soam[s * 4 + 3];
+        let s = self.b.ppu.s as usize;
+        self.b.ppu.t_oam[s].oam_y = self.b.ppu.soam[s * 4];
+        self.b.ppu.t_oam[s].oam_ind = self.b.ppu.soam[s * 4 + 1];
+        self.b.ppu.t_oam[s].oam_attr = self.b.ppu.soam[s * 4 + 2];
+        self.b.ppu.t_oam[s].oam_x = self.b.ppu.soam[s * 4 + 3];
 
-        self.ppu.line = self.ppu.yp - i32::from(self.ppu.t_oam[s].oam_y);
-        if (self.ppu.t_oam[s].oam_attr & 0x80) != 0 {
+        self.b.ppu.line = self.b.ppu.yp - i32::from(self.b.ppu.t_oam[s].oam_y);
+        if (self.b.ppu.t_oam[s].oam_attr & 0x80) != 0 {
             //vflip
-            self.ppu.line = self.ppu.sprite_height - self.ppu.line - 1;
+            self.b.ppu.line = self.b.ppu.sprite_height - self.b.ppu.line - 1;
         }
 
-        self.ppu.pattern_number = i32::from(self.ppu.t_oam[s].oam_ind);
+        self.b.ppu.pattern_number = i32::from(self.b.ppu.t_oam[s].oam_ind);
     }
 
     /// The `sl_sprites` fill, shared by the 8-sprite path and the extra-sprites path.
     fn fill_sl_sprites(&mut self, s: i32) {
-        let p = &mut self.ppu;
+        let p = &mut self.b.ppu;
         let su = s as usize;
         let temp_x = i32::from(p.t_oam[su].oam_x);
         let mut i = 0i32;
@@ -851,63 +858,64 @@ impl Nes {
     /// The sprites past the eighth, when `AllowMoreThanEightSprites` is on: all the same steps
     /// "but don't run any cycles".
     fn extra_sprites(&mut self) {
-        let count = self.ppu.soam_index_aux;
+        let count = self.b.ppu.soam_index_aux;
         for s in 8..count {
             let su = s as usize;
-            self.ppu.t_oam[su].oam_y = self.ppu.soam[su * 4];
-            self.ppu.t_oam[su].oam_ind = self.ppu.soam[su * 4 + 1];
-            self.ppu.t_oam[su].oam_attr = self.ppu.soam[su * 4 + 2];
-            self.ppu.t_oam[su].oam_x = self.ppu.soam[su * 4 + 3];
+            self.b.ppu.t_oam[su].oam_y = self.b.ppu.soam[su * 4];
+            self.b.ppu.t_oam[su].oam_ind = self.b.ppu.soam[su * 4 + 1];
+            self.b.ppu.t_oam[su].oam_attr = self.b.ppu.soam[su * 4 + 2];
+            self.b.ppu.t_oam[su].oam_x = self.b.ppu.soam[su * 4 + 3];
 
-            let mut line = self.ppu.yp - i32::from(self.ppu.t_oam[su].oam_y);
-            if (self.ppu.t_oam[su].oam_attr & 0x80) != 0 {
+            let mut line = self.b.ppu.yp - i32::from(self.b.ppu.t_oam[su].oam_y);
+            if (self.b.ppu.t_oam[su].oam_attr & 0x80) != 0 {
                 //vflip
-                line = self.ppu.sprite_height - line - 1;
+                line = self.b.ppu.sprite_height - line - 1;
             }
 
-            let mut pattern_number = i32::from(self.ppu.t_oam[su].oam_ind);
+            let mut pattern_number = i32::from(self.b.ppu.t_oam[su].oam_ind);
             let mut pattern_address;
 
             //8x16 sprite handling:
-            if self.ppu.reg_2000.obj_size_16 != 0 {
+            if self.b.ppu.reg_2000.obj_size_16 != 0 {
                 let bank = (pattern_number & 1) << 12;
                 pattern_number &= !1;
                 pattern_number |= (line >> 3) & 1;
                 pattern_address = (pattern_number << 4) | bank;
             } else {
-                pattern_address = (pattern_number << 4) | (self.ppu.reg_2000.obj_pattern_hi << 12);
+                pattern_address =
+                    (pattern_number << 4) | (self.b.ppu.reg_2000.obj_pattern_hi << 12);
             }
 
             pattern_address += line & 7;
 
-            let a = self.ppu.ppur.get_ntread();
-            self.ppubus_read(a, true, false);
+            let a = self.b.ppu.ppur.get_ntread();
+            self.b.ppubus_read(a, true, false);
 
-            let a = self.ppu.ppur.get_atread();
-            self.ppubus_read(a, true, false); //at or nt?
+            let a = self.b.ppu.ppur.get_atread();
+            self.b.ppubus_read(a, true, false); //at or nt?
 
             let mut addr = pattern_address;
-            let v = self.ppubus_read(addr, true, false);
-            self.ppu.t_oam[su].patterns_0 = v;
+            let v = self.b.ppubus_read(addr, true, false);
+            self.b.ppu.t_oam[su].patterns_0 = v;
 
             addr += 8;
-            let v = self.ppubus_read(addr, true, false);
-            self.ppu.t_oam[su].patterns_1 = v;
+            let v = self.b.ppubus_read(addr, true, false);
+            self.b.ppu.t_oam[su].patterns_1 = v;
 
             // hflip
-            if (self.ppu.t_oam[su].oam_attr & 0x40) == 0 {
-                self.ppu.t_oam[su].patterns_0 =
-                    BIT_REVERSE_BYTE8[self.ppu.t_oam[su].patterns_0 as usize];
-                self.ppu.t_oam[su].patterns_1 =
-                    BIT_REVERSE_BYTE8[self.ppu.t_oam[su].patterns_1 as usize];
+            if (self.b.ppu.t_oam[su].oam_attr & 0x40) == 0 {
+                self.b.ppu.t_oam[su].patterns_0 =
+                    BIT_REVERSE_BYTE8[self.b.ppu.t_oam[su].patterns_0 as usize];
+                self.b.ppu.t_oam[su].patterns_1 =
+                    BIT_REVERSE_BYTE8[self.b.ppu.t_oam[su].patterns_1 as usize];
             }
 
-            if self.ppu.t_oam[su].oam_attr == 0xFF {
-                self.ppu.t_oam[su].patterns_0 = 0;
-                self.ppu.t_oam[su].patterns_1 = 0;
+            if self.b.ppu.t_oam[su].oam_attr == 0xFF {
+                self.b.ppu.t_oam[su].patterns_0 = 0;
+                self.b.ppu.t_oam[su].patterns_1 = 0;
             }
 
-            if self.ppu.ppur.status.sl != 0 && self.ppu.ppur.status.sl != 240 {
+            if self.b.ppu.ppur.status.sl != 0 && self.b.ppu.ppur.status.sl != 240 {
                 self.fill_sl_sprites(s);
             }
         }
@@ -915,53 +923,53 @@ impl Nes {
 
     /// `PPU.TickPPU_preVBL`.
     pub(crate) fn tick_ppu_pre_vbl(&mut self) {
-        let pre = self.ppu.pre_nmi_lines;
-        if self.ppu.ppur.status.cycle == 340 && self.ppu.ppur.status.sl == 241 + pre - 1 {
-            self.ppu.reg2002_vblank_active_pending = true;
+        let pre = self.b.ppu.pre_nmi_lines;
+        if self.b.ppu.ppur.status.cycle == 340 && self.b.ppu.ppur.status.sl == 241 + pre - 1 {
+            self.b.ppu.reg2002_vblank_active_pending = true;
         }
 
         self.runppu();
 
-        if self.ppu.ppur.status.cycle == 341 {
-            self.ppu.ppur.status.cycle = 0;
-            self.ppu.ppur.status.sl += 1;
+        if self.b.ppu.ppur.status.cycle == 341 {
+            self.b.ppu.ppur.status.cycle = 0;
+            self.b.ppu.ppur.status.sl += 1;
 
-            if self.ppu.ppur.status.sl == 241 + pre {
-                if self.ppu.reg2002_vblank_active_pending {
-                    self.ppu.reg2002_vblank_active = true;
-                    self.ppu.reg2002_vblank_active_pending = false;
+            if self.b.ppu.ppur.status.sl == 241 + pre {
+                if self.b.ppu.reg2002_vblank_active_pending {
+                    self.b.ppu.reg2002_vblank_active = true;
+                    self.b.ppu.reg2002_vblank_active_pending = false;
                 }
 
-                self.ppu.do_pre_vbl = false;
-                self.ppu.do_vbl = true;
+                self.b.ppu.do_pre_vbl = false;
+                self.b.ppu.do_vbl = true;
 
-                self.ppu.ppu_init_frame();
-                self.frame_is_done = true;
+                self.b.ppu.ppu_init_frame();
+                self.b.frame_is_done = true;
             }
         }
     }
 
     /// `PPU.NewDeadPPU`: the start-up frame, during which the NES ignores register writes.
     pub(crate) fn new_dead_ppu(&mut self) {
-        if self.ppu.ppur.status.cycle == 241 * 341 - self.ppu.start_up_offset - 1 {
-            self.ppu.reg2002_vblank_active_pending = true;
+        if self.b.ppu.ppur.status.cycle == 241 * 341 - self.b.ppu.start_up_offset - 1 {
+            self.b.ppu.reg2002_vblank_active_pending = true;
         }
 
         self.runppu();
 
-        if self.ppu.ppur.status.cycle == 241 * 341 - self.ppu.start_up_offset {
-            if self.ppu.reg2002_vblank_active_pending {
-                self.ppu.reg2002_vblank_active = true;
-                self.ppu.reg2002_vblank_active_pending = false;
+        if self.b.ppu.ppur.status.cycle == 241 * 341 - self.b.ppu.start_up_offset {
+            if self.b.ppu.reg2002_vblank_active_pending {
+                self.b.ppu.reg2002_vblank_active = true;
+                self.b.ppu.reg2002_vblank_active_pending = false;
             }
 
-            self.ppu.ppudead -= 1;
+            self.b.ppu.ppudead -= 1;
 
-            self.ppu.ppu_init_frame();
+            self.b.ppu.ppu_init_frame();
 
-            self.ppu.do_vbl = true;
+            self.b.ppu.do_vbl = true;
 
-            self.frame_is_done = true;
+            self.b.frame_is_done = true;
         }
     }
 }

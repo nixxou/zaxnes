@@ -8,7 +8,7 @@ use super::mmc3::Mmc3BoardBase;
 use super::{Board, BoardBase, BoardEnv};
 use crate::cart::DetectionOrigin;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct TxRom {
     base: BoardBase,
     pub m: Mmc3BoardBase,
@@ -29,6 +29,10 @@ impl Board for TxRom {
     fn base_mut(&mut self) -> &mut BoardBase {
         &mut self.base
     }
+    fn clone_box(&self) -> Box<dyn Board> {
+        Box::new(self.clone())
+    }
+
     fn name(&self) -> &'static str {
         "TxROM"
     }

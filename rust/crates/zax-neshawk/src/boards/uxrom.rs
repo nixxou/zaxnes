@@ -16,7 +16,7 @@ enum AdjustPrg {
     Un1Rom,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct UxRom {
     base: BoardBase,
     // configuration
@@ -34,6 +34,10 @@ impl Board for UxRom {
     fn base_mut(&mut self) -> &mut BoardBase {
         &mut self.base
     }
+    fn clone_box(&self) -> Box<dyn Board> {
+        Box::new(self.clone())
+    }
+
     fn name(&self) -> &'static str {
         "UxROM"
     }

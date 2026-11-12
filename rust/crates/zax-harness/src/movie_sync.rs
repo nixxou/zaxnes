@@ -87,7 +87,8 @@ use crate::HarnessError;
 pub const USAGE: &str = "zax-harness movie-sync <movie.fm2|.bk2> <rom.nes> [options]
     Plays a TAS movie and says where the two engines part, frame by frame. With `both` it runs
     them in lockstep and compares the work RAM, the picture and each frame's input sensitivity.
-      --engine zaxnes|fceux|both   which machine(s) (default: both)
+      --engine zaxnes|fceux|neshawk|both   which machine(s) (default: both)
+                           `neshawk` is `zax-neshawk`, the Rust port of BizHawk's own core
       --frames <n>         stop after n frames (default: the whole movie)
       --from <n>           start comparing at frame n (both engines still run every frame)
       --ram default|ff|zero|random:<seed>
@@ -98,6 +99,14 @@ pub const USAGE: &str = "zax-harness movie-sync <movie.fm2|.bk2> <rom.nes> [opti
       --keep-going <n>     compare n more frames after the first divergence (default: all of them)
       --ram-bytes <n>      how many differing RAM addresses a frame's line names (default 16)
       --progress <n>       print a line every n frames (default 0, none)
+      --neshawk-gamedb <dir>   BizHawk's gamedb directory (NesCarts.xml, gamedb_nes.txt),
+                           which `--engine neshawk` needs to pick the board BizHawk picks;
+                           defaults to $ZAXNES_BIZHAWK_GAMEDB
+      --neshawk-event-log <file>   `--engine neshawk` only: the CYCLE LEDGER of every frame
+                           run, in the very shape `scripts/bk2cyc*.lua` writes on BizHawk, so
+                           that the two can be diffed event for event
+      --neshawk-watch-pc <hex,hex,...>   the PCs the ledger prints a `pc$` line for, which is the
+                           Lua scripts' `watched_pc` (e.g. C37C,C06E,80FC,804C for Kirby)
       --movie-mode         `--engine fceux` only: play through FCEUX's own movie mode
       --report <file.json> write the whole measurement as JSON
       --trace <file.txt>   write a work-RAM checksum every --trace-step frames, with the running
@@ -212,6 +221,8 @@ pub enum Engines {
     Zaxnes,
     /// FCEUX alone.
     Fceux,
+    /// `zax-neshawk`, the Rust port of NesHawk, alone (lot NESHAWK-REWRITE).
+    Neshawk,
     /// Both, in lockstep, compared every frame.
     Both,
 }
@@ -245,6 +256,12 @@ pub struct Options {
     pub ram_bytes: usize,
     /// Print a progress line every this many frames; 0 for none.
     pub progress: u32,
+    /// BizHawk's `gamedb` directory, which `--engine neshawk` needs for board detection.
+    pub neshawk_gamedb: Option<PathBuf>,
+    /// Where `--engine neshawk` writes its cycle ledger, in the shape `bk2cyc*.lua` writes.
+    pub neshawk_event_log: Option<PathBuf>,
+    /// The PCs the ledger prints a `pc$` line for, as the Lua scripts' `watched_pc` does.
+    pub neshawk_watch_pc: Vec<u16>,
     /// Play through FCEUX's own movie mode (`--engine fceux` only).
     pub movie_mode: bool,
     /// Where to write the JSON.
@@ -322,6 +339,9 @@ impl Default for Options {
             movie: PathBuf::new(),
             rom: PathBuf::new(),
             engine: Engines::Both,
+            neshawk_gamedb: None,
+            neshawk_event_log: None,
+            neshawk_watch_pc: Vec::new(),
             frames: None,
             from: 0,
             ram: None,
@@ -375,6 +395,27 @@ impl Options {
             index += 1;
             match argument.as_str() {
                 "--engine" => options.engine = parse_engine(&value_at(args, &mut index))?,
+                "--neshawk-gamedb" => {
+                    options.neshawk_gamedb = Some(PathBuf::from(value_at(args, &mut index)));
+                }
+                "--neshawk-event-log" => {
+                    options.neshawk_event_log = Some(PathBuf::from(value_at(args, &mut index)));
+                }
+                "--neshawk-watch-pc" => {
+                    let value = value_at(args, &mut index);
+                    options.neshawk_watch_pc = value
+                        .split(',')
+                        .filter(|text| !text.trim().is_empty())
+                        .map(|text| {
+                            let text = text.trim().trim_start_matches("0x").trim_start_matches('$');
+                            u16::from_str_radix(text, 16).map_err(|_| {
+                                HarnessError::Usage(format!(
+                                    "--neshawk-watch-pc {text:?} is not a hexadecimal address"
+                                ))
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                }
                 "--frames" => {
                     options.frames = Some(number(&value_at(args, &mut index), "--frames")?);
                 }
@@ -476,9 +517,10 @@ fn parse_engine(text: &str) -> Result<Engines, HarnessError> {
     match text {
         "zaxnes" => Ok(Engines::Zaxnes),
         "fceux" => Ok(Engines::Fceux),
+        "neshawk" => Ok(Engines::Neshawk),
         "both" => Ok(Engines::Both),
         _ => Err(HarnessError::Usage(format!(
-            "--engine {text:?} is not zaxnes, fceux or both\n{USAGE}"
+            "--engine {text:?} is not zaxnes, fceux, neshawk or both\n{USAGE}"
         ))),
     }
 }
@@ -1722,6 +1764,16 @@ pub fn run(options: &Options) -> Result<Measurement, HarnessError> {
                 .ram_against_reference
                 .extend(bytes.map(|bytes| (engine, bytes)));
         }
+        Engines::Neshawk => {
+            let mut machine = neshawk_machine(options, &movie, &machines)?;
+            let (run, trace, bytes) = run_alone(options, &movie, machine.as_mut(), ram)?;
+            let engine = run.engine.clone();
+            measurement.runs.push(run);
+            measurement.traces.extend(trace);
+            measurement
+                .ram_against_reference
+                .extend(bytes.map(|bytes| (engine, bytes)));
+        }
         Engines::Fceux => run_fceux_alone(options, &movie, &machines, &mut measurement)?,
     }
     finish_traces(options, &mut measurement)?;
@@ -2273,6 +2325,283 @@ fn zaxnes_machine(
     match options.profile.unwrap_or_else(|| movie.recorded_profile()) {
         ProfileChoice::Standard => build::<Standard>(options, movie, machines),
         ProfileChoice::NesHawk => build::<NesHawkCompat>(options, movie, machines),
+    }
+}
+
+/// `zax-neshawk`, the Rust port of NesHawk, as a [`Machine`].
+///
+/// A `.bk2` replayed on a port of the core that recorded it is the whole point of lot
+/// NESHAWK-REWRITE: `--engine neshawk --ram-ref <BizHawk per-frame reference>` is the instrument
+/// that says whether the port and BizHawk are the same machine.
+fn neshawk_machine(
+    options: &Options,
+    movie: &MovieFile,
+    machines: &Machines<'_>,
+) -> Result<Box<dyn Machine>, HarnessError> {
+    let machine = NeshawkMachine::new(machines.image, machines.region, movie.ports, options)
+        .map_err(HarnessError::Rom)?;
+    Ok(Box::new(machine))
+}
+
+/// `zax-neshawk`'s machine behind the harness's [`Machine`] trait.
+pub(crate) struct NeshawkMachine {
+    nes: zax_neshawk::Nes,
+    /// Kept so that a mid-movie hard reset can rebuild the machine from the image, which is what
+    /// `NES.HardReset` does when it rebuilds the board.
+    image: Vec<u8>,
+    db: zax_neshawk::gamedb::GameDb,
+    region: NesRegion,
+    ports: [ControllerPortType; 2],
+    /// What [`Machine::capture`] took.
+    state: Option<zax_neshawk::Nes>,
+    /// The cycle ledger, when `--neshawk-event-log` asked for one.
+    ledger: Option<Ledger>,
+}
+
+/// The cycle ledger of `--neshawk-event-log`: the same lines `scripts/bk2cyc*.lua` writes on
+/// BizHawk, so that a diff of the two files is a diff of the two machines event for event.
+///
+/// The filter is the scripts' own: every write to `$4000-$401F` (with `$4014` printed as `oam`,
+/// which is what the Lua calls it), reads of `$2002` and `$4015`, the first instruction of the
+/// NMI handler, and whatever PCs `--neshawk-watch-pc` names.
+struct Ledger {
+    path: PathBuf,
+    text: String,
+    watch_pc: Vec<u16>,
+    /// The NMI vector, read off the cartridge once the machine is up.
+    nmi_vector: u16,
+}
+
+impl Ledger {
+    /// One frame's worth of lines, from the events the machine recorded for it.
+    fn frame(&mut self, frame: u32, start: i64, lag: i32, events: &[zax_neshawk::BusEvent]) {
+        use std::fmt::Write as _;
+        use zax_neshawk::BusEventKind;
+
+        let _ = writeln!(self.text, "F {frame} start={start} lag={lag}");
+        for event in events {
+            let at = event.cycle - start;
+            match event.kind {
+                BusEventKind::Exec => {
+                    let tag = if event.address == self.nmi_vector {
+                        "nmi".to_owned()
+                    } else if self.watch_pc.contains(&event.address) {
+                        format!("pc${:04X}", event.address)
+                    } else {
+                        continue;
+                    };
+                    let _ = writeln!(
+                        self.text,
+                        "  {frame} {at:6} {tag:<8} A:{:02X} X:{:02X} Y:{:02X} SP:{:02X}",
+                        event.a, event.x, event.y, event.s
+                    );
+                }
+                BusEventKind::Write => {
+                    if !(0x4000..=0x401F).contains(&event.address) {
+                        continue;
+                    }
+                    let tag = if event.address == 0x4014 {
+                        "oam".to_owned()
+                    } else {
+                        format!("w${:04X}", event.address)
+                    };
+                    let _ = writeln!(self.text, "  {frame} {at:6} {tag:<8} ={:02X}", event.value);
+                }
+                BusEventKind::Read => {
+                    if event.address != 0x2002 && event.address != 0x4015 {
+                        continue;
+                    }
+                    let _ = writeln!(
+                        self.text,
+                        "  {frame} {at:6} {:<8} ={:02X}",
+                        format!("r${:04X}", event.address),
+                        event.value
+                    );
+                }
+            }
+        }
+    }
+}
+
+impl NeshawkMachine {
+    /// Where BizHawk's `gamedb` directory is, which board detection needs to be
+    /// NesHawk-equivalent: `--neshawk-gamedb`, else `ZAXNES_BIZHAWK_GAMEDB`, else nothing — and
+    /// then detection falls back to the iNES header, which `zax-neshawk::gamedb` explains is a
+    /// *different machine* for some cartridges.
+    fn gamedb_dir(options: &Options) -> Option<PathBuf> {
+        options
+            .neshawk_gamedb
+            .clone()
+            .or_else(|| std::env::var_os("ZAXNES_BIZHAWK_GAMEDB").map(PathBuf::from))
+    }
+
+    fn new(
+        image: &[u8],
+        region: NesRegion,
+        ports: [ControllerPortType; 2],
+        options: &Options,
+    ) -> Result<Self, String> {
+        let db = match Self::gamedb_dir(options) {
+            Some(dir) => zax_neshawk::gamedb::GameDb::load_from_dir(&dir),
+            None => zax_neshawk::gamedb::GameDb::empty(),
+        };
+        let nes = Self::load(image, &db, ports)?;
+        let mut machine = Self {
+            nes,
+            image: image.to_vec(),
+            db,
+            region,
+            ports,
+            state: None,
+            ledger: None,
+        };
+        machine.apply_region();
+        if let Some(path) = options.neshawk_event_log.clone() {
+            let lo = machine.nes.peek_memory(0xFFFA);
+            let hi = machine.nes.peek_memory(0xFFFB);
+            machine.ledger = Some(Ledger {
+                path,
+                text: format!("romhash {}\n", "zax-neshawk"),
+                watch_pc: options.neshawk_watch_pc.clone(),
+                nmi_vector: u16::from(lo) | (u16::from(hi) << 8),
+            });
+            machine.nes.bus_log.arm(0);
+        }
+        Ok(machine)
+    }
+
+    fn load(
+        image: &[u8],
+        db: &zax_neshawk::gamedb::GameDb,
+        ports: [ControllerPortType; 2],
+    ) -> Result<zax_neshawk::Nes, String> {
+        let port = |kind: ControllerPortType| match kind {
+            ControllerPortType::Empty => zax_neshawk::controllers::PortDevice::Unplugged,
+            // NesHawk's Zapper is not ported; a movie that names one plays a pad here, and the
+            // report says which device each port got so that the substitution is visible.
+            _ => zax_neshawk::controllers::PortDevice::ControllerNes,
+        };
+        zax_neshawk::Nes::load(image, db, port(ports[0]), port(ports[1]))
+            .map_err(|why| why.to_string())
+    }
+
+    /// One frame, with the cycle ledger taken around it when one was asked for.
+    fn advance(&mut self, reset: bool) {
+        if self.ledger.is_none() {
+            self.nes.frame_advance(reset, false);
+            return;
+        }
+        let start = self.nes.total_executed_cycles;
+        self.nes.bus_log.events.clear();
+        self.nes.frame_advance(reset, false);
+        let frame = u32::try_from(self.nes.frame).unwrap_or(0);
+        let lag = self.nes.lag_count();
+        // The borrow has to be split: the ledger formats the events the machine owns.
+        let events = std::mem::take(&mut self.nes.bus_log.events);
+        if let Some(ledger) = self.ledger.as_mut() {
+            ledger.frame(frame, start, lag, &events);
+        }
+        self.nes.bus_log.events = events;
+        self.nes.bus_log.events.clear();
+    }
+
+    /// The movie's region. `NES.HardReset` is what reads `_display_type`, so it is set before the
+    /// power-on that [`Machine::power`] does.
+    fn apply_region(&mut self) {
+        self.nes.set_display_type(match self.region {
+            NesRegion::Pal => zax_neshawk::DisplayType::Pal,
+            NesRegion::Dendy => zax_neshawk::DisplayType::Dendy,
+            _ => zax_neshawk::DisplayType::Ntsc,
+        });
+    }
+}
+
+impl Drop for NeshawkMachine {
+    fn drop(&mut self) {
+        if let Some(ledger) = self.ledger.take() {
+            let _ = fs::write(&ledger.path, &ledger.text);
+        }
+    }
+}
+
+impl Machine for NeshawkMachine {
+    fn name(&self) -> &'static str {
+        "neshawk"
+    }
+
+    fn power(&mut self, ram: RamPattern) -> Result<(), String> {
+        // `Nes::load` already powered the machine on once; a `FrameCommand::HardReset` mid-movie
+        // starts from the image again, which is what `NES.HardReset` does by rebuilding the board.
+        self.nes = Self::load(&self.image, &self.db, self.ports)?;
+        self.apply_region();
+        if self.ledger.is_some() {
+            // `Self::load` built a new machine, whose log is off by default.
+            self.nes.bus_log.arm(0);
+        }
+        // The movie's power-on pattern is NesHawk's own `InitialWRamStatePattern`, which
+        // `HardReset` reads *before* it fills the RAM — so it is set and the machine re-powered,
+        // rather than the bytes being written over the top afterwards.
+        let mut pattern = vec![0u8; RAM_LEN];
+        ram.fill(&mut pattern);
+        self.nes.initial_wram_state_pattern = pattern;
+        self.nes.hard_reset();
+        Ok(())
+    }
+
+    fn soft_reset(&mut self) -> Result<(), String> {
+        // Nothing to do: NesHawk applies RESET at the *start* of the frame after the one that
+        // pressed it (`FrameAdvance` acts on the previous call's `resetSignal`), so the movie's
+        // RESET is carried by `run_before_soft_reset` below and taking the line here as well
+        // would reset twice.
+        Ok(())
+    }
+
+    fn run(&mut self, word: u16) -> Result<(), String> {
+        self.nes.controller_deck.pad = [(word & 0xFF) as u8, (word >> 8) as u8];
+        self.advance(false);
+        Ok(())
+    }
+
+    fn run_before_soft_reset(&mut self, word: u16) -> Result<(), String> {
+        // `FrameAdvance` reads `controller.IsPressed("Reset")` at the end of the frame and acts on
+        // it at the start of the next, so pressing it on *this* frame is exactly what the movie's
+        // Reset column means.
+        self.nes.controller_deck.pad = [(word & 0xFF) as u8, (word >> 8) as u8];
+        self.advance(true);
+        Ok(())
+    }
+
+    fn ram_into(&self, out: &mut Vec<u8>) -> Result<(), String> {
+        out.clear();
+        out.reserve(RAM_LEN);
+        out.extend_from_slice(&self.nes.ram);
+        Ok(())
+    }
+
+    fn picture_into(&self, out: &mut Vec<u8>) -> Result<(), String> {
+        out.clear();
+        out.reserve(PICTURE_LEN);
+        // `xbuf` holds `pixel | intensity << 6`, with bit 15 marking a pixel the backdrop shows
+        // through; the harness's picture is one NES colour index a pixel, which is the low six.
+        out.extend(self.nes.ppu.xbuf.iter().map(|&p| u8::try_from(p & 0x3F).unwrap_or(0)));
+        Ok(())
+    }
+
+    /// A whole second machine rather than a serialised block: `zax-neshawk` has no `SyncState`
+    /// yet, and a clone is exact where a half-written serialiser would quietly not be.
+    fn capture(&mut self) -> Result<(), String> {
+        self.state = Some(self.nes.clone());
+        Ok(())
+    }
+
+    fn restore(&mut self) -> Result<(), String> {
+        match self.state.take() {
+            Some(state) => {
+                self.nes = state;
+                Ok(())
+            }
+            None => Err("nothing was captured to restore".to_owned()),
+        }
     }
 }
 

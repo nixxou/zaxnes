@@ -245,3 +245,54 @@ database's record format, read at load time from a `gamedb` directory
 
 Not ported, stated rather than faked: VS. System, FDS, NSF, UNIF, the light gun, the cheat
 engine, the code-data logger, the memory domains, `Palettes.cs`.
+
+### Step 3 — the port behind the harness, and the first verification against BizHawk
+
+`movie-sync --engine neshawk` plays a `.bk2` on the port of the core that recorded it, with
+`--ram-ref` holding the run against BizHawk's own per-frame work RAM byte for byte, and
+`--neshawk-event-log` writing the **cycle ledger** in the very shape `scripts/bk2cyc*.lua` writes
+on BizHawk, so the two can be diffed event for event. `--neshawk-gamedb` (or
+`ZAXNES_BIZHAWK_GAMEDB`) points at BizHawk's `gamedb` directory, without which board detection
+falls back to the iNES header.
+
+#### Results
+
+| what | against | result |
+|---|---|---|
+| *Hoshi no Kirby* `.bk2`, frames 1-400 | `kirby-jp-step1.txt` | **400 of 400 frames byte-identical** (2 KiB of work RAM) |
+| the same, frames 1-10 000 | `kirby-jp-step1c.txt` | **8 901 of 8 901 compared frames byte-identical** |
+| *Faxanadu* (USA) `.bk2`, all 83 218 frames | `fax-usa.txt` | **832 of 832 reference lines agree, to frame 83 200**, and every lag count agrees |
+
+#### Divergence 1, and the mistranslated line
+
+The first Kirby run parted from BizHawk at **frame 11** — the frame the game first writes `$4014`
+and first enables the DMC. The RAM diff said what the cause was before any bisection: our stack
+held the same byte sequence as BizHawk's **two addresses higher**, so a 2-byte push was missing.
+
+The line was not in the DMA code at all. `NES.WriteReg($4014)` does `cpu.RDY = false`, and
+`WriteReg` is reached from inside `cpu.ExecuteOne()` — but this port lifted the CPU **out** of the
+machine for the duration of `execute_one` (`mem::take`, put back after) so that the link could
+hold the rest of it. The write therefore landed on the *placeholder* CPU and was thrown away:
+`RDY` stayed high, the 6502 went on executing straight through the 513-cycle sprite DMA, and the
+frame was that much shorter. The same hole swallowed every bus-side read of
+`cpu.TotalExecutedCycles` — `double_controller_read` and `double_2007_read`, both of which read 0
+for ever — and made the cycle ledger's `A`/`X`/`Y`/`SP` columns garbage, which is what exposed it.
+
+**The fix is structural, not a constant.** `Nes` is now `{ cpu: Mos6502x, b: Bus }`, and
+`cpu.execute_one(&mut self.b)` borrows the two halves at once by destructuring, so the CPU is
+**live** throughout the instruction and a `$4014` write reaches the real `RDY`. The four
+registers the C# keeps on the CPU but the *machine* also drives — `address_bus`, `RDY`,
+`rdy_freeze` and `TotalExecutedCycles` — live on `Bus` and the CPU reaches them through
+`Mos6502xLink` (`rdy`, `set_rdy_freeze`, `rdy_freeze`, `add_executed_cycle`, `set_address_bus`).
+`on_exec_fetch` gained the four register values for the same reason. Same registers, same write
+order, same points; only their home differs. `Nes` derefs to `Bus`, so every `self.ppu`,
+`self.apu`, `self.board` of the ported code still reads as the C# does.
+
+`nestest` was re-run after the refactor and is still exact on all 8 991 instructions, and the 16
+`instr_test-v5` ROMs still all report Passed.
+
+**The lesson, recorded because it will recur:** a port that cannot keep a component *live* while
+another component calls into it will silently drop the writes that cross back. The three
+`&mut`-splitting devices this port uses — the `Bus` split, `BoardEnv`, and the link's four pin
+accessors — are each there because a C# field is written from both sides, and each one had to be
+found by a diff rather than by reading.

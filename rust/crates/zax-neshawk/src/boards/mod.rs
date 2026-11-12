@@ -186,6 +186,13 @@ pub trait Board {
     /// The C# class name, for the load report and the harness.
     fn name(&self) -> &'static str;
 
+    /// A copy of this board, state and all.
+    ///
+    /// The C# serialises a board through `SyncState`; a port with no serialiser yet needs the
+    /// same thing for the harness's input-sensitivity probe and for the engine's savestate, and
+    /// a clone is what a `Box<dyn Board>` can offer. Every implementation is one line.
+    fn clone_box(&self) -> Box<dyn Board>;
+
     /// `Configure(origin)`. Reads and writes `self.base_mut().cart`.
     fn configure(&mut self, origin: DetectionOrigin) -> bool;
 

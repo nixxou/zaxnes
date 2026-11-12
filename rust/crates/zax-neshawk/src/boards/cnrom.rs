@@ -9,7 +9,7 @@ use crate::cart::DetectionOrigin;
 /// `NES.RomChecksums.SeicrossRev2` — "yes this is meant to include the prefix".
 const SEICROSS_REV2: &str = "SHA1:4C9C05FAD6F6F33A92A27C2EDC1E7DE12D7F216D";
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CnRom {
     base: BoardBase,
     // configuration
@@ -45,6 +45,10 @@ impl Board for CnRom {
     fn base_mut(&mut self) -> &mut BoardBase {
         &mut self.base
     }
+    fn clone_box(&self) -> Box<dyn Board> {
+        Box::new(self.clone())
+    }
+
     fn name(&self) -> &'static str {
         "CNROM"
     }

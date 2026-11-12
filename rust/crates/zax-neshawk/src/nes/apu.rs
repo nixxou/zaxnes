@@ -2,13 +2,13 @@
 //!
 //! Ported from BizHawk 2.11.1 `Consoles/Nintendo/NES/APU.cs`: `DMCUnit.Run` (which drives
 //! `nes.cpu.RDY` and `nes.dmc_dma_exec`), `DMCUnit.Fetch` (which reads the CPU bus), and
-//! `RunOneLast` (which strobes the joypads and publishes `nes._irq_apu`). They are `impl Nes`
+//! `RunOneLast` (which strobes the joypads and publishes `nes._irq_apu`). They are `impl Bus`
 //! for that reason; everything else is in [`crate::apu`].
 //! MIT; see `LICENSE-BizHawk`.
 
-use super::Nes;
+use super::Bus;
 
-impl Nes {
+impl Bus {
     /// `APU.RunOneFirst`.
     pub(crate) fn apu_run_one_first(&mut self) {
         self.apu.run_one_first_before_dmc();
@@ -40,7 +40,7 @@ impl Nes {
             if !self.apu.dmc.fill_glitch {
                 if !self.apu.call_from_write {
                     // when called due to empty buffer while DMC running, there is no delay
-                    self.cpu.rdy = false;
+                    self.rdy = false;
                     self.dmc_dma_exec = true;
 
                     if self.apu.dmc.fill_glitch_2 {

@@ -14,7 +14,7 @@
 //!
 //! | `Execute.cs` | here | why |
 //! |---|---|---|
-//! | `rdy_freeze = !RDY; if (RDY) {…}` | `if self.rdy_gate() {…}` | the pair is one idiom and appears ~150 times; the helper is exactly it |
+//! | `rdy_freeze = !RDY; if (RDY) {…}` | `if rdy_gate(bus) {…}` | the pair is one idiom and appears ~150 times; the helper is exactly it |
 //! | `_link.ReadMemory(a)` | `bus.read_memory(a)` | the link is passed in, not stored |
 //! | `(ushort)ea` | `self.ea16()` | `ea` is `int` in the C# and holds a vector as well as an address |
 //! | `(opcode3 << 8) + opcode2` | `self.abs_addr()` | the absolute-addressing operand |
@@ -64,6 +64,15 @@ use super::uop::{
 };
 use super::{Mos6502x, Mos6502xLink, BRK_VECTOR, IRQ_VECTOR, NMI_VECTOR, RESET_VECTOR};
 
+/// `rdy_freeze = !RDY; if (RDY)` — the gate almost every micro-operation opens with.
+/// Returns whether the cycle may do its work. A free function rather than a method because both
+/// latches live on the machine now (see [`Mos6502xLink::set_address_bus`]).
+#[inline]
+fn rdy_gate(bus: &mut impl Mos6502xLink) -> bool {
+    bus.set_rdy_freeze(!bus.rdy());
+    bus.rdy()
+}
+
 /// `BizHawk.Common.NumberExtensions.Bit` on an `int`: `(value >> bit) & 1 != 0`.
 ///
 /// The shift is arithmetic, as C#'s is on a signed `int`. `RelBranch_Stage4` tests bit 31 and
@@ -74,13 +83,6 @@ const fn bit(value: i32, index: u32) -> bool {
 
 impl Mos6502x {
     // ------------------------------------------------------------- the idioms
-
-    /// `rdy_freeze = !RDY; if (RDY)` — the gate almost every micro-operation opens with.
-    /// Returns whether the cycle may do its work.
-    fn rdy_gate(&mut self) -> bool {
-        self.rdy_freeze = !self.rdy;
-        self.rdy
-    }
 
     /// `PC++`: the old `PC`, with `PC` advanced.
     fn pc_pp(&mut self) -> u16 {
@@ -140,13 +142,13 @@ impl Mos6502x {
     /// `MOS6502X.ExecuteOne`: one CPU cycle.
     pub fn execute_one(&mut self, bus: &mut impl Mos6502xLink) {
         // total cycles now increments every time a cycle is called to accurately count during RDY
-        self.total_executed_cycles += 1;
+        bus.add_executed_cycle();
         self.interrupt_pending |= self.interrupted();
-        self.rdy_freeze = false;
+        bus.set_rdy_freeze(false);
 
         self.execute_one_retry(bus);
 
-        if !self.rdy_freeze {
+        if !bus.rdy_freeze() {
             self.mi += 1;
         }
 
@@ -416,7 +418,7 @@ impl Mos6502x {
             Uop::End_ISpecial => self.End_ISpecial(bus),
             Uop::End_SuppressInterrupt => self.End_SuppressInterrupt(bus),
             Uop::End => self.End(bus),
-            Uop::Jam => self.Jam(),
+            Uop::Jam => self.Jam(bus),
             // `Unsupported`, `_Bit` and `RelBranch_Stage2`'s unreferenced siblings: no row of
             // the table names them, so the C#'s `default: throw` is unreachable too.
             Uop::Unsupported | Uop::_Bit => {}
@@ -426,7 +428,7 @@ impl Mos6502x {
     // ------------------------------------------------------------ fetch cycle
 
     fn FetchDummy(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
         }
     }
@@ -461,10 +463,10 @@ impl Mos6502x {
     }
 
     fn Fetch1_Real(&mut self, bus: &mut impl Mos6502xLink) {
-        self.rdy_freeze = !self.rdy;
-        if self.rdy {
+        bus.set_rdy_freeze(!bus.rdy());
+        if bus.rdy() {
             self.branch_irq_hack = false;
-            bus.on_exec_fetch(self.PC);
+            bus.on_exec_fetch(self.PC, self.A, self.X, self.Y, self.S);
             let pc = self.pc_pp();
             self.opcode = usize::from(bus.read_memory(pc));
             self.mi = -1;
@@ -473,14 +475,14 @@ impl Mos6502x {
     }
 
     fn Fetch2(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             self.opcode2 = bus.read_memory(pc);
         }
     }
 
     fn Fetch3(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             self.opcode3 = bus.read_memory(pc);
             bus.set_address_bus((u16::from(self.opcode3) << 8) | u16::from(self.opcode2));
@@ -524,7 +526,7 @@ impl Mos6502x {
     }
 
     fn PushP_Reset(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.ea = i32::from(RESET_VECTOR);
             let addr = self.push_addr();
             bus.dummy_read_memory(addr);
@@ -533,14 +535,14 @@ impl Mos6502x {
     }
 
     fn PushDummy(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let addr = self.push_addr();
             bus.dummy_read_memory(addr);
         }
     }
 
     fn FetchPCLVector(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             if self.ea == i32::from(BRK_VECTOR) && self.flag_b() && self.nmi {
                 self.nmi = false;
                 self.ea = i32::from(NMI_VECTOR);
@@ -554,7 +556,7 @@ impl Mos6502x {
     }
 
     fn FetchPCHVector(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let addr = (self.ea + 1) as u16;
             self.alu_temp += i32::from(bus.read_memory(addr)) << 8;
             self.PC = self.alu_temp as u16;
@@ -564,7 +566,7 @@ impl Mos6502x {
     // --------------------------------------------- implied and accumulator
 
     fn Imp_INY(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
             self.Y = self.Y.wrapping_add(1);
             self.NZ_Y();
@@ -572,7 +574,7 @@ impl Mos6502x {
     }
 
     fn Imp_DEY(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
             self.Y = self.Y.wrapping_sub(1);
             self.NZ_Y();
@@ -580,7 +582,7 @@ impl Mos6502x {
     }
 
     fn Imp_INX(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
             self.X = self.X.wrapping_add(1);
             self.NZ_X();
@@ -588,7 +590,7 @@ impl Mos6502x {
     }
 
     fn Imp_DEX(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
             self.X = self.X.wrapping_sub(1);
             self.NZ_X();
@@ -608,7 +610,7 @@ impl Mos6502x {
     }
 
     fn Imp_TSX(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
             self.X = self.S;
             self.NZ_X();
@@ -616,14 +618,14 @@ impl Mos6502x {
     }
 
     fn Imp_TXS(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
             self.S = self.X;
         }
     }
 
     fn Imp_TAX(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
             self.X = self.A;
             self.NZ_X();
@@ -631,7 +633,7 @@ impl Mos6502x {
     }
 
     fn Imp_TAY(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
             self.Y = self.A;
             self.NZ_Y();
@@ -639,7 +641,7 @@ impl Mos6502x {
     }
 
     fn Imp_TYA(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
             self.A = self.Y;
             self.NZ_A();
@@ -647,7 +649,7 @@ impl Mos6502x {
     }
 
     fn Imp_TXA(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
             self.A = self.X;
             self.NZ_A();
@@ -658,7 +660,7 @@ impl Mos6502x {
         // not affected by RDY
         self.iflag_pending = true;
 
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
         }
     }
@@ -667,48 +669,48 @@ impl Mos6502x {
         // not affected by RDY
         self.iflag_pending = false;
 
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
         }
     }
 
     fn Imp_SEC(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
             self.set_flag_c(true);
         }
     }
 
     fn Imp_CLC(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
             self.set_flag_c(false);
         }
     }
 
     fn Imp_SED(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
             self.set_flag_d(true);
         }
     }
 
     fn Imp_CLD(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
             self.set_flag_d(false);
         }
     }
 
     fn Imp_CLV(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
             self.set_flag_v(false);
         }
     }
 
     fn Imp_ASL_A(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
             self.set_flag_c((self.A & 0x80) != 0);
             self.A <<= 1;
@@ -717,7 +719,7 @@ impl Mos6502x {
     }
 
     fn Imp_ROL_A(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
             self.temp8 = self.A;
             self.A = (self.A << 1) | (self.P & 1);
@@ -727,7 +729,7 @@ impl Mos6502x {
     }
 
     fn Imp_ROR_A(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
             self.temp8 = self.A;
             self.A = (self.A >> 1) | ((self.P & 1) << 7);
@@ -737,7 +739,7 @@ impl Mos6502x {
     }
 
     fn Imp_LSR_A(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
             self.set_flag_c((self.A & 1) != 0);
             self.A >>= 1;
@@ -764,28 +766,28 @@ impl Mos6502x {
     }
 
     fn Abs_READ_LDA(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.A = bus.read_memory(self.abs_addr());
             self.NZ_A();
         }
     }
 
     fn Abs_READ_LDY(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.Y = bus.read_memory(self.abs_addr());
             self.NZ_Y();
         }
     }
 
     fn Abs_READ_LDX(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.X = bus.read_memory(self.abs_addr());
             self.NZ_X();
         }
     }
 
     fn Abs_READ_BIT(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.abs_addr()));
             self._Bit();
         }
@@ -794,7 +796,7 @@ impl Mos6502x {
     /// The C# reads the operand **twice** here, which is a quirk of this micro-operation rather
     /// than of the instruction, and is kept.
     fn Abs_READ_LAX(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.abs_addr()));
             self.A = bus.read_memory(self.abs_addr());
             self.X = self.A;
@@ -803,69 +805,69 @@ impl Mos6502x {
     }
 
     fn Abs_READ_AND(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.abs_addr()));
             self._And();
         }
     }
 
     fn Abs_READ_EOR(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.abs_addr()));
             self._Eor();
         }
     }
 
     fn Abs_READ_ORA(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.abs_addr()));
             self._Ora();
         }
     }
 
     fn Abs_READ_ADC(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.abs_addr()));
             self._Adc();
         }
     }
 
     fn Abs_READ_CMP(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.abs_addr()));
             self._Cmp();
         }
     }
 
     fn Abs_READ_CPY(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.abs_addr()));
             self._Cpy();
         }
     }
 
     fn Abs_READ_NOP(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.abs_addr()));
         }
     }
 
     fn Abs_READ_CPX(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.abs_addr()));
             self._Cpx();
         }
     }
 
     fn Abs_READ_SBC(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.abs_addr()));
             self._Sbc();
         }
     }
 
     fn Abs_RMW_Stage4(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.ea = i32::from(self.abs_addr());
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
         }
@@ -979,21 +981,21 @@ impl Mos6502x {
     }
 
     fn JMP_abs(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.PC =
                 (u16::from(bus.read_memory(self.PC)) << 8).wrapping_add(u16::from(self.opcode2));
         }
     }
 
     fn AbsInd_JMP_Stage4(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.ea = i32::from(self.abs_addr());
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
         }
     }
 
     fn AbsInd_JMP_Stage5(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.ea = (i32::from(self.opcode3) << 8) + i32::from(self.opcode2.wrapping_add(1));
             self.alu_temp += i32::from(bus.read_memory(self.ea16())) << 8;
             self.PC = self.alu_temp as u16;
@@ -1021,21 +1023,21 @@ impl Mos6502x {
     /// A bit sneaky to shove this into `opcode2`… but we can reuse all the zero page uops if we
     /// do that. (The C#'s own comment.)
     fn ZpIdx_Stage3_X(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.read_memory(u16::from(self.opcode2));
             self.opcode2 = self.opcode2.wrapping_add(self.X);
         }
     }
 
     fn ZpIdx_Stage3_Y(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.read_memory(u16::from(self.opcode2));
             self.opcode2 = self.opcode2.wrapping_add(self.Y);
         }
     }
 
     fn ZpIdx_RMW_Stage4(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(u16::from(self.opcode2)));
         }
     }
@@ -1045,42 +1047,42 @@ impl Mos6502x {
     }
 
     fn ZP_READ_EOR(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(u16::from(self.opcode2)));
             self._Eor();
         }
     }
 
     fn ZP_READ_BIT(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(u16::from(self.opcode2)));
             self._Bit();
         }
     }
 
     fn ZP_READ_LDA(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.A = bus.read_memory(u16::from(self.opcode2));
             self.NZ_A();
         }
     }
 
     fn ZP_READ_LDY(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.Y = bus.read_memory(u16::from(self.opcode2));
             self.NZ_Y();
         }
     }
 
     fn ZP_READ_LDX(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.X = bus.read_memory(u16::from(self.opcode2));
             self.NZ_X();
         }
     }
 
     fn ZP_READ_LAX(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             // ?? is this right?? (the C#'s own comment)
             self.X = bus.read_memory(u16::from(self.opcode2));
             self.A = self.X;
@@ -1089,62 +1091,62 @@ impl Mos6502x {
     }
 
     fn ZP_READ_CPY(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(u16::from(self.opcode2)));
             self._Cpy();
         }
     }
 
     fn ZP_READ_CMP(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(u16::from(self.opcode2)));
             self._Cmp();
         }
     }
 
     fn ZP_READ_CPX(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(u16::from(self.opcode2)));
             self._Cpx();
         }
     }
 
     fn ZP_READ_ORA(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(u16::from(self.opcode2)));
             self._Ora();
         }
     }
 
     fn ZP_READ_NOP(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.read_memory(u16::from(self.opcode2)); // just a dummy
         }
     }
 
     fn ZP_READ_SBC(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(u16::from(self.opcode2)));
             self._Sbc();
         }
     }
 
     fn ZP_READ_ADC(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(u16::from(self.opcode2)));
             self._Adc();
         }
     }
 
     fn ZP_READ_AND(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(u16::from(self.opcode2)));
             self._And();
         }
     }
 
     fn ZP_RMW_Stage3(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(u16::from(self.opcode2)));
         }
     }
@@ -1259,42 +1261,42 @@ impl Mos6502x {
     // -------------------------------------------- indexed indirect (addr,X)
 
     fn IdxInd_Stage3(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(u16::from(self.opcode2));
             self.alu_temp = i32::from(self.opcode2.wrapping_add(self.X));
         }
     }
 
     fn IdxInd_Stage4(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.ea = i32::from(bus.read_memory(self.alu_temp as u16));
             bus.set_address_bus(self.ea16());
         }
     }
 
     fn IdxInd_Stage5(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let addr = u16::from((self.alu_temp as u8).wrapping_add(1));
             self.ea += i32::from(bus.read_memory(addr)) << 8;
         }
     }
 
     fn IdxInd_Stage6_READ_LDA(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.A = bus.read_memory(self.ea16());
             self.NZ_A();
         }
     }
 
     fn IdxInd_Stage6_READ_ORA(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
             self._Ora();
         }
     }
 
     fn IdxInd_Stage6_READ_LAX(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.A = bus.read_memory(self.ea16());
             self.X = self.A;
             self.NZ_A();
@@ -1302,35 +1304,35 @@ impl Mos6502x {
     }
 
     fn IdxInd_Stage6_READ_CMP(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
             self._Cmp();
         }
     }
 
     fn IdxInd_Stage6_READ_ADC(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
             self._Adc();
         }
     }
 
     fn IdxInd_Stage6_READ_AND(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
             self._And();
         }
     }
 
     fn IdxInd_Stage6_READ_EOR(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
             self._Eor();
         }
     }
 
     fn IdxInd_Stage6_READ_SBC(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
             self._Sbc();
         }
@@ -1347,7 +1349,7 @@ impl Mos6502x {
     }
 
     fn IdxInd_Stage6_RMW(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
         }
     }
@@ -1414,13 +1416,13 @@ impl Mos6502x {
     // -------------------------------------------- indirect indexed (addr),Y
 
     fn IndIdx_Stage3(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.ea = i32::from(bus.read_memory(u16::from(self.opcode2)));
         }
     }
 
     fn IndIdx_Stage4(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = self.ea + i32::from(self.Y);
             let addr = u16::from(self.opcode2.wrapping_add(1));
             self.ea = (i32::from(bus.read_memory(addr)) << 8) | (self.alu_temp & 0xFF);
@@ -1430,16 +1432,16 @@ impl Mos6502x {
     }
 
     fn IndIdx_WRITE_Stage5(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.read_memory(self.ea16());
             self.ea += (self.alu_temp >> 8) << 8;
         }
     }
 
     fn IndIdx_WRITE_Stage5_SHA(&mut self, bus: &mut impl Mos6502xLink) {
-        self.rdy_freeze = !self.rdy;
+        bus.set_rdy_freeze(!bus.rdy());
 
-        if self.rdy {
+        if bus.rdy() {
             self.H |= ((self.ea >> 8) + 1) as u8;
             bus.read_memory(self.ea16());
 
@@ -1458,7 +1460,7 @@ impl Mos6502x {
 
     fn IndIdx_READ_Stage5(&mut self, bus: &mut impl Mos6502xLink) {
         if bit(self.alu_temp, 8) {
-            if self.rdy_gate() {
+            if rdy_gate(bus) {
                 bus.read_memory(self.ea16());
                 self.ea_add_page();
             }
@@ -1469,7 +1471,7 @@ impl Mos6502x {
     }
 
     fn IndIdx_RMW_Stage5(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.read_memory(self.ea16());
             if bit(self.alu_temp, 8) {
                 self.ea_add_page();
@@ -1487,35 +1489,35 @@ impl Mos6502x {
     }
 
     fn IndIdx_READ_Stage6_LDA(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.A = bus.read_memory(self.ea16());
             self.NZ_A();
         }
     }
 
     fn IndIdx_READ_Stage6_CMP(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
             self._Cmp();
         }
     }
 
     fn IndIdx_READ_Stage6_AND(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
             self._And();
         }
     }
 
     fn IndIdx_READ_Stage6_EOR(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
             self._Eor();
         }
     }
 
     fn IndIdx_READ_Stage6_LAX(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.A = bus.read_memory(self.ea16());
             self.X = self.A;
             self.NZ_A();
@@ -1523,28 +1525,28 @@ impl Mos6502x {
     }
 
     fn IndIdx_READ_Stage6_ADC(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
             self._Adc();
         }
     }
 
     fn IndIdx_READ_Stage6_SBC(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
             self._Sbc();
         }
     }
 
     fn IndIdx_READ_Stage6_ORA(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
             self._Ora();
         }
     }
 
     fn IndIdx_RMW_Stage6(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
         }
     }
@@ -1612,7 +1614,7 @@ impl Mos6502x {
     // ----------------------------------------------------- absolute indexed
 
     fn AbsIdx_Stage3_Y(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             self.opcode3 = bus.read_memory(pc);
             self.alu_temp = i32::from(self.opcode2) + i32::from(self.Y);
@@ -1623,7 +1625,7 @@ impl Mos6502x {
     }
 
     fn AbsIdx_Stage3_X(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             self.opcode3 = bus.read_memory(pc);
             self.alu_temp = i32::from(self.opcode2) + i32::from(self.X);
@@ -1635,7 +1637,7 @@ impl Mos6502x {
 
     fn AbsIdx_READ_Stage4(&mut self, bus: &mut impl Mos6502xLink) {
         if bit(self.alu_temp, 8) {
-            if self.rdy_gate() {
+            if rdy_gate(bus) {
                 self.alu_temp = i32::from(bus.read_memory(self.ea16()));
                 self.ea_add_page();
             }
@@ -1646,7 +1648,7 @@ impl Mos6502x {
     }
 
     fn AbsIdx_Stage4(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let adjust = bit(self.alu_temp, 8);
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
 
@@ -1657,9 +1659,9 @@ impl Mos6502x {
     }
 
     fn AbsIdx_Stage4_SHX(&mut self, bus: &mut impl Mos6502xLink) {
-        self.rdy_freeze = !self.rdy;
+        bus.set_rdy_freeze(!bus.rdy());
 
-        if self.rdy {
+        if bus.rdy() {
             self.H |= ((self.ea >> 8) + 1) as u8;
             let adjust = bit(self.alu_temp, 8);
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
@@ -1677,9 +1679,9 @@ impl Mos6502x {
     }
 
     fn AbsIdx_Stage4_SHY(&mut self, bus: &mut impl Mos6502xLink) {
-        self.rdy_freeze = !self.rdy;
+        bus.set_rdy_freeze(!bus.rdy());
 
-        if self.rdy {
+        if bus.rdy() {
             self.H |= ((self.ea >> 8) + 1) as u8;
             let adjust = bit(self.alu_temp, 8);
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
@@ -1697,9 +1699,9 @@ impl Mos6502x {
     }
 
     fn AbsIdx_Stage4_SHA(&mut self, bus: &mut impl Mos6502xLink) {
-        self.rdy_freeze = !self.rdy;
+        bus.set_rdy_freeze(!bus.rdy());
 
-        if self.rdy {
+        if bus.rdy() {
             self.H |= ((self.ea >> 8) + 1) as u8;
             let adjust = bit(self.alu_temp, 8);
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
@@ -1718,9 +1720,9 @@ impl Mos6502x {
     }
 
     fn AbsIdx_Stage4_SHS(&mut self, bus: &mut impl Mos6502xLink) {
-        self.rdy_freeze = !self.rdy;
+        bus.set_rdy_freeze(!bus.rdy());
 
-        if self.rdy {
+        if bus.rdy() {
             self.H |= ((self.ea >> 8) + 1) as u8;
             let adjust = bit(self.alu_temp, 8);
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
@@ -1763,7 +1765,7 @@ impl Mos6502x {
     }
 
     fn AbsIdx_RMW_Stage5(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
         }
     }
@@ -1876,21 +1878,21 @@ impl Mos6502x {
     }
 
     fn AbsIdx_READ_Stage5_LDA(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.A = bus.read_memory(self.ea16());
             self.NZ_A();
         }
     }
 
     fn AbsIdx_READ_Stage5_LDX(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.X = bus.read_memory(self.ea16());
             self.NZ_X();
         }
     }
 
     fn AbsIdx_READ_Stage5_LAX(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.A = bus.read_memory(self.ea16());
             self.X = self.A;
             self.NZ_A();
@@ -1898,55 +1900,55 @@ impl Mos6502x {
     }
 
     fn AbsIdx_READ_Stage5_LDY(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.Y = bus.read_memory(self.ea16());
             self.NZ_Y();
         }
     }
 
     fn AbsIdx_READ_Stage5_ORA(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
             self._Ora();
         }
     }
 
     fn AbsIdx_READ_Stage5_NOP(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
         }
     }
 
     fn AbsIdx_READ_Stage5_CMP(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
             self._Cmp();
         }
     }
 
     fn AbsIdx_READ_Stage5_SBC(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
             self._Sbc();
         }
     }
 
     fn AbsIdx_READ_Stage5_ADC(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
             self._Adc();
         }
     }
 
     fn AbsIdx_READ_Stage5_EOR(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
             self._Eor();
         }
     }
 
     fn AbsIdx_READ_Stage5_AND(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
             self._And();
         }
@@ -1954,7 +1956,7 @@ impl Mos6502x {
 
     /// `LAS`/`LAE` (`$BB`). The C# calls this one `_ERROR` and implements it anyway.
     fn AbsIdx_READ_Stage5_ERROR(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.alu_temp = i32::from(bus.read_memory(self.ea16()));
             self.S &= self.alu_temp as u8;
             self.X = self.S;
@@ -1966,7 +1968,7 @@ impl Mos6502x {
     // ------------------------------------------------------------ immediate
 
     fn Imm_EOR(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             self.alu_temp = i32::from(bus.read_memory(pc));
             self._Eor();
@@ -1974,7 +1976,7 @@ impl Mos6502x {
     }
 
     fn Imm_ANC(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             self.alu_temp = i32::from(bus.read_memory(pc));
             self._Anc();
@@ -1982,7 +1984,7 @@ impl Mos6502x {
     }
 
     fn Imm_ASR(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             self.alu_temp = i32::from(bus.read_memory(pc));
             self._Asr();
@@ -1990,7 +1992,7 @@ impl Mos6502x {
     }
 
     fn Imm_AXS(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             self.alu_temp = i32::from(bus.read_memory(pc));
             self._Axs();
@@ -1998,7 +2000,7 @@ impl Mos6502x {
     }
 
     fn Imm_ARR(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             self.alu_temp = i32::from(bus.read_memory(pc));
             self._Arr();
@@ -2006,7 +2008,7 @@ impl Mos6502x {
     }
 
     fn Imm_LXA(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             self.alu_temp = i32::from(bus.read_memory(pc));
             self._Lxa();
@@ -2014,7 +2016,7 @@ impl Mos6502x {
     }
 
     fn Imm_ORA(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             self.alu_temp = i32::from(bus.read_memory(pc));
             self._Ora();
@@ -2022,7 +2024,7 @@ impl Mos6502x {
     }
 
     fn Imm_CPY(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             self.alu_temp = i32::from(bus.read_memory(pc));
             self._Cpy();
@@ -2030,7 +2032,7 @@ impl Mos6502x {
     }
 
     fn Imm_CPX(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             self.alu_temp = i32::from(bus.read_memory(pc));
             self._Cpx();
@@ -2038,7 +2040,7 @@ impl Mos6502x {
     }
 
     fn Imm_CMP(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             self.alu_temp = i32::from(bus.read_memory(pc));
             self._Cmp();
@@ -2046,7 +2048,7 @@ impl Mos6502x {
     }
 
     fn Imm_SBC(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             self.alu_temp = i32::from(bus.read_memory(pc));
             self._Sbc();
@@ -2054,7 +2056,7 @@ impl Mos6502x {
     }
 
     fn Imm_AND(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             self.alu_temp = i32::from(bus.read_memory(pc));
             self._And();
@@ -2062,7 +2064,7 @@ impl Mos6502x {
     }
 
     fn Imm_ADC(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             self.alu_temp = i32::from(bus.read_memory(pc));
             self._Adc();
@@ -2070,7 +2072,7 @@ impl Mos6502x {
     }
 
     fn Imm_LDA(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             self.A = bus.read_memory(pc);
             self.NZ_A();
@@ -2078,7 +2080,7 @@ impl Mos6502x {
     }
 
     fn Imm_LDX(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             self.X = bus.read_memory(pc);
             self.NZ_X();
@@ -2086,7 +2088,7 @@ impl Mos6502x {
     }
 
     fn Imm_LDY(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             self.Y = bus.read_memory(pc);
             self.NZ_Y();
@@ -2094,7 +2096,7 @@ impl Mos6502x {
     }
 
     fn Imm_ANE(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             self.alu_temp = i32::from(bus.read_memory(pc));
             self._Ane();
@@ -2102,7 +2104,7 @@ impl Mos6502x {
     }
 
     fn Imm_Unsupported(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             bus.read_memory(pc);
         }
@@ -2151,7 +2153,7 @@ impl Mos6502x {
     }
 
     fn RelBranch_Stage2(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let pc = self.pc_pp();
             self.opcode2 = bus.read_memory(pc);
             if self.branch_taken {
@@ -2165,7 +2167,7 @@ impl Mos6502x {
     }
 
     fn RelBranch_Stage3(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
             self.alu_temp = i32::from(self.PC as u8) + i32::from(self.opcode2 as i8);
             self.PC &= 0xFF00;
@@ -2185,7 +2187,7 @@ impl Mos6502x {
     }
 
     fn RelBranch_Stage4(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
             if bit(self.alu_temp, 31) {
                 self.PC = self.PC.wrapping_sub(0x100);
@@ -2198,13 +2200,13 @@ impl Mos6502x {
     // ------------------------------------------- the stack instructions, misc
 
     fn NOP(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.dummy_read_memory(self.PC);
         }
     }
 
     fn DecS(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.S = self.S.wrapping_sub(1);
             let addr = self.stack_addr();
             bus.dummy_read_memory(addr);
@@ -2212,14 +2214,14 @@ impl Mos6502x {
     }
 
     fn IncS(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let addr = self.pull_addr();
             bus.dummy_read_memory(addr);
         }
     }
 
     fn JSR(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.PC =
                 (u16::from(bus.read_memory(self.PC)) << 8).wrapping_add(u16::from(self.opcode2));
         }
@@ -2237,7 +2239,7 @@ impl Mos6502x {
     }
 
     fn PullA_NoInc(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let addr = self.stack_addr();
             self.A = bus.read_memory(addr);
             self.NZ_A();
@@ -2245,7 +2247,7 @@ impl Mos6502x {
     }
 
     fn PullP(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let addr = self.pull_addr();
             self.P = bus.read_memory(addr);
             self.set_flag_t(true); // force T always to remain true
@@ -2253,7 +2255,7 @@ impl Mos6502x {
     }
 
     fn PullP_NoInc(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             self.my_iflag = self.flag_i();
             let addr = self.stack_addr();
             self.P = bus.read_memory(addr);
@@ -2264,7 +2266,7 @@ impl Mos6502x {
     }
 
     fn PullPCL(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let addr = self.pull_addr();
             self.PC &= 0xFF00;
             self.PC |= u16::from(bus.read_memory(addr));
@@ -2272,7 +2274,7 @@ impl Mos6502x {
     }
 
     fn PullPCH_NoInc(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             let addr = self.stack_addr();
             self.PC &= 0xFF;
             self.PC |= u16::from(bus.read_memory(addr)) << 8;
@@ -2280,7 +2282,7 @@ impl Mos6502x {
     }
 
     fn IncPC(&mut self, bus: &mut impl Mos6502xLink) {
-        if self.rdy_gate() {
+        if rdy_gate(bus) {
             bus.read_memory(self.PC);
             self.PC = self.PC.wrapping_add(1);
         }
@@ -2517,8 +2519,11 @@ impl Mos6502x {
         self.execute_one_retry(bus);
     }
 
-    fn Jam(&mut self) {
-        self.rdy_freeze = true;
+    // `Jam` needs no CPU state at all now that `rdy_freeze` is the machine's, but it stays a
+    // method so that the dispatch arm reads like every other one.
+    #[allow(clippy::unused_self)]
+    fn Jam(&mut self, bus: &mut impl Mos6502xLink) {
+        bus.set_rdy_freeze(true);
     }
 }
 
