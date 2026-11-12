@@ -133,3 +133,27 @@ fn kirby_widens_and_a_game_without_a_hack_does_not() {
     assert!(core.save_ram().len() >= 8192, "Zelda has a battery");
     shot(&core, "zelda");
 }
+
+#[test]
+fn the_demo_makes_sound() {
+    let Some(rom) = demo() else {
+        eprintln!("skipped: no FlappyZaxNes.nes in zax-app/demo");
+        return;
+    };
+    let mut core = Core::load(&rom, "FlappyZaxNes.nes", widescreen(true)).expect("the demo loads");
+    let mut loudest = 0_i32;
+    let mut frames = 0_usize;
+    // The title is silent: the game starts at Start.
+    for frame in 0..600_u32 {
+        core.run(if (300..306).contains(&frame) { 1 << 3 } else { 0 });
+        frames += core.sound().len() / 2;
+        loudest = core
+            .sound()
+            .iter()
+            .fold(loudest, |most, sample| most.max(i32::from(*sample).abs()));
+    }
+    eprintln!("600 frames: {frames} sound frames, loudest {loudest}");
+    // 10 s at 48 kHz, give or take what the APU keeps in its ring.
+    assert!((470_000..=490_000).contains(&frames));
+    assert!(loudest > 1000, "the game makes sound");
+}
