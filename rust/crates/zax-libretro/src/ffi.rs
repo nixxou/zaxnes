@@ -298,12 +298,16 @@ fn read_options(hacks: &[zax_nes::builtin_patches::HackOption]) -> Options {
 }
 
 fn hack_list(core: &Core) -> Vec<zax_nes::builtin_patches::HackOption> {
-    core.hack_options().into_iter().map(|(option, _)| option).collect()
+    core.hack_options()
+        .into_iter()
+        .map(|(option, _)| option)
+        .collect()
 }
 
 fn av_info(core: Option<&Core>) -> SystemAvInfo {
-    let (width, height, max, aspect, fps) =
-        core.map_or((256, 240, (MAX_WIDTH, MAX_HEIGHT), 4.0 / 3.0, 60.098_8), |core| {
+    let (width, height, max, aspect, fps) = core.map_or(
+        (256, 240, (MAX_WIDTH, MAX_HEIGHT), 4.0 / 3.0, 60.098_8),
+        |core| {
             if core.is_three_d() {
                 let (width, height) = core.options().resolution;
                 #[allow(clippy::cast_precision_loss)] // Screen sizes.
@@ -319,7 +323,8 @@ fn av_info(core: Option<&Core>) -> SystemAvInfo {
                     core.frames_per_second(),
                 )
             }
-        });
+        },
+    );
     SystemAvInfo {
         geometry: GameGeometry {
             base_width: width,
@@ -615,9 +620,8 @@ extern "C" fn context_reset() {
     };
     // SAFETY: the frontend's loader, called with NUL-terminated names while its context is
     // current, as glow asks.
-    let gl = unsafe {
-        glow::Context::from_loader_function_cstr(|name| proc_address(name.as_ptr()))
-    };
+    let gl =
+        unsafe { glow::Context::from_loader_function_cstr(|name| proc_address(name.as_ptr())) };
     match SceneRenderer::new(Rc::new(gl), None) {
         Ok(renderer) => {
             GL.with(|gl| *gl.borrow_mut() = Some(Gl { renderer }));
@@ -671,7 +675,10 @@ fn start_three_d(core: &mut Core, name: &str, image: &[u8]) {
     let title = document.profile.title.clone().unwrap_or_default();
     let tiles = document.hash_state().map(|state| state.tiles.clone());
     if let Err(error) = core.start_three_d(&document.profile, tiles, log_line) {
-        log(LOG_ERROR, &format!("{title}: the profile is refused ({error}), 2D"));
+        log(
+            LOG_ERROR,
+            &format!("{title}: the profile is refused ({error}), 2D"),
+        );
         return;
     }
     if request_opengl() {
@@ -692,7 +699,10 @@ pub unsafe extern "C" fn retro_load_game(info: *const GameInfo) -> bool {
         return false;
     };
     if info.data.is_null() {
-        log(LOG_ERROR, "the ROM came without its data (need_fullpath is off)");
+        log(
+            LOG_ERROR,
+            "the ROM came without its data (need_fullpath is off)",
+        );
         return false;
     }
     // SAFETY: `data` is `size` readable bytes for the call.
@@ -702,9 +712,10 @@ pub unsafe extern "C" fn retro_load_game(info: *const GameInfo) -> bool {
     } else {
         // SAFETY: a NUL-terminated path.
         let path = unsafe { CStr::from_ptr(info.path) }.to_string_lossy();
-        std::path::Path::new(path.as_ref())
-            .file_name()
-            .map_or_else(|| "game.nes".to_owned(), |name| name.to_string_lossy().into_owned())
+        std::path::Path::new(path.as_ref()).file_name().map_or_else(
+            || "game.nes".to_owned(),
+            |name| name.to_string_lossy().into_owned(),
+        )
     };
     let mut format = PIXEL_FORMAT_XRGB8888;
     if !environment(ENVIRONMENT_SET_PIXEL_FORMAT, &mut format) {
@@ -749,13 +760,17 @@ fn describe_input() {
             })
         })
         .collect();
-    descriptors.extend(CAMERA.iter().map(|(device, index, id, name)| InputDescriptor {
-        port: 0,
-        device: *device,
-        index: *index,
-        id: *id,
-        description: name.as_ptr(),
-    }));
+    descriptors.extend(
+        CAMERA
+            .iter()
+            .map(|(device, index, id, name)| InputDescriptor {
+                port: 0,
+                device: *device,
+                index: *index,
+                id: *id,
+                description: name.as_ptr(),
+            }),
+    );
     descriptors.push(InputDescriptor {
         port: 0,
         device: 0,

@@ -412,12 +412,17 @@ impl Core {
         matches!(self.nes.region(), NesRegion::Pal | NesRegion::Dendy)
     }
 
-    /// The size every state of this game fits in.
+    /// The size every state of this game fits in: the machine's (the image is not in it: the
+    /// frontend keeps the ROM, and the bound with it covers the state without it), then in 3D
+    /// the scripts' `PData` block.
     #[must_use]
     pub fn state_size(&self) -> usize {
-        // The image is not in the state (the frontend keeps the ROM); the bound with it covers
-        // the state without it.
-        self.nes.max_state_size()
+        let scripts = if self.three_d.is_some() {
+            zax_scripting::persistent::BLOCK_SIZE
+        } else {
+            0
+        };
+        self.nes.max_state_size() + scripts
     }
 
     /// Writes the state into `out`, which is [`Core::state_size`] long; false when it does not
@@ -426,11 +431,23 @@ impl Core {
         let Ok(state) = self.nes.save_state(false) else {
             return false;
         };
-        let Some(head) = out.get_mut(..state.len()) else {
+        let machine = self.nes.max_state_size();
+        if state.len() > machine || out.len() < machine {
             return false;
-        };
-        head.copy_from_slice(&state);
-        out[state.len()..].fill(0);
+        }
+        let (head, tail) = out.split_at_mut(machine);
+        head[..state.len()].copy_from_slice(&state);
+        head[state.len()..].fill(0);
+        tail.fill(0);
+        if let Some(block) = self
+            .three_d
+            .as_ref()
+            .and_then(crate::three_d::ThreeD::persistent_data)
+        {
+            if let Some(room) = tail.get_mut(..block.len()) {
+                room.copy_from_slice(&block);
+            }
+        }
         true
     }
 
@@ -439,6 +456,14 @@ impl Core {
         let region = self.nes.region();
         let loaded = self.nes.try_load_state(data, 0).is_ok();
         self.nes.set_region(region);
+        let machine = self.nes.max_state_size();
+        if let (true, Some(three_d), Some(block)) = (
+            loaded,
+            self.three_d.as_ref(),
+            data.get(machine..machine + zax_scripting::persistent::BLOCK_SIZE),
+        ) {
+            three_d.restore_persistent_data(block);
+        }
         loaded
     }
 

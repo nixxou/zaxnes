@@ -104,7 +104,10 @@ mod tests {
 
     #[test]
     fn a_title_suits_the_roms_that_carry_it() {
-        assert_eq!(rank("Super Mario Bros. 3", "Super Mario Bros. 3 [USA][!!]"), Some(0));
+        assert_eq!(
+            rank("Super Mario Bros. 3", "Super Mario Bros. 3 [USA][!!]"),
+            Some(0)
+        );
         assert_eq!(rank("Kirby", "Kirby's Adventure (USA)"), Some(1));
         assert_eq!(rank("Zelda II", "Metroid (USA)"), None);
     }
@@ -112,7 +115,9 @@ mod tests {
     #[test]
     fn the_demo_finds_its_own_profile() {
         let document = find("FlappyZaxNes.nes", &[], None);
-        assert!(document.is_some_and(|document| !document.profile.permanent_patterns.is_empty()
-            || !document.profile.temporary_patterns.is_empty()));
+        assert!(
+            document.is_some_and(|document| !document.profile.permanent_patterns.is_empty()
+                || !document.profile.temporary_patterns.is_empty())
+        );
     }
 }

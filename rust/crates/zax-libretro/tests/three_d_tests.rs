@@ -57,11 +57,13 @@ fn gpu() -> Option<Gpu> {
 /// Draws the game's 3D and gives the picture as RGBA rows, the top one first.
 fn draw(gpu: &mut Gpu, core: &mut Core) -> Vec<u8> {
     let target = gpu.context.target();
-    let three_d = core.three_d_mut().expect("the game plays in 3D");
+    let Some(three_d) = core.three_d_mut() else {
+        return Vec::new();
+    };
     let (scene, frame) = three_d.scene_and_frame();
-    gpu.renderer
-        .render(&target, scene, &frame)
-        .expect("the frame draws");
+    if gpu.renderer.render(&target, scene, &frame).is_err() {
+        return Vec::new();
+    }
     gpu.context.finish();
     gpu.context.read_pixels()
 }
@@ -95,7 +97,8 @@ fn play(core: &mut Core, frames: u32, input: impl Fn(u32) -> u16) {
 }
 
 fn varied(rgba: &[u8]) -> bool {
-    rgba.chunks_exact(4).any(|pixel| pixel != &rgba[..4])
+    rgba.get(..4)
+        .is_some_and(|first| rgba.chunks_exact(4).any(|pixel| pixel != first))
 }
 
 #[test]
@@ -138,4 +141,19 @@ fn faxanadu_plays_in_3d() {
     let picture = draw(&mut gpu, &mut core);
     assert!(varied(&picture));
     shot(&picture, "3d-faxanadu");
+}
+
+#[test]
+fn a_3d_state_comes_back() {
+    let Some(mut core) = three_d("FlappyZaxNes.nes") else {
+        return;
+    };
+    play(&mut core, 120, |_| 0);
+    let mut state = vec![0; core.state_size()];
+    assert!(core.save_state(&mut state));
+    play(&mut core, 60, |frame| u16::from(frame % 20 < 2));
+    assert!(core.load_state(&state));
+    let mut again = vec![0; core.state_size()];
+    assert!(core.save_state(&mut again));
+    assert_eq!(state, again, "the machine and the scripts' PData as they were");
 }

@@ -139,9 +139,14 @@ impl ThreeD {
             ..
         } = self;
         with_context(scene, nes, zapper_offset, |context| {
-            lend_context(engine, |engine| engine, context, |engine| {
-                engine.convert(&batch, counter);
-            });
+            lend_context(
+                engine,
+                |engine| engine,
+                context,
+                |engine| {
+                    engine.convert(&batch, counter);
+                },
+            );
         });
         self.engine.publish();
         self.sync_settings(nes);
@@ -180,13 +185,28 @@ impl ThreeD {
         if turn != (0.0, 0.0) || zoom != 0.0 {
             let setpoint = camera.current_mut();
             setpoint.angles.y += turn.0 * TURN_SPEED * real_seconds;
-            setpoint.angles.x = (setpoint.angles.x + turn.1 * TURN_SPEED * real_seconds)
-                .clamp(-89.0, 89.0);
+            setpoint.angles.x =
+                (setpoint.angles.x + turn.1 * TURN_SPEED * real_seconds).clamp(-89.0, 89.0);
             let distance = setpoint.distance();
             setpoint.set_distance(distance * (1.0 + zoom * ZOOM_SPEED * real_seconds));
         }
         camera.advance(real_seconds);
         self.scene.real_time += real_seconds;
+    }
+
+    /// The scripts' 64 `PData` values, the block a state carries (REQ-LUA-071).
+    #[must_use]
+    pub fn persistent_data(&self) -> Option<[u8; zax_scripting::persistent::BLOCK_SIZE]> {
+        self.engine
+            .script_host_as::<ProfileScriptRuntime>()
+            .and_then(|runtime| runtime.capture_persistent_data().ok())
+    }
+
+    /// Puts a state's `PData` values back (REQ-LUA-072).
+    pub fn restore_persistent_data(&self, block: &[u8]) {
+        if let Some(runtime) = self.engine.script_host_as::<ProfileScriptRuntime>() {
+            let _ = runtime.restore_persistent_data(block);
+        }
     }
 
     /// The camera back where the profile puts it.
@@ -487,6 +507,7 @@ fn push_settings(model: &SettingsModel, scene: &mut SceneState) {
     scene.settings.custom_background_color = color_of(model, SettingId::SceneCustomBgColor);
     scene.use_nes_background_color = model.get(SettingId::SceneUseNesBgColor).as_bool();
     let direction = model.get(SettingId::LightDirection).as_vector3();
-    scene.light.direction = zax_render::numerics::Vector3::new(direction.x, direction.y, direction.z);
+    scene.light.direction =
+        zax_render::numerics::Vector3::new(direction.x, direction.y, direction.z);
     scene.light.color = color_of(model, SettingId::LightColor);
 }
