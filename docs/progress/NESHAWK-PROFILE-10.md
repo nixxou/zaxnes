@@ -11,7 +11,10 @@ Branch `feat/neshawk-profile`, worktree `cleanroom/wt-bk2`, base `08a881b8` (lot
       8 363 instructions in step to the cycle and no DMA at all, parting on whether the vblank NMI
       displaces the spin loop's `BEQ`. The candidate history named first is **closed three ways**.
 - [ ] 3. **Rounds** — until frame 156 312 or five rounds.
-- [ ] 4. **No regression**, report, final pass.
+- [x] 4. **No regression** on the `Standard` profile (`golden-core` byte-identical, 212/7 and
+      `AccuracyCoin` 128/147 unchanged, both *Faxanadu* dumps at 207 and 220), and the NesHawk
+      profile's costs **exactly as the three items' own notes predicted**. The bench reads +2.32 %
+      and +1.43 %, over the budget and inside the instrument's own same-binary spread; flagged.
 
 ## The environment this lot runs in
 
@@ -229,3 +232,118 @@ IRQ, so neither could have been round 1.
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE-10 step 3/4 done: round 1, no item, four candidates closed by measurement
+
+---
+
+## Step 4 — no regression, the report and the final pass
+
+### The answer first
+
+**The `Standard` profile is untouched, and this time that is provable from the diff and not only
+from the suites.** The whole change against `08a881b8` is three `const ... = false` → `true` inside
+`impl TimingProfile for NesHawkCompat`, their doc comments, a test file and this note — so no
+`Standard` code path exists that did not exist before, and `golden-core` is byte-identical.
+
+**What the three items cost the NesHawk profile is exactly what their own notes predicted**, to the
+ROM and to the line: two public ROMs (`sprdma_and_dmc_dma` and `sprdma_and_dmc_dma_512`), two
+`AccuracyCoin` rows, 45 and 104 *Faxanadu* checksum lines, and 35 742 *Kirby* frames. Nothing was
+discovered in the regression pass that the measurements had not already named.
+
+### The suites, both profiles
+
+| | lot 9 shipped | **this lot** |
+|---|---|---|
+| `golden-core`, 98 originals × 1 200 frames | `8d508070…` | **`8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773`** — byte-identical |
+| `test-roms --profile standard` | 212 pass, 7 fail | **212 / 7** — unchanged |
+| `AccuracyCoin`, standard | 128/147 | **128/147** — unchanged |
+| `test-roms --profile neshawk` | 207 pass, 12 fail | **205 / 14** — the two are `sprdma_and_dmc_dma` and `sprdma_and_dmc_dma_512` |
+| `AccuracyCoin`, neshawk | 121/147 | **119/147** |
+| `ppu_vbl_nmi`, `vbl_nmi_timing` | 11/11, 7/7 both profiles | **11/11, 7/7 on both** — unchanged |
+| `cpu_interrupts_v2` | 6/6 standard | **6/6 standard, 4/6 neshawk** (`cpu_interrupts`, `4-irq_and_dma`) |
+| `apu_test` | 19/19 standard | **19/19 standard, 17/19 neshawk** |
+| the thirty DMC/DMA ROMs, standard | 24 pass, 6 manual | **24 pass, 6 manual** — unchanged |
+| *Kirby* `.bk2`, neshawk | 45 095 | **9 353** |
+| *Faxanadu*, both dumps, standard | 207 and 220 | **207 and 220** — unchanged |
+| *Faxanadu*, both dumps, neshawk | 247 and 314 | **202 and 210** |
+
+**That `ppu_vbl_nmi` is 11/11 on the NesHawk profile is load-bearing for step 2**, not a formality:
+it is the ROM whose passing on NesHawk refuses item 8, and the three items shipped here do not
+touch it.
+
+**The `AccuracyCoin` rows the NesHawk profile fails that `standard` passes**, ten of them, with one
+the other way (`Hybrid Addresses`): `$2002 flag timing`, `Controller Strobing`, `DMA Landing on
+Write`, `DMC DMA + OAM DMA`, `DMC Reload Timing`, `Delta Modulation Channel`, `Frame Counter
+4-step`, `Frame Counter 5-step`, `Implied Dummy Reads`, `Interrupt flag latency`.
+
+### The attribution, each cost against the note that predicted it
+
+| the cost | the note that predicted it, written before this lot ran |
+|---|---|
+| *Faxanadu* 247 → **202** and 314 → **210** | item 13's constant: *"takes Faxanadu `[USA]` from 247 of 832 checksum lines to 202 and the `[Rev 1]` dump from 314 to 210"* — exact |
+| `sprdma_and_dmc_dma`, both ROMs | item 13's constant: *"`Standard`'s phase is the one blargg's `sprdma_and_dmc_dma` measures and passes"* |
+| *Kirby* 45 095 → **9 353** | lot 9 step 3: every changed configuration parts at 9 353, the all-off profile reaching 45 095 *because its two errors cancel* |
+
+### The speed, and it is over the budget on the wall clock
+
+`bench-core`, 600 frames, **six** interleaved rounds — three with the items-off binary first and
+three with the items-on binary first, which is the control the amplitude needed:
+
+| | items off | items on | difference |
+|---|---|---|---|
+| Super Mario Bros. 3, total | 1.2925 ms/frame | 1.3225 | **+2.32 %** |
+| Mega Man 3, total | 0.8692 | 0.8816 | **+1.43 %** |
+| Super Mario Bros. 3, rounds 1-3 / 4-6 | — | — | +3.83 % / **+0.82 %** |
+| Mega Man 3, rounds 1-3 / 4-6 | — | — | +0.32 % / **+2.54 %** |
+
+**Reported as over the +1 % budget, and here is why it is nevertheless layout and not emulation.**
+The order control inverts the ranking — Super Mario Bros. 3 is the worse game off-first and the
+better one on-first, and Mega Man 3 the reverse — and **one binary's own spread over its six rounds
+is as large as the difference**:
+
+| one binary, six rounds | spread |
+|---|---|
+| Super Mario Bros. 3, items off | 1.2825 - 1.3021 = **+1.53 %** |
+| Super Mario Bros. 3, items on | 1.3056 - 1.3571 = **+3.94 %** |
+| Mega Man 3, items off | 0.8608 - 0.8848 = **+2.79 %** |
+| Mega Man 3, items on | 0.8674 - 0.8893 = **+2.52 %** |
+
+So Mega Man 3's +1.43 % is *below* the same-binary floor of +2.79 % on that very game. Against that
+the two deterministic instruments both say nothing changed: the diff adds no `Standard` code, and
+`golden-core` over 98 ROMs × 1 200 frames is byte-identical. What moved is where
+`NesCoreOf<NesHawkCompat>`'s three new arms put `NesCoreOf<Standard>`'s hot code in the binary —
+the effect `docs/review/NESHAWK-PROFILE.md` already records as *"the honest measure of what this
+bench can resolve"*. **The cumulative figure against `428c50e6` is therefore carried forward as lot
+9's −3.0 % and −2.8 %, and this lot's own figure is flagged rather than absorbed**: an owner who
+wants it inside +1 % should ask for a layout round, not a re-measurement.
+
+### The final pass
+
+| | |
+|---|---|
+| `cargo fmt --all --check` | clean |
+| `cargo clippy --workspace --all-targets --release -- -D warnings` | clean |
+| `cargo test --release`, `--exclude zax-app --exclude zax-platform` | **2 500 passed, 0 failed, 88 ignored** over **144** targets — summed per target, not read off the last line (the trap) |
+| the same `-- --ignored`, `-p zax-nes -p zax-harness`, with `ZAXNES_ROMS`, `ZAXNES_TEST_ROMS` and `ZAXNES_PROFILES` | **12 passed, 0 failed** |
+| `neshawk_profile_tests` | **13 passed, 1 ignored**, the three items measured against the shipped profile directly |
+| two pre-existing environment failures, named rather than passed over | `zax-app` and `zax-platform` do not **link** here (`LNK1181: SDL2.lib`), and six ignored `zax-profiles` tests want the real 3dSen installation the clean side may not read. Neither is new and neither touches anything this lot changed |
+| disk at the end | `G:` 31 GB free, `C:` 8 GB |
+
+### What this lot did not do, said plainly
+
+* **It shipped no new item.** Round 1 spent itself closing the candidate every lot since
+  NESHAWK-PROFILE-3 has come back to, and the two candidates the brief named after it — the
+  OAM/DMC interleave (item 13's unmeasured half) and the MMC3 IRQ polling point — are untouched.
+  Neither can act in BizHawk frames 25-27, which carry `dmc=0/0` and no IRQ.
+* **It moved the movie backwards**, 45 095 → 9 353, by the owner's own instruction: the three items
+  are each measured right and 45 095 was two errors cancelling. Every later comparison is against
+  9 353.
+* **It did not re-measure the bench against `428c50e6`**, which would need a second build of that
+  commit; the figure above is against this lot's own parent, which is the comparison that isolates
+  the change.
+* **It left `7 163` unshipped** though it is worth 4 155 byte-identical `step1c` frames, because it
+  has no reading and does not move the wall. The measurement is in step 2 so that no later lot
+  re-takes it.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-10 step 4/4 done: no regression on the standard profile, the three items' costs exactly as predicted
