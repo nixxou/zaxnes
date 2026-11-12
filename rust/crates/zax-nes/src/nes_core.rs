@@ -656,8 +656,13 @@ impl<P: TimingProfile> NesCoreOf<P> {
         // frame 5 of the *Kirby* `.bk2` — the frame the movie's first reset lands in — is 27 392
         // cycles long, exactly as its frame 1 is (`PPU.cs` `Reset()`, which the soft reset calls,
         // sets `ppudead = 1` again).
+        // Item 14 rides on the same call, and only here: a bias at the **power-on** is absorbed
+        // by the post-reset boot's own `$2002` wait, where one applied after it is not. The
+        // shipped value is 0 on both profiles, so this is `run_ppu_start_up_dots(CONST)` as it
+        // was.
         if P::PPU_START_UP_DOTS_SKIPPED > 0 {
-            self.bus.run_ppu_start_up_dots(P::PPU_START_UP_DOTS_SKIPPED);
+            self.bus
+                .run_ppu_start_up_dots(P::PPU_START_UP_DOTS_SKIPPED + P::SOFT_RESET_PPU_DOT_BIAS);
         }
 
         self.cpu.soft_reset(&mut self.bus);

@@ -1102,3 +1102,87 @@ fn the_interrupt_phase_rom_is_written_out_for_bizhawk() {
     std::fs::write(&path, &image).expect("the path is writable");
     println!("  wrote {} bytes to {path}", image.len());
 }
+
+/// **Item 14** — a dot bias on the **soft reset's** start-up run alone, which is the only shape
+/// of PPU/CPU phase this core has that a game cannot put back.
+///
+/// **Shipped at `0` on both profiles**, which is the line this core always had; the measured
+/// NesHawk value is `−1` and it ships off for want of a reading
+/// ([`TimingProfile::SOFT_RESET_PPU_DOT_BIAS`] carries the measurement, the sweep and the three
+/// readings that were tried). This test is **parametric**, not pinned: it reads the two profiles'
+/// own constants and asserts the PPU lands where they say, so the day the item ships the test
+/// follows it instead of failing for the wrong reason.
+#[test]
+fn item_14_the_soft_reset_dot_bias_moves_the_ppu_and_nothing_else_does() {
+    /// How many dots the PPU advances **across** `soft_reset()`, which removes the two cores'
+    /// own positions from the comparison: `run_frame` stops after the instruction that crossed
+    /// the boundary, so the position *before* the reset is quantised differently on the two
+    /// profiles and their absolute dots are not comparable. The advance is.
+    fn dots_across_reset<P: TimingProfile>() -> i64 {
+        use zax_nes::{NesCoreOf, RunFrame as _};
+
+        let mut core = NesCoreOf::<P>::new();
+        assert!(
+            core.load_rom(&minimal_rom(0x01, None, None), "Minimal.nes")
+                .success
+        );
+        core.run_frame(0);
+        core.run_frame(0);
+        let frame = 262 * 341;
+        let at = |core: &NesCoreOf<P>| {
+            let ppu = core.bus().ppu();
+            i64::from(ppu.scanline()) * 341 + i64::from(ppu.dot())
+        };
+        let before = at(&core);
+        core.soft_reset();
+        (at(&core) - before).rem_euclid(frame)
+    }
+
+    let plain = dots_across_reset::<Standard>();
+    let hawk = dots_across_reset::<NesHawkCompat>();
+    println!("  standard {plain}, neshawk {hawk}, apart {}", hawk - plain);
+
+    // The only thing between them is item 10's start-up run and item 14's bias on it: the reset
+    // itself — the PPU's own `soft_reset`, then the CPU's seven reset cycles — is the same work
+    // on both profiles, so it cancels.
+    let predicted = (NesHawkCompat::PPU_START_UP_DOTS_SKIPPED
+        + NesHawkCompat::SOFT_RESET_PPU_DOT_BIAS)
+        - (Standard::PPU_START_UP_DOTS_SKIPPED + Standard::SOFT_RESET_PPU_DOT_BIAS);
+    // **Item 14's own quantity is the sub-cycle dot, and that is what this asserts.** The raw gap
+    // also carries item 12, whose reset lands two CPU cycles elsewhere — six dots — and the
+    // instruction the frame loop stopped after. Both are whole CPU cycles, so they vanish mod 3,
+    // where a one-dot change of item 14 does not. This is the trap
+    // `docs/review/NESHAWK-PROFILE.md` names as "a differential test can be pinning a *different*
+    // item's cycle": the test has to hold item 14 to a condition the other items do not vary.
+    let slack = hawk - plain - predicted;
+    assert_eq!(
+        0,
+        slack.rem_euclid(3),
+        "the two profiles' PPUs are their two constants apart to the CPU cycle; the residue is          item 14's own dot and it must be 0, got a gap of {} against a predicted {predicted}",
+        hawk - plain
+    );
+    assert!(
+        slack.abs() <= 12,
+        "and what is left is the other items' whole cycles, not a dot count: got {slack}"
+    );
+
+    // **The record of the choice.** Item 14 ships OFF, so the site is `run_ppu_start_up_dots` with
+    // the constant it always carried, and the two cores differ by item 10 alone.
+    assert_eq!(
+        0,
+        NesHawkCompat::SOFT_RESET_PPU_DOT_BIAS,
+        "item 14 ships OFF: measured at -1, no reading, and it does not move the wall at 9 353"
+    );
+    assert_eq!(
+        0,
+        Standard::SOFT_RESET_PPU_DOT_BIAS,
+        "and the standard profile never carries it"
+    );
+
+    // The site is nevertheless **live**: item 10's own 7 165 reaches the PPU through it, so a
+    // change to either constant moves this measurement rather than being silently dropped.
+    assert_ne!(
+        plain, hawk,
+        "item 10 still reaches the PPU through the site item 14 rides on"
+    );
+}

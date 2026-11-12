@@ -337,6 +337,22 @@ pub trait TimingProfile: Copy + Clone + Default + core::fmt::Debug + Send + Sync
     /// early. Nothing in the one movie there is exercises that, and the honest fix is a
     /// cycle-stepped CPU, not a constant.
     const RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT: bool;
+
+    /// **Item 14** (lot NESHAWK-PROFILE-11 step 2). PPU dots added to — or, negative, taken off —
+    /// the start-up run of a **soft reset** only, which moves the PPU against the CPU by that many
+    /// dots for the rest of the run. **The shipped value is `0` on both profiles**, which is the
+    /// line this core always had; the measured NesHawk value is **−1** and it ships off for want
+    /// of a reading. See the note on [`NesHawkCompat`]'s value.
+    ///
+    /// It is the one knob of its shape that is **reachable**.
+    /// [`TimingProfile::PPU_START_UP_DOTS_SKIPPED`] is applied at the power-on **and** at the
+    /// soft reset, so every value of it gives an **even** net offset — lot NESHAWK-PROFILE-10's
+    /// finding, re-measured here at 7 164 and 7 166, both of which are *exactly inert*. A bias at
+    /// the **power-on** alone is inert too, over −2 to +3, with −3 (one whole CPU cycle) as the
+    /// live control: the post-reset boot's `$2002` wait re-quantises it, because moving the whole
+    /// PPU moves the dot the flag rises on **and** the dot the loop sees it on. A dot dropped
+    /// **after** that wait moves only the first, and nothing in the game can put it back.
+    const SOFT_RESET_PPU_DOT_BIAS: i64;
 }
 
 /// Zaxnes's own 2A03: the behaviour every lot before NESHAWK-PROFILE measured, and the one every
@@ -363,6 +379,7 @@ impl TimingProfile for Standard {
     const DMC_POWER_ON_TIMER: i32 = 0;
     const OAM_DMA_WAITS_AT_THE_END: bool = false;
     const RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT: bool = false;
+    const SOFT_RESET_PPU_DOT_BIAS: i64 = 0;
 }
 
 /// A 2A03 that makes BizHawk NesHawk's timing choices where they differ from Zaxnes's, so that a
@@ -450,4 +467,34 @@ impl TimingProfile for NesHawkCompat {
     /// own it takes the movie from 45 095 to **4 665**, which is the two-errors-cancelling
     /// arithmetic and not a fault of the item.
     const RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT: bool = true;
+
+    /// Item 14 — **measured at −1 and shipped at `0`, which is item 11's shape exactly: correct
+    /// in isolation is not the same as shippable, and the knowledge is kept rather than deleted.**
+    ///
+    /// **What it is worth.** At −1 the movie's first difference of any kind moves from tree frame
+    /// **14** to tree frame **38**: frames 3 to 37 go in step on *every* event of the ledger where
+    /// the shipped profile parts at 14, and `--ram-ref` over frames 1 100-10 000 goes from 237
+    /// frames identical to the byte to **459**. The sweep is sharply peaked and signed — the
+    /// window is exactly `{-1, -2}`, one cycle-grid position, with `0` parting at frame 14, `+1`
+    /// and `+2` parting at frame **11** and `-3`, `-4`, `-5` parting at frame **8**.
+    ///
+    /// **It costs nothing, and that is structural.** The site is the soft reset, which only a
+    /// movie's RESET column reaches, so every ROM of every suite runs the code it ran before —
+    /// `test-roms --filter nmi --profile neshawk` stays 20 pass / 0 fail with it on. It is also
+    /// the one knob of this shape that `ppu_vbl_nmi` `05-nmi_timing` cannot refuse either way:
+    /// that ROM synchronises on `$2002` and times in CPU cycles, so a **uniform** PPU/CPU phase
+    /// cancels in both of its terms. Every *rule*-shaped candidate for the same dot has been
+    /// refused by it — item 8 by lot NESHAWK-PROFILE-4, and the dot-grained version of the same
+    /// question by step 1 of this lot, which fails six ROMs NesHawk itself passes.
+    ///
+    /// **Why it ships off: there is no reading.** Three were tried and none predicts it.
+    /// `PPU.cs` `Reset()`'s `idleSynch = true` — NesHawk's odd-frame skip left **armed** where
+    /// `Ppu2C02::soft_reset` disarms it — is a real difference and the right size, but its effect
+    /// **alternates** rather than accumulating, and implemented faithfully it leaves the movie
+    /// parting at frame 14. `PPU.run.cs` `NewDeadPPU()` reads `241 * 341 - start_up_offset` =
+    /// 82 177 dots verbatim, which is the shipped 7 165 and not 7 164. And `evenOddDestiny =
+    /// PPUON` is sampled at `ppur.status.cycle == 339` against this core's dot 338, which is one
+    /// dot but only moves anything when a `$2001` write lands on it. **It does not move the wall
+    /// at 9 353 either**, so what it buys is the clock and not the work.
+    const SOFT_RESET_PPU_DOT_BIAS: i64 = 0;
 }
