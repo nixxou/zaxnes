@@ -20,9 +20,15 @@ $ErrorActionPreference = 'Stop'
 $rust = Split-Path -Parent $PSScriptRoot
 $root = Split-Path -Parent $rust
 
+# The FCEUX engine is built in (owner decision, 2026-11-12): the fork `fceux-zax` must have been
+# built (`zax\build-msvc.cmd`) and ZAX_FCEUX_DIR must name its root unless it sits beside an
+# ancestor of this folder. Its sources ship in the package (GPL), as fceux-zax-source.zip.
+$fceux = $env:ZAX_FCEUX_DIR
+if (-not $fceux) { throw 'package: set ZAX_FCEUX_DIR to the root of the fceux-zax fork (built with zax\build-msvc.cmd)' }
+
 Push-Location $rust
 try {
-    cargo build --release -p zax-app --features bundled,shaders
+    cargo build --release -p zax-app --features bundled,shaders,fceux-core
     if ($LASTEXITCODE -ne 0) { throw "package: cargo build failed ($LASTEXITCODE)" }
     # The harness of the editor mode (the editor folder's AGENT.md): renders from any angle
     # without the window, lists a profile's patterns.
@@ -46,6 +52,9 @@ Copy-Item (Join-Path $rust 'target\release\zax-harness.exe') (Join-Path $Output 
 foreach ($document in 'LICENSE', 'HOWTO-RUN.md', 'ASSETS-LICENSES.md', 'THIRD-PARTY-NOTICES.md') {
     Copy-Item (Join-Path $root $document) (Join-Path $Output $document) -Force
 }
+# GPL: the corresponding source of the FCEUX fork linked into zaxnes.exe, at the commit built.
+git -C $fceux archive --format=zip --prefix=fceux-zax/ -o (Join-Path $Output 'fceux-zax-source.zip') HEAD
+if ($LASTEXITCODE -ne 0) { throw "package: git archive of the FCEUX fork failed ($LASTEXITCODE)" }
 
 # AMD-033 §3: an empty profiles folder next to zaxnes.exe, with a line saying what to put in it.
 # It is the second folder the library scans, in every mode, and it is only ever read.
@@ -91,7 +100,9 @@ Documentation : HOWTO-RUN.md (en français) — menus, raccourcis, options, empl
 sauvegarde et ligne de commande complète.
 
 Licence : GNU GPL v3, fichier LICENSE. Le code tiers et les paquets utilisés sont listés
-dans THIRD-PARTY-NOTICES.md, les assets dans ASSETS-LICENSES.md.
+dans THIRD-PARTY-NOTICES.md, les assets dans ASSETS-LICENSES.md. Le moteur FCEUX (option
+« Moteur d'émulation » de chaque jeu) est un fork de FCEUX sous GPL v2 ; ses sources sont
+dans fceux-zax-source.zip.
 
 Vérification non interactive :
 
@@ -104,7 +115,7 @@ Set-Content -Path (Join-Path $Output 'README.txt') -Value $readme -Encoding utf8
 # The folder ships the executable, the documents and profiles\README.txt, and nothing else
 # (portable.txt is added after these checks).
 $expected = @('zaxnes.exe', 'zax-harness.exe', 'LICENSE', 'HOWTO-RUN.md', 'ASSETS-LICENSES.md',
-    'THIRD-PARTY-NOTICES.md', 'README.txt', 'profiles\README.txt')
+    'THIRD-PARTY-NOTICES.md', 'README.txt', 'profiles\README.txt', 'fceux-zax-source.zip')
 $shipped = @(Get-ChildItem -Recurse -File $Output | ForEach-Object {
         $_.FullName.Substring($Output.Length + 1)
     })

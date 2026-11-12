@@ -26,8 +26,13 @@ out_dir="$target_dir/package"
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$rust_dir/Cargo.toml" | head -n 1)"
 
 export SDL2_TOOLCHAIN="${SDL2_TOOLCHAIN:-$script_dir/x86_64-sdl2-zig.cmake}"
-(cd "$rust_dir" && cargo zigbuild --locked --release -p zax-app --features firmware-sdl,shaders \
-    --target "$target.$glibc")
+# The FCEUX engine is built in (owner decision, 2026-11-12), from the fork built with zig for the
+# same glibc (`sh zax/build-linux-zig.sh` in the fork). ZAX_FCEUX_DIR names the fork's root; its
+# sources ship in the package (GPL), as fceux-zax-source.zip.
+: "${ZAX_FCEUX_DIR:?set ZAX_FCEUX_DIR to the root of the fceux-zax fork}"
+export ZAX_FCEUX_LIB="${ZAX_FCEUX_LIB:-$ZAX_FCEUX_DIR/build-linux-zig}"
+(cd "$rust_dir" && cargo zigbuild --locked --release -p zax-app \
+    --features firmware-sdl,shaders,fceux-core --target "$target.$glibc")
 # The harness of the editor mode (the editor folder's AGENT.md): renders from any angle without
 # the window, lists a profile's patterns.
 (cd "$rust_dir" && cargo zigbuild --locked --release -p zax-harness --target "$target.$glibc")
@@ -61,6 +66,8 @@ install -m 755 "$binary" "$dir/zaxnes"
 install -m 755 "$harness" "$dir/zax-harness"
 install -m 644 "$root_dir/LICENSE" "$root_dir/THIRD-PARTY-NOTICES.md" "$root_dir/ASSETS-LICENSES.md" \
     "$root_dir/HOWTO-RUN.md" "$dir/"
+# GPL: the corresponding source of the FCEUX fork linked into zaxnes, at the commit built.
+git -C "$ZAX_FCEUX_DIR" archive --format=zip --prefix=fceux-zax/ -o "$dir/fceux-zax-source.zip" HEAD
 printf '%s\n' "Déposez ici vos profils .3dn ; ils sont chargés au démarrage. Aucun profil n'est fourni." \
     > "$dir/profiles/README.txt"
 cat > "$dir/README.txt" <<EOF
@@ -78,7 +85,7 @@ EOF
 
 # The package holds the binary, the documents and profiles/README.txt, and nothing else.
 shipped="$(cd "$dir" && find . -type f | sort | tr '\n' ' ')"
-expected="./ASSETS-LICENSES.md ./HOWTO-RUN.md ./LICENSE ./README.txt ./THIRD-PARTY-NOTICES.md ./profiles/README.txt ./zax-harness ./zaxnes "
+expected="./ASSETS-LICENSES.md ./HOWTO-RUN.md ./LICENSE ./README.txt ./THIRD-PARTY-NOTICES.md ./fceux-zax-source.zip ./profiles/README.txt ./zax-harness ./zaxnes "
 if [[ "$shipped" != "$expected" ]]; then
     echo "error: unexpected package contents: $shipped" >&2
     exit 1
