@@ -1,0 +1,161 @@
+//! The core options `RetroArch` shows (the libretro "variables"): their keys, their choices, and
+//! how their values make [`Options`]. The first choice of each is its default.
+
+use zax_nes::builtin_patches::HackOption;
+use zax_nes::ppu::SpriteLimit;
+use zax_nes::NesRegion;
+
+use crate::core::{Options, RegionChoice};
+
+const WIDESCREEN: &str = "zaxnes_widescreen";
+const RATIO: &str = "zaxnes_widescreen_ratio";
+const ADVANCED: &str = "zaxnes_widescreen_advanced";
+const REGION: &str = "zaxnes_region";
+const SPRITE_LIMIT: &str = "zaxnes_sprite_limit";
+const PALETTE: &str = "zaxnes_palette";
+/// The prefix of the options of the game's hack: the option's own key follows.
+const HACK: &str = "zaxnes_hack_";
+
+const RATIOS: [(&str, f32); 4] = [
+    ("16:9", 16.0 / 9.0),
+    ("16:10", 16.0 / 10.0),
+    ("3:2", 3.0 / 2.0),
+    ("21:9", 21.0 / 9.0),
+];
+
+/// The palettes, by their index in `zax_engine3d::palette`.
+const PALETTES: [&str; 11] = [
+    "Zaxnes",
+    "Mesen",
+    "FCEUX",
+    "Nestopia YUV",
+    "Nestopia RGB",
+    "Smooth FBX",
+    "NES Classic FBX",
+    "Composite Direct FBX",
+    "PVM Style FBX",
+    "Sony CXA2025AS",
+    "Wavebeam",
+];
+
+/// The options to declare, as key and `"Description; choice|choice"`, the game's hack options
+/// (`hacks`, each with its default) after the others.
+#[must_use]
+pub fn declarations(hacks: &[HackOption]) -> Vec<(String, String)> {
+    let mut list = vec![
+        (
+            WIDESCREEN.to_owned(),
+            "Widescreen (games with a widescreen hack); enabled|disabled".to_owned(),
+        ),
+        (
+            RATIO.to_owned(),
+            format!(
+                "Widescreen ratio; {}",
+                RATIOS.map(|(name, _)| name).join("|")
+            ),
+        ),
+        (
+            ADVANCED.to_owned(),
+            "Widescreen advanced mode; enabled|disabled".to_owned(),
+        ),
+        (REGION.to_owned(), "Region; Auto|NTSC|PAL|Dendy".to_owned()),
+        (
+            SPRITE_LIMIT.to_owned(),
+            "Sprite limit; 8 per line|Removed|Smart".to_owned(),
+        ),
+        (
+            PALETTE.to_owned(),
+            format!("Palette; {}", PALETTES.join("|")),
+        ),
+    ];
+    for option in hacks {
+        let choices = if option.default {
+            "enabled|disabled"
+        } else {
+            "disabled|enabled"
+        };
+        list.push((
+            format!("{HACK}{}", option.key),
+            format!("Hack: {}; {choices}", option.label),
+        ));
+    }
+    list
+}
+
+/// The options the values give: `value` answers a key with its value, none when the frontend
+/// has none; `hacks` are the game's hack options.
+#[must_use]
+pub fn read(value: &dyn Fn(&str) -> Option<String>, hacks: &[HackOption]) -> Options {
+    let defaults = Options::default();
+    let enabled = |key: &str, default: bool| value(key).map_or(default, |text| text == "enabled");
+    Options {
+        widescreen: enabled(WIDESCREEN, defaults.widescreen),
+        ratio: value(RATIO)
+            .and_then(|text| RATIOS.iter().find(|(name, _)| *name == text))
+            .map_or(defaults.ratio, |(_, ratio)| *ratio),
+        advanced: enabled(ADVANCED, defaults.advanced),
+        region: match value(REGION).as_deref() {
+            Some("NTSC") => RegionChoice::Forced(NesRegion::Ntsc),
+            Some("PAL") => RegionChoice::Forced(NesRegion::Pal),
+            Some("Dendy") => RegionChoice::Forced(NesRegion::Dendy),
+            _ => RegionChoice::Auto,
+        },
+        sprite_limit: match value(SPRITE_LIMIT).as_deref() {
+            Some("Removed") => SpriteLimit::Removed,
+            Some("Smart") => SpriteLimit::Smart,
+            _ => SpriteLimit::Kept,
+        },
+        palette: value(PALETTE)
+            .and_then(|text| PALETTES.iter().position(|name| *name == text))
+            .and_then(|index| u8::try_from(index).ok())
+            .unwrap_or(0),
+        hacks: hacks
+            .iter()
+            .map(|option| {
+                let key = format!("{HACK}{}", option.key);
+                (option.key.to_owned(), enabled(&key, option.default))
+            })
+            .collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const OPTION: HackOption = HackOption {
+        key: "invincible",
+        label: "Invincible",
+        label_fr: "Invincible",
+        bit: 8,
+        default: false,
+    };
+
+    #[test]
+    fn the_first_choice_is_the_default_and_values_come_back() {
+        let list = declarations(&[OPTION]);
+        assert!(list.iter().any(|(key, text)| key == "zaxnes_hack_invincible"
+            && text == "Hack: Invincible; disabled|enabled"));
+        let none = read(&|_| None, &[OPTION]);
+        assert_eq!(none, Options {
+            hacks: vec![("invincible".to_owned(), false)],
+            ..Options::default()
+        });
+        let set = read(
+            &|key| match key {
+                "zaxnes_widescreen" => Some("disabled".to_owned()),
+                "zaxnes_widescreen_ratio" => Some("21:9".to_owned()),
+                "zaxnes_region" => Some("PAL".to_owned()),
+                "zaxnes_palette" => Some("Mesen".to_owned()),
+                "zaxnes_hack_invincible" => Some("enabled".to_owned()),
+                _ => None,
+            },
+            &[OPTION],
+        );
+        assert!(!set.widescreen);
+        assert!((set.ratio - 21.0 / 9.0).abs() < 1e-6);
+        assert_eq!(set.region, RegionChoice::Forced(NesRegion::Pal));
+        assert_eq!(set.palette, 1);
+        assert_eq!(set.hacks, vec![("invincible".to_owned(), true)]);
+    }
+}

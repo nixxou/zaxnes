@@ -2862,6 +2862,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "zax-libretro"
+version = "0.5.0"
+dependencies = [
+ "zax-engine3d",
+ "zax-nes",
+]
+
+[[package]]
 name = "zax-nes"
 version = "0.5.0"
 dependencies = [
