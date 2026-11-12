@@ -322,13 +322,14 @@ impl Core {
         new
     }
 
-    /// The width over the height of the picture as shown: the NES's 4:3 for 256 x 240, widened
-    /// by the margins.
+    /// The width over the height of the picture as shown: square pixels, as the application
+    /// draws its 2D picture (`Scene::picture_aspect`), which is what the widescreen ratios are
+    /// computed for (16:9 is 427 x 240, 432 in whole tiles).
     #[must_use]
     pub fn aspect_ratio(&self) -> f32 {
         let (width, height) = self.picture_size();
         #[allow(clippy::cast_precision_loss)] // Small sizes.
-        let ratio = (4.0 / 3.0) * (width as f32 / 256.0) / (height as f32 / 240.0);
+        let ratio = width as f32 / height as f32;
         ratio
     }
 

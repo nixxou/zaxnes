@@ -200,8 +200,10 @@ fn declare_options(hacks: &[zax_nes::builtin_patches::HackOption]) {
         key: std::ptr::null(),
         value: std::ptr::null(),
     });
-    let mut first = variables.as_mut_ptr();
-    environment(ENVIRONMENT_SET_VARIABLES, &mut first);
+    // The data is the array itself, ended by a null entry (`const struct retro_variable *`).
+    if let Some(first) = variables.first_mut() {
+        environment(ENVIRONMENT_SET_VARIABLES, first);
+    }
 }
 
 fn read_options(hacks: &[zax_nes::builtin_patches::HackOption]) -> Options {
@@ -521,8 +523,10 @@ fn describe_input() {
         id: 0,
         description: std::ptr::null(),
     });
-    let mut first = descriptors.as_mut_ptr();
-    environment(ENVIRONMENT_SET_INPUT_DESCRIPTORS, &mut first);
+    // The array itself, ended by a null description.
+    if let Some(first) = descriptors.first_mut() {
+        environment(ENVIRONMENT_SET_INPUT_DESCRIPTORS, first);
+    }
 }
 
 #[no_mangle]
