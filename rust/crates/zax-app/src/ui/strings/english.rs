@@ -504,6 +504,12 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.tv_mode", "Video region"),
     ("setting.emu.core", "Emulation core"),
     ("setting.emu.engine", "Emulation engine (this game)"),
+    ("setting.emu.cartridge_db", "Cartridge database"),
+    ("setting.emu.power_on_ram", "Work RAM at power-on"),
+    ("option.Zeros", "Zeros"),
+    ("option.FCEUX pattern", "FCEUX pattern"),
+    ("option.All $FF", "All $FF"),
+    ("option.Random", "Random"),
     ("setting.emu.catch_up", "Catch-up when late (frames)"),
     // AMD-041 §3: the title and the four values of the Run-ahead list.
     ("setting.emu.run_ahead", "Run-ahead"),
@@ -1139,6 +1145,14 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
          single core, so the value is taken modulo 1: anything written here reads back as 0 and \
          nothing uses it. The row is kept because the key is part of the settings file and of the \
          script surface (Setting.Core). Default: 0.",
+    ),
+    (
+        "detail.emu.cartridge_db",
+        "Completes what an old iNES header cannot say about a cartridge, from a database of          about 10 000 dumps: the chip revision (an MMC3A or an MMC1A, say), the submapper, the          real save RAM, the battery, the region. It never changes the mapper number and never          touches a NES 2.0 header. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.power_on_ram",
+        "What the console's 2 KiB of work RAM hold when it is switched on. A real NES starts with          whatever its memory settled to; most games clear it first, a few read it before. Zeros          is Zaxnes's default; the FCEUX pattern (00 00 00 00 FF FF FF FF) is what FCEUX and          BizHawk use, and what a few games need; Random changes at every power-on. Takes effect          at the next load. Default: Zeros.",
     ),
     (
         "detail.emu.engine",

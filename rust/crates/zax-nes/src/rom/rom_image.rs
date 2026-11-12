@@ -120,6 +120,14 @@ impl RomImage {
         Some(note)
     }
 
+    /// Takes the header the cartridge database gives for this dump (lot CARTDB): the same PRG
+    /// and CHR sizes — `cartdb::corrected_header` refuses an entry whose sizes differ — so the
+    /// banks already split stay where they are, and only what the iNES 1.0 header could not say
+    /// changes before [`crate::cartridges::Cartridge::create`] reads it.
+    pub(crate) fn take_database_header(&mut self, header: InesHeader) {
+        self.header = header;
+    }
+
     /// The parsed header.
     #[must_use]
     pub const fn header(&self) -> &InesHeader {

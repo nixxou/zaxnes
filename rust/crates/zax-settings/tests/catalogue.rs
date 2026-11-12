@@ -80,7 +80,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
     // (Q-153 §2). audio.classic_output: AUDIO-2's fallback to the output of v0.4.2.
     // emu.engine: the per-game engine choice of lot FCEUX-23 step 5 (`docs/review/FCEUX-ENGINE.md`
     // §4), which only a build with the `fceux-core` feature offers but every build carries the key
-    // of, so a `games.json` crosses between them.
+    // of, so a `games.json` crosses between them. emu.cartridge_db and emu.power_on_ram: lot CARTDB.
     assert_eq!(
         additions,
         [
@@ -95,6 +95,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "audio.latency_ms",
             "audio.mute",
             "emu.builtin_patches",
+            "emu.cartridge_db",
             "emu.catch_up",
             "emu.catch_up_last_3d",
             "emu.engine",
@@ -105,6 +106,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "emu.lua_smooth_gc",
             "emu.pause_3d_in_2d",
             "emu.pipeline",
+            "emu.power_on_ram",
             "emu.smooth_scroll_ahead",
             "emu.smooth_scroll_view",
             "input.touch_extra",

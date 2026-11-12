@@ -5,6 +5,7 @@
 pub mod bench_core;
 // `.bk2` (BizHawk) movies, read into `movie_file`'s own type (lot EVAL-SYNC step 4).
 pub mod bk2;
+pub mod cartdb_survey;
 pub mod classify;
 pub mod compare;
 mod error;

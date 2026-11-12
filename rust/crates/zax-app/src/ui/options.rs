@@ -302,6 +302,9 @@ const EMULATION: &[LayoutEntry] = &[
     // Lot FCEUX-23 step 5: the per-game engine. `is_shown` drops it off a build without the
     // `fceux-core` feature, as it drops the graphics API off a build without `wgpu`.
     LayoutEntry::Row(SettingId::EmuEngine),
+    // Lot CARTDB: the cartridge database and the power-on RAM.
+    LayoutEntry::Row(SettingId::EmuCartridgeDb),
+    LayoutEntry::Row(SettingId::EmuPowerOnRam),
 ];
 
 /// The rows of the **Interface** tab, from the most common to the most advanced.

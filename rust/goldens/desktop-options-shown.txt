@@ -21,6 +21,7 @@ audio.latency_ms
 audio.volume
 camera.fov
 emu.auto_tv_mode
+emu.cartridge_db
 emu.catch_up
 emu.catch_up_last_3d
 emu.core
@@ -31,6 +32,7 @@ emu.lua_optimized
 emu.lua_smooth_gc
 emu.pause_3d_in_2d
 emu.pipeline
+emu.power_on_ram
 emu.run_ahead
 emu.smooth_scroll_ahead
 emu.smooth_scroll_view

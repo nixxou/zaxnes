@@ -791,6 +791,21 @@ impl EngineHandle {
         }
     }
 
+    /// Whether the cartridge database corrects iNES 1.0 headers at the next load (lot CARTDB);
+    /// ignored on another engine, which reads headers its own way.
+    pub fn set_cartridge_db(&mut self, enabled: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_cartridge_db(enabled);
+        }
+    }
+
+    /// What the work RAM holds at the next power-on (lot CARTDB); likewise.
+    pub fn set_power_on_ram(&mut self, pattern: zax_nes::PowerOnRam) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_power_on_ram(pattern);
+        }
+    }
+
     /// Whether the advanced widescreen patches apply too; likewise.
     pub fn set_advanced_patches(&mut self, enabled: bool) {
         if let Some(core) = self.zaxnes_mut() {

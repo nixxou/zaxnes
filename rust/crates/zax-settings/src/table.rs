@@ -1050,6 +1050,7 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
     video_overscan(out);
     video_nes_palette(out);
     emulation_engine(out);
+    emulation_cartridge(out);
     out.push(
         SettingDescriptor::new(
             SettingId::EmuCore,
@@ -1101,6 +1102,42 @@ fn emulation_engine(out: &mut Vec<SettingDescriptor>) {
             opt(3, "NesHawk"),
         ]))
         .with_label("Emulation engine"),
+    );
+}
+
+/// Lot CARTDB (Rust-only): the cartridge database and the power-on RAM, both read at the next
+/// ROM load. The database is on by default — it only completes iNES 1.0 headers it knows, never
+/// changes a mapper number and never touches a NES 2.0 header; the RAM keeps REQ-CORE-004's zeros
+/// by default.
+fn emulation_cartridge(out: &mut Vec<SettingDescriptor>) {
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuCartridgeDb,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Cartridge database"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuPowerOnRam,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Zeros"),
+            opt(1, "FCEUX pattern"),
+            opt(2, "All $FF"),
+            opt(3, "Random"),
+        ]))
+        .with_label("Power-on RAM"),
     );
 }
 

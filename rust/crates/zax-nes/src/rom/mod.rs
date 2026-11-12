@@ -1,5 +1,6 @@
 //! The iNES / NES 2.0 loader (port of `src/Zax.Nes/Rom`).
 
+pub mod cartdb;
 mod ines_header;
 mod region_exceptions;
 mod rom_image;

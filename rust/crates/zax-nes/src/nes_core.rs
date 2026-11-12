@@ -42,6 +42,11 @@ pub struct NesCore {
     builtin_patch: Option<&'static str>,
     /// Whether the built-in patches apply at all (on by default).
     builtin_patches_enabled: bool,
+    /// Whether the cartridge database corrects iNES 1.0 headers at load (lot CARTDB).
+    cartridge_db: bool,
+    /// What the 2 KiB of work RAM hold at power-on (lot CARTDB step 2); zeros by default, as
+    /// REQ-CORE-004 has it.
+    power_on_ram: crate::PowerOnRam,
     advanced_patches_enabled: bool,
     /// The built-in patch applied to a ROM none is made for (Rust-only, owner request: forced).
     forced_patch: Option<&'static crate::builtin_patches::BuiltinPatch>,
@@ -132,6 +137,8 @@ impl NesCore {
             original_image: None,
             builtin_patch: None,
             builtin_patches_enabled: true,
+            cartridge_db: true,
+            power_on_ram: crate::PowerOnRam::Zero,
             advanced_patches_enabled: false,
             forced_patch: None,
             rom_crc: None,
@@ -165,6 +172,21 @@ impl NesCore {
     pub fn set_builtin_patches(&mut self, enabled: bool) {
         self.builtin_patches_enabled = enabled;
         self.refresh_patch_cache();
+    }
+
+    /// Turns the cartridge database on or off for the next [`NesCore::load_rom`] (lot CARTDB):
+    /// on, an iNES 1.0 header the database knows is replaced by the NES 2.0 header the dump
+    /// should have carried; off, every header is read as the file has it.
+    pub fn set_cartridge_db(&mut self, enabled: bool) {
+        self.cartridge_db = enabled;
+    }
+
+    /// What the work RAM holds at the next power-on (lot CARTDB step 2). A real console's RAM
+    /// starts with whatever its cells settled to; a few games read it before writing it, and
+    /// FCEUX and NesHawk fill it with `00 00 00 00 FF FF FF FF` for that reason (NesHawk's
+    /// `NES.Core.cs` names *Cybernoid*, *Minna no Taabou* and *Huang Di*). Zeros by default.
+    pub fn set_power_on_ram(&mut self, pattern: crate::PowerOnRam) {
+        self.power_on_ram = pattern;
     }
 
     /// Whether the built-in patches and the advanced ones are on for the next load, as
@@ -443,6 +465,22 @@ impl NesCore {
         #[cfg(not(feature = "board-vs-system"))]
         let note: Option<String> = None;
 
+        // Lot CARTDB: what an iNES 1.0 header cannot say (the chip revision, the submapper, the
+        // RAM, the battery, the region), from the cartridge database, before the board is built
+        // from the header. A NES 2.0 header is never touched.
+        let note = if self.cartridge_db {
+            match crate::rom::cartdb::corrected_header(rom.header(), crc) {
+                Some(correction) => {
+                    rom.take_database_header(correction.header);
+                    let fixed = format!("cartridge database: {}", correction.changes.join("; "));
+                    Some(note.map_or(fixed.clone(), |note| format!("{note}; {fixed}")))
+                }
+                None => note,
+            }
+        } else {
+            note
+        };
+
         let cartridge = match Cartridge::create(rom) {
             Ok(cartridge) => cartridge,
             Err(error) => {
@@ -654,6 +692,10 @@ impl NesCore {
         self.apply_region();
 
         self.bus.reset();
+        // The bus's power-on zeroed the work RAM; any other pattern goes over it.
+        if self.power_on_ram != crate::PowerOnRam::Zero {
+            self.power_on_ram.fill(self.bus.ram_mut());
+        }
         self.bus.ppu_mut().reset();
         self.boot_patch_window(self.builtin_patch);
         self.boot_pack_zone();

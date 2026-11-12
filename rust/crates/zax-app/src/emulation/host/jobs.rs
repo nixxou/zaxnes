@@ -519,8 +519,24 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let builtin_patches = self.builtin_patches_wanted();
                 let advanced = self.advanced_patches_wanted();
                 let forced = self.forced_patch();
+                let cartridge_db = self.settings.get(SettingId::EmuCartridgeDb).as_bool();
+                let power_on_ram = match self.settings.get(SettingId::EmuPowerOnRam).as_int() {
+                    1 => zax_nes::PowerOnRam::Pattern,
+                    2 => zax_nes::PowerOnRam::Ff,
+                    3 => zax_nes::PowerOnRam::Random(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(1, |elapsed| {
+                                u64::try_from(elapsed.as_nanos() & u128::from(u64::MAX))
+                                    .unwrap_or(1)
+                            }),
+                    ),
+                    _ => zax_nes::PowerOnRam::Zero,
+                };
                 let result = match self.session.as_mut() {
                     Some(session) => {
+                        session.core_mut().set_cartridge_db(cartridge_db);
+                        session.core_mut().set_power_on_ram(power_on_ram);
                         session.core_mut().set_builtin_patches(builtin_patches);
                         session.core_mut().set_advanced_patches(advanced);
                         session.core_mut().set_forced_patch(forced);

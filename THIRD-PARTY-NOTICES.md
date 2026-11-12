@@ -24,6 +24,11 @@ leur audio d'extension (`rust/crates/zax-nes/src/apu`) sont **adaptées de Mesen
 (<https://github.com/SourMesen/Mesen2>, dépôt local `third_party/mesen2`, commit `b9fa69d`),
 publié sous GNU GPL v3 :
 
+- la **base de cartouches** (`rust/crates/zax-nes/data/cartdb.csv`), générée par
+  `rust/tools/cartdb_from_mesen.py` à partir de `MesenNesDB.txt` de Mesen (édition MesenCE 2.2.1),
+  elle-même construite par Mesen à partir de la base d'en-têtes NES 2.0 de NewRisingSun, de
+  NesCartDB (BootGod) et de la base de Nestopia UE ; seuls les champs dont le chargeur a besoin
+  sont gardés (lot CARTDB) ;
 - le choix du jeu de registres CHR du MMC5 (`mmc5.rs`, `chr_address`), repris de l'expression
   `chrA` de `Core/NES/Mappers/Nintendo/MMC5.h` ;
 - l'heuristique de décodage des lignes d'adresse des VRC2/VRC4 quand le sous-mappeur NES 2.0 est

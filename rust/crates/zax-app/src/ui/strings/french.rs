@@ -516,6 +516,12 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.tv_mode", "Région vidéo"),
     ("setting.emu.core", "Cœur d'émulation"),
     ("setting.emu.engine", "Moteur d'émulation (ce jeu)"),
+    ("setting.emu.cartridge_db", "Base de cartouches"),
+    ("setting.emu.power_on_ram", "RAM à l'allumage"),
+    ("option.Zeros", "Zéros"),
+    ("option.FCEUX pattern", "Motif FCEUX"),
+    ("option.All $FF", "Tout à $FF"),
+    ("option.Random", "Aléatoire"),
     ("setting.audio.volume", "Volume général"),
     ("setting.audio.bg_music", "Musique de menu"),
     ("setting.audio.mute", "Muet"),
@@ -1113,6 +1119,14 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
          n'en a qu'un, si bien que la valeur est prise modulo 1 : tout ce qu'on écrit ici se relit \
          comme 0 et rien ne s'en sert. La ligne est conservée parce que la clé fait partie du \
          fichier de réglages et de la surface de script (Setting.Core). Par défaut : 0.",
+    ),
+    (
+        "detail.emu.cartridge_db",
+        "Complète ce qu'un ancien en-tête iNES ne peut pas dire d'une cartouche, d'après une base          d'environ 10 000 dumps : la révision de la puce (une MMC3A ou une MMC1A, par exemple), le          sous-mappeur, la vraie RAM de sauvegarde, la pile, la région. Elle ne change jamais le          numéro de mappeur et ne touche jamais un en-tête NES 2.0. Prend effet au prochain          chargement. Par défaut : activée.",
+    ),
+    (
+        "detail.emu.power_on_ram",
+        "Le contenu des 2 Kio de RAM de travail de la console à l'allumage. Une vraie NES démarre          avec ce que sa mémoire contient au hasard ; la plupart des jeux l'effacent d'abord,          quelques-uns la lisent avant. Zéros est le choix par défaut de Zaxnes ; le motif FCEUX          (00 00 00 00 FF FF FF FF) est celui de FCEUX et de BizHawk, dont quelques jeux ont          besoin ; Aléatoire change à chaque allumage. Prend effet au prochain chargement. Par          défaut : Zéros.",
     ),
     (
         "detail.emu.engine",

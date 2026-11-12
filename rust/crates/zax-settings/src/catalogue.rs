@@ -141,6 +141,10 @@ setting_ids! {
     // carrying it loads and saves without error; a build without the `fceux-core` feature has
     // only one engine, does not show the row and ignores the value.
     EmuEngine => "emu.engine",
+    // Lot CARTDB (Rust-only): the cartridge database that corrects iNES 1.0 headers at load, and
+    // what the work RAM holds at power-on.
+    EmuCartridgeDb => "emu.cartridge_db",
+    EmuPowerOnRam => "emu.power_on_ram",
     EmuCatchUp => "emu.catch_up",
     // AMD-041 REQ-LOOP-064, exposed as `RunAheadFrames` (AMD-040 REQ-LUA-114).
     EmuRunAhead => "emu.run_ahead",
