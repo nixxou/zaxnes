@@ -9,8 +9,16 @@ use zax_nes::{NesCore, NesRegion, RegionTiming};
 
 /// The sample rate the core makes its sound at.
 pub const SAMPLE_RATE: i32 = 48_000;
-/// The widest picture: the NES's 256 pixels and the widest margins on each side.
-pub const MAX_WIDTH: u32 = 256 + 2 * zax_nes::wide::MAX_MARGIN.unsigned_abs();
+/// The bytes at the end of a state for the 120 Hz scrolling: whether the picture between two
+/// frames is owed, and its shift.
+const HALF_BYTES: usize = 5;
+
+/// How many pixels the picture has for each NES pixel across with the 120 Hz scrolling on, so
+/// that the playfield slides by quarters of a pixel.
+pub const SMOOTH_SCALE: u32 = 4;
+/// The widest picture: the NES's 256 pixels and the widest margins on each side, at the scale
+/// of the 120 Hz scrolling.
+pub const MAX_WIDTH: u32 = (256 + 2 * zax_nes::wide::MAX_MARGIN.unsigned_abs()) * SMOOTH_SCALE;
 /// The tallest picture: 240 lines and the tallest margins above and below.
 pub const MAX_HEIGHT: u32 = 240 + 2 * zax_nes::wide::MAX_VERTICAL_MARGIN.unsigned_abs();
 
@@ -63,6 +71,13 @@ pub struct Options {
     /// The widescreen hack of another version of the game forced on a ROM it is not made for
     /// (at the next load).
     pub force_patch: bool,
+    /// The 2D at twice the game's frame rate, for a display at 120 Hz: between two frames the
+    /// playfield is drawn half way along the camera's motion (the application's experimental
+    /// smooth scrolling: the camera a game's hack reports, its `smooth_scroll` aid).
+    pub smooth_120: bool,
+    /// With `smooth_120`, the motion of any game found by running a frame ahead
+    /// (`emu.smooth_scroll_ahead`), when its hack does not report its camera.
+    pub smooth_ahead: bool,
 }
 
 impl Default for Options {
@@ -83,6 +98,8 @@ impl Default for Options {
             strict_edges: false,
             overscan: [0; 4],
             force_patch: false,
+            smooth_120: false,
+            smooth_ahead: true,
         }
     }
 }
@@ -116,6 +133,14 @@ pub struct Core {
     announced: (u32, u32),
     /// The 3D of the game, when it has a profile and the frontend draws it.
     three_d: Option<crate::three_d::ThreeD>,
+    /// The sprites that move with the camera, not shifted with the playfield (120 Hz).
+    overlay: Vec<u8>,
+    /// With the 120 Hz scrolling, the second picture of the frame is due: its shift, and the
+    /// sound the first left for it.
+    half: Option<f32>,
+    second_sound: Vec<i16>,
+    /// The rows of the picture of the frame just run (120 Hz).
+    rows: u32,
 }
 
 impl Core {
@@ -160,6 +185,10 @@ impl Core {
             framed: false,
             announced: (256, 240),
             three_d: None,
+            overlay: Vec::new(),
+            half: None,
+            second_sound: Vec::new(),
+            rows: 240,
         };
         core.options.widescreen = options.widescreen;
         core.options.advanced = options.advanced;
@@ -222,6 +251,13 @@ impl Core {
             self.nes.set_region(region);
             changed.timing = true;
         }
+        if options.smooth_120 != self.options.smooth_120 {
+            changed.timing = true;
+            changed.geometry = true;
+            self.half = None;
+        }
+        self.nes
+            .set_smooth_scroll_ahead(options.smooth_120 && options.smooth_ahead);
         if (options.widescreen, options.advanced)
             != (self.options.widescreen, self.options.advanced)
         {
@@ -237,7 +273,7 @@ impl Core {
         let before = (self.margin(), self.options.overscan);
         self.options = options;
         let margin = self.margin();
-        changed.geometry = (margin, self.options.overscan) != before;
+        changed.geometry |= (margin, self.options.overscan) != before;
         if changed.geometry || changed.hack_options {
             self.framed = false;
         }
@@ -400,7 +436,14 @@ impl Core {
 
     /// Runs one frame with the two pads' buttons (A, B, Select, Start, Up, Down, Left, Right in
     /// bits 0 to 7 of each byte, port 1 in the low byte), then makes its picture and sound.
+    ///
+    /// With the 120 Hz scrolling on (2D only), it takes two calls a frame: the first runs it and
+    /// shows its picture, the second shows the playfield half way to the next.
     pub fn run(&mut self, input: u16) {
+        if self.smooth() {
+            self.run_smooth(input);
+            return;
+        }
         self.nes.run_frame(input);
         if let Some(three_d) = self.three_d.as_mut() {
             three_d.convert(&mut self.nes);
@@ -408,6 +451,86 @@ impl Core {
             self.make_picture();
         }
         self.make_sound();
+    }
+
+    /// Whether the 120 Hz scrolling is in force: asked for, and the game in 2D.
+    fn smooth(&self) -> bool {
+        self.options.smooth_120 && self.three_d.is_none()
+    }
+
+    fn run_smooth(&mut self, input: u16) {
+        if let Some(shift) = self.half.take() {
+            self.make_shifted_picture(shift);
+            self.audio = std::mem::take(&mut self.second_sound);
+            return;
+        }
+        self.nes
+            .run_frame_ahead(input, u8::from(self.options.smooth_ahead));
+        let rows = self.nes.wide_picture_into(&mut self.indices);
+        self.rows = u32::try_from(rows).unwrap_or(240).max(1);
+        self.nes
+            .split_steady_sprites(&mut self.indices, &mut self.overlay);
+        let shift = self.nes.picture_shift();
+        let motion = self.nes.picture_motion().unwrap_or(0.0);
+        self.make_sound();
+        self.nes.restore_real_frame();
+        let first = shift.map_or(0.0, |(shift, _, _)| shift);
+        self.make_shifted_picture(first);
+        self.half = Some(first + motion / 2.0);
+        // The frame's sound in two halves, whole stereo frames each.
+        let middle = (self.audio.len() / 4) * 2;
+        self.second_sound.clear();
+        self.second_sound.extend_from_slice(&self.audio[middle..]);
+        self.audio.truncate(middle);
+    }
+
+    /// The picture of the frame just run at [`SMOOTH_SCALE`] times its width, its playfield
+    /// moved left by `shift` pixels (quarters of one), the sprites that move with the camera
+    /// left where they are.
+    fn make_shifted_picture(&mut self, shift: f32) {
+        let pixels = u32::try_from(self.indices.len()).unwrap_or(0);
+        let full_height = self.rows;
+        let full_width = (pixels / full_height).max(1);
+        let (x0, y0, width, height) = self.shown(full_width, full_height);
+        let margin_y = full_height.saturating_sub(240) / 2;
+        let band = self
+            .nes
+            .picture_shift()
+            .map_or(0..0, |(_, start, end)| {
+                let start = u32::try_from(start).unwrap_or(0) + margin_y;
+                let end = u32::try_from(end).unwrap_or(0) + margin_y;
+                start..end
+            });
+        #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // A few pixels.
+        let quarters = (shift * SMOOTH_SCALE as f32).round() as i64;
+        let colours = palette_colours();
+        let scale = SMOOTH_SCALE as usize;
+        let (full_width, x0, width) = (full_width as usize, x0 as usize, width as usize);
+        self.width = u32::try_from(width * scale).unwrap_or(1);
+        self.height = height;
+        self.framed = true;
+        self.frame.clear();
+        for y in y0..y0 + height {
+            let start = y as usize * full_width;
+            let Some(row) = self.indices.get(start..start + full_width) else {
+                break;
+            };
+            let overlay = self.overlay.get(start..start + full_width);
+            let moved = band.contains(&y);
+            for out in 0..width * scale {
+                let place = i64::try_from(x0 * scale + out).unwrap_or(0);
+                let source = if moved { place + quarters } else { place };
+                let column = usize::try_from(source.max(0) / i64::from(SMOOTH_SCALE))
+                    .unwrap_or(0)
+                    .min(full_width - 1);
+                let still = overlay
+                    .and_then(|overlay| overlay.get(x0 + out / scale))
+                    .copied()
+                    .filter(|index| *index != 0xFF);
+                let index = still.unwrap_or(row[column]);
+                self.frame.push(colours[usize::from(index & 0x3F)]);
+            }
+        }
     }
 
     fn make_picture(&mut self) {
@@ -419,11 +542,7 @@ impl Core {
         self.height = height;
         self.width = width;
         self.framed = true;
-        let mut colours = [0_u32; 64];
-        for (index, colour) in colours.iter_mut().enumerate() {
-            let rgb = zax_engine3d::palette::nes_color(index);
-            *colour = (u32::from(rgb.r) << 16) | (u32::from(rgb.g) << 8) | u32::from(rgb.b);
-        }
+        let colours = palette_colours();
         self.frame.clear();
         let (x, width, full_width) = (x as usize, width as usize, full_width as usize);
         for row in self.indices.chunks(full_width).skip(y as usize).take(height as usize) {
@@ -463,7 +582,11 @@ impl Core {
         }
         let margin = self.margin();
         let (_, _, width, height) = self.shown(256 + 2 * margin.0, 240 + 2 * margin.1);
-        (width, height)
+        if self.smooth() {
+            (width * SMOOTH_SCALE, height)
+        } else {
+            (width, height)
+        }
     }
 
     /// Whether the picture's size differs from the one the frontend was last told; it counts as
@@ -481,6 +604,11 @@ impl Core {
     #[must_use]
     pub fn aspect_ratio(&self) -> f32 {
         let (width, height) = self.picture_size();
+        let width = if self.smooth() {
+            width / SMOOTH_SCALE
+        } else {
+            width
+        };
         #[allow(clippy::cast_precision_loss)] // Small sizes.
         let ratio = width as f32 / height as f32;
         ratio
@@ -504,7 +632,12 @@ impl Core {
         if timing.skips_dot_on_odd_frames {
             dots_per_frame -= 0.5;
         }
-        dots_per_second / dots_per_frame
+        let rate = dots_per_second / dots_per_frame;
+        if self.smooth() {
+            rate * 2.0
+        } else {
+            rate
+        }
     }
 
     /// Whether the region in force is PAL's frame rate.
@@ -515,7 +648,8 @@ impl Core {
 
     /// The size every state of this game fits in: the machine's (the image is not in it: the
     /// frontend keeps the ROM, and the bound with it covers the state without it), then in 3D
-    /// the scripts' `PData` block.
+    /// the scripts' `PData` block, then [`HALF_BYTES`] for the picture between two frames the
+    /// 120 Hz scrolling owes (so that the frontend's run-ahead and rewind keep its pace).
     #[must_use]
     pub fn state_size(&self) -> usize {
         let scripts = if self.three_d.is_some() {
@@ -523,7 +657,7 @@ impl Core {
         } else {
             0
         };
-        self.nes.max_state_size() + scripts
+        self.nes.max_state_size() + scripts + HALF_BYTES
     }
 
     /// Writes the state into `out`, which is [`Core::state_size`] long; false when it does not
@@ -549,11 +683,23 @@ impl Core {
                 room.copy_from_slice(&block);
             }
         }
+        if let (Some(shift), Some(room)) = (self.half, tail.len().checked_sub(HALF_BYTES)) {
+            tail[room] = 1;
+            tail[room + 1..room + HALF_BYTES].copy_from_slice(&shift.to_le_bytes());
+        }
         true
     }
 
     /// Restores a state [`Core::save_state`] wrote.
     pub fn load_state(&mut self, data: &[u8]) -> bool {
+        self.half = data
+            .len()
+            .checked_sub(HALF_BYTES)
+            .and_then(|at| data.get(at..))
+            .filter(|half| half[0] == 1)
+            .and_then(|half| half[1..].try_into().ok())
+            .map(f32::from_le_bytes)
+            .filter(|_| self.smooth());
         let region = self.nes.region();
         let loaded = self.nes.try_load_state(data, 0).is_ok();
         self.nes.set_region(region);
@@ -583,6 +729,17 @@ impl Core {
 
     /// The reset button.
     pub fn reset(&mut self) {
+        self.half = None;
         self.nes.soft_reset();
     }
+}
+
+/// The NES colours of the palette in force, 0RGB.
+fn palette_colours() -> [u32; 64] {
+    let mut colours = [0_u32; 64];
+    for (index, colour) in colours.iter_mut().enumerate() {
+        let rgb = zax_engine3d::palette::nes_color(index);
+        *colour = (u32::from(rgb.r) << 16) | (u32::from(rgb.g) << 8) | u32::from(rgb.b);
+    }
+    colours
 }

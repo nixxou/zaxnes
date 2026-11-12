@@ -29,6 +29,8 @@ const REFLECTIONS: &str = "zaxnes_3d_reflections";
 const SKY: &str = "zaxnes_3d_sky";
 const FAST_LUA: &str = "zaxnes_3d_fast_lua";
 const EXTRA: &str = "zaxnes_widescreen_extra";
+const SMOOTH: &str = "zaxnes_smooth_120";
+const SMOOTH_AHEAD: &str = "zaxnes_smooth_ahead";
 const STRICT: &str = "zaxnes_widescreen_strict_edges";
 const FORCE: &str = "zaxnes_widescreen_other_versions";
 const OVERSCAN: [&str; 4] = [
@@ -88,6 +90,7 @@ const PALETTES: [&str; 11] = [
 /// The options to declare, as key and `"Description; choice|choice"`, the game's hack options
 /// (`hacks`, each with its default) after the others.
 #[must_use]
+#[allow(clippy::too_many_lines)] // One entry per option.
 pub fn declarations(hacks: &[HackOption]) -> Vec<(String, String)> {
     let resolutions: Vec<String> = RESOLUTIONS
         .iter()
@@ -152,6 +155,14 @@ pub fn declarations(hacks: &[HackOption]) -> Vec<(String, String)> {
         (
             FORCE.to_owned(),
             "Widescreen on other versions of a game (restart); disabled|enabled".to_owned(),
+        ),
+        (
+            SMOOTH.to_owned(),
+            "Smooth scrolling 120 Hz (2D, a display at 120 Hz only); disabled|enabled".to_owned(),
+        ),
+        (
+            SMOOTH_AHEAD.to_owned(),
+            "Smooth scrolling of every game (a frame run ahead); enabled|disabled".to_owned(),
         ),
         (REGION.to_owned(), "Region; Auto|NTSC|PAL|Dendy".to_owned()),
         (
@@ -235,6 +246,8 @@ pub fn read(value: &dyn Fn(&str) -> Option<String>, hacks: &[HackOption]) -> Opt
             .filter(|percent| EXTRA_PERCENT.contains(percent))
             .unwrap_or(defaults.extra_percent),
         strict_edges: enabled(STRICT, defaults.strict_edges),
+        smooth_120: enabled(SMOOTH, defaults.smooth_120),
+        smooth_ahead: enabled(SMOOTH_AHEAD, defaults.smooth_ahead),
         force_patch: enabled(FORCE, defaults.force_patch),
         overscan: OVERSCAN.map(|key| {
             value(key)

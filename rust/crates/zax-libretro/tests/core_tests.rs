@@ -126,6 +126,146 @@ fn the_overscan_crops_and_the_extra_margin_widens() {
     assert_eq!(core.picture().1, 416);
 }
 
+/// How far left, in output pixels, the playfield of `after` lies from `before`'s: the shift that
+/// best matches row 120 (the pipes and the sky), out of 1024.
+fn offset(before: &[u32], after: &[u32]) -> i32 {
+    let row = |picture: &[u32]| picture[120 * 1024..121 * 1024].to_vec();
+    let (before, after) = (row(before), row(after));
+    (-24..=24)
+        .min_by_key(|shift: &i32| {
+            (64..960)
+                .filter(|x: &i32| {
+                    let source = usize::try_from(x + shift).unwrap_or(0);
+                    after[usize::try_from(*x).unwrap_or(0)] != before[source]
+                })
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+/// At 120 Hz each frame takes two calls; the second shows the playfield half way to the next
+/// frame's, the frame's sound split between the two.
+#[test]
+fn smooth_scrolling_draws_a_picture_between_two_frames() {
+    let Some(rom) = demo() else {
+        eprintln!("skipped: no FlappyZaxNes.nes in zax-app/demo");
+        return;
+    };
+    let mut core = Core::load(&rom, "FlappyZaxNes.nes", widescreen(false)).expect("the demo loads");
+    let normal = core.frames_per_second();
+    let mut options = core.options().clone();
+    options.smooth_120 = true;
+    let changed = core.set_options(options);
+    assert!(changed.timing && changed.geometry);
+    assert!((core.frames_per_second() - 2.0 * normal).abs() < 1e-9);
+    assert_eq!(core.picture_size(), (1024, 240));
+    assert!((core.aspect_ratio() - 256.0 / 240.0).abs() < 1e-6);
+    // Past the title, flying: the playfield scrolls.
+    let mut between = 0;
+    let mut sound = 0;
+    let mut last_first: Option<Vec<u32>> = None;
+    let mut halves: Vec<i32> = Vec::new();
+    let mut checked = 0;
+    for frame in 0..600_u32 {
+        let start = if (300..306).contains(&frame) { 1 << 3 } else { 0 };
+        let flap = u16::from(frame % 30 < 2);
+        core.run(start | flap);
+        let first = core.picture().0.to_vec();
+        sound += core.sound().len();
+        // The picture between the frame before and this one: half its offset.
+        if let (Some(before), Some(middle)) = (&last_first, halves.last().copied()) {
+            if (310..400).contains(&frame) {
+                let whole = offset(before, &first);
+                if whole != 0 {
+                    checked += 1;
+                    assert!(
+                        (middle * 2 - whole).abs() <= 1,
+                        "frame {frame}: between {middle}, whole {whole}"
+                    );
+                }
+            }
+        }
+        core.run(start | flap);
+        sound += core.sound().len();
+        assert_eq!(core.picture().1, 1024);
+        halves.push(offset(&first, core.picture().0));
+        if (310..400).contains(&frame) && core.picture().0 != first.as_slice() {
+            between += 1;
+        }
+        last_first = Some(first);
+        if frame == 500 {
+            shot(&core, "flappy-120-between");
+        }
+    }
+    // Flying from frame 306: the playfield scrolls, a pixel every frame or two.
+    eprintln!("{between} pictures between of 90, {checked} half way checked");
+    assert!(checked > 40);
+    assert!(between > 40, "the picture between moves: {between}");
+    // About 800 stereo frames a game frame, split in two.
+    let frames = sound / 2 / 600;
+    assert!((700..=900).contains(&frames), "{frames}");
+}
+
+/// The frontend's run-ahead at 120 Hz: a state saved between the two calls of a frame keeps the
+/// picture between owed, so the game keeps its pace.
+#[test]
+fn smooth_scrolling_keeps_its_pace_under_the_frontends_run_ahead() {
+    let Some(rom) = demo() else {
+        eprintln!("skipped: no FlappyZaxNes.nes in zax-app/demo");
+        return;
+    };
+    let smooth = Options {
+        widescreen: false,
+        smooth_120: true,
+        ..Options::default()
+    };
+    let mut plain = Core::load(&rom, "FlappyZaxNes.nes", smooth.clone()).expect("the demo loads");
+    let mut ahead = Core::load(&rom, "FlappyZaxNes.nes", smooth).expect("the demo loads");
+    let mut state = vec![0; ahead.state_size()];
+    for call in 0..800_u32 {
+        let input = if (600..612).contains(&call) { 1 << 3 } else { 0 };
+        plain.run(input);
+        ahead.run(input);
+        assert!(ahead.save_state(&mut state));
+        ahead.run(input);
+        assert!(ahead.load_state(&state));
+    }
+    assert_eq!(ahead.system_ram(), plain.system_ram());
+}
+
+/// Kirby's hack reports its camera: the picture between follows it, the run-ahead off.
+#[test]
+fn kirby_scrolls_smoothly_from_its_camera() {
+    let Some(kirby) = owner_rom("Kirby's Adventure [USA][!!].nes") else {
+        eprintln!("skipped: ZAXNES_LIBRETRO_ROMS does not hold Kirby's Adventure");
+        return;
+    };
+    let options = Options {
+        smooth_120: true,
+        smooth_ahead: false,
+        hacks: vec![("smooth_scroll".to_owned(), true)],
+        ..Options::default()
+    };
+    let mut core = Core::load(&kirby, "Kirby.nes", options).expect("Kirby loads");
+    let mut between = 0;
+    for frame in 0..2400_u32 {
+        // Start on the title and on the file screen, then right through the level.
+        let start = u16::from(matches!(frame, 300..=303 | 500..=503 | 700..=703)) << 3;
+        let right = u16::from(frame >= 1200) << 7;
+        core.run(start | right);
+        let first = core.picture().0.to_vec();
+        core.run(start | right);
+        if frame >= 1200 && core.picture().0 != first.as_slice() {
+            between += 1;
+        }
+        if frame == 2000 {
+            shot(&core, "kirby-120-between");
+        }
+    }
+    eprintln!("Kirby: {between} pictures between moved of 1200");
+    assert!(between > 100);
+}
+
 #[test]
 fn a_state_comes_back_to_the_same_picture() {
     let Some(rom) = demo() else {
