@@ -80,8 +80,14 @@ def build_libraries(sdk, ndk):
         'CFLAGS_aarch64_linux_android':
             '-include ' + os.path.join(ANDROID, 'sdl-ndk27.h').replace('\\', '/'),
     })
+    # The FCEUX engine is built in (owner decision, 2026-11-12), from the fork built with the NDK
+    # (`zax\build-android.cmd` in the fork, whose root ZAX_FCEUX_DIR names).
+    fceux = os.environ.get('ZAX_FCEUX_DIR')
+    if not fceux:
+        sys.exit('set ZAX_FCEUX_DIR to the root of the fceux-zax fork (built with zax\\build-android.cmd)')
+    env.setdefault('ZAX_FCEUX_LIB', os.path.join(fceux, 'build-android'))
     run(['cargo', 'ndk', '-t', ABI, '-P', str(MIN_SDK), 'build', '--release', '-p',
-         'zax-android'], cwd=RUST, env=env)
+         'zax-android', '--features', 'zax-app/fceux-core'], cwd=RUST, env=env)
     out = os.path.join(TARGET, TRIPLE, 'release')
     # The C++ runtime of the slang shaders (glslang, through librashader): libmain.so needs it
     # at start-up, and the NDK's shared one is the one Android's loader finds in the APK.

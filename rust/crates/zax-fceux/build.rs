@@ -78,8 +78,12 @@ fn main() {
         println!("cargo:rustc-link-lib=dylib=z");
     }
 
-    // The C++ runtime. rustc links the MSVC CRT itself, but not libstdc++.
-    if !msvc {
+    // The C++ runtime. rustc links the MSVC CRT itself, but not libstdc++. On Android the fork is
+    // built against the NDK's libc++_shared (`zax\build-android.cmd`), the copy the APK already
+    // ships for the slang shaders; one C++ runtime in the process, not two.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("android") {
+        println!("cargo:rustc-link-lib=dylib=c++_shared");
+    } else if !msvc {
         println!("cargo:rustc-link-lib=dylib=stdc++");
     }
 
