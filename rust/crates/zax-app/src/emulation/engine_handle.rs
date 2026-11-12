@@ -456,11 +456,20 @@ impl EngineHandle {
     /// The frame's picture widened by its widescreen margins, into `out`; the number of rows.
     /// An engine without the widescreen extension gives the plain 256 x 240 picture, which is
     /// what its frames are.
+    ///
+    /// The 2D mode draws only the pixels whose opacity bit is set (REQ-CORE-049, REQ-SCN-076),
+    /// and only Zaxnes's PPU keeps that bit. Another engine's picture is plain colour indices, so
+    /// every pixel is marked opaque: the whole picture is drawn, its backdrop colour included,
+    /// rather than nothing at all (owner report, 2026-11-12: FCEUX and NesHawk showed only the
+    /// background colour in 2D).
     pub fn wide_picture_into(&self, out: &mut Vec<u8>) -> usize {
         if let Some(core) = self.zaxnes() {
             return core.wide_picture_into(out);
         }
         self.engine.pixel_frame_indices_into(out);
+        for pixel in out.iter_mut() {
+            *pixel = (*pixel & zax_nes::ppu::PIXEL_COLOR) | zax_nes::ppu::OPAQUE_PIXEL;
+        }
         STANDARD_ROWS
     }
 
