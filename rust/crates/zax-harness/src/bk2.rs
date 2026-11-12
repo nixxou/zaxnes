@@ -85,6 +85,8 @@ use std::io::{Cursor, Read};
 
 use sha1::{Digest, Sha1};
 
+use zax_nes::input::ControllerPortType;
+
 use crate::movie_file::{FrameCommand, FrameInput, MovieFile, RamPattern};
 
 /// The members this reader looks for, in the spelling `BizHawk` writes them. Matched without
@@ -127,7 +129,7 @@ pub fn read(bytes: &[u8]) -> Result<MovieFile, String> {
     let header = parse_header(&read_member(&mut archive, member(HEADER), "Header.txt")?);
     check_header(&header)?;
     let settings = read_member(&mut archive, member(SYNC_SETTINGS), "SyncSettings.json")?;
-    check_sync_settings(&settings, &mut notes)?;
+    let ports = check_sync_settings(&settings, &mut notes)?;
     let frames = parse_input_log(&read_member(
         &mut archive,
         member(INPUT_LOG),
@@ -182,6 +184,7 @@ pub fn read(bytes: &[u8]) -> Result<MovieFile, String> {
         // Measured, and the note above carries the measurement; `MovieFile::reset_after_frame`
         // carries the reasoning for both formats.
         reset_after_frame: true,
+        ports,
         header,
         notes,
     })
@@ -247,7 +250,18 @@ fn check_header(header: &BTreeMap<String, String>) -> Result<(), String> {
 ///
 /// `BizHawk` wraps the object in `{"o": …}`; both shapes are accepted because the public
 /// description does not fix the wrapper.
-fn check_sync_settings(text: &str, notes: &mut Vec<String>) -> Result<(), String> {
+///
+/// Returns **what is plugged into each port**, which `Controls.NesLeftPort` and
+/// `Controls.NesRightPort` name. Until lot NESHAWK-PROFILE-13 this reader checked those two
+/// fields and threw the answer away — `UnpluggedNES` was accepted and then replayed with a pad in
+/// the socket — and that is the whole of the *Hoshi no Kirby* movie's tree frame 40: its
+/// `NesRightPort` is `UnpluggedNES`, a DMC DMA clocks port 2 a ninth time, and a pad answers that
+/// read with a 1 where an empty socket answers 0. One bit, two extra passes of the game's input
+/// routine, and the first difference of any kind in the whole movie.
+fn check_sync_settings(
+    text: &str,
+    notes: &mut Vec<String>,
+) -> Result<[ControllerPortType; 2], String> {
     let root: serde_json::Value = serde_json::from_str(text)
         .map_err(|error| format!("`SyncSettings.json` does not parse: {error}"))?;
     let settings = root.get("o").unwrap_or(&root);
@@ -292,7 +306,7 @@ fn check_sync_settings(text: &str, notes: &mut Vec<String>) -> Result<(), String
 
     let Some(controls) = settings.get("Controls") else {
         notes.push("the sync settings name no controls; two standard pads are assumed".to_owned());
-        return Ok(());
+        return Ok([ControllerPortType::Controller; 2]);
     };
     if controls
         .get("Famicom")
@@ -305,21 +319,32 @@ fn check_sync_settings(text: &str, notes: &mut Vec<String>) -> Result<(), String
                 .to_owned(),
         );
     }
-    for port in ["NesLeftPort", "NesRightPort"] {
-        match controls.get(port).and_then(serde_json::Value::as_str) {
-            None | Some("ControllerNES" | "UnpluggedNES") => {}
+    let mut ports = [ControllerPortType::Controller; 2];
+    for (index, port) in ["NesLeftPort", "NesRightPort"].into_iter().enumerate() {
+        ports[index] = match controls.get(port).and_then(serde_json::Value::as_str) {
+            None | Some("ControllerNES") => ControllerPortType::Controller,
+            Some("UnpluggedNES") => {
+                notes.push(format!(
+                    "`{port}` is `UnpluggedNES`, so that socket is replayed EMPTY: a read of it \
+                     clocks no shift register and answers 0 for ever, where a pad answers 1 from \
+                     the ninth read after a strobe. It is only ever visible when a DMC DMA adds a \
+                     clock to a game's own eight, and in the Kirby movie it is the first \
+                     difference of any kind (tree frame 40)"
+                ));
+                ControllerPortType::Empty
+            }
             Some(other) => {
                 return Err(format!(
                     "`{port}` holds `{other}`, which is not a standard pad or an empty socket"
                 ))
             }
-        }
+        };
     }
     match controls
         .get("FamicomExpPort")
         .and_then(serde_json::Value::as_str)
     {
-        None | Some("UnpluggedFam") => Ok(()),
+        None | Some("UnpluggedFam") => Ok(ports),
         Some(other) => Err(format!(
             "the Famicom expansion port holds `{other}`, which this reader cannot honour"
         )),
@@ -600,6 +625,49 @@ mod tests {
         members[0].1 = "Platform NES\r\nStartsFromSavestate True\r\n";
         let error = read(&archive(&members)).err().unwrap_or_default();
         assert!(error.contains("starts from a savestate"), "{error}");
+    }
+
+    /// `Controls.NesLeftPort` / `NesRightPort` are **read**, not merely checked.
+    ///
+    /// Until lot NESHAWK-PROFILE-13 this reader accepted `UnpluggedNES` and then replayed the
+    /// movie with a pad in the socket, which is the *Hoshi no Kirby* `.bk2`'s tree frame 40: an
+    /// empty socket and a pad with no button held differ from the **ninth** read after a strobe,
+    /// and a DMC DMA is what reaches it. The note is asserted too, because a reader that honours
+    /// something silently is one nobody can check.
+    #[test]
+    fn an_unplugged_port_is_read_as_an_empty_socket_and_said_so() {
+        let line = "|..|........|........|";
+        let cases = [
+            (SYNC, [ControllerPortType::Controller; 2], false),
+            (
+                r#"{"o":{"RegionOverride":0,"Controls":{"Famicom":false,
+                   "NesLeftPort":"ControllerNES","NesRightPort":"UnpluggedNES",
+                   "FamicomExpPort":"UnpluggedFam"}}}"#,
+                [ControllerPortType::Controller, ControllerPortType::Empty],
+                true,
+            ),
+            (
+                r#"{"o":{"RegionOverride":0,"Controls":{"NesLeftPort":"UnpluggedNES",
+                   "NesRightPort":"UnpluggedNES"}}}"#,
+                [ControllerPortType::Empty; 2],
+                true,
+            ),
+            // No `Controls` at all: two pads, which is what the note beside it has always said.
+            (
+                r#"{"o":{"RegionOverride":0}}"#,
+                [ControllerPortType::Controller; 2],
+                false,
+            ),
+        ];
+        for (sync, wanted, says_so) in cases {
+            let file = read(&movie("", sync, &[line])).unwrap_or_else(|error| panic!("{error}"));
+            assert_eq!(wanted, file.ports, "{sync}");
+            let mentioned = file
+                .notes
+                .iter()
+                .any(|note| note.contains("UnpluggedNES") && note.contains("EMPTY"));
+            assert_eq!(says_so, mentioned, "the note for {sync}");
+        }
     }
 
     #[test]

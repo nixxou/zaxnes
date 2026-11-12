@@ -52,6 +52,15 @@ pub enum ControllerPortType {
     Controller = 0,
     /// A Zapper light gun.
     Zapper = 1,
+    /// An **empty socket**: nothing is plugged in, so nothing drives the port's data line and
+    /// there is no shift register for a read to clock.
+    ///
+    /// A port is only ever this because a movie says so — `BizHawk`'s `UnpluggedNES`, which a
+    /// `.bk2`'s `SyncSettings.json` names per port — and that is the whole of it: a machine
+    /// powers on with two pads, and the application never offers it. The difference an emulator
+    /// can see is the **ninth** read after a strobe, where a pad answers 1 and an empty socket
+    /// goes on answering 0 (lot NESHAWK-PROFILE-13 step 1).
+    Empty = 2,
 }
 
 /// A port number outside 0 to 1 (REQ-CORE-024).

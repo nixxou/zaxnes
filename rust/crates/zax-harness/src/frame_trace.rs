@@ -762,6 +762,10 @@ fn trace_on<P: TimingProfile>(
 ) -> Result<Report, HarnessError> {
     let mut machine = ZaxnesMachine::<P>::new(image, name, region, options.builtin_patches)
         .map_err(HarnessError::Rom)?;
+    // The movie's own sockets, before the power-on: a `.bk2` can say a port is empty, and an
+    // empty port answers a ninth read differently from a pad (`ZaxnesMachine::plug_ports`).
+    // Without this the ledger this tool writes would be of a machine the movie did not record.
+    machine.plug_ports(movie.ports);
     machine.power(ram).map_err(HarnessError::Rom)?;
     // Everything before the first traced frame is the ordinary path, so the state the trace
     // starts from is the state the movie puts the machine in and nothing else.
@@ -1233,6 +1237,13 @@ fn ledger_events(lines: &[CensusLine]) -> Vec<Event> {
                 DmaEventKind::DmcRequest | DmaEventKind::DmcHalt | DmaEventKind::DmcFetch => {
                     return None
                 }
+                // Left out of the **ledger** on purpose, though it is a register access a Lua
+                // script can see: `bk2cyc1.lua` wrote the references this side is held against
+                // and it logs `$4016` writes alone, so a ledger line for a port *read* would
+                // read as an event the other machine does not have on every frame of every
+                // window. It is in the `--dmc-census` section, which is where lot
+                // NESHAWK-PROFILE-13 compares it against `q192.lua`'s own stream.
+                DmaEventKind::InputPortRead => return None,
             };
             Some(Event {
                 offset: line.cycle,

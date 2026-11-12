@@ -22,6 +22,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use zax_nes::input::ControllerPortType;
 use zax_nes::movie::fm2::{Fm2Movie, COMMAND_HARD_RESET, COMMAND_SOFT_RESET};
 
 use crate::profile_choice::ProfileChoice;
@@ -195,6 +196,13 @@ pub struct MovieFile {
     /// `movie-sync` turns this into the base placement of the command, which `--resets` then
     /// probes ±1 around.
     pub reset_after_frame: bool,
+    /// What is plugged into each controller port, port 0 first.
+    ///
+    /// A `.bk2` names it per port in `SyncSettings.json` (`NesLeftPort` / `NesRightPort`), and
+    /// `UnpluggedNES` is an **empty socket**, not a pad with no button held — the two differ from
+    /// the ninth read after a strobe, which only a DMA that adds a clock ever reaches. An `.fm2`
+    /// states nothing of the kind, so it is two pads.
+    pub ports: [ControllerPortType; 2],
     /// The header, key by key, as the file wrote it — for the report, and for nothing else.
     pub header: BTreeMap<String, String>,
     /// What the reader had to decide for itself, each a sentence. A reader that cannot honour
@@ -297,6 +305,9 @@ impl MovieFile {
             // public format page says in words: a frame's commands are "valid at the start of the
             // frame".
             reset_after_frame: false,
+            // An `.fm2` has no field for it: FCEUX's movie format states the buttons and not the
+            // sockets, so both hold a standard pad, which is what this reader has always done.
+            ports: [ControllerPortType::Controller; 2],
             header,
             notes,
         })

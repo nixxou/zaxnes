@@ -38,6 +38,16 @@ pub enum DmaEventKind {
     ApuStatusRead,
     /// A read of `$2002`, whichever unit made it.
     PpuStatusRead,
+    /// A read of `$4016` or `$4017`, whichever unit made it — the CPU's own read **and** a DMA
+    /// halt's or dummy cycle's repeat of it, which clock the controller's shift register just as
+    /// the CPU's does.
+    ///
+    /// Lot NESHAWK-PROFILE-13 asks for it by name: tree frame 40's difference is not a cycle
+    /// residual but an extra pass of Kirby's input routine, so what has to be placed against the
+    /// cycle is **how many times each port is read and with what value**, which no other event of
+    /// this census carries. BizHawk's own stream carries the same lines (`q192.lua`), so the two
+    /// machines are compared read for read.
+    InputPortRead,
 }
 
 impl DmaEventKind {
@@ -53,6 +63,7 @@ impl DmaEventKind {
             Self::PortStrobe => "strobe ",
             Self::ApuStatusRead => "r4015  ",
             Self::PpuStatusRead => "r2002  ",
+            Self::InputPortRead => "rport  ",
         }
     }
 }

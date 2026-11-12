@@ -73,6 +73,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
+use zax_nes::input::ControllerPortType;
 use zax_nes::rom::InesHeader;
 use zax_nes::state::CoreState;
 use zax_nes::{NesCoreOf, NesHawkCompat, NesRegion, RunFrame, Standard, TimingProfile};
@@ -632,6 +633,25 @@ impl<P: TimingProfile> ZaxnesMachine<P> {
         // real write path, so these reach the PPU registers exactly as a CPU write would.
         self.core.write_memory(0x2000, 0);
         self.core.write_memory(0x2001, 0);
+    }
+
+    /// Plugs the movie's own devices into the two controller ports.
+    ///
+    /// A `.bk2` states per port whether a pad is in the socket at all, and an **empty** socket is
+    /// not a pad with no button held: a pad answers 1 from the ninth read after a strobe and an
+    /// empty socket answers 0 for ever, so the two part exactly when a DMA adds a clock to a
+    /// game's own eight reads. That is the *Hoshi no Kirby* movie's tree frame 40 (lot
+    /// NESHAWK-PROFILE-13 step 1), and it is a property of the recorded **machine** rather than
+    /// of the 2A03's timing, which is why it is here and not an item of `NesHawkCompat`.
+    ///
+    /// The devices survive a power cycle and a reset — `InputPorts::reset` keeps them, as the
+    /// reference does — so this is set once, before [`Machine::power`].
+    pub(crate) fn plug_ports(&mut self, ports: [ControllerPortType; 2]) {
+        for (port, kind) in ports.into_iter().enumerate() {
+            // The only error is a port number out of range, and the array's length is the port
+            // count; `InputPorts::PORT_COUNT` is 2 and so is `MovieFile::ports`.
+            let _ = self.core.set_port_type(port, kind);
+        }
     }
 
     /// Asks for the cartridge's PRG-RAM to hold `pattern` after every power-on.
@@ -2231,6 +2251,7 @@ fn zaxnes_machine(
 ) -> Result<Box<dyn Machine>, HarnessError> {
     fn build<P: TimingProfile>(
         options: &Options,
+        movie: &MovieFile,
         machines: &Machines<'_>,
     ) -> Result<Box<dyn Machine>, HarnessError> {
         let mut machine = ZaxnesMachine::<P>::new(
@@ -2245,12 +2266,13 @@ fn zaxnes_machine(
         }
         machine.ppu_warmup = options.ppu_warmup;
         machine.ppu_ram = options.ppu_ram;
+        machine.plug_ports(movie.ports);
         Ok(Box::new(machine))
     }
 
     match options.profile.unwrap_or_else(|| movie.recorded_profile()) {
-        ProfileChoice::Standard => build::<Standard>(options, machines),
-        ProfileChoice::NesHawk => build::<NesHawkCompat>(options, machines),
+        ProfileChoice::Standard => build::<Standard>(options, movie, machines),
+        ProfileChoice::NesHawk => build::<NesHawkCompat>(options, movie, machines),
     }
 }
 

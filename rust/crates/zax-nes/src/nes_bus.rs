@@ -1449,8 +1449,28 @@ impl<P: TimingProfile> NesBusOf<P> {
             // come from there — which is how `Implied Dummy Reads` can take the operands of a
             // `JSR` out of `$4016`/`$4017` and have them "leech off the value read from the
             // opcode" when that opcode came from `$4015`.
-            0x4016 => self.read_input_port(0, self.data_bus),
-            0x4017 => self.read_input_port(1, self.data_bus),
+            0x4016 => {
+                let value = self.read_input_port(0, self.data_bus);
+                #[cfg(feature = "dma-census")]
+                self.note_dma(
+                    crate::dma_census::DmaEventKind::InputPortRead,
+                    0x4016,
+                    value,
+                    0,
+                );
+                value
+            }
+            0x4017 => {
+                let value = self.read_input_port(1, self.data_bus);
+                #[cfg(feature = "dma-census")]
+                self.note_dma(
+                    crate::dma_census::DmaEventKind::InputPortRead,
+                    0x4017,
+                    value,
+                    0,
+                );
+                value
+            }
 
             // $4000-$4014 are write-only and $4018-$401F are disabled: open bus.
             _ => self.external_bus(),
