@@ -403,7 +403,15 @@ impl Nes {
     /// `NES.BoardSystem.cs`'s `BoardSystemHardReset`: a brand new board of the same class, with
     /// the ROM and the save RAM carried over and the WRAM and VRAM cleared.
     fn board_system_hard_reset(&mut self) {
-        let mut newboard = crate::boards::create_board(self.b.board_kind);
+        let Some(mut newboard) = crate::boards::create_board(self.b.board_kind) else {
+            // The Zaxnes fallback board cannot be rebuilt from its class — it holds a whole
+            // `zax-nes` cartridge, built from the ROM image this method has not got. It resets
+            // in place instead, through the Zaxnes cartridge's own power-on, which clears the
+            // same memories this method would have cleared.
+            self.b.board.power_on_in_place();
+            self.b.ppu.has_clock_ppu = self.b.board.has_clock_ppu();
+            return;
+        };
         newboard.base_mut().cart = self.b.cart.clone();
         newboard.configure(self.b.origin);
         self.b.cart = newboard.base().cart.clone();
@@ -423,8 +431,9 @@ impl Nes {
         newboard.post_configure();
 
         // the old board's sram must be restored
-        if let Some(save) = self.b.board.save_ram() {
-            let save = save.to_vec();
+        let mut save = Vec::new();
+        self.b.board.save_ram_into(&mut save);
+        if !save.is_empty() {
             if let Some(dst) = newboard.save_ram_mut() {
                 let n = save.len().min(dst.len());
                 dst[..n].copy_from_slice(&save[..n]);
@@ -1064,15 +1073,7 @@ impl crate::state::SyncState for Bus {
 
     fn read_state(&mut self, r: &mut crate::state::StateReader<'_>) {
         self.read_sync_fields(r);
-        // The board is borrowed out and put back so that `read_sync_fields`'s exhaustive
-        // destructuring and the board's own read do not want `&mut self` at once. Same board,
-        // same bytes; only the borrow differs.
-        let mut board = std::mem::replace(
-            &mut self.board,
-            crate::boards::create_board(self.board_kind),
-        );
-        board.read_state(r);
-        self.board = board;
+        self.board.read_state(r);
     }
 }
 

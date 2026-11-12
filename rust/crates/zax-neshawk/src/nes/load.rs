@@ -9,7 +9,7 @@ use std::fmt::Write as _;
 
 use super::{Bus, BusLog, DisplayType, Nes};
 use crate::apu::Apu;
-use crate::boards::{self, BoardKind};
+use crate::boards::{self, Board, BoardKind};
 use crate::cart::{detect_from_ines, CartInfo, DetectionOrigin};
 use crate::controllers::{ControllerDeck, PortDevice};
 use crate::cpu::Mos6502x;
@@ -59,8 +59,12 @@ pub struct LoadReport {
     pub origin: DetectionOrigin,
     pub board_name: &'static str,
     pub cart: CartInfo,
-    /// True when the board came from `zax-nes` instead, which this crate never sets; the harness
-    /// and the engine use it to mark a game as not NesHawk-exact.
+    /// True when no ported NesHawk class accepted the cartridge and it runs on **Zaxnes's** board
+    /// instead ([`crate::boards::ZaxnesBoard`], the owner's decision of 2026-11-12).
+    ///
+    /// Everything that can show a user or a tool what it is running reads this: the engine's load
+    /// note, `movie-sync`'s report, and every `test-roms` row. A verdict taken on such a
+    /// cartridge is not a verdict on NesHawk's board.
     pub board_from_zaxnes: bool,
 }
 
@@ -378,9 +382,39 @@ impl Nes {
         let game_name = choice.name.clone().unwrap_or_default();
 
         //find a INESBoard to handle this
-        let Some((board_kind, mut board, cart)) = boards::find_board(&choice, origin) else {
-            return Err(LoadError::NoBoardFor(choice.board_type.clone()));
-        };
+        //
+        // Owner's decision of 2026-11-12: when no ported NesHawk class accepts the cartridge, it
+        // runs on **Zaxnes's** board through `boards::ZaxnesBoard` rather than failing to load.
+        // The board is marked "board from Zaxnes, not NesHawk-exact" in the load report, in the
+        // engine's capabilities and in the harness's output; only a mapper neither emulator has
+        // is still a load error.
+        let found = boards::find_board(&choice, origin);
+        let (board_kind, mut board, cart, board_from_zaxnes) =
+            if let Some((kind, board, cart)) = found {
+                (kind, board, cart, false)
+            } else {
+                let Some(fallback) = boards::ZaxnesBoard::try_new(rom, &game_name) else {
+                    return Err(LoadError::NoBoardFor(choice.board_type.clone()));
+                };
+                let board_type = choice.board_type.clone();
+                let mapper = fallback.mapper();
+                log(format!(
+                "No ported NesHawk class implements {board_type}; this cartridge runs on Zaxnes's \
+                 own board for mapper {mapper} -- board from Zaxnes, not NesHawk-exact."
+            ));
+                let mut cart = choice.clone();
+                // The Zaxnes cartridge owns its PRG-RAM, CHR-RAM and nametable layout, so
+                // `BoardBase`'s memories must stay empty: the block below sizes them from these two
+                // fields and would otherwise allocate a second, unused copy of every one of them.
+                cart.wram_size = 0;
+                cart.vram_size = 0;
+                (
+                    boards::BoardKind::Zaxnes,
+                    Box::new(fallback) as Box<dyn Board>,
+                    cart,
+                    true,
+                )
+            };
         drop(board_probe);
 
         log("Final game detection results:".to_string());
@@ -394,8 +428,13 @@ impl Nes {
         log("------".to_string());
 
         //create the board's rom and vrom
+        //
+        // Skipped for the Zaxnes fallback: its `zax-nes` cartridge already holds the image, split
+        // into banks, and filling `BoardBase` as well would be a second copy of the whole ROM.
         let mut trainer: Option<Vec<u8>> = None;
-        if let Some(hi) = &ines_header_info {
+        if board_from_zaxnes {
+            // nothing: the cartridge is already built
+        } else if let Some(hi) = &ines_header_info {
             let mut pos = 16usize;
             if hi.trainer_size != 0 {
                 let end = (pos + 512).min(rom.len());
@@ -537,7 +576,7 @@ impl Nes {
             origin,
             board_name,
             cart,
-            board_from_zaxnes: false,
+            board_from_zaxnes,
         });
 
         Ok(nes)

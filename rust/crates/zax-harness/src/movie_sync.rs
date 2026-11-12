@@ -2462,6 +2462,18 @@ impl NeshawkMachine {
             ledger: None,
         };
         machine.apply_region();
+        // The owner's marker of 2026-11-12: a mapper with no ported NesHawk board runs on
+        // Zaxnes's board, which is not NesHawk-exact — so a run of it must not be read as
+        // NesHawk's. Printed here rather than buried in the JSON, because this is the tool whose
+        // whole point is "the port and BizHawk are the same machine".
+        if let Some(report) = machine.nes.load_report.as_ref() {
+            if report.board_from_zaxnes {
+                println!(
+                    "  note: no ported NesHawk board implements this cartridge, so it runs on                      Zaxnes's own {} -- BOARD FROM ZAXNES, NOT NESHAWK-EXACT. The CPU, the PPU                      and the APU are still the port's; the board's IRQ timing is not.",
+                    report.board_name
+                );
+            }
+        }
         if let Some(path) = options.neshawk_event_log.clone() {
             let lo = machine.nes.peek_memory(0xFFFA);
             let hi = machine.nes.peek_memory(0xFFFB);

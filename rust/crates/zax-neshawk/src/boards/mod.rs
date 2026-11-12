@@ -27,8 +27,10 @@ mod nrom;
 mod sxrom;
 mod txrom;
 mod uxrom;
+pub mod zaxnes;
 
 pub use mmc3::Mmc3;
+pub use zaxnes::ZaxnesBoard;
 
 /// `NesBoardBase.cs`'s `EMirrorType`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -223,6 +225,14 @@ pub trait Board: Send {
     /// `SyncState`'s read half; see [`Board::write_state`].
     fn read_state(&mut self, reader: &mut crate::state::StateReader<'_>);
 
+    /// A power-on applied **in place**, for a board `BoardSystemHardReset` cannot rebuild from
+    /// its class alone.
+    ///
+    /// Only [`zaxnes::ZaxnesBoard`] overrides it: it holds a whole `zax-nes` cartridge built from
+    /// the ROM image, which the rebuild path has not got. Every ported NesHawk board is rebuilt
+    /// instead, exactly as the C# rebuilds it, and so does nothing here.
+    fn power_on_in_place(&mut self) {}
+
     /// `Configure(origin)`. Reads and writes `self.base_mut().cart`.
     fn configure(&mut self, origin: DetectionOrigin) -> bool;
 
@@ -287,13 +297,17 @@ pub trait Board: Send {
         self.base().irq_signal
     }
 
-    /// `SaveRam`: the battery-backed WRAM, or nothing.
-    fn save_ram(&self) -> Option<&[u8]> {
+    /// `SaveRam`: the battery-backed WRAM, copied into `out` whose earlier content is replaced;
+    /// `out` is left empty when the cartridge has none.
+    ///
+    /// A copy rather than the `Option<&[u8]>` this was: [`zaxnes::ZaxnesBoard`] keeps its
+    /// cartridge in a `RefCell`, and a `Ref` cannot lend a slice out of a `&self`. Both callers
+    /// copied the bytes immediately anyway.
+    fn save_ram_into(&self, out: &mut Vec<u8>) {
+        out.clear();
         let b = self.base();
         if b.cart.wram_battery && !b.wram.is_empty() {
-            Some(&b.wram)
-        } else {
-            None
+            out.extend_from_slice(&b.wram);
         }
     }
 
@@ -319,6 +333,11 @@ pub enum BoardKind {
     SxRom512,
     SoRom,
     TxRom,
+    /// Not a NesHawk class at all: [`zaxnes::ZaxnesBoard`], the fallback for a mapper no ported
+    /// board implements (the owner's decision of 2026-11-12). It is in this enum so that a
+    /// savestate can record which board a block was taken on, and [`create_board`] answers
+    /// `None` for it because it cannot be built without the ROM image.
+    Zaxnes,
 }
 
 /// The order `FindBoard` walks, which is BizHawk's reflection order: the classes carrying
@@ -342,10 +361,11 @@ const BOARD_ORDER: &[BoardKind] = &[
     BoardKind::SoRom,
 ];
 
-/// Make an empty instance of a board class.
+/// Make an empty instance of a board class, or `None` for [`BoardKind::Zaxnes`], which needs the
+/// ROM image and is built by [`zaxnes::ZaxnesBoard::try_new`] instead.
 #[must_use]
-pub fn create_board(kind: BoardKind) -> Box<dyn Board> {
-    match kind {
+pub fn create_board(kind: BoardKind) -> Option<Box<dyn Board>> {
+    Some(match kind {
         BoardKind::Nrom => Box::new(nrom::Nrom::default()),
         BoardKind::UxRom => Box::new(uxrom::UxRom::default()),
         BoardKind::CnRom => Box::new(cnrom::CnRom::new()),
@@ -355,7 +375,8 @@ pub fn create_board(kind: BoardKind) -> Box<dyn Board> {
         BoardKind::SxRom512 => Box::new(sxrom::SxRom::new(sxrom::SxVariant::SxRom512)),
         BoardKind::SoRom => Box::new(sxrom::SxRom::new(sxrom::SxVariant::SoRom)),
         BoardKind::TxRom => Box::new(txrom::TxRom::default()),
-    }
+        BoardKind::Zaxnes => return None,
+    })
 }
 
 /// `NES.BoardSystem.cs`'s `FindBoard`: the first class whose `Configure` accepts the cart.
@@ -370,7 +391,9 @@ pub fn find_board(
 ) -> Option<(BoardKind, Box<dyn Board>, CartInfo)> {
     let mut running = cart.clone();
     for &kind in BOARD_ORDER {
-        let mut board = create_board(kind);
+        let Some(mut board) = create_board(kind) else {
+            continue;
+        };
         board.base_mut().cart = running.clone();
         let accepted = board.configure(origin);
         running = board.base().cart.clone();
@@ -410,6 +433,7 @@ crate::state::sync_enum!(BoardKind {
     6 => BoardKind::SxRom512,
     7 => BoardKind::SoRom,
     8 => BoardKind::TxRom,
+    9 => BoardKind::Zaxnes,
 });
 
 /// `impl Board::write_state`/`read_state` for a board whose own `SyncState` impl is generated:

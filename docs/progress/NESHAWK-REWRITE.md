@@ -492,3 +492,50 @@ compares 120 frames of work RAM, the frame buffer and the cycle count with the c
 | *Kirby* `.bk2` frames 1-400 against `kirby-jp-step1.txt` | **400 of 400 byte-identical** |
 | `cargo test -p zax-neshawk --release` | 21 pass, 1 ignored (needs `ZAXNES_ROMS`) |
 | `fmt`, `clippy -D warnings` on `zax-neshawk` and `zax-core-api` | clean |
+
+### Resumption 2, step B — the Zaxnes-board fallback
+
+The owner's decision of 2026-11-12, implemented: a mapper with no ported NesHawk board now runs
+on **Zaxnes's** board through `boards::zaxnes::ZaxnesBoard`, marked "board from Zaxnes, not
+NesHawk-exact" everywhere a user or a tool can see it, and **never a load error**. Only a mapper
+*neither* emulator has is still refused (and there is exactly one file in the collection like
+that, a headerless image with no database entry).
+
+| | before | after |
+|---|---|---|
+| `test-roms --engine neshawk`, 331 ROMs | 183 pass / 18 fail / **31 unsupported** / 99 manual | **199 pass / 20 fail / 1 unsupported / 111 manual** |
+
+The 31 unsupported were the unported boards. They are now 1, and **every one of the 20 failures is
+accounted for without a port defect**:
+
+* **12 `holy-mapperel` MMC1.** Ten report "$E000 bit 4 does not disable WRAM", which is NesHawk's
+  own documented behaviour (`SxROM.cs` honours `wram_disable` only when `_is_snrom`). The other
+  two are SNROM and **fail on Zaxnes as well** — checked this step, both engines run them and both
+  refuse them, with different detail digits.
+* **AccuracyCoin 130/147** — identical to NesHawk's own run, which is the result of record.
+* **5 DMC/DMA ROMs** that NesHawk fails identically, verified on BizHawk in the earlier step.
+* **2 mapper-4 variants** (`mmc3_test/6-MMC6`, `mmc3_test_2/6-MMC3_alt`) which were *unsupported*
+  before: NesHawk routes them to board classes this port has not got, and Zaxnes's mapper-4 board
+  does not implement MMC6 either. They are the fallback's honest limit, not a regression.
+
+#### Three design points worth recording
+
+1. **The cartridge is in a `RefCell`**, and that is load-bearing rather than clever. NesHawk's
+   `INesBoard` read hooks are `&self` in this port (every ported board leaves no trace on a read)
+   while `Cartridge::try_cpu_read` is `&mut` — the MMC5's `$5204` clears its IRQ flag when read.
+   Without the cell those side effects would silently not happen, which is the worst kind of
+   defect: a game that mostly works. Safe Rust, one borrow per call, never held across a call out.
+2. **`Board::save_ram` became `save_ram_into(&self, &mut Vec<u8>)`.** A `Ref` cannot lend a slice
+   out of a `&self`, and both callers copied the bytes immediately anyway.
+3. **`BoardSystemHardReset` cannot rebuild this board from its class** — it holds a whole
+   `zax-nes` cartridge built from the ROM image, which that method has not got. A new
+   `Board::power_on_in_place` hook, which only this board overrides, resets it through
+   `Cartridge::reset` instead.
+
+The three things the fallback loses, stated in the module header rather than left to be found: the
+IRQ counter's clock (a Zaxnes board may count A12 through its own `A12Watcher` or count
+scanlines), the fetch kind on a PPU read (NesHawk's `ReadPPU` does not carry one, so the adapter
+says `Background`), and four-screen nametables (the console's 2 KiB and the cartridge's view of
+them are two memories here where in Zaxnes they are one).
+
+*Kirby* frames 1-400 re-run after the load path changed: still **400 of 400 byte-identical**.

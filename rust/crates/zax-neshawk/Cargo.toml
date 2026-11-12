@@ -11,6 +11,9 @@ description = "BizHawk's NesHawk NES core, ported to Rust. See LICENSE-BizHawk."
 # The shared engine types: the `Engine` trait, `TileRecord`, `FrameBatch`, the savestate
 # errors. No third-party dependency, and `zax-core-api` has none of its own.
 zax-core-api = { path = "../zax-core-api" }
+# Zaxnes's own boards, for the fallback of `boards::zaxnes`: a mapper with no ported NesHawk
+# board runs on Zaxnes's, marked "board from Zaxnes, not NesHawk-exact" (owner, 2026-11-12).
+zax-nes = { path = "../zax-nes" }
 
 [lints]
 workspace = true

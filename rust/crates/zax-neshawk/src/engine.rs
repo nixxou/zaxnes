@@ -841,8 +841,8 @@ impl Engine for NesHawkEngine {
 
     fn export_battery_ram(&self, out: &mut Vec<u8>) {
         out.clear();
-        if let Some(ram) = self.nes.as_ref().and_then(|nes| nes.board.save_ram()) {
-            out.extend_from_slice(ram);
+        if let Some(nes) = self.nes.as_ref() {
+            nes.board.save_ram_into(out);
         }
     }
 

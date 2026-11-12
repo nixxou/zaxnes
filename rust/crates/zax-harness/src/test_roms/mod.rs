@@ -654,6 +654,22 @@ fn run_one_neshawk(
             };
         }
     };
+    // The owner's marker: a mapper with no ported NesHawk board runs on Zaxnes's board, and the
+    // row has to say so or a verdict from it would read as NesHawk's (owner, 2026-11-12).
+    let from_zaxnes = nes
+        .load_report
+        .as_ref()
+        .is_some_and(|report| report.board_from_zaxnes);
+    let board = nes
+        .load_report
+        .as_ref()
+        .map_or("?", |report| report.board_name)
+        .to_owned();
+    result.detail.insert("board".into(), json!(board));
+    result
+        .detail
+        .insert("board_from_zaxnes".into(), json!(from_zaxnes));
+
     let mut core = machine::NeshawkTestMachine::new(nes);
     // `Nes::load` applied the region off the header, which is the port's own contract — but a ROM
     // made for one console has to be *run* on that console or its result means nothing, and
@@ -673,7 +689,19 @@ fn run_one_neshawk(
         .detail
         .insert("region".into(), json!(format!("{wanted:?}")));
 
-    read_verdict(name, frame_cap, run_all, &mut core, result, started)
+    let mut finished = read_verdict(name, frame_cap, run_all, &mut core, result, started);
+    if from_zaxnes {
+        // In the message as well as in `detail`, because the message is what the markdown report
+        // and the one-line-per-ROM output print.
+        if !finished.result.message.is_empty() {
+            finished.result.message.push_str(" / ");
+        }
+        finished
+            .result
+            .message
+            .push_str("board from Zaxnes, not NesHawk-exact");
+    }
+    finished
 }
 
 /// The half that does not care which core it is: the plan, the reader, the row.
