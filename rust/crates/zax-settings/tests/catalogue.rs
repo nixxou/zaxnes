@@ -103,7 +103,10 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "emu.pipeline",
             "emu.smooth_scroll_ahead",
             "emu.smooth_scroll_view",
+            "input.touch_haptic_buttons",
+            "input.touch_haptic_dpad",
             "input.touch_pad",
+            "input.touch_scale",
             // AMD-049 REQ-SCN-075: a setting of Zaxnes's own (divergence D) — the original
             // always lights the backdrop with the almost-matt model, so it has no such key.
             "render.backdrop_lighting",
@@ -135,6 +138,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             // EDITOR-1 (owner request): the editor mode, Zaxnes's own as well.
             "ui.editor_mode",
             "ui.language",
+            "ui.orientation",
             "ui.profiler",
             "ui.roms_folder",
             "ui.show_fps",

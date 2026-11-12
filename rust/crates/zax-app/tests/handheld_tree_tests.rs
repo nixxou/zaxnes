@@ -18,7 +18,7 @@ use zax_settings::catalogue::SettingId;
 /// settings-file key, every other row a name of its own that no translation can move.
 fn row_key(row: OptionRow) -> String {
     match row {
-        OptionRow::Setting(id) => id.key().into_owned(),
+        OptionRow::Setting(id) | OptionRow::Choice(id) => id.key().into_owned(),
         OptionRow::Group(key) => format!("[{key}]"),
         OptionRow::Page(page) => format!("page.{}", page_name(page)),
         OptionRow::Language => "row.language".to_owned(),
@@ -64,6 +64,7 @@ fn page_name(page: OptionsPage) -> &'static str {
         OptionsPage::Emulation => "emulation",
         OptionsPage::Audio => "audio",
         OptionsPage::Shaders => "shaders",
+        OptionsPage::Touch => "touch",
     }
 }
 
@@ -190,17 +191,20 @@ fn ro_3_every_row_the_console_offered_is_still_reachable() {
     }
     assert!(missing.is_empty(), "no longer reachable: {missing:?}");
 
-    // The touch-pad row keeps its behaviour: it is the Android main page and nothing else.
+    // The Android main page is the main page and the touch screen's page, which holds the
+    // touch-pad row (owner request: the pad's size, vibrations and the orientation with it).
+    let touch = OptionRow::Page(OptionsPage::Touch);
     assert_eq!(
         TOUCH_ROWS.len(),
         ROWS.len() + 1,
-        "the Android page is the main page and the touch-pad row"
+        "the Android page is the main page and the touch screen's page"
     );
-    assert!(TOUCH_ROWS.contains(&OptionRow::TouchPad));
-    assert!(!ROWS.contains(&OptionRow::TouchPad));
+    assert!(TOUCH_ROWS.contains(&touch));
+    assert!(!ROWS.contains(&touch));
+    assert!(OptionsPage::Touch.rows().contains(&OptionRow::TouchPad));
     let without: Vec<OptionRow> = TOUCH_ROWS
         .into_iter()
-        .filter(|row| *row != OptionRow::TouchPad)
+        .filter(|row| *row != touch)
         .collect();
     assert_eq!(ROWS.to_vec(), without);
 

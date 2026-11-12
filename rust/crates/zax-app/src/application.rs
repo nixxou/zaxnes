@@ -933,12 +933,17 @@ impl Running {
                     .get(zax_settings::catalogue::SettingId::InputTouchPad)
                     .as_int(),
             );
+            let options = touch_options(frame.host.settings());
             #[allow(clippy::cast_precision_loss)] // window sizes are far below 2^24
             let size = |(width, height): (u32, u32)| [width as f32, height as f32];
             let playing = self.ui.game_on_screen();
-            self.input
-                .touch
-                .update(mode, playing, size(sizes.window), size(sizes.drawable));
+            self.input.touch.update(
+                mode,
+                options,
+                playing,
+                size(sizes.window),
+                size(sizes.drawable),
+            );
             let (taps, swipe) = (self.input.touch.take_taps(), self.input.touch.take_scroll());
             self.ui.set_touch_pad(self.input.touch.view(), taps, swipe);
         }
@@ -2504,6 +2509,20 @@ fn pull_head_on(
             scene.picture_head_on = false;
             scene.picture_tilt = [0.0; 2];
         }
+    }
+}
+
+/// The touch pad's size and vibrations, from the settings.
+fn touch_options(
+    settings: &zax_settings::model::SettingsModel,
+) -> zax_platform::input::touch::TouchOptions {
+    use zax_settings::catalogue::SettingId;
+    #[allow(clippy::cast_precision_loss)] // 50 to 175 percent.
+    let scale = settings.get(SettingId::InputTouchScale).as_int().clamp(25, 300) as f32 / 100.0;
+    zax_platform::input::touch::TouchOptions {
+        scale,
+        haptic_dpad: settings.get(SettingId::InputTouchHapticDpad).as_int(),
+        haptic_buttons: settings.get(SettingId::InputTouchHapticButtons).as_int(),
     }
 }
 

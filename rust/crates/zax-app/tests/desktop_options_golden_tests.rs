@@ -104,6 +104,10 @@ fn ro_1_the_excluded_list_is_unchanged() {
             SettingId::AchievementsToken,
             SettingId::VideoHalfRate3d,
             SettingId::InputTouchPad,
+            SettingId::InputTouchScale,
+            SettingId::InputTouchHapticDpad,
+            SettingId::InputTouchHapticButtons,
+            SettingId::UiOrientation,
             SettingId::UiLibraryView,
             SettingId::VideoMsaa20,
         ],
@@ -549,7 +553,9 @@ fn ro_3_the_handheld_main_pages_are_the_mockups() {
             OptionRow::Page(OptionsPage::Optimizations),
             OptionRow::Page(OptionsPage::Advanced),
             OptionRow::Controls,
-            OptionRow::TouchPad,
+            // Owner request: the touch pad's row went into the touch screen's page, with its
+            // size, its vibrations and the orientation.
+            OptionRow::Page(OptionsPage::Touch),
             OptionRow::Achievements,
             OptionRow::Profiler,
         ],

@@ -141,7 +141,8 @@ pub const fn page_rows(page: OptionsPage) -> &'static [OptionRow] {
         OptionsPage::NesPicture
         | OptionsPage::Camera
         | OptionsPage::Audio
-        | OptionsPage::Shaders => &[],
+        | OptionsPage::Shaders
+        | OptionsPage::Touch => &[],
     }
 }
 
@@ -195,7 +196,9 @@ pub const fn row_settings(row: OptionRow) -> &'static [SettingId] {
         // advanced page go through the same variant — names nothing here, so it can never
         // become an option of a game.
         OptionRow::Setting(id) => one_setting(id),
+        // The touch screen's settings belong to the device, not to a game.
         OptionRow::Language
+        | OptionRow::Choice(_)
         | OptionRow::Camera
         | OptionRow::Controls
         | OptionRow::Achievements

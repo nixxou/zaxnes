@@ -64,6 +64,9 @@ pub enum OptionRow {
     Achievements,
     /// The touch pad (Rust-only, a touch screen only): no, yes or automatic.
     TouchPad,
+    /// A setting stepped through the choices of its domain, its label and its choices those of
+    /// the catalogue: the touch screen's (size, vibrations, orientation).
+    Choice(SettingId),
     /// A setting of the desktop's options window shown as a stepped row
     /// ([`super::advanced::ROW_SETTINGS`] names every one the console offers).
     Setting(SettingId),
@@ -121,11 +124,14 @@ pub enum OptionsPage {
     Audio,
     /// The slang shaders of the four slots (owner request, the desktop's Shaders window).
     Shaders,
+    /// The touch screen (Android, owner request): the pad, its size and vibrations, the
+    /// orientation.
+    Touch,
 }
 
 impl OptionsPage {
     /// Every page, for the tests that walk them all.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Optimizations,
         Self::Advanced,
         Self::Display,
@@ -138,6 +144,7 @@ impl OptionsPage {
         Self::Emulation,
         Self::Audio,
         Self::Shaders,
+        Self::Touch,
     ];
 
     /// The key of the page's title.
@@ -156,6 +163,7 @@ impl OptionsPage {
             Self::Emulation => keys::TAB_EMULATION,
             Self::Audio => keys::TAB_AUDIO,
             Self::Shaders => "shaders.title",
+            Self::Touch => keys::HANDHELD_OPTION_TOUCH_SCREEN,
         }
     }
 
@@ -175,6 +183,7 @@ impl OptionsPage {
             Self::Emulation => &EMULATION_ROWS,
             Self::Audio => &AUDIO_ROWS,
             Self::Shaders => &SHADER_ROWS,
+            Self::Touch => &TOUCH_SCREEN_ROWS,
         }
     }
 
@@ -217,10 +226,44 @@ pub const TOUCH_ROWS: [OptionRow; 14] = [
     OptionRow::Page(OptionsPage::Optimizations),
     OptionRow::Page(OptionsPage::Advanced),
     OptionRow::Controls,
-    OptionRow::TouchPad,
+    OptionRow::Page(OptionsPage::Touch),
     OptionRow::Achievements,
     OptionRow::Profiler,
 ];
+
+/// The rows of the touch screen's page (owner request): the pad, its size and its vibrations, and
+/// the orientation of the screen.
+pub const TOUCH_SCREEN_ROWS: [OptionRow; 5] = [
+    OptionRow::TouchPad,
+    OptionRow::Choice(SettingId::InputTouchScale),
+    OptionRow::Choice(SettingId::InputTouchHapticDpad),
+    OptionRow::Choice(SettingId::InputTouchHapticButtons),
+    OptionRow::Choice(SettingId::UiOrientation),
+];
+
+/// The values of a setting's choices, in their order.
+fn choice_values(id: SettingId) -> Vec<i32> {
+    catalogue::descriptor(id)
+        .domain()
+        .options()
+        .unwrap_or_default()
+        .iter()
+        .map(|option| {
+            #[allow(clippy::cast_possible_truncation)] // A choice's value.
+            let value = option.value as i32;
+            value
+        })
+        .collect()
+}
+
+/// The label of the choice the setting `id` holds.
+fn choice_text(id: SettingId, settings: &SettingsModel) -> String {
+    let current = settings.get(id).as_int();
+    catalogue::descriptor(id)
+        .domain()
+        .label_of(f64::from(current))
+        .map_or_else(|| current.to_string(), text::label_of_option)
+}
 
 /// The values of the touch pad row (`input.touch_pad`): no, yes, automatic.
 const TOUCH_PADS: [i32; 3] = [0, 1, 2];
@@ -691,6 +734,13 @@ pub fn step_row(row: OptionRow, settings: &mut SettingsModel, step: i32) -> Opti
             let next = *cycled(&TOUCH_PADS, &touch_pad(settings), step);
             settings.set(SettingId::InputTouchPad, SettingValue::Enum(next));
         }
+        OptionRow::Choice(id) => {
+            let values = choice_values(id);
+            if !values.is_empty() {
+                let next = *cycled(&values, &settings.get(id).as_int(), step);
+                settings.set(id, SettingValue::Enum(next));
+            }
+        }
         OptionRow::Controls | OptionRow::Page(_) | OptionRow::Group(_) => {}
         OptionRow::Setting(id) => super::advanced::step(id, settings, step),
         OptionRow::Achievements => return Some(OptionsCommand::OpenAchievements),
@@ -744,6 +794,7 @@ pub fn label(row: OptionRow) -> String {
         OptionRow::Pipeline => strings::get(keys::HANDHELD_OPTION_PIPELINE),
         OptionRow::Region => strings::get(keys::HANDHELD_OPTION_REGION),
         OptionRow::TouchPad => strings::get(keys::HANDHELD_OPTION_TOUCH_PAD),
+        OptionRow::Choice(id) => text::label_of(catalogue::descriptor(id)),
         OptionRow::Setting(id) => super::advanced::label(id),
         OptionRow::Controls => strings::get(keys::HANDHELD_OPTION_CONTROLS),
         OptionRow::Achievements => strings::get(keys::TAB_ACHIEVEMENTS),
@@ -799,6 +850,7 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
             RegionChoice::Ntsc => "NTSC".to_owned(),
             RegionChoice::Pal => "PAL".to_owned(),
         },
+        OptionRow::Choice(id) => choice_text(id, settings),
         OptionRow::TouchPad => match touch_pad(settings) {
             0 => strings::get(keys::HANDHELD_TOUCH_PAD_OFF),
             1 => strings::get(keys::HANDHELD_TOUCH_PAD_ON),

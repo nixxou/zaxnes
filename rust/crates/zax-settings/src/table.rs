@@ -1330,7 +1330,70 @@ fn touch(out: &mut Vec<SettingDescriptor>) {
         ]))
         .with_label("Touch pad"),
     );
+    // Rust-only (owner request): the size of the pad, each control growing or shrinking from the
+    // edge or the corner of the screen it keeps to; in percent of the size it was made at.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::InputTouchScale,
+            SettingKind::Enum,
+            SettingValue::Enum(100),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Input,
+        )
+        .with_domain(Domain::choice(
+            TOUCH_SCALES
+                .iter()
+                .map(|percent| opt(*percent, &format!("{percent} %")))
+                .collect(),
+        ))
+        .with_label("Touch pad size"),
+    );
+    // Rust-only (owner request): the vibration of a press, the cross apart from the buttons.
+    for (id, label) in [
+        (SettingId::InputTouchHapticDpad, "Vibration of the cross"),
+        (SettingId::InputTouchHapticButtons, "Vibration of the buttons"),
+    ] {
+        out.push(
+            SettingDescriptor::new(
+                id,
+                SettingKind::Enum,
+                SettingValue::Enum(0),
+                SettingScope::User,
+                SettingEffect::Immediate,
+                SettingTheme::Input,
+            )
+            .with_domain(Domain::choice(vec![
+                opt(0, "Off"),
+                opt(1, "Light"),
+                opt(2, "Medium"),
+                opt(3, "Strong"),
+            ]))
+            .with_label(label),
+        );
+    }
+    // Rust-only (owner request, Android): the screen's orientation. In portrait the game takes the
+    // top of the screen and the pad the bottom.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::UiOrientation,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Interface,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Landscape"),
+            opt(1, "Portrait"),
+            opt(2, "Auto"),
+        ]))
+        .with_label("Orientation"),
+    );
 }
+
+/// The sizes of the touch pad, in percent (`input.touch_scale`).
+pub const TOUCH_SCALES: [i32; 11] = [50, 60, 70, 80, 90, 100, 110, 120, 135, 150, 175];
 
 fn audio_input_interface(out: &mut Vec<SettingDescriptor>) {
     out.push(

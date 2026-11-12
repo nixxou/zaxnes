@@ -66,6 +66,28 @@ impl TouchPadMode {
     }
 }
 
+/// The player's settings of the pad: its size and its vibrations.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TouchOptions {
+    /// The size of the controls, 1 the size they were made at (`input.touch_scale`).
+    pub scale: f32,
+    /// The vibration of the cross: 0 none, 1 light, 2 medium, 3 strong
+    /// (`input.touch_haptic_dpad`).
+    pub haptic_dpad: i32,
+    /// The vibration of the buttons, likewise (`input.touch_haptic_buttons`).
+    pub haptic_buttons: i32,
+}
+
+impl Default for TouchOptions {
+    fn default() -> Self {
+        Self {
+            scale: 1.0,
+            haptic_dpad: 0,
+            haptic_buttons: 0,
+        }
+    }
+}
+
 /// A control of the pad.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TouchControl {
@@ -142,6 +164,22 @@ impl Circle {
     fn contains(&self, point: [f32; 2], scale: f32) -> bool {
         distance(point, self.center) <= self.radius * scale
     }
+
+    /// The circle `scale` times as large, the point `anchor` (a corner or an edge of the view)
+    /// staying where it is: the control keeps to its edge, its gap to it growing with it.
+    fn scaled_from(self, anchor: [f32; 2], scale: f32) -> Self {
+        Self {
+            center: scale_point(self.center, anchor, scale),
+            radius: self.radius * scale,
+        }
+    }
+}
+
+fn scale_point(point: [f32; 2], anchor: [f32; 2], scale: f32) -> [f32; 2] {
+    [
+        anchor[0] + (point[0] - anchor[0]) * scale,
+        anchor[1] + (point[1] - anchor[1]) * scale,
+    ]
 }
 
 /// A rectangular control, in pixels.
@@ -152,6 +190,13 @@ pub struct Rect {
 }
 
 impl Rect {
+    fn scaled_from(self, anchor: [f32; 2], scale: f32) -> Self {
+        Self {
+            min: scale_point(self.min, anchor, scale),
+            max: scale_point(self.max, anchor, scale),
+        }
+    }
+
     fn contains(&self, point: [f32; 2], margin: f32) -> bool {
         point[0] >= self.min[0] - margin
             && point[0] <= self.max[0] + margin
@@ -235,6 +280,31 @@ impl TouchLayout {
                 center: [unit * 0.32, unit * 0.08],
                 radius: unit * 0.045,
             },
+        }
+    }
+
+    /// The layout on a view of `width` by `height` pixels at `scale` times the size: each control
+    /// grows or shrinks from the corner or the edge of the view it keeps to — the cross from the
+    /// bottom left corner, B and A from the bottom right one, Select and Start from the middle of
+    /// the bottom edge, the menu from the top right corner, the three small buttons from the top
+    /// left one.
+    #[must_use]
+    pub fn scaled(width: f32, height: f32, scale: f32) -> Self {
+        let base = Self::for_view(width, height);
+        let scale = scale.clamp(0.25, 3.0);
+        let (top_left, top_right) = ([0.0, 0.0], [width, 0.0]);
+        let (bottom_left, bottom_right) = ([0.0, height], [width, height]);
+        let bottom_middle = [width * 0.5, height];
+        Self {
+            dpad: base.dpad.scaled_from(bottom_left, scale),
+            a: base.a.scaled_from(bottom_right, scale),
+            b: base.b.scaled_from(bottom_right, scale),
+            select: base.select.scaled_from(bottom_middle, scale),
+            start: base.start.scaled_from(bottom_middle, scale),
+            menu: base.menu.scaled_from(top_right, scale),
+            flat: base.flat.scaled_from(top_left, scale),
+            lock: base.lock.scaled_from(top_left, scale),
+            recenter: base.recenter.scaled_from(top_left, scale),
         }
     }
 
@@ -418,6 +488,9 @@ pub struct TouchPad {
     mouse_finger: bool,
     /// Where free fingers tapped since the last [`TouchPad::take_taps`], in drawable pixels.
     taps: Vec<[f32; 2]>,
+    options: TouchOptions,
+    /// The device's vibrator, opened at the first vibration asked for.
+    vibrator: Vibrator,
 }
 
 /// The finger the mouse stands for.
@@ -445,6 +518,8 @@ impl TouchPad {
             name: CString::new(TOUCH_PAD_NAME).unwrap_or_default(),
             mouse_finger,
             taps: Vec::new(),
+            options: TouchOptions::default(),
+            vibrator: Vibrator::default(),
         }
     }
 
@@ -532,12 +607,17 @@ impl TouchPad {
     pub fn update(
         &mut self,
         mode: TouchPadMode,
+        options: TouchOptions,
         playing: bool,
         window: [f32; 2],
         drawable: [f32; 2],
     ) {
         self.mode = mode;
         self.playing = playing;
+        // Compared exactly: another size lays the pad out again.
+        #[allow(clippy::float_cmp)]
+        let rescaled = options.scale != self.options.scale;
+        self.options = options;
         let [width, height] = drawable;
         if window[0] > 0.0 && window[1] > 0.0 {
             self.scale = [width / window[0], height / window[1]];
@@ -545,9 +625,9 @@ impl TouchPad {
         // The window's own sizes, compared exactly: a new size lays the pad out again.
         #[allow(clippy::float_cmp)]
         let resized = self.view != [width, height];
-        if resized {
+        if resized || rescaled {
             self.view = [width, height];
-            self.layout = TouchLayout::for_view(width, height);
+            self.layout = TouchLayout::scaled(width, height, self.options.scale);
         }
         self.follow_visibility();
     }
@@ -615,6 +695,13 @@ impl TouchPad {
             self.pressed = [false; CONTROLS];
             return;
         }
+        let (dpad, buttons) = new_presses(&self.pressed, &pressed);
+        if dpad {
+            self.vibrator.pulse(self.options.haptic_dpad);
+        }
+        if buttons {
+            self.vibrator.pulse(self.options.haptic_buttons);
+        }
         for control in TouchControl::ALL {
             let on = pressed[control.index()];
             if on == self.pressed[control.index()] {
@@ -674,6 +761,78 @@ impl Drop for TouchPad {
         if !self.joystick.is_null() {
             self.detach();
         }
+    }
+}
+
+/// What a change of the pressed controls from `before` to `after` asks to vibrate: the cross
+/// (another direction pressed, a diagonal included) and the buttons (one more pressed).
+fn new_presses(before: &[bool; CONTROLS], after: &[bool; CONTROLS]) -> (bool, bool) {
+    let directions = 4;
+    let dpad = after[..directions].iter().any(|on| *on) && after[..directions] != before[..directions];
+    let buttons = (directions..CONTROLS).any(|index| after[index] && !before[index]);
+    (dpad, buttons)
+}
+
+/// The vibration of a level: its strength (0 to 1) and how long it lasts, in milliseconds.
+const fn pulse_of(level: i32) -> Option<(f32, u32)> {
+    match level {
+        1 => Some((0.35, 12)),
+        2 => Some((0.65, 20)),
+        3 => Some((1.0, 30)),
+        _ => None,
+    }
+}
+
+/// The device's vibrator: SDL's first haptic device, which on Android is the phone's or the
+/// tablet's own (SDL calls it `VIBRATOR_SERVICE`). Opened once, at the first pulse; none on a
+/// device without one.
+#[derive(Debug, Default)]
+struct Vibrator {
+    haptic: Option<*mut sys::SDL_Haptic>,
+}
+
+impl Vibrator {
+    /// A short pulse at `level` (0 none, 1 light, 2 medium, 3 strong).
+    fn pulse(&mut self, level: i32) {
+        let Some((strength, length)) = pulse_of(level) else {
+            return;
+        };
+        let haptic = *self.haptic.get_or_insert_with(open_vibrator);
+        if haptic.is_null() {
+            return;
+        }
+        // SAFETY: an open haptic device whose rumble was initialised.
+        unsafe {
+            sys::SDL_HapticRumblePlay(haptic, strength, length);
+        }
+    }
+}
+
+impl Drop for Vibrator {
+    fn drop(&mut self) {
+        if let Some(haptic) = self.haptic.filter(|haptic| !haptic.is_null()) {
+            // SAFETY: the device this vibrator opened, closed once.
+            unsafe { sys::SDL_HapticClose(haptic) };
+        }
+    }
+}
+
+/// Opens the first haptic device for rumbling; null when there is none or it cannot rumble.
+fn open_vibrator() -> *mut sys::SDL_Haptic {
+    // SAFETY: SDL's haptic subsystem, started then queried; the device is closed by `Vibrator`.
+    unsafe {
+        if sys::SDL_InitSubSystem(sys::SDL_INIT_HAPTIC) != 0 || sys::SDL_NumHaptics() < 1 {
+            return ptr::null_mut();
+        }
+        let haptic = sys::SDL_HapticOpen(0);
+        if haptic.is_null() {
+            return haptic;
+        }
+        if sys::SDL_HapticRumbleInit(haptic) != 0 {
+            sys::SDL_HapticClose(haptic);
+            return ptr::null_mut();
+        }
+        haptic
     }
 }
 
@@ -789,6 +948,56 @@ mod tests {
         );
         assert_eq!(None, layout.button_at([960.0, 400.0]));
         assert!(layout.select.max[0] < layout.start.min[0]);
+    }
+
+    #[test]
+    fn a_larger_pad_keeps_each_control_to_its_corner() {
+        let (width, height) = (1920.0, 1080.0);
+        let normal = TouchLayout::scaled(width, height, 1.0);
+        assert_eq!(normal, layout());
+        let large = TouchLayout::scaled(width, height, 1.5);
+        // The cross grows from the bottom left corner: its gaps to both edges grow with it.
+        let gap = |circle: Circle| {
+            [
+                circle.center[0] - circle.radius,
+                height - circle.center[1] - circle.radius,
+            ]
+        };
+        let (before, after) = (gap(normal.dpad), gap(large.dpad));
+        assert!((after[0] - before[0] * 1.5).abs() < 1e-3);
+        assert!((after[1] - before[1] * 1.5).abs() < 1e-3);
+        assert!((large.dpad.radius - normal.dpad.radius * 1.5).abs() < 1e-3);
+        // A from the bottom right one, the menu from the top right, Select from the bottom middle.
+        assert!(large.a.center[0] < normal.a.center[0] && large.a.center[1] < normal.a.center[1]);
+        assert!(large.menu.center[0] < normal.menu.center[0]);
+        assert!(large.menu.center[1] > normal.menu.center[1]);
+        assert!(large.select.min[0] < normal.select.min[0]);
+        assert!((large.select.max[1] - height).abs() > (normal.select.max[1] - height).abs());
+        // Smaller, the other way; and the pad still answers where it is drawn.
+        let small = TouchLayout::scaled(width, height, 0.6);
+        assert!(small.dpad.center[1] > normal.dpad.center[1]);
+        assert_eq!(Some(TouchControl::A), small.button_at(small.a.center));
+        assert_eq!(Some(TouchControl::B), large.button_at(large.b.center));
+    }
+
+    #[test]
+    fn a_new_press_vibrates_its_part_of_the_pad() {
+        let mut before = [false; CONTROLS];
+        let mut after = before;
+        after[TouchControl::Up.index()] = true;
+        assert_eq!((true, false), new_presses(&before, &after));
+        before = after;
+        // Held: nothing more; a diagonal is a new direction.
+        assert_eq!((false, false), new_presses(&before, &after));
+        after[TouchControl::Right.index()] = true;
+        assert_eq!((true, false), new_presses(&before, &after));
+        before = after;
+        after[TouchControl::A.index()] = true;
+        assert_eq!((false, true), new_presses(&before, &after));
+        // Letting go vibrates nothing.
+        assert_eq!((false, false), new_presses(&after, &[false; CONTROLS]));
+        assert_eq!(None, pulse_of(0));
+        assert!(pulse_of(3).is_some_and(|(strength, _)| (strength - 1.0).abs() < 1e-6));
     }
 
     #[test]
