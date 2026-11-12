@@ -12,8 +12,11 @@ Branch `feat/neshawk-profile`, worktree `cleanroom/wt-bk2`, base `52dfcbbf` (lot
       transfer where this core's loses a cycle on each in-transfer fetch. Measured off BizHawk's
       own stream with no calibration, read in `RunCpuOne` second, and it takes frame 38's residual
       from **+2 to +1**. It costs nothing anywhere and moves no RAM byte.
-- [ ] 3. **Rounds** — next first difference, same loop, up to five rounds, *Faxanadu* re-checked
-      after every item.
+- [x] 3. **Round 2** — **item 16**, item 15's other end: a fetch standing on the transfer's own
+      wait cycle costs it **one** cycle, not two. Frame 38 closes completely, and every event of
+      tree frames **3 to 40** is now in step. The first difference of any kind is tree frame 40
+      and it is **no longer a cycle displacement at all** — this core runs an extra `$4016` input
+      pass there.
 - [ ] 4. **No regression** and the final pass.
 
 ## The environment this lot runs in
@@ -167,3 +170,99 @@ either way — the realign and the wait are the same cycle. That is round 2's it
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE-12 step 2/4 done: item 15 -- a fetch inside an OAM transfer is serviced from the request cycle
+
+---
+
+## Step 3 — round 2: item 16 closes tree frame 38, and the wall changes character
+
+### The answer first
+
+**Item 16 is item 15's other end, and frame 38 is now closed.** The residual item 15 left was not
+the same thing, and the sweep said so before the item was written: the phases on which the NesHawk
+profile charges three cycles for an inside fetch read exactly the same with item 15 off, so they
+predate it. What separates frame 38 from frame **37** — same instruction, same two inside fetches,
+frame 37 in step throughout — is *where* the second fetch comes due: frame 38's is at **+517**
+cycles from the `$4014` write, past the transfer's nominal 514, and frame 37's at **+491**.
+
+**BizHawk measures that case directly, both halves inside one machine:**
+
+| | last `w $2004` | then | then | the CPU runs |
+|---|---|---|---|---|
+| a fetch at the end (tree frame 38) | 1 097 681 | `r $FE57`, the fetch | one idle cycle | 1 097 684 |
+| no fetch at the end (tree frame 36) | 1 067 901 | one idle cycle | — | 1 067 903 |
+
+So the fetch adds **one** cycle there, not two. Execute to execute across the whole transfer
+(`x $C360` to `x $C365`) NesHawk spends **523** cycles on tree frame 38 and **524** on tree frame
+37 — one cycle apart on the same instruction with the same two fetches, which is this item and
+nothing else. This core spent 524 on both.
+
+**The reading agrees and is short.** Item 7's second cycle is `dmc_realign`, and all `dmc_realign`
+does in `RunCpuOne` is skip the **OAM block** on the cycle after the fetch; once the 512th access
+has run, `oam_dma_exec` is already false and there is no block left to skip, so the realign costs
+nothing. What the CPU still loses is item 13's own cycle — and the fetch is standing on it. One
+site, `nes_bus.rs` `run_dma`: the trailing `tick` is not spent when a fetch has already spent it.
+
+### What it is worth
+
+| | item 15 only | **with item 16** |
+|---|---|---|
+| tree frame 38's residual | +1 on 11 events of 14 | **0** |
+| frames in step on every event | 3-37 | **3-40** |
+| first difference of any kind | tree frame 38, a cycle residual | tree frame **40**, an extra `$4016` pass |
+| `golden-core` | `8d508070…` | **`8d508070…`** byte-identical |
+| `test-roms --profile standard` | 212 / 7 | **212 / 7** |
+| `test-roms --profile neshawk` | 205 / 14 | **205 / 14** |
+| *Faxanadu* USA / Rev 1 | 202 / 210 | **202 / 210** |
+| `step1` / `step1b` / `step1c` identical | 219 / 342 / 459 | **219 / 342 / 459** |
+| the parting frame | 9 353 | **9 353** |
+
+Like items 14 and 15 it is **exactly inert on the work RAM** and costs nothing; what it buys is
+the clock.
+
+### The two items' tests, and the trap they walked into
+
+Item 16 **moved item 15's test**, which is the trap `docs/review/NESHAWK-PROFILE.md` records as
+*"a differential test of one item can be an instrument for another"* — item 1b's test had to move
+to the even slips when item 1c shipped, and this is the same shape. At item 15's phases 345 and 346
+the second fetch lands on the transfer's wait cycle, so item 16 fires there too and those phases
+read 3 where item 15 alone reads 4. **Item 15's test now runs the part of the sweep item 16 leaves
+alone**, phases 347-360, where it reads 4 with the item and 2 without it either way.
+
+No lead isolates item 16 from item 15 — item 15 moves *where* the fetch lands and item 16 prices
+the last place it can land — so item 16's test pins the **shipped** vector and carries both
+off-tables in a comment beside it:
+
+| leads 505-514 | |
+|---|---|
+| both items on (shipped) | `[2, 2, 2, 2, 2, 2, 2, 1, 1, 0]` |
+| item 16 off, item 15 on | `[2, 2, 2, 2, 2, 2, 2, 2, 2, 0]` |
+| item 16 on, item 15 off | `[2, 2, 2, 2, 2, 0, 0, 2, 2, 0]` |
+| `Standard`, unchanged by either | `[2, 2, 2, 2, 2, 2, 1, 1, 3, 3]` |
+
+The last row is what keeps both tests differential rather than pins: a regression of the standard
+path fails them.
+
+### Round 3's window, and why it is a different hunt
+
+The first difference of any kind is tree frame **40**, and for the first time in five lots it is
+**not a cycle residual**: every event of frames 3-40 agrees on its absolute cycle, and the
+instrument stops on an **event-stream** difference — BizHawk writes `$4017` where this core writes
+a sixth `$4016`. This core runs **six** strobe pairs in frame 40 (frame-relative 944/950,
+1096/1102, 1287/1293, 1435/1441, **1602/1608, 1756/1762**) where NesHawk runs five. That is
+Kirby's input routine taking an extra pass — the same shape lot NESHAWK-PROFILE-7 measured at
+frame 55 and lot 8 at frame 40, where a DMC halt lands on the game's own `LDA $4016,X` read on one
+machine and not the other and the pad byte comes back corrupted. Lot 8 recorded that item 1c alone
+closed frame 40's collision; with items 14, 15 and 16 on it is **back**, which is itself a result —
+the three items moved the clock under it. Round 3 is that collision, and it needs the `$4016` bus
+stream of frame 40 rather than the event ledger, which cannot walk past it.
+
+### The instruments
+
+| | |
+|---|---|
+| `q191.lua` | the same stream as step 2; the end-of-transfer window is its last 600 lines |
+| the one-fetch `lead` sweep | in item 16's own test: rate 0 puts exactly one request inside a 514-cycle transfer, and `lead` places it anywhere in the transfer. It is what showed the `+2 → +1` edge at leads 512-513 and the control at 514 |
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-12 step 3/4 done: round 2, item 16 closes tree frame 38 and the wall is now frame 40's extra input pass

@@ -380,6 +380,32 @@ pub trait TimingProfile: Copy + Clone + Default + core::fmt::Debug + Send + Sync
     /// core reads 432, **431**, 432, 432. Each of the two in-transfer fetches is one cycle late,
     /// and the two cycles are the whole of the movie's first difference at that frame.
     const DMC_FETCH_IN_AN_OAM_TRANSFER_STARTS_AT_THE_REQUEST: bool;
+
+    /// **Item 16** (lot NESHAWK-PROFILE-12 step 3), the other end of item 15's interleave. A DMC
+    /// fetch whose own cycle is the one **after an OAM transfer's last `$2004` write** costs that
+    /// transfer **one** cycle and not two, because the cycle it takes is the cycle
+    /// [`TimingProfile::OAM_DMA_WAITS_AT_THE_END`] already charges as the transfer's wait.
+    ///
+    /// **Why the two coincide, in `NES.Core.cs` `RunCpuOne`.** Item 7's second cycle is
+    /// `dmc_realign`, and all `dmc_realign` does is skip the **OAM block** on the cycle after the
+    /// fetch; once the 512th access has run, `oam_dma_exec` is already false and there is no block
+    /// left to skip, so the realign costs nothing at all. What the CPU still loses is item 13's
+    /// own cycle — `oam_dma_exec` goes false on the last write's cycle and the CPU runs again only
+    /// on the cycle after the next — and the fetch is standing on it.
+    ///
+    /// **Measured off BizHawk's own stream** (`q191.lua`), both cases inside one machine, which is
+    /// what makes it a measurement and not an arithmetic:
+    ///
+    /// | | last `w $2004` | then | then | the CPU runs |
+    /// |---|---|---|---|---|
+    /// | a fetch at the end (tree frame 38) | 1 097 681 | `r $FE57`, the fetch | one idle cycle | 1 097 684 |
+    /// | no fetch at the end (tree frame 36) | 1 067 901 | one idle cycle | — | 1 067 903 |
+    ///
+    /// So the fetch adds **one** cycle there. Execute to execute across the whole transfer
+    /// (`x $C360` to `x $C365`) NesHawk spends 523 cycles on tree frame 38 and **524** on tree
+    /// frame 37, whose two inside fetches are both comfortably inside it — one cycle apart on the
+    /// same instruction with the same two fetches, which is this item and nothing else.
+    const DMC_FETCH_TAKES_THE_OAM_TRANSFER_WAIT_CYCLE: bool;
 }
 
 /// Zaxnes's own 2A03: the behaviour every lot before NESHAWK-PROFILE measured, and the one every
@@ -408,6 +434,7 @@ impl TimingProfile for Standard {
     const RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT: bool = false;
     const SOFT_RESET_PPU_DOT_BIAS: i64 = 0;
     const DMC_FETCH_IN_AN_OAM_TRANSFER_STARTS_AT_THE_REQUEST: bool = false;
+    const DMC_FETCH_TAKES_THE_OAM_TRANSFER_WAIT_CYCLE: bool = false;
 }
 
 /// A 2A03 that makes BizHawk NesHawk's timing choices where they differ from Zaxnes's, so that a
@@ -547,4 +574,8 @@ impl TimingProfile for NesHawkCompat {
     /// `pc$C06E` is back at 0 — because what the transfer's middle loses its end gives back, the
     /// held request's halt and re-reads landing on transfer cycles that were going to run anyway.
     const DMC_FETCH_IN_AN_OAM_TRANSFER_STARTS_AT_THE_REQUEST: bool = true;
+
+    /// Item 16 — item 15's other end, measured off the same stream: a fetch standing on the
+    /// transfer's own wait cycle costs it one cycle, not two. The trait's note carries the table.
+    const DMC_FETCH_TAKES_THE_OAM_TRANSFER_WAIT_CYCLE: bool = true;
 }

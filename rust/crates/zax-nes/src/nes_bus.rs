@@ -897,6 +897,10 @@ impl<P: TimingProfile> NesBusOf<P> {
         let mut oam_steps: u16 = 0;
         let mut oam_index: u8 = 0;
         let mut oam_byte: u8 = 0;
+        // **Item 16**: set when a DMC fetch's own cycle was the one after the transfer's last
+        // `$2004` write — the cycle item 13 charges as the transfer's wait. See the trailing
+        // `tick` at the end of this function.
+        let mut the_fetch_took_the_wait_cycle = false;
 
         // **Item 13**, the first of its two halves: NesHawk spends no halt cycle of its own on an
         // OAM transfer — its dead cycles carry no bus access at all — so when the halt cycle is
@@ -986,6 +990,14 @@ impl<P: TimingProfile> NesBusOf<P> {
                     if !input_port {
                         self.dma_repeat_read::<ZONE>(read_address);
                     }
+                } else if P::DMC_FETCH_TAKES_THE_OAM_TRANSFER_WAIT_CYCLE && oam_steps == 0x200 {
+                    // **Item 16**: the transfer's accesses are done, so this fetch's own cycle is
+                    // the cycle after the last `$2004` write — which is the cycle item 13 charges
+                    // as the transfer's wait. NesHawk spends it once, not twice: `dmc_realign`
+                    // only skips the OAM block and `oam_dma_exec` is already false, so the realign
+                    // costs nothing and what follows the fetch is the one cycle the CPU was going
+                    // to lose anyway.
+                    the_fetch_took_the_wait_cycle = true;
                 }
             } else if get_cycle && (self.dma & DMA_OAM) != 0 {
                 self.dma_cycle();
@@ -1017,7 +1029,8 @@ impl<P: TimingProfile> NesBusOf<P> {
         // again only on the cycle after the next — and that cycle carries no bus access, so it is
         // a plain tick and not another re-read. `oam_steps` counts this transfer's own accesses,
         // so a `run_dma` entered for a DMC fetch alone never reaches it.
-        if P::OAM_DMA_WAITS_AT_THE_END && oam_steps == 0x200 {
+        // **Item 16** takes it back when a DMC fetch has already spent that cycle.
+        if P::OAM_DMA_WAITS_AT_THE_END && oam_steps == 0x200 && !the_fetch_took_the_wait_cycle {
             self.tick();
         }
     }

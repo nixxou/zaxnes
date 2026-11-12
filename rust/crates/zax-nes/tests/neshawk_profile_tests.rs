@@ -1251,8 +1251,12 @@ fn item_15_a_fetch_inside_an_oam_transfer_is_serviced_from_the_request() {
     // The window where **two** requests fall inside one transfer, which is what tree frame 38 has:
     // the transfer is 514 cycles and the sample period 432, so a second request fits on the phases
     // from 345 on. 343 and 344 are left out because the NesHawk profile has only one fetch inside
-    // there and the two columns are then measuring different things.
-    let phases: Vec<u32> = (345..=360).collect();
+    // there and the two columns would be measuring different things — and **345 and 346 are left
+    // out because item 16 varies them**: at those two phases the second fetch lands on the
+    // transfer's own wait cycle, so they read 3 on the shipped profile and not 4. That is the trap
+    // `docs/review/NESHAWK-PROFILE.md` names as "a differential test of one item can be an
+    // instrument for another", and the window below is the part of the sweep item 16 leaves alone.
+    let phases: Vec<u32> = (347..=360).collect();
     let charge = |v: &[(i64, i64)]| v.iter().map(|&(c, _)| c).collect::<Vec<_>>();
     let hawk: Vec<_> = phases.iter().map(|&d| row::<NesHawkCompat>(d)).collect();
     let plain: Vec<_> = phases.iter().map(|&d| row::<Standard>(d)).collect();
@@ -1267,21 +1271,120 @@ fn item_15_a_fetch_inside_an_oam_transfer_is_serviced_from_the_request() {
         );
         // **The item.** Two cycles per inside fetch — item 7's fetch cycle and its realign — on
         // **every** phase, because the transfer's own cycles stand in for the halt and both
-        // re-reads from the request cycle inclusive. Without the item the first two phases read
-        // **5** and the next two **3**: the halt landed a cycle late there, which both lengthened
-        // the transfer and moved the fetch off the request's own grid.
+        // re-reads from the request cycle inclusive. **Without the item phases 347 and 348 read
+        // 2**: the halt landed a cycle late there, which both lengthened the transfer and moved the
+        // fetch off the request's own grid. Those two phases are what isolates this item — they
+        // read 4 whether item 16 is on or off.
         assert_eq!(
             4, c,
             "neshawk, delay {d}: two inside fetches cost the transfer 2 cycles each"
         );
     }
 
-    // **And the standard profile is untouched at the same phases**, which is what makes this
-    // differential rather than a pin: its first two read 3 where NesHawk's read 4, because its
-    // fetch may only read on a get cycle.
+    // **And the standard profile is untouched at the same phases**, which is what makes this a
+    // differential and not a pin: a regression of the standard path fails here rather than passing
+    // quietly. The two columns agree over this window, and that agreement *is* the item's claim —
+    // without it the NesHawk column reads 2 at the first two phases where this one reads 4.
     assert_eq!(
-        vec![3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+        vec![4; 14],
         charge(&plain),
         "standard: the get-cycle alignment this core has always had"
+    );
+}
+
+/// **Item 16** — item 15's other end: a DMC fetch whose own cycle is the one **after an OAM
+/// transfer's last `$2004` write** costs that transfer **one** cycle and not two, because the
+/// cycle it stands on is the cycle item 13 already charges as the transfer's wait.
+///
+/// **Measured off BizHawk's own stream** (`q191.lua`), both cases inside one machine: with a fetch
+/// at the end the last `w $2004` is followed by the fetch, one idle cycle and then the CPU (tree
+/// frame 38, cycles 1 097 681-1 097 684); with no fetch at the end it is followed by one idle
+/// cycle and then the CPU (tree frame 36, 1 067 901-1 067 903). Execute to execute across the
+/// whole transfer NesHawk spends **523** cycles on tree frame 38 against **524** on tree frame 37,
+/// whose two inside fetches are both comfortably inside it.
+///
+/// `lead` is the cycles between the `$4014` write and the cycle the DMC's memory reader runs dry
+/// on, so it places the one request anywhere in the transfer. The sample is at rate 0 — 3 424
+/// cycles a byte — so exactly one request can fall inside a 514-cycle transfer, and the cycles
+/// before the write are **write** cycles, which no DMA unit may halt.
+#[test]
+fn item_16_a_fetch_on_the_oam_transfers_wait_cycle_costs_one_cycle() {
+    /// `(the cycles the transfer cost above a transfer with no fetch inside it, the fetches that
+    /// ran inside it)`.
+    fn row<P: TimingProfile>(lead: u32) -> (i64, i64) {
+        let mut bus = loaded_bus::<P>();
+        start_a_dmc_sample(&mut bus);
+        let horizon = bus
+            .apu()
+            .cycles_until_dmc_fetch()
+            .expect("the sample is still playing");
+        assert!(
+            horizon > lead,
+            "{}: horizon {horizon} <= lead {lead}",
+            P::NAME
+        );
+        for _ in 0..horizon - lead {
+            bus.write(0x0000, 0x00);
+        }
+        let fetches = bus.dmc_dma_count();
+        let parity = bus.cycle_count() % 2;
+        bus.write(0x4014, 0x02);
+        let cost = cost_of_a_read(&mut bus, 0x8000);
+        // Each profile's own base, at the write's own parity — item 13 puts the two profiles'
+        // transfers at 513 and 514 on opposite phases, so a base from the other column is wrong
+        // by one.
+        let base = {
+            let mut b = loaded_bus::<P>();
+            while b.cycle_count() % 2 != parity {
+                b.write(0x0000, 0x00);
+            }
+            b.write(0x4014, 0x02);
+            cost_of_a_read(&mut b, 0x8000)
+        };
+        (cost - base, bus.dmc_dma_count() - fetches)
+    }
+
+    let leads: Vec<u32> = (505..=514).collect();
+    let charge = |f: &dyn Fn(u32) -> (i64, i64)| leads.iter().map(|&l| f(l).0).collect::<Vec<_>>();
+    let hawk = charge(&row::<NesHawkCompat>);
+    let plain = charge(&row::<Standard>);
+    println!("  leads    {leads:?}");
+    println!("  neshawk  {hawk:?}");
+    println!("  standard {plain:?}");
+
+    // **The item.** A fetch anywhere inside the transfer costs it two cycles (item 7); on the last
+    // two positions at which a request still produces a fetch inside it — leads 512 and 513, where
+    // the fetch's own cycle is the wait cycle — it costs **one**, and that cycle is tree frame
+    // 38's whole residual.
+    //
+    // **This item and item 15 compose on the same site and no lead isolates them**, because item
+    // 15 moves *where* the fetch lands and this one prices the last place it can land. So the
+    // vector below is the **shipped** profile's, and the two off-tables are recorded here instead,
+    // which is what a later lot needs in order to see which assertion moved:
+    //
+    // | leads 505-514 | |
+    // |---|---|
+    // | both items on (shipped) | `[2, 2, 2, 2, 2, 2, 2, 1, 1, 0]` |
+    // | item 16 off, item 15 on | `[2, 2, 2, 2, 2, 2, 2, 2, 2, 0]` |
+    // | item 16 on, item 15 off | `[2, 2, 2, 2, 2, 0, 0, 2, 2, 0]` |
+    assert_eq!(
+        vec![2, 2, 2, 2, 2, 2, 2, 1, 1, 0],
+        hawk,
+        "neshawk: two cycles per inside fetch, and one on the transfer's own wait cycle"
+    );
+    // **And the standard profile is untouched**, which is what makes this differential: its own
+    // end-of-transfer shape is 2, 2, …, 1, 1, 3, 3, because its fetch may only read on a get cycle
+    // and its wait cycle is at the *start* of the transfer (item 13's other arm).
+    assert_eq!(
+        vec![2, 2, 2, 2, 2, 2, 1, 1, 3, 3],
+        plain,
+        "standard: the get-cycle alignment and the wait cycle this core has always had"
+    );
+    // The last row is the control that the window is the right one: at lead 514 the request has
+    // moved past the transfer's end on the NesHawk profile and no fetch falls inside it at all.
+    assert_eq!(
+        0,
+        row::<NesHawkCompat>(514).1,
+        "neshawk: lead 514 is past the transfer and is the window's own edge"
     );
 }
