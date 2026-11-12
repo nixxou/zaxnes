@@ -242,6 +242,9 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     editor_request: Option<EditorRequest>,
     job: Option<jobs::LoadJob>,
     loading: bool,
+    /// The widescreen held off whatever the settings say, the screen too narrow for it (portrait,
+    /// owner request); nothing is written to the settings.
+    widescreen_held_off: bool,
     confirmation: Option<ConfirmationRequest>,
     events: Vec<HostEvent>,
     state: EmulationState,
@@ -433,6 +436,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             editor_request: None,
             job: None,
             loading: false,
+            widescreen_held_off: false,
             confirmation: None,
             events: Vec::new(),
             state: EmulationState::Stopped,

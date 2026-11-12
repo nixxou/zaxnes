@@ -135,6 +135,38 @@ pub struct HostWindow {
     swap_interval: i32,
 }
 
+/// SDL's `SDL_HINT_ORIENTATIONS`, which its Android activity reads.
+const ORIENTATIONS_HINT: &str = "SDL_IOS_ORIENTATIONS";
+
+/// The orientations the screen may take (`ui.orientation`, owner request).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Orientation {
+    Landscape,
+    Portrait,
+    /// Either, as the device is held.
+    Auto,
+}
+
+impl Orientation {
+    /// The orientation of the setting's value: 1 portrait, 2 automatic, anything else landscape.
+    #[must_use]
+    pub const fn from_setting(value: i32) -> Self {
+        match value {
+            1 => Self::Portrait,
+            2 => Self::Auto,
+            _ => Self::Landscape,
+        }
+    }
+
+    const fn hint(self) -> &'static str {
+        match self {
+            Self::Landscape => "LandscapeLeft LandscapeRight",
+            Self::Portrait => "Portrait PortraitUpsideDown",
+            Self::Auto => "LandscapeLeft LandscapeRight Portrait PortraitUpsideDown",
+        }
+    }
+}
+
 impl HostWindow {
     /// Creates a window with a GL context of the flavour [`GlFlavor::select`] picks, current on
     /// this thread.
@@ -155,6 +187,8 @@ impl HostWindow {
             sdl2::hint::set("SDL_ACCELEROMETER_AS_JOYSTICK", "0");
             // Back reaches the application (the in-game menu) instead of leaving the activity.
             sdl2::hint::set("SDL_ANDROID_TRAP_BACK_BUTTON", "1");
+            // Landscape until the settings say otherwise ([`HostWindow::set_orientation`]).
+            sdl2::hint::set(ORIENTATIONS_HINT, Orientation::Landscape.hint());
         }
 
         let sdl = sdl2::init()?;
@@ -259,6 +293,18 @@ impl HostWindow {
     #[must_use]
     pub fn window(&self) -> &Window {
         &self.window
+    }
+
+    /// Lets the screen turn to `orientation` (Android; nothing elsewhere). SDL hands its hint to
+    /// the activity when the window's resizable flag is set, so the flag is set off and on again:
+    /// the window stays resizable, which lets "Auto" follow the sensor.
+    pub fn set_orientation(&mut self, orientation: Orientation) {
+        if !cfg!(target_os = "android") {
+            return;
+        }
+        sdl2::hint::set(ORIENTATIONS_HINT, orientation.hint());
+        self.window.set_resizable(false);
+        self.window.set_resizable(true);
     }
 
     /// The refresh rate of the display the window is on, in hertz; none when SDL does not know it.

@@ -97,9 +97,10 @@ impl OffscreenFramebuffer {
         Ok(())
     }
 
-    /// Copies the buffer onto the default framebuffer, stretched to the window and filtered
-    /// bilinearly (REQ-SCN-063).
-    pub fn blit_to_default_framebuffer(&self, window_width: i32, window_height: i32) {
+    /// Copies the buffer onto the default framebuffer, stretched to `window_width` x
+    /// `window_height` pixels `bottom` pixels above the window's bottom (the touch pad's band in
+    /// portrait), filtered bilinearly (REQ-SCN-063).
+    pub fn blit_to_default_framebuffer(&self, window_width: i32, window_height: i32, bottom: i32) {
         // SAFETY: plain GL calls on the context this buffer was created with, which is current
         // on the calling thread (the application is single-threaded).
         unsafe {
@@ -112,9 +113,9 @@ impl OffscreenFramebuffer {
                 self.width,
                 self.height,
                 0,
-                0,
+                bottom.max(0),
                 window_width.max(1),
-                window_height.max(1),
+                bottom.max(0) + window_height.max(1),
                 glow::COLOR_BUFFER_BIT,
                 glow::LINEAR,
             );
@@ -298,6 +299,9 @@ pub fn begin_window_pass(gl: &glow::Context, width: i32, height: i32) {
     unsafe {
         gl.viewport(0, 0, width, height);
         gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+        // Black, not whatever the scene renderer cleared with last: the window shows outside
+        // the scene picture (the touch pad's band in portrait).
+        gl.clear_color(0.0, 0.0, 0.0, 1.0);
         gl.clear(glow::COLOR_BUFFER_BIT);
     }
 }

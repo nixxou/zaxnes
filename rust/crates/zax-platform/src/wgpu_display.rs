@@ -72,6 +72,9 @@ pub struct SceneLayer<'a> {
     /// The texture of `view`, which the slang shaders read.
     pub texture: &'a wgpu::Texture,
     pub height: u32,
+    /// The pixels between the scene's bottom and the window's (the touch pad's band in
+    /// portrait); 0 puts the scene at the bottom.
+    pub bottom: u32,
 }
 
 /// The surface, the device and what draws the window.
@@ -470,6 +473,17 @@ impl WgpuDisplay {
         };
         let view = reduced_view.as_ref().unwrap_or(view);
         let layer = scene_height.clamp(1, height);
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss
+        )] // Window sizes.
+        let bottom = if self.reduced.drawn {
+            (scene.bottom as f32 * share).round() as u32
+        } else {
+            scene.bottom
+        }
+        .min(height - layer);
         // The picture's rectangle, centred in the scene's: the final pass clears the rest.
         let rectangle = match self.shaders.picture_aspect() {
             Some(aspect) if aspect.is_finite() && aspect > 0.0 => {
@@ -479,9 +493,9 @@ impl WgpuDisplay {
                     clippy::cast_precision_loss
                 )] // Window sizes.
                 let inner = ((layer as f32 * aspect).round() as u32).clamp(1, width);
-                ((width - inner) / 2, height - layer, inner, layer)
+                ((width - inner) / 2, height - layer - bottom, inner, layer)
             }
-            _ => (0, height - layer, width, layer),
+            _ => (0, height - layer - bottom, width, layer),
         };
         self.shaders.record(
             scene.texture,
@@ -505,6 +519,7 @@ impl WgpuDisplay {
             view,
             texture,
             height,
+            bottom: 0,
         })
     }
 
@@ -782,9 +797,10 @@ impl Compositor {
             ],
         });
         let layer = scene.height.clamp(1, height);
+        let bottom = scene.bottom.min(height - layer);
         pass.set_viewport(
             0.0,
-            (height - layer) as f32,
+            (height - layer - bottom) as f32,
             width as f32,
             layer as f32,
             0.0,

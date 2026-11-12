@@ -77,8 +77,25 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// the widescreen of the game is on (owner request: off, the game starts as it was made).
     #[must_use]
     pub fn builtin_patches_wanted(&self) -> bool {
-        self.settings.get(SettingId::EmuBuiltinPatches).as_bool()
+        !self.widescreen_held_off
+            && self.settings.get(SettingId::EmuBuiltinPatches).as_bool()
             && self.settings.get(SettingId::VideoWidescreen).as_int() != 0
+    }
+
+    /// Holds the widescreen off, or lets it go back to what the settings say, without writing
+    /// them (owner request: the portrait screen is too narrow for it). The game in play switches
+    /// at once when its hack pack carries its states across, as for a change of the settings.
+    pub fn set_widescreen_held_off(&mut self, held: bool) {
+        if held != self.widescreen_held_off {
+            self.widescreen_held_off = held;
+            self.follow_patch_switch();
+        }
+    }
+
+    /// Whether the widescreen is held off ([`Self::set_widescreen_held_off`]).
+    #[must_use]
+    pub const fn widescreen_held_off(&self) -> bool {
+        self.widescreen_held_off
     }
 
     /// Whether the advanced mode of the game's widescreen is on (its patch, when the patch is an

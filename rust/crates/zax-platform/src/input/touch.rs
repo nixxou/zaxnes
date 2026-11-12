@@ -290,9 +290,75 @@ impl TouchLayout {
     /// left one.
     #[must_use]
     pub fn scaled(width: f32, height: f32, scale: f32) -> Self {
-        let base = Self::for_view(width, height);
+        Self::for_view(width, height).scaled_from_edges(width, height, 0.0, scale)
+    }
+
+    /// The layout in portrait (owner request): the game above `top`, the pad in the band under
+    /// it, the whole width. The cross on the left and B and A on the right, half way down the
+    /// band; Select and Start at the bottom in the middle; the menu and the three small buttons
+    /// along the band's top.
+    #[must_use]
+    pub fn for_portrait(width: f32, height: f32, top: f32) -> Self {
+        let band = (height - top).max(1.0);
+        let unit = width.min(band * 1.6);
+        let dpad_radius = unit * 0.15;
+        let button = unit * 0.09;
+        let small = [unit * 0.16, unit * 0.06];
+        let bottom = height - band * 0.05;
+        let middle = top + band * 0.5;
+        let pill = |center_x: f32| Rect {
+            min: [center_x - small[0] * 0.5, bottom - small[1]],
+            max: [center_x + small[0] * 0.5, bottom],
+        };
+        let corner = top + unit * 0.07;
+        let little = unit * 0.045;
+        Self {
+            dpad: Circle {
+                center: [unit * 0.06 + dpad_radius, middle],
+                radius: dpad_radius,
+            },
+            a: Circle {
+                center: [width - unit * 0.11, middle - unit * 0.07],
+                radius: button,
+            },
+            b: Circle {
+                center: [width - unit * 0.3, middle + unit * 0.07],
+                radius: button,
+            },
+            select: pill(width * 0.5 - unit * 0.11),
+            start: pill(width * 0.5 + unit * 0.11),
+            menu: Circle {
+                center: [width - unit * 0.07, corner],
+                radius: little,
+            },
+            flat: Circle {
+                center: [unit * 0.07, corner],
+                radius: little,
+            },
+            lock: Circle {
+                center: [unit * 0.19, corner],
+                radius: little,
+            },
+            recenter: Circle {
+                center: [unit * 0.31, corner],
+                radius: little,
+            },
+        }
+    }
+
+    /// [`Self::for_portrait`] at `scale` times the size, each control keeping to its corner or
+    /// edge of the band, as [`Self::scaled`] does on the whole screen.
+    #[must_use]
+    pub fn scaled_portrait(width: f32, height: f32, top: f32, scale: f32) -> Self {
+        Self::for_portrait(width, height, top).scaled_from_edges(width, height, top, scale)
+    }
+
+    /// This layout `scale` times as large, each control growing from the corner or the edge of
+    /// the area from `top` to `height` it keeps to.
+    fn scaled_from_edges(self, width: f32, height: f32, top: f32, scale: f32) -> Self {
+        let base = self;
         let scale = scale.clamp(0.25, 3.0);
-        let (top_left, top_right) = ([0.0, 0.0], [width, 0.0]);
+        let (top_left, top_right) = ([0.0, top], [width, top]);
         let (bottom_left, bottom_right) = ([0.0, height], [width, height]);
         let bottom_middle = [width * 0.5, height];
         Self {
@@ -489,6 +555,8 @@ pub struct TouchPad {
     /// Where free fingers tapped since the last [`TouchPad::take_taps`], in drawable pixels.
     taps: Vec<[f32; 2]>,
     options: TouchOptions,
+    /// In portrait, where the pad's band starts.
+    pad_top: Option<f32>,
     /// The device's vibrator, opened at the first vibration asked for.
     vibrator: Vibrator,
 }
@@ -519,6 +587,7 @@ impl TouchPad {
             mouse_finger,
             taps: Vec::new(),
             options: TouchOptions::default(),
+            pad_top: None,
             vibrator: Vibrator::default(),
         }
     }
@@ -604,6 +673,8 @@ impl TouchPad {
     /// Takes the mode of the setting, whether a game is on the screen, and the sizes of the
     /// window and of its drawable, for this frame; the pad is laid out and drawn in drawable
     /// pixels.
+    ///
+    /// `pad_top`, in portrait, is where the game's view ends and the pad's band starts.
     pub fn update(
         &mut self,
         mode: TouchPadMode,
@@ -611,12 +682,14 @@ impl TouchPad {
         playing: bool,
         window: [f32; 2],
         drawable: [f32; 2],
+        pad_top: Option<f32>,
     ) {
         self.mode = mode;
         self.playing = playing;
         // Compared exactly: another size lays the pad out again.
         #[allow(clippy::float_cmp)]
-        let rescaled = options.scale != self.options.scale;
+        let rescaled = options.scale != self.options.scale || pad_top != self.pad_top;
+        self.pad_top = pad_top;
         self.options = options;
         let [width, height] = drawable;
         if window[0] > 0.0 && window[1] > 0.0 {
@@ -627,7 +700,10 @@ impl TouchPad {
         let resized = self.view != [width, height];
         if resized || rescaled {
             self.view = [width, height];
-            self.layout = TouchLayout::scaled(width, height, self.options.scale);
+            self.layout = match pad_top {
+                Some(top) => TouchLayout::scaled_portrait(width, height, top, self.options.scale),
+                None => TouchLayout::scaled(width, height, self.options.scale),
+            };
         }
         self.follow_visibility();
     }
@@ -768,7 +844,8 @@ impl Drop for TouchPad {
 /// (another direction pressed, a diagonal included) and the buttons (one more pressed).
 fn new_presses(before: &[bool; CONTROLS], after: &[bool; CONTROLS]) -> (bool, bool) {
     let directions = 4;
-    let dpad = after[..directions].iter().any(|on| *on) && after[..directions] != before[..directions];
+    let dpad =
+        after[..directions].iter().any(|on| *on) && after[..directions] != before[..directions];
     let buttons = (directions..CONTROLS).any(|index| after[index] && !before[index]);
     (dpad, buttons)
 }
@@ -978,6 +1055,50 @@ mod tests {
         assert!(small.dpad.center[1] > normal.dpad.center[1]);
         assert_eq!(Some(TouchControl::A), small.button_at(small.a.center));
         assert_eq!(Some(TouchControl::B), large.button_at(large.b.center));
+    }
+
+    #[test]
+    fn in_portrait_the_pad_keeps_to_the_band_under_the_game() {
+        let (width, height) = (1080.0, 2340.0);
+        let top = 810.0;
+        let layout = TouchLayout::for_portrait(width, height, top);
+        let circles = [
+            layout.dpad,
+            layout.a,
+            layout.b,
+            layout.menu,
+            layout.flat,
+            layout.lock,
+            layout.recenter,
+        ];
+        for circle in circles {
+            assert!(
+                circle.center[1] - circle.radius >= top,
+                "{circle:?} over the game"
+            );
+            assert!(circle.center[1] + circle.radius <= height);
+            assert!(circle.center[0] - circle.radius >= 0.0);
+            assert!(circle.center[0] + circle.radius <= width);
+        }
+        assert!(layout.select.min[1] > top && layout.start.max[1] <= height);
+        assert!(layout.dpad.center[0] < width * 0.5 && layout.a.center[0] > width * 0.5);
+        // Every control answers where it is drawn, and the game's view answers nothing.
+        for (control, point) in [
+            (TouchControl::A, layout.a.center),
+            (TouchControl::B, layout.b.center),
+            (TouchControl::Menu, layout.menu.center),
+            (TouchControl::Flat, layout.flat.center),
+            (TouchControl::Lock, layout.lock.center),
+            (TouchControl::Recenter, layout.recenter.center),
+        ] {
+            assert_eq!(Some(control), layout.button_at(point));
+        }
+        assert_eq!(None, layout.button_at([width * 0.5, top * 0.5]));
+        assert!(!layout.takes_dpad([width * 0.5, top * 0.5]));
+        // Larger, the small buttons stay on the band's top edge.
+        let large = TouchLayout::scaled_portrait(width, height, top, 1.4);
+        assert!(large.flat.center[1] - large.flat.radius >= top);
+        assert!(large.dpad.radius > layout.dpad.radius);
     }
 
     #[test]

@@ -337,6 +337,8 @@ impl Running {
             Some(Box::new(log)),
         );
         let pacing_state = pacing.apply(&mut window, &model);
+        // The screen's orientation (Android, owner request).
+        window.set_orientation(orientation_of(&model));
         let profiling = frame_profiler::requested_by_environment()
             || model.get(SettingId::UiProfiler).as_bool();
         if profiling {
@@ -819,7 +821,11 @@ impl Running {
     /// Sizes the view for the window and decides whether the render-skip rule keeps the
     /// previous image.
     fn plan_view(&mut self, emulated: u32, width: i32, height: i32) -> Result<ViewPlan, String> {
-        let view_height = (height - to_i32_f(self.ui.chrome_height())).max(1);
+        let below_chrome = (height - to_i32_f(self.ui.chrome_height())).max(1);
+        // Portrait on a touch screen (owner request): the game takes the top of the screen at
+        // 4:3, the whole width, and the touch pad the band left under it.
+        let (view_height, view_bottom) = portrait_view(width, below_chrome);
+        self.host.set_widescreen_held_off(view_bottom > 0);
         self.state.view_size = (width.max(1), view_height);
         let automatic = self.resolution.active;
         let factor = if automatic {
@@ -892,6 +898,7 @@ impl Running {
         ) && !self.state.picture_between;
         Ok(ViewPlan {
             view_height,
+            view_bottom,
             size: (scene_width, scene_height),
             skip,
         })
@@ -937,12 +944,21 @@ impl Running {
             #[allow(clippy::cast_precision_loss)] // window sizes are far below 2^24
             let size = |(width, height): (u32, u32)| [width as f32, height as f32];
             let playing = self.ui.game_on_screen();
+            let drawable = size(sizes.drawable);
+            // Portrait: the pad's band starts where the game's view ends.
+            #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // Window sizes.
+            let pad_top = {
+                let (width, height) = (drawable[0] as i32, drawable[1] as i32);
+                let (view, below) = portrait_view(width, height);
+                (below > 0).then_some(view as f32)
+            };
             self.input.touch.update(
                 mode,
                 options,
                 playing,
                 size(sizes.window),
-                size(sizes.drawable),
+                drawable,
+                pad_top,
             );
             let (taps, swipe) = (self.input.touch.take_taps(), self.input.touch.take_scroll());
             self.ui.set_touch_pad(self.input.touch.view(), taps, swipe);
@@ -1443,6 +1459,7 @@ impl Running {
     ) -> Result<Duration, String> {
         let ViewPlan {
             view_height,
+            view_bottom,
             size: (scene_width, scene_height),
             skip,
         } = self.plan_view(emulated, width, height)?;
@@ -1465,7 +1482,7 @@ impl Running {
                 None,
                 &mut self.ui,
                 (width, height),
-                view_height,
+                (view_height, view_bottom),
             );
             return Ok(Duration::ZERO);
         };
@@ -1505,7 +1522,13 @@ impl Running {
                 draw_scene(graphics, view, &scene, &frame, shadow_reported, clock)
             };
             let mark = clock.start();
-            graphics.draw_window(window, Some(view), ui, (width, height), view_height);
+            graphics.draw_window(
+                window,
+                Some(view),
+                ui,
+                (width, height),
+                (view_height, view_bottom),
+            );
             clock.stop(Stage::Ui, mark);
             let waiting = Instant::now();
             let converted = conversion.map_or(Duration::ZERO, |conversion| {
@@ -1535,6 +1558,7 @@ impl Running {
         self.request_shader();
         let ViewPlan {
             view_height,
+            view_bottom,
             size: (scene_width, scene_height),
             skip,
         } = self.plan_view(emulated, width, height)?;
@@ -1562,7 +1586,7 @@ impl Running {
             self.host.view(),
             &mut self.ui,
             (width, height),
-            view_height,
+            (view_height, view_bottom),
         );
         let shot = self.ui.advance_shots();
         if let Some(path) = shot.capture {
@@ -2061,6 +2085,8 @@ fn log_window_icon(window: &mut HostWindow) {
 /// the render-skip rule keeps the previous image.
 struct ViewPlan {
     view_height: i32,
+    /// The pixels under the view: the touch pad's band in portrait, none otherwise.
+    view_bottom: i32,
     size: (i32, i32),
     skip: bool,
 }
@@ -2512,13 +2538,36 @@ fn pull_head_on(
     }
 }
 
+/// The height of the game's view in a window `width` wide with `height` pixels under its menu
+/// bar, and the band left under it: in portrait on a touch screen, the whole width at 4:3 on top
+/// and the rest for the touch pad (owner request); the whole height otherwise.
+#[must_use]
+pub fn portrait_view(width: i32, height: i32) -> (i32, i32) {
+    if !zax_platform::input::touch::offered() || height <= width {
+        return (height, 0);
+    }
+    let view = (width * 3 / 4).clamp(1, height);
+    (view, height - view)
+}
+
+/// The orientation the screen may take, from the settings.
+fn orientation_of(
+    settings: &zax_settings::model::SettingsModel,
+) -> zax_platform::window::Orientation {
+    zax_platform::window::Orientation::from_setting(settings.get(SettingId::UiOrientation).as_int())
+}
+
 /// The touch pad's size and vibrations, from the settings.
 fn touch_options(
     settings: &zax_settings::model::SettingsModel,
 ) -> zax_platform::input::touch::TouchOptions {
     use zax_settings::catalogue::SettingId;
     #[allow(clippy::cast_precision_loss)] // 50 to 175 percent.
-    let scale = settings.get(SettingId::InputTouchScale).as_int().clamp(25, 300) as f32 / 100.0;
+    let scale = settings
+        .get(SettingId::InputTouchScale)
+        .as_int()
+        .clamp(25, 300) as f32
+        / 100.0;
     zax_platform::input::touch::TouchOptions {
         scale,
         haptic_dpad: settings.get(SettingId::InputTouchHapticDpad).as_int(),
@@ -2599,8 +2648,14 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         .get(SettingId::EmuSmoothScrollView)
         .as_bool();
     state.picture_between = false;
+    // Portrait (owner request): the widescreen is held off while the screen is too narrow.
+    let widescreen_choice = if host.widescreen_held_off() {
+        0
+    } else {
+        host.settings().get(SettingId::VideoWidescreen).as_int()
+    };
     let (widescreen, widescreen_y) = widescreen_margin(
-        host.settings().get(SettingId::VideoWidescreen).as_int(),
+        widescreen_choice,
         host.settings()
             .get(SettingId::VideoWidescreenExtra)
             .as_int(),
@@ -2840,6 +2895,9 @@ fn forward_events(
         match &event {
             HostEvent::SettingChanged(id) => {
                 pacing.on_setting_changed(window, host.settings(), *id);
+                if *id == SettingId::UiOrientation {
+                    window.set_orientation(orientation_of(host.settings()));
+                }
             }
             // REQ-UI-209: the window state follows ui.fullscreen, whoever flipped it.
             HostEvent::UiRequested {

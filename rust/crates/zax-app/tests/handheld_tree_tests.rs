@@ -202,10 +202,7 @@ fn ro_3_every_row_the_console_offered_is_still_reachable() {
     assert!(TOUCH_ROWS.contains(&touch));
     assert!(!ROWS.contains(&touch));
     assert!(OptionsPage::Touch.rows().contains(&OptionRow::TouchPad));
-    let without: Vec<OptionRow> = TOUCH_ROWS
-        .into_iter()
-        .filter(|row| *row != touch)
-        .collect();
+    let without: Vec<OptionRow> = TOUCH_ROWS.into_iter().filter(|row| *row != touch).collect();
     assert_eq!(ROWS.to_vec(), without);
 
     // Every setting the console offered is still offered, which is the same claim read of the
