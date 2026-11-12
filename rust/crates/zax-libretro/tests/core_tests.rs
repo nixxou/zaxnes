@@ -44,7 +44,7 @@ fn shot(core: &Core, name: &str) {
 fn play(core: &mut Core, frames: u32) {
     for frame in 0..frames {
         let start = if frame % 60 < 5 { 1 << 3 } else { 0 };
-        let a = if frame % 40 < 3 { 1 } else { 0 };
+        let a = u16::from(frame % 40 < 3);
         core.run(start | a);
     }
 }
