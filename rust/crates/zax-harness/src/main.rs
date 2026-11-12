@@ -8,9 +8,11 @@ use std::process::ExitCode;
 #[cfg(feature = "vs-system")]
 use zax_harness::vs;
 use zax_harness::{
-    bench_core, classify, compare, golden_core, lua_api, meshes, packs, profile_tool, render,
-    test_roms, HarnessError,
+    bench_core, classify, compare, frame_trace, golden_core, lua_api, meshes, movie_sync,
+    neshawk_tiles, packs, profile_tool, render, test_roms, HarnessError,
 };
+#[cfg(feature = "fceux-core")]
+use zax_harness::{fceux_bench, fceux_compare, fceux_run, fceux_tiles};
 
 const USAGE: &str = "usage: zax-harness golden-core <roms dir> <out.jsonl> [frames]
        zax-harness test-roms <roms dir> <out.json> [--filter <substring>] [options]
@@ -23,7 +25,14 @@ const USAGE: &str = "usage: zax-harness golden-core <roms dir> <out.jsonl> [fram
        zax-harness profile-dump <file.3dn> [--tiles] (the patterns and their 3D looks)
        zax-harness profile-build <description.json> <out.3dn> (a profile from JSON)
        zax-harness classify <rules.json> --out <classified.json> [options] (tiles of dumps to patterns)
-       zax-harness vs <rom.nes> [--dip <byte>] [--coin <slot>] [--frames <n>] (a VS. System)";
+       zax-harness vs <rom.nes> [--dip <byte>] [--coin <slot>] [--frames <n>] (a VS. System)
+       zax-harness movie-sync <movie.fm2|.bk2> <rom.nes> [options] (where the engines part on a TAS)
+       zax-harness frame-trace <movie.fm2|.bk2> <rom.nes> --frame <n> (one frame, instruction by instruction)
+       zax-harness fceux-run <roms dir|rom.nes> <out.jsonl> [frames] (golden-core on FCEUX)
+       zax-harness fceux-frame <rom.nes> <out.json> [frames] (FCEUX's tile records)
+       zax-harness fceux-compare <zaxnes.jsonl> <fceux.jsonl> [options] (the two engines)
+       zax-harness fceux-tiles <roms dir|rom.nes> <out.jsonl> [options] (the records, field by field)
+       zax-harness fceux-bench <rom.nes> --engine fceux|zaxnes [options] (what the capture costs)";
 
 fn run(args: &[String]) -> Result<(), HarnessError> {
     match args {
@@ -104,6 +113,9 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
             print!("{}", vs::run(&options)?);
             Ok(())
         }
+        [command, rest @ ..] if command == "movie-sync" => movie_sync::command(rest),
+        [command, rest @ ..] if command == "frame-trace" => frame_trace::command(rest),
+        [command, rest @ ..] if command == "neshawk-tiles" => neshawk_tiles::command(rest),
         [command, rest @ ..] if command == "compare" => {
             let options = compare::Options::parse(rest)?;
             println!("{}", compare::run(&options)?);
@@ -113,23 +125,64 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
             print_help();
             Ok(())
         }
-        _ => Err(HarnessError::Usage(USAGE.to_owned())),
+        // The FCEUX engine's five, which only exist in a build with it; their own function,
+        // tried last, because the command names above are all distinct from theirs.
+        _ => fceux_command(args).unwrap_or_else(|| Err(HarnessError::Usage(USAGE.to_owned()))),
     }
+}
+
+/// The FCEUX engine's own subcommands, or `None` when `args` names none of them.
+///
+/// Its own function for the reason [`print_help`] is one: `run` is two lines inside clippy's
+/// hundred with the five here, and five past it with them inlined — and the budget counts the
+/// source lines, so `#[cfg]`-ing them out of the build does not help.
+#[cfg(feature = "fceux-core")]
+fn fceux_command(args: &[String]) -> Option<Result<(), HarnessError>> {
+    match args {
+        [command, roms, out_path, rest @ ..] if command == "fceux-run" => {
+            Some(fceux_run::command(roms, out_path, rest))
+        }
+        [command, rom, out_path, rest @ ..] if command == "fceux-frame" => {
+            Some(fceux_run::frame_command(rom, out_path, rest))
+        }
+        [command, rest @ ..] if command == "fceux-tiles" => Some(fceux_tiles::command(rest)),
+        [command, rest @ ..] if command == "fceux-bench" => Some(fceux_bench::command(rest)),
+        [command, rest @ ..] if command == "fceux-compare" => Some(fceux_compare::command(rest)),
+        _ => None,
+    }
+}
+
+/// Without the engine there are none, so every one of its names falls through to the usage.
+#[cfg(not(feature = "fceux-core"))]
+fn fceux_command(_args: &[String]) -> Option<Result<(), HarnessError>> {
+    None
 }
 
 /// The whole help: the one-line usage of every subcommand, then each one's own paragraph.
 ///
 /// Apart from `run` (LUA-MERGE: both sides of the merge added subcommands to it — `test-roms`
 /// and `vs` on one side, `classify` on the other — and together they took it past the hundred
-/// lines clippy allows).
+/// lines clippy allows). Each command's paragraph joins the list only when it exists in this
+/// build.
 fn print_help() {
     // The `vs` usage joins the list only when the command exists.
     #[cfg(feature = "vs-system")]
     let vs_usage = format!("\n\n{}", vs::USAGE);
     #[cfg(not(feature = "vs-system"))]
     let vs_usage = String::new();
+    // And the two FCEUX commands only in a build with the engine.
+    #[cfg(feature = "fceux-core")]
+    let fceux_usage = format!(
+        "\n\n{}\n\n{}\n\n{}\n\n{}",
+        fceux_run::USAGE,
+        fceux_compare::USAGE,
+        fceux_tiles::USAGE,
+        fceux_bench::USAGE
+    );
+    #[cfg(not(feature = "fceux-core"))]
+    let fceux_usage = String::new();
     println!(
-        "{USAGE}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}{vs_usage}",
+        "{USAGE}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}{vs_usage}{fceux_usage}",
         test_roms::USAGE,
         meshes::USAGE,
         lua_api::USAGE,
@@ -137,7 +190,10 @@ fn print_help() {
         compare::USAGE,
         bench_core::USAGE,
         profile_tool::USAGE,
-        classify::USAGE
+        classify::USAGE,
+        movie_sync::USAGE,
+        frame_trace::USAGE,
+        neshawk_tiles::USAGE
     );
 }
 

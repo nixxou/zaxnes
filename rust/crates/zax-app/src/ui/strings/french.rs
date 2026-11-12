@@ -28,6 +28,8 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::SLOT_EMPTY, "vide"),
     (keys::SLOT_OTHER_PATCH, "faite avec les patchs intégrés réglés autrement"),
     (keys::SLOT_OTHER_HACK_VERSION, "faite avec une autre version du hack intégré"),
+    (keys::SLOT_ENGINE, "moteur : {engine}"),
+    (keys::SLOT_OTHER_ENGINE, "faite avec le moteur {engine} : choisissez le moteur {engine} pour ce jeu pour la charger"),
     (keys::MENU_MOVIES, "Lire un film"),
     (keys::WINDOW_MOVIE_NOTE, "Note sur cette frame"),
     (keys::MOVIE_NOTE_WRITE, "Écrire"),
@@ -141,6 +143,14 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HINT_NEEDS_CURVATURE, "(sans effet : aucune courbure n'est réglée)"),
     (keys::HINT_REGION_AUTOMATIC, "(fixée par la détection au prochain chargement de ROM)"),
     (keys::HINT_SINGLE_CORE, "(cette version n'a qu'un cœur : la valeur est toujours 0)"),
+    (keys::HINT_FCEUX_NO_WIDESCREEN, "(ce moteur n'a pas de panoramique : choisissez le moteur Zaxnes pour ce jeu)"),
+    (keys::HINT_FCEUX_NO_HACKS, "(ce moteur n'applique aucun pack de hack : choisissez le moteur Zaxnes pour ce jeu)"),
+    (keys::HINT_FCEUX_NO_SPRITE_LIMIT, "(ce moteur garde les 8 sprites par ligne : choisissez le moteur Zaxnes pour ce jeu)"),
+    (keys::HINT_FCEUX_NO_RUN_AHEAD, "(l'avance de trames n'est pas implémentée sur ce moteur)"),
+    (keys::STATUS_ENGINE_FCEUX, "moteur FCEUX"),
+    (keys::STATUS_ENGINE_NESHAWK, "moteur NesHawk"),
+    (keys::HINT_FCEUX_VALIDATED, "(cette ROM est validée pour la 3D sur le moteur FCEUX)"),
+    (keys::HINT_FCEUX_NOT_VALIDATED, "(cette ROM n'est pas validée pour la 3D sur le moteur FCEUX : la 3D peut différer de celle de Zaxnes)"),
     (keys::HINT_CLASSIC_AUDIO, "(sans effet : la sortie audio classique a sa propre réserve fixe)"),
     (keys::HINT_NEEDS_ACHIEVEMENTS, "(sans effet : RetroAchievements est désactivé)"),
     (keys::HINT_STYLE_CLASSIC, "Style = Classic : ces effets sont désactivés."),
@@ -505,6 +515,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.builtin_patches", "Patchs de ROM intégrés (au prochain chargement)"),
     ("setting.emu.tv_mode", "Région vidéo"),
     ("setting.emu.core", "Cœur d'émulation"),
+    ("setting.emu.engine", "Moteur d'émulation (ce jeu)"),
     ("setting.audio.volume", "Volume général"),
     ("setting.audio.bg_music", "Musique de menu"),
     ("setting.audio.mute", "Muet"),
@@ -1103,6 +1114,20 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
          comme 0 et rien ne s'en sert. La ligne est conservée parce que la clé fait partie du \
          fichier de réglages et de la surface de script (Setting.Core). Par défaut : 0.",
     ),
+    (
+        "detail.emu.engine",
+        "Quel émulateur exécute ce jeu : le cœur de Zaxnes, FCEUX, ou NesHawk. C'est un choix par \
+         jeu et non une préférence, parce que la raison de passer à un autre moteur est toujours \
+         un jeu précis. FCEUX est là pour la couverture — un jeu que Zaxnes exécute mal, ou dont \
+         la carte lui manque. NesHawk est le portage en Rust du cœur de BizHawk, et c'est lui qui \
+         fait rejouer un film de BizHawk à l'identique : un .bk2 enregistré sur NesHawk s'y \
+         rejoue trame pour trame, ce qu'aucun autre moteur ne peut promettre. Il prend effet au \
+         prochain chargement, changer de moteur voulant dire redémarrer la machine. Ni FCEUX ni \
+         NesHawk n'a de panoramique, de pack de hack, de réglage de la limite de sprites ni \
+         d'avance de trames : ce sont des pièces de la machine de Zaxnes, et leurs lignes le \
+         disent tant qu'un autre moteur est choisi. Une sauvegarde d'état faite sur un moteur ne \
+         se charge pas sur un autre. Par défaut : Zaxnes.",
+    ),
 
     // -------------------------------------------------------- onglet Interface
     (
@@ -1216,6 +1241,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HANDHELD_GLOBAL_VALUE, "Global : {0}"),
     (keys::HANDHELD_OWN_COUNT, "{0} propres"),
     (keys::HANDHELD_RUN_AHEAD_FORCED, "(forcé à 0 : scripts)"),
+    (keys::HANDHELD_ZAXNES_ONLY, "(moteur Zaxnes uniquement)"),
     (keys::HANDHELD_HINT_GAME_OPTIONS, "Options du jeu"),
     (keys::HANDHELD_HINT_FAVORITE, "Favori"),
     (keys::HANDHELD_HINT_RESET_ALL, "Tout remettre"),

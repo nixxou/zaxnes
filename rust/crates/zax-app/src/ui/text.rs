@@ -195,6 +195,18 @@ pub fn movie_note_write() -> String {
     strings::get(keys::MOVIE_NOTE_WRITE)
 }
 
+/// The engine a state was made with, for the slot lists.
+#[must_use]
+pub fn slot_engine(engine: zax_core_api::EngineKind) -> String {
+    strings::get(keys::SLOT_ENGINE).replace("{engine}", engine.display_name())
+}
+
+/// Why a state made with `engine` does not load on the engine the game runs on.
+#[must_use]
+pub fn slot_other_engine(engine: zax_core_api::EngineKind) -> String {
+    strings::get(keys::SLOT_OTHER_ENGINE).replace("{engine}", engine.display_name())
+}
+
 /// Note after a slot made with another version of the built-in hack.
 #[must_use]
 pub fn slot_other_hack_version() -> String {
@@ -286,6 +298,20 @@ pub fn reset_defaults() -> String {
 #[must_use]
 pub fn run_ahead_forced_to_zero() -> String {
     strings::get(keys::HINT_RUN_AHEAD_FORCED)
+}
+
+/// Whether this ROM is one lot FCEUX-6's sweep validated for 3D on the FCEUX engine (lot
+/// FCEUX-48 step 2). The row stays live either way: the engine option works for every game, and
+/// this only says what is known about the 3D it will draw.
+#[must_use]
+pub fn fceux_validated() -> String {
+    strings::get(keys::HINT_FCEUX_VALIDATED)
+}
+
+/// The same, for a ROM nobody validated. Not a refusal.
+#[must_use]
+pub fn fceux_not_validated() -> String {
+    strings::get(keys::HINT_FCEUX_NOT_VALIDATED)
 }
 
 /// Generic close button.

@@ -227,6 +227,54 @@ repli quand aucune police système n'est trouvée (AMD-024 REQ-PUB-006).
 Le format de profil `.3dn` est lu et écrit par un codec écrit pour ce projet
 (`rust/crates/zax-profiles/src/wire/`) ; aucune bibliothèque protobuf n'est livrée.
 
+## FCEUX — second moteur d'émulation, en option (non livré par défaut)
+
+### FCEUX — (c) les auteurs de FCEUX — GNU GPL v2 ou ultérieure
+
+Zaxnes peut être construit avec **FCEUX** comme second moteur d'émulation, choisi jeu par jeu par
+l'option `emu.engine` (lots FCEUX-1, FCEUX-23 et FCEUX-48). Cette possibilité est derrière la fonctionnalité
+Cargo `fceux-core`, **désactivée par défaut** — à la fois pour `zax-app` et pour `zax-harness` :
+les binaires livrés ne contiennent aucun code de FCEUX, l'option n'est pas affichée, et le
+constructeur qui n'active pas cette fonctionnalité n'a rien à faire de cette section.
+
+**Aucun code de FCEUX n'est repris dans les sources de Zaxnes.** Il vit uniquement dans un fork
+séparé, `cleanroom/fceux-zax` (branche `zax`), qui conserve l'historique complet de FCEUX amont ;
+le côté Rust (`rust/crates/zax-fceux`) ne parle qu'à l'interface C de ce fork
+(`zax/zaxfceux.h`) et à rien d'autre. Chaque en-tête de copyright de FCEUX est conservé tel quel,
+et les fichiers ajoutés dans `zax/` portent la même licence que FCEUX.
+
+FCEUX est publié sous **GNU GPL v2 ou ultérieure** ; « ou ultérieure » permet de l'utiliser sous
+GPL v3, qui est la licence de Zaxnes, de sorte que l'ensemble lié reste sous GPL v3 — que la
+bibliothèque soit liée statiquement ou dynamiquement.
+
+**Ce qu'impose une distribution avec FCEUX** : si un binaire de Zaxnes est livré avec la
+bibliothèque de ce fork, les **sources complètes correspondantes du fork** doivent voyager avec
+lui (offertes aux mêmes conditions, à côté du binaire). C'est la raison pour laquelle
+l'historique de FCEUX est conservé intact dans le fork : chacune de nos modifications est un
+`git diff` lisible par-dessus l'amont. `zax/README.md` les énumère, et c'est lui qui fait foi : au
+terme du lot **FCEUX-48**, **six fichiers de `src/`** et le répertoire `zax/`.
+
+Le lot FCEUX-23 n'avait fait qu'agrandir `zax/` (trois appels de plus pour la mémoire de
+sauvegarde, aucun fichier de FCEUX touché). Le lot FCEUX-48 ajoute deux fichiers de `src/`, et la
+distinction entre les deux compte :
+
+- `src/movie.cpp` — un `FCEUFILE` consommé une fois, pour ouvrir un film `.fm2` depuis la mémoire
+  plutôt que depuis un chemin, exactement comme `src/fceu.cpp` le fait déjà pour une image de
+  cartouche. C'est une **adaptation** pour Zaxnes, marquée `// ZAX:` comme les autres ;
+- `src/ines.cpp` — un **correctif d'un défaut de FCEUX lui-même** : l'allocation de la CHR-RAM est
+  complétée à 8 Kio, parce que `setchr8()` installe une fenêtre linéaire de 8 Kio quelle que soit
+  la taille de la puce et qu'une CHR-RAM plus petite faisait donc écrire hors du tampon. Il ne
+  porte **pas** de marque `// ZAX:`, volontairement : il est écrit pour être proposé tel quel en
+  amont de FCEUX, et ce signalement revient au propriétaire du projet.
+
+Le lot ajoute aussi six appels de film à l'interface C (`zax/zaxfceux.cpp`), qui ne touchent aucun
+fichier de FCEUX.
+
+Le fork compile aussi la copie de **zlib** que FCEUX embarque déjà
+(`src/drivers/win/zlib`, zlib 1.1.4, licence zlib) quand aucune zlib système n'est trouvée, et la
+copie de **minizip** de FCEUX (`src/utils/unzip.cpp`, licence zlib) ; les deux sont du code de
+l'arbre amont, sous les licences de leurs auteurs.
+
 ## Assets
 
 **Aucun asset n'est livré sous forme de fichier.** Le seul qui l'était — le boîtier TV

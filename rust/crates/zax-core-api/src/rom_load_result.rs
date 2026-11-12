@@ -1,5 +1,4 @@
-use super::RomLoadFailure;
-use crate::NesRegion;
+use crate::{NesRegion, RomLoadFailure};
 
 /// Outcome of "load a ROM" (REQ-CORE-010, REQ-CORE-011, REQ-CORE-013).
 ///

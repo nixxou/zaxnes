@@ -6,7 +6,7 @@
 //! ([`Submenu`]) and a choice names what makes it selected ([`Selection`]); the model reads the
 //! host it is given at the moment it builds the children or answers.
 
-use zax_nes::ControllerPortType;
+use zax_core_api::ControllerPortType;
 use zax_render::camera::CameraMode;
 use zax_settings::catalogue::{self, SettingId};
 
@@ -486,6 +486,16 @@ fn slot_items(numbered: Command, quick: Command, host: &AppHost) -> Vec<MenuItem
                 MenuWarning::Blocked
             }
         };
+        // The engine that made the state, when it is not Zaxnes or the game runs on another;
+        // a state of another engine than the one in play cannot load at all.
+        let (label, warning) = match slot_engine_note(host, &id) {
+            Some(EngineNote::Shown(note)) => (format!("{label} · {note}"), warning),
+            Some(EngineNote::Refused(note)) => (
+                format!("{} ({note})", slot_label(slot, host.slots.find(&id))),
+                MenuWarning::Blocked,
+            ),
+            None => (label, warning),
+        };
         let mut item = MenuItem::of(numbered, Some(label), CommandArgs::of_number(slot));
         item.warning = warning;
         items.push(item);
@@ -542,6 +552,28 @@ fn slot_count() -> i32 {
 }
 
 /// The label of numbered slot `slot` in the state submenus: "Slot 3 — date" or "Slot 3 — empty".
+/// What the slot lists say of the engine a state was made with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EngineNote {
+    /// The engine, shown because it is not Zaxnes or the game in play runs on another one.
+    Shown(String),
+    /// The state was made with another engine than the game in play's: why it cannot load.
+    Refused(String),
+}
+
+/// The engine note of the slot `slot_id`, `None` when there is nothing to say: an empty slot, or
+/// a Zaxnes state while the game runs on Zaxnes (or no game runs).
+#[must_use]
+pub fn slot_engine_note(host: &AppHost, slot_id: &str) -> Option<EngineNote> {
+    let engine = host.slot_engine(slot_id)?;
+    let in_play = host.engine_in_play();
+    if in_play.is_some_and(|in_play| in_play != engine) {
+        return Some(EngineNote::Refused(text::slot_other_engine(engine)));
+    }
+    (engine != zax_core_api::EngineKind::Zaxnes)
+        .then(|| EngineNote::Shown(text::slot_engine(engine)))
+}
+
 #[must_use]
 pub fn slot_label(slot: i32, record: Option<&SaveSlotRecord>) -> String {
     format!("{} {slot} — {}", text::slot_prefix(), state_stamp(record))

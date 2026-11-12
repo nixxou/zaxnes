@@ -14,6 +14,7 @@ mod hack_switch;
 mod hacks;
 mod jobs;
 mod movies;
+mod own_movies;
 mod resume;
 mod save_states;
 mod script_reload;
@@ -22,7 +23,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use time::OffsetDateTime;
-use zax_nes::NesRegion;
+use zax_core_api::NesRegion;
 use zax_nes::RegionTiming;
 use zax_scripting::{HookTime, NullScriptLog, ScriptLog};
 use zax_settings::catalogue::SettingId;
@@ -191,6 +192,20 @@ impl<C: GameCatalog, V: GameView> EmulationHostOptions<C, V> {
     }
 }
 
+/// What the slot lists read from each slot's state file, kept so a menu drawn every frame does
+/// not read the files every frame.
+#[derive(Default)]
+struct SlotCaches {
+    /// Whether each slot's state fits the built-in ROM patches, by slot, save time and setting.
+    patch:
+        std::cell::RefCell<std::collections::HashMap<(String, i64, bool), jobs::SlotPatchStatus>>,
+    /// The engine that wrote each slot's state, by slot and save time (`None`: not one this
+    /// build knows, or no readable state).
+    engine: std::cell::RefCell<
+        std::collections::HashMap<(String, i64), Option<zax_core_api::EngineKind>>,
+    >,
+}
+
 /// The emulation host.
 #[allow(clippy::struct_excessive_bools)] // independent flags of the loop, as the C# class
 pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
@@ -235,6 +250,11 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     movie_after_launch: Option<String>,
     /// The thread exploring the movie being played, while it runs (EDITOR-1).
     movie_explorer: Option<super::movie_explorer::MovieExplorer>,
+    /// The engine a `.fm2` playback forced on this session (lot FCEUX-48 step 4), `None`
+    /// otherwise. It is **not** the game's stored `emu.engine`: a movie only replays on the
+    /// engine that recorded it, so opening one forces that engine for the session and leaves the
+    /// user's choice alone. `ensure_session` reads it in place of the game's own.
+    movie_engine: Option<zax_core_api::EngineKind>,
     /// The drawings over the view and the editor's pens (EDITOR-1).
     annotations: super::annotations::Annotations,
     /// What the editor mode is asked to do, for the application (`editor_mode.rs`).
@@ -300,9 +320,8 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     /// The slots shared by every game before the files were named after the ROM: a game's
     /// states move to its files when it is chosen.
     pub legacy_slots: SaveSlotIndex,
-    /// Whether each slot's state fits the built-in ROM patches, by slot, save time and setting.
-    slot_patch_cache:
-        std::cell::RefCell<std::collections::HashMap<(String, i64, bool), jobs::SlotPatchStatus>>,
+    /// What the slot lists read from the slots' state files.
+    slot_caches: SlotCaches,
     /// The CRC of the data of the ROM files, which tells the games a hack is made for.
     rom_crcs: std::cell::RefCell<crate::persistence::rom_crc_cache::RomCrcCache>,
     /// What the study of each ROM file found: whether a widescreen hack fits it.
@@ -434,6 +453,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             movie_timeline: None,
             movie_after_launch: None,
             movie_explorer: None,
+            movie_engine: None,
             annotations: super::annotations::Annotations::default(),
             editor_request: None,
             job: None,
@@ -464,7 +484,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             shader_report: crate::ui::shader_panel::ShaderReport::default(),
             slots: SaveSlotIndex::new(),
             legacy_slots,
-            slot_patch_cache: std::cell::RefCell::default(),
+            slot_caches: SlotCaches::default(),
             rom_crcs: std::cell::RefCell::new(rom_crcs),
             hack_compat: std::cell::RefCell::new(hack_compat),
             zapper: ZapperState::new(),
@@ -631,27 +651,26 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// handle, which survives that reset; filtering on `has_rom` here left the output with no
     /// console at all and every game silent.
     fn attach_console(&mut self) {
-        let Some(reader) = self
-            .session
-            .as_ref()
-            .map(|session| session.core().audio_reader())
-        else {
+        let Some(session) = self.session.as_ref() else {
             return;
         };
         if self.classic_audio {
-            // `v0.4.2`'s source, byte for byte: the mixer reads the ring on the main thread and
-            // the read is all or nothing.
+            // `v0.4.2`'s source, byte for byte on Zaxnes: the mixer reads the APU's ring on the
+            // main thread and the read is all or nothing. Lot FCEUX-23 step 5: on an engine whose
+            // samples are behind a `!Sync` handle the source reads the handle's shared ring,
+            // which the session fills once a frame.
+            let Some(source) = session.core().audio_source() else {
+                return;
+            };
             if let Some(mixer) = self.mixer.as_mut() {
-                let source: crate::audio::audio_mixer::AudioSampleSource =
-                    Box::new(move |destination| {
-                        // A mono read cannot be refused; an empty buffer reads as silence.
-                        reader.read_samples(destination, false).unwrap_or(0)
-                    });
                 mixer.set_emulation_source(Some(source));
             }
         } else if let Some(audio) = &self.audio {
-            // The audio thread reads the core's ring itself from here on (Q-153).
-            audio.set_console(Some(Box::new(stream::ApuSamples::new(reader))));
+            // The audio thread reads the engine's ring itself from here on (Q-153).
+            let Some(samples) = session.core().console_samples() else {
+                return;
+            };
+            audio.set_console(Some(samples));
         }
     }
 
@@ -855,10 +874,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
 
     /// The device plugged into `port` of the game being played.
     #[must_use]
-    pub fn port_type(&self, port: usize) -> zax_nes::ControllerPortType {
+    pub fn port_type(&self, port: usize) -> zax_core_api::ControllerPortType {
         self.session
             .as_ref()
-            .map_or(zax_nes::ControllerPortType::Controller, |session| {
+            .map_or(zax_core_api::ControllerPortType::Controller, |session| {
                 session.port_type(port)
             })
     }
@@ -1414,11 +1433,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             return;
         };
         if let Some(session) = self.session.as_mut().filter(|session| session.has_rom()) {
-            session
-                .core_mut()
-                .bus_mut()
-                .apu_mut()
-                .drop_pending_samples();
+            session.core_mut().drop_pending_samples();
         }
         control.request_resync();
         self.audio_rate.restart();
@@ -1739,7 +1754,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let Some(audio) = self.audio.clone() else {
             return;
         };
-        let cap = zax_nes::apu::Apu2A03::MAX_RATIO_ADJUSTMENT;
+        let cap = zax_core_api::MAX_RATIO_ADJUSTMENT;
         // REQ-AUD-011: at any speed other than 100 % the core is retiming its own resampler, so
         // there is nothing to correct; and a recorded movie must not depend on the drift of
         // this machine's sound card.
@@ -1793,12 +1808,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let Some(session) = self.session.as_mut().filter(|session| session.has_rom()) else {
             return;
         };
-        let available = session.core().apu().available_samples();
+        let available = session.core().audio_available();
         #[allow(clippy::cast_precision_loss)] // sample counts are far below 2^52
         let error = (available as f64 - TARGET as f64) / TARGET as f64;
         // A proportional correction that saturates at the cap: a full buffer slows the
         // production down, an empty one speeds it up.
-        let cap = zax_nes::apu::Apu2A03::MAX_RATIO_ADJUSTMENT;
+        let cap = zax_core_api::MAX_RATIO_ADJUSTMENT;
         let adjustment = (-error * 0.002).clamp(-cap, cap);
         if session
             .core_mut()
@@ -1839,7 +1854,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         // REQ-PERS-060: written at most every 30 s, and only when the content changed.
         let core = session.core();
         self.battery
-            .advance(&self.paths, real_seconds, core.export_battery_ram());
+            .advance(&self.paths, real_seconds, &core.battery_ram());
     }
 
     /// Stops the game being played: the cartridge RAM is written (REQ-PERS-060), the `End`
@@ -1850,7 +1865,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         if let Some(mut session) = self.session.take() {
             {
                 let core = session.core();
-                self.battery.flush(&self.paths, core.export_battery_ram());
+                self.battery.flush(&self.paths, &core.battery_ram());
             }
             // AMD-062 REQ-PROF-082: what the game resolved is kept for the next launch, and the
             // catalogue keeps it for a relaunch of the same game (REQ-PROF-080).

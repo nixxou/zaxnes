@@ -2818,8 +2818,11 @@ dependencies = [
  "walkdir",
  "wgpu",
  "zax-achievements",
+ "zax-core-api",
  "zax-engine3d",
+ "zax-fceux",
  "zax-nes",
+ "zax-neshawk",
  "zax-platform",
  "zax-profiles",
  "zax-render",
@@ -2829,13 +2832,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "zax-core-api"
+version = "0.5.0"
+dependencies = [
+ "zax-nes",
+]
+
+[[package]]
 name = "zax-engine3d"
 version = "0.5.0"
 dependencies = [
  "rstest",
  "thiserror 2.0.21",
+ "zax-core-api",
  "zax-nes",
  "zax-profiles",
+]
+
+[[package]]
+name = "zax-fceux"
+version = "0.5.0"
+dependencies = [
+ "zax-core-api",
 ]
 
 [[package]]
@@ -2851,14 +2869,19 @@ name = "zax-harness"
 version = "0.5.0"
 dependencies = [
  "serde_json",
+ "sha1",
  "sha2",
+ "zax-core-api",
  "zax-engine3d",
+ "zax-fceux",
  "zax-goldens",
  "zax-nes",
+ "zax-neshawk",
  "zax-profiles",
  "zax-render",
  "zax-scripting",
  "zax-settings",
+ "zip",
 ]
 
 [[package]]
@@ -2866,7 +2889,16 @@ name = "zax-nes"
 version = "0.5.0"
 dependencies = [
  "sha2",
+ "zax-core-api",
  "zax-goldens",
+]
+
+[[package]]
+name = "zax-neshawk"
+version = "0.5.0"
+dependencies = [
+ "zax-core-api",
+ "zax-nes",
 ]
 
 [[package]]
@@ -2912,6 +2944,7 @@ dependencies = [
  "thiserror 2.0.21",
  "wgpu",
  "windows-sys 0.61.2",
+ "zax-core-api",
  "zax-engine3d",
  "zax-nes",
  "zax-profiles",
@@ -2925,8 +2958,8 @@ dependencies = [
  "getrandom 0.3.4",
  "mlua",
  "thiserror 2.0.21",
+ "zax-core-api",
  "zax-engine3d",
- "zax-nes",
  "zax-profiles",
  "zax-settings",
 ]

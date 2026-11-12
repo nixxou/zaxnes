@@ -207,6 +207,55 @@ fn req_core_061_a_zapper_read_does_not_advance_a_shift_register() {
     }
 }
 
+/// REQ-CORE-024. The one difference between an **empty socket** and a pad with no button held,
+/// and the whole of the *Hoshi no Kirby* `.bk2`'s tree frame 40 (lot NESHAWK-PROFILE-13 step 1):
+/// the first eight reads after a strobe are 0 on both, and from the **ninth** a pad answers 1
+/// where an empty socket goes on answering 0 for ever.
+///
+/// The two columns are taken in one test so that a regression of either is a failure of this one.
+/// An emulator only ever reaches the ninth read when a DMA adds a clock to a game's own eight,
+/// which is why the difference hid for twelve lots behind a work-RAM reference that cannot see it.
+#[test]
+fn req_core_024_an_empty_socket_never_answers_one_where_a_pad_does() {
+    fn eight_then_four(kind: ControllerPortType) -> (Vec<u8>, Vec<u8>) {
+        let mut ports = InputPorts::new();
+        ports.set_port_type(1, kind).unwrap();
+        ports.begin_frame(0x0000); // No button held on either pad.
+        ports.write(0x01, 10); // A get cycle: the reload lands on cycle 11.
+        ports.write(0x00, 14);
+        let first = (0..8)
+            .map(|_| read(&mut ports, 1, 0, false) & 0x01)
+            .collect();
+        let rest = (0..4)
+            .map(|_| read(&mut ports, 1, 0, false) & 0x01)
+            .collect();
+        (first, rest)
+    }
+
+    let (pad_first, pad_rest) = eight_then_four(ControllerPortType::Controller);
+    let (empty_first, empty_rest) = eight_then_four(ControllerPortType::Empty);
+
+    assert_eq!(vec![0; 8], pad_first, "a pad with no button held reads 0");
+    assert_eq!(vec![0; 8], empty_first, "and so does an empty socket");
+    assert_eq!(vec![1; 4], pad_rest, "the pad's shift register is depleted");
+    assert_eq!(
+        vec![0; 4],
+        empty_rest,
+        "the empty socket has none to deplete"
+    );
+}
+
+/// REQ-CORE-024: the three open-bus bits of an empty socket are the stale bus, as they are on a
+/// pad — the socket is empty, the 2A03's decoder is not.
+#[test]
+fn req_core_024_an_empty_socket_still_shows_the_open_bus_in_bits_five_to_seven() {
+    let mut ports = InputPorts::new();
+    ports.set_port_type(0, ControllerPortType::Empty).unwrap();
+    ports.begin_frame(0x00FF); // Every button of port 1 held: an empty socket reports none.
+    assert_eq!(0xE0, read(&mut ports, 0, 0xFF, false));
+    assert_eq!(0x40, read(&mut ports, 0, 0x4F, false));
+}
+
 #[test]
 fn req_core_024_switching_back_to_a_controller_restores_serial_reads() {
     let mut ports = InputPorts::new();

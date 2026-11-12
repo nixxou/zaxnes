@@ -4,6 +4,7 @@
 
 mod common;
 
+use common::mapper_fixture::{MapperMachine, MapperRom};
 use common::{machine_with, minimal, minimal_rom};
 use zax_nes::{ControllerPortType, NesCore};
 
@@ -260,4 +261,154 @@ fn req_core_122_a_soft_reset_without_a_rom_does_nothing() {
 
     assert_eq!(None, core.rom_name());
     assert_eq!(0, core.frame_count());
+}
+
+// ------------------------------------------------------------------- the mapper (EVAL-SYNC-3)
+
+/// **The mapper does not see the RESET button**, so its registers, its IRQ unit and its A12
+/// watcher hold whatever the game last wrote into them.
+///
+/// nesdev's "Cartridge connector" lists every pin of both the 60-pin Famicom and the 72-pin NES
+/// edge — power, the CPU address, data and control lines, the PPU lines, CIRAM, audio, `/IRQ`,
+/// `M2`, `/ROMSEL`, `SYSTEM CLK`, the expansion pins and the CIC's two — and there is **no
+/// `/RESET` among them**. nesdev's "CPU power up state" *after reset* says the internal RAM is
+/// unchanged and does not mention the cartridge at all.
+///
+/// Until lot EVAL-SYNC-3 `NesCore::soft_reset` called `Cartridge::reset`, which put every board
+/// back to power-on; `docs/review/AMD-REQ-CORE-122-mapper-reset.md` is the amendment that asks
+/// of REQ-CORE-122. The MMC3 is the board to measure it on because it is the one with a licensed
+/// library of games a player presses RESET on.
+#[test]
+fn req_core_122_a_soft_reset_leaves_the_mmc3_alone() {
+    let mut core = MapperRom::new(4).prg(32).chr(128).load();
+    assert_eq!(
+        [0, 1, 30, 31],
+        core.prg_windows(),
+        "the MMC3's own power-on layout, so that the writes below can be seen to move it"
+    );
+
+    // Four bank registers and the mirroring, all of them things the game chose.
+    core.mmc3_bank(6, 0x05);
+    core.mmc3_bank(7, 0x09);
+    core.mmc3_bank(0, 0x40);
+    core.mmc3_bank(1, 0x42);
+    core.mapper_write(0xA000, 0x01);
+    let windows = core.prg_windows();
+    let chr = core.chr_windows();
+    let mirroring = core.mirroring();
+    assert_eq!([5, 9, 30, 31], windows, "the writes have to land first");
+
+    core.soft_reset();
+
+    assert_eq!(
+        windows,
+        core.prg_windows(),
+        "a press on RESET cannot take the PRG banks away: the chip never sees the line"
+    );
+    assert_eq!(chr, core.chr_windows(), "nor the CHR banks");
+    assert_eq!(mirroring, core.mirroring(), "nor the mirroring it selected");
+
+    // And the power cycle still does take them away (REQ-CORE-004, DEC-02-Q3 — unchanged).
+    core.reset();
+    assert_eq!([0, 1, 30, 31], core.prg_windows());
+}
+
+/// The same for the MMC3's **IRQ unit**, which is the half that decides where a game's status
+/// bar splits: `$C000` (latch), `$C001` (reload), `$E001` (enable) survive a soft reset, so a
+/// game that re-enters its reset vector without rewriting them keeps its split.
+///
+/// Measured through the **line** rather than through the registers, and the A12 rises are made
+/// by hand as the other MMC3-clone IRQ tests of this workspace make them — rendering off, so
+/// that only these rises clock the counter and the count is exact.
+#[test]
+fn req_core_122_a_soft_reset_keeps_the_mmc3_irq_armed() {
+    /// Clocks the counter `times` times: one low and one high of the filtered A12 each, far
+    /// enough apart in CPU cycles that the watcher's filter counts every one.
+    fn clock_a12(core: &mut NesCore, times: i64, from: i64) {
+        for i in 0..times {
+            let cart = core.cartridge_mut().unwrap();
+            cart.on_ppu_address_bus(0x0000, from + i * 100);
+            cart.on_ppu_address_bus(0x1000, from + i * 100 + 50);
+        }
+    }
+
+    let mut core = MapperRom::new(4).prg(32).chr(128).load();
+    core.write_memory(0x2001, 0x00); // No rendering: only the rises below clock it.
+                                     // A latch of 4, reloaded and enabled, as a game arms it in vblank.
+    core.mapper_write(0xC000, 0x04);
+    core.mapper_write(0xC001, 0x00);
+    core.mapper_write(0xE001, 0x00);
+    clock_a12(&mut core, 8, 10_000);
+    assert!(
+        core.cartridge().unwrap().irq_asserted(),
+        "the IRQ has to fire first, or the test below proves nothing"
+    );
+
+    // $E000 acknowledges and disables, which is what a handler does; $E001 re-enables, and the
+    // latch is **not** rewritten. Then the reset.
+    core.mapper_write(0xE000, 0x00);
+    assert!(!core.cartridge().unwrap().irq_asserted());
+    core.mapper_write(0xE001, 0x00);
+    core.soft_reset();
+
+    clock_a12(&mut core, 8, 20_000);
+    assert!(
+        core.cartridge().unwrap().irq_asserted(),
+        "the latch and the enable survive a press on RESET, so the counter fires again with no \
+         further write"
+    );
+
+    // A power cycle does clear them: nothing fires however long the counter is clocked.
+    core.reset();
+    core.write_memory(0x2001, 0x00);
+    clock_a12(&mut core, 40, 30_000);
+    assert!(
+        !core.cartridge().unwrap().irq_asserted(),
+        "a power cycle still puts the IRQ unit back (REQ-CORE-004, DEC-02-Q3)"
+    );
+}
+
+/// **The exception, and the only board of this build that has one**: a reset-detecting multicart.
+///
+/// nesdev, "NES 2.0 Mapper 313" (reset-based multicarts around the MMC3 ASIC): *"When an
+/// interruption of the M2 signal is detected, the higher address lines are automatically
+/// incremented."* They see the reset through the **absence of M2**, not through a pin. nesdev,
+/// "INES Mapper 215", says it of this board in so many words: *"The Outer Bank Register is reset
+/// to its power-up value if a Reset has been detected via an interruption of the M2 signal. This
+/// makes it difficult to dump these cartridges using a Kazzo device."*
+///
+/// There is **no image of a mapper-215 board under `assets-free/test-roms`** (§3.4 of
+/// `docs/review/MF-6-inventory.md`: 48 MMC3-clone numbers, none with a licensed title), so the
+/// image is the synthetic one `MapperRom` builds, as every other mapper-215 test of this
+/// workspace uses.
+#[cfg(feature = "board-215")]
+#[test]
+fn req_core_122_a_reset_detecting_multicart_puts_its_outer_bank_back() {
+    let mut core = MapperRom::new(215).prg(192).chr(1536).load();
+    // Out of the NROM override, so that the MMC3's own banking is what the windows show.
+    core.mapper_write(0x5000, 0x00);
+    core.mmc3_bank(6, 0x01);
+    core.mapper_write(0x5001, 0x02);
+    assert_eq!(
+        1 + 2 * 32,
+        core.prg_windows()[0],
+        "outer bank 2 over MMC3 bank 1"
+    );
+
+    core.soft_reset();
+
+    // $5001 powers up at $0F, whose two outer PRG bits are 3.
+    assert_eq!(
+        1 + 3 * 32,
+        core.prg_windows()[0],
+        "the outer bank goes back to its power-up value, which is the whole of what the page \
+         says a detected reset does"
+    );
+    // And the MMC3 chip behind it is untouched: bank register 6 still holds 1.
+    core.mapper_write(0x5001, 0x02);
+    assert_eq!(
+        1 + 2 * 32,
+        core.prg_windows()[0],
+        "the chip's own registers never saw the reset either"
+    );
 }

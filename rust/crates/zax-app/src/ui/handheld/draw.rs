@@ -818,12 +818,10 @@ impl HandheldUi {
                     String::new(),
                     own_colour(options.has_options()),
                 ),
-                GameRow::Widescreen => plain(
-                    strings::get(keys::HACK_WIDESCREEN),
-                    strings::get(keys::HANDHELD_HOLD_FOR_SETTINGS),
-                    DIM,
-                ),
-                GameRow::Hacks => plain(strings::get(keys::MENU_AIDS), ">".to_owned(), DIM),
+                GameRow::Widescreen | GameRow::Hacks => {
+                    let (label, value) = zaxnes_row_text(*row, options.edited());
+                    plain(label, value, DIM)
+                }
                 GameRow::Option(options::OptionRow::Group(key)) => {
                     RowSpec::Group(strings::get(key))
                 }
@@ -846,6 +844,10 @@ impl HandheldUi {
                     let own = options.is_own(*row);
                     let shown = format!("< {} >", options.console_value_text(*row));
                     let shown = match options::forced_run_ahead_note(*row, run_ahead_forced) {
+                        Some(note) => format!("{shown} {note}"),
+                        None => shown,
+                    };
+                    let shown = match options::engine_lock_note(*row, options.edited()) {
                         Some(note) => format!("{shown} {note}"),
                         None => shown,
                     };
@@ -1011,6 +1013,11 @@ impl HandheldUi {
             // The setting is kept, so the row still steps; what it says is that this game runs
             // at 0 all the same.
             let shown = match options::forced_run_ahead_note(*row, run_ahead_forced) {
+                Some(note) => format!("{shown} {note}"),
+                None => shown,
+            };
+            // A control only Zaxnes's own engine has, while another engine is chosen.
+            let shown = match options::engine_lock_note(*row, frame.host.settings()) {
                 Some(note) => format!("{shown} {note}"),
                 None => shown,
             };
@@ -1290,6 +1297,9 @@ impl HandheldUi {
                 "< {} >",
                 crate::emulation::speed_setting::factor_text(f64::from(self.overlay.speed()) / 10.0)
             ),
+            OverlayItem::Widescreen | OverlayItem::Hacks if !playing_on_zaxnes(frame.host) => {
+                strings::get(keys::HANDHELD_ZAXNES_ONLY)
+            }
             OverlayItem::Widescreen => {
                 let settings = frame.host.settings();
                 let on = settings.get(SettingId::VideoWidescreen).as_int() != 0;
@@ -1354,11 +1364,23 @@ impl HandheldUi {
             };
             let label = menu_bar::slot_label(slot, record);
             let (name, date) = label.split_once(" — ").unwrap_or((label.as_str(), ""));
+            // The engine that made the state, when it is not Zaxnes or the game runs on another;
+            // red when it is not the engine in play, whose state it cannot load.
+            let (date, colour) =
+                match menu_bar::slot_engine_note(frame.host, &numbered_slot_id(slot)) {
+                    Some(menu_bar::EngineNote::Shown(note)) => (format!("{date} · {note}"), colour),
+                    Some(menu_bar::EngineNote::Refused(_)) => {
+                        let engine = frame.host.slot_engine(&numbered_slot_id(slot));
+                        let name = engine.map_or("?", zax_core_api::EngineKind::display_name);
+                        (format!("{date} · {name}"), WARNING)
+                    }
+                    None => (date.to_owned(), colour),
+                };
             painter.row_to(
                 row,
                 (index == states.selected_index(), accent),
                 name,
-                (date, colour),
+                (&date, colour),
                 split - metrics.padding * 0.5,
             );
         }
@@ -1429,11 +1451,18 @@ impl HandheldUi {
             SlotState::OtherVersion => Some((keys::SLOT_OTHER_HACK_VERSION, WARNING)),
             SlotState::Empty | SlotState::Fits => None,
         };
-        if let Some((key, colour)) = caption {
+        let caption = caption.map(|(key, colour)| (strings::get(key), colour));
+        // A state of another engine than the game's says so first: that is what stops it.
+        let caption = match menu_bar::slot_engine_note(frame.host, &numbered_slot_id(slot)) {
+            Some(menu_bar::EngineNote::Refused(note)) => Some((note, WARNING)),
+            Some(menu_bar::EngineNote::Shown(note)) if caption.is_none() => Some((note, DIM)),
+            _ => caption,
+        };
+        if let Some((message, colour)) = caption {
             ui.set_cursor_pos([left, top + height + metrics.padding]);
             let _wrap = ui.push_text_wrap_pos_with_pos(right);
             let _colour = ui.push_style_color(StyleColor::Text, colour);
-            ui.text_wrapped(strings::get(key));
+            ui.text_wrapped(message);
         }
     }
 
@@ -1819,4 +1848,29 @@ impl HandheldUi {
             });
         painter.hints(layout::hints(Screen::AchievementList));
     }
+}
+
+/// Whether the game in play runs on Zaxnes's own engine (or no game is in play): the in-game
+/// menu's widescreen and hacks are Zaxnes's bus, which the other engines have not got.
+pub(super) fn playing_on_zaxnes(host: &crate::application::AppHost) -> bool {
+    host.session()
+        .is_none_or(|session| session.core().kind() == zax_core_api::EngineKind::Zaxnes)
+}
+
+/// The label and value of the widescreen and hacks rows of a game's main options screen: what
+/// they open, or that they are Zaxnes's own while the game runs on another engine.
+fn zaxnes_row_text(row: GameRow, model: &zax_settings::model::SettingsModel) -> (String, String) {
+    let label = strings::get(if row == GameRow::Widescreen {
+        keys::HACK_WIDESCREEN
+    } else {
+        keys::MENU_AIDS
+    });
+    let value = if crate::ui::options::engine_is_not_zaxnes(model) {
+        strings::get(keys::HANDHELD_ZAXNES_ONLY)
+    } else if row == GameRow::Widescreen {
+        strings::get(keys::HANDHELD_HOLD_FOR_SETTINGS)
+    } else {
+        ">".to_owned()
+    };
+    (label, value)
 }

@@ -4,9 +4,9 @@
 use std::fs;
 use std::path::Path;
 
+use zax_core_api::FrameBatch;
 use zax_engine3d::engine::ConversionEngine;
 use zax_engine3d::settings::RenderAlgorithm;
-use zax_nes::FrameBatch;
 use zax_profiles::profile::GameProfile;
 use zax_render::scene::SceneState;
 
@@ -41,7 +41,7 @@ pub fn from_json(
             mask_x: 0,
             mask_y: 0,
             margin: 0,
-            visible_rows: zax_nes::STANDARD_ROWS,
+            visible_rows: zax_core_api::STANDARD_ROWS,
             margin_y: 0,
         },
         0,

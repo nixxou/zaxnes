@@ -640,6 +640,9 @@ impl HandheldOptionsModel {
                     self.open(page);
                 }
             }
+            // A control only Zaxnes's own engine has does not step while another is chosen.
+            PadButton::Left | PadButton::Right | PadButton::A
+                if engine_lock(self.selected(), settings).is_some() => {}
             PadButton::Left => return self.step(settings, -1),
             PadButton::Right => return self.step(settings, 1),
             PadButton::A => {
@@ -889,6 +892,23 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
 pub fn forced_run_ahead_note(row: OptionRow, forced: bool) -> Option<String> {
     (forced && row == OptionRow::Setting(SettingId::EmuRunAhead))
         .then(|| strings::get(keys::HANDHELD_RUN_AHEAD_FORCED))
+}
+
+/// Why `row` is locked on the console: it is a control only Zaxnes's own engine has (the
+/// widescreen, the hack packs, the sprite limit, the run-ahead) and another engine is chosen in
+/// `model`. The same list as the desktop window's, `ui::options::engine_reason`.
+#[must_use]
+pub fn engine_lock(row: OptionRow, model: &SettingsModel) -> Option<&'static str> {
+    match row {
+        OptionRow::Setting(id) => crate::ui::options::engine_reason(id, model),
+        _ => None,
+    }
+}
+
+/// The note a console row shows after its value while [`engine_lock`] locks it.
+#[must_use]
+pub fn engine_lock_note(row: OptionRow, model: &SettingsModel) -> Option<String> {
+    engine_lock(row, model).map(|_| strings::get(keys::HANDHELD_ZAXNES_ONLY))
 }
 
 /// The name of a camera preset, in the language in force.

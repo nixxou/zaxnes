@@ -26,6 +26,12 @@ wgpu = ["zax-render/wgpu"]
 # build whose core has no VS layer wants. `docs/review/BOARD-FEATURES.md` has the switch.
 vs-system = ["zax-nes/board-vs-system"]
 
+# `zax-harness fceux-run` and `fceux-compare`, the FCEUX engine's two commands (lot FCEUX-1
+# step 4). Off by default like everything of that engine: with it off `zax-fceux` is not a
+# dependency at all, no C is linked, and the binary is the one it always was. On, it needs the
+# fork `cleanroom/fceux-zax` built first - `zax-fceux/build.rs` says how.
+fceux-core = ["dep:zax-fceux", "zax-fceux/fceux-core"]
+
 # The core's exact sprite-evaluation pipeline (lot MF-4e step 3), out of `default` because it is
 # above the owner's tolerance on both runs. A pass-through for the same reason `vs-system` is one:
 # Cargo cannot see a dependency's feature from a test, and
@@ -41,11 +47,27 @@ ppu-exact-sprite-eval = ["zax-nes/ppu-exact-sprite-eval"]
 # configuration it is scoring, and this feature is worth exactly one row of it.
 ppu-2007-render-read = ["zax-nes/ppu-2007-render-read"]
 
+# `frame-trace --dmc-census`, the DMA census of lot NESHAWK-PROFILE-2 step 2: a pass-through to
+# the core's own `dma-census`, because Cargo cannot see a dependency's feature from here. **An
+# instrument, off by default**: with it off the option is a usage error naming the flag to rebuild
+# with, and the core carries not one hook. `crates/zax-nes/src/dma_census.rs` says why.
+dma-census = ["zax-nes/dma-census"]
+
 [dependencies]
 serde_json.workspace = true
+zax-core-api = { path = "../zax-core-api" }
 sha2 = "0.10"
+# `.bk2` movies (lot EVAL-SYNC step 4): a zip of text files, whose header states a SHA-1.
+# Both are already `zax-app`'s own dependencies at these versions, so this adds nothing to the
+# lock file and nothing to fetch.
+sha1 = { version = "0.11.0", default-features = false }
+zip = { version = "7.3.0", default-features = false, features = ["deflate"] }
 zax-engine3d = { path = "../zax-engine3d" }
+zax-fceux = { path = "../zax-fceux", optional = true }
 zax-nes = { path = "../zax-nes" }
+# `movie-sync --engine neshawk`: the Rust port of BizHawk's own NES core (lot
+# NESHAWK-REWRITE). A leaf crate with no dependencies of its own.
+zax-neshawk = { path = "../zax-neshawk" }
 zax-profiles = { path = "../zax-profiles" }
 zax-render = { path = "../zax-render", features = ["offscreen"] }
 zax-scripting = { path = "../zax-scripting" }

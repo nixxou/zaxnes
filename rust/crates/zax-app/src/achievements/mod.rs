@@ -15,10 +15,10 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::emulation::engine_handle::EngineHandle;
 use zax_achievements::{
     Achievement, Client, Event, Item, Memory, NoMemory, Summary, Transport, UreqTransport,
 };
-use zax_nes::NesCore;
 use zax_platform::ui_image::PictureUpdate;
 use zax_platform::WaveAudio;
 
@@ -43,7 +43,7 @@ pub const PROGRESS_SECONDS: f64 = 2.5;
 
 /// The CPU bus of the console as rcheevos addresses a NES: $0000 to $FFFF, read without side
 /// effects.
-pub struct CoreMemory<'a>(pub &'a NesCore);
+pub struct CoreMemory<'a>(pub &'a EngineHandle);
 
 impl Memory for CoreMemory<'_> {
     fn read(&self, address: u32) -> Option<u8> {
@@ -296,7 +296,7 @@ impl AchievementSystem {
     /// A game starts (a launch, a reset, a save state): its achievements load once signed in.
     /// The same game again keeps them and only starts them over. `image` is the ROM as an
     /// iNES file.
-    pub fn start_game(&mut self, core: &NesCore, image: Vec<u8>) {
+    pub fn start_game(&mut self, core: &EngineHandle, image: Vec<u8>) {
         if self.image.as_deref() == Some(image.as_slice()) && self.game_requested {
             self.reset(core);
             return;
@@ -410,7 +410,7 @@ impl AchievementSystem {
     }
 
     /// The console was reset: every achievement starts over.
-    pub fn reset(&mut self, core: &NesCore) {
+    pub fn reset(&mut self, core: &EngineHandle) {
         self.last_frame = Some(core.frame_count());
         if let Some(client) = &mut self.client {
             client.reset(&CoreMemory(core));
@@ -427,7 +427,7 @@ impl AchievementSystem {
 
     /// A save state was loaded: `progress` is what it holds, `None` for a state without it
     /// (every achievement then starts over).
-    pub fn restore_progress(&mut self, core: &NesCore, progress: Option<&[u8]>) {
+    pub fn restore_progress(&mut self, core: &EngineHandle, progress: Option<&[u8]>) {
         self.last_frame = Some(core.frame_count());
         self.clear_indicators();
         let Some(client) = &mut self.client else {
@@ -445,7 +445,7 @@ impl AchievementSystem {
     /// Evaluates the frame the core just ended, once: the frame counter tells a new frame
     /// from one already seen, and from a jump back (a rollback, a state loaded), which is only
     /// noted.
-    pub fn after_frame(&mut self, core: &NesCore) {
+    pub fn after_frame(&mut self, core: &EngineHandle) {
         let frame = core.frame_count();
         let previous = self.last_frame.replace(frame);
         if previous.is_some_and(|previous| frame <= previous) {
@@ -461,7 +461,7 @@ impl AchievementSystem {
 
     /// The work of a displayed frame: the server's answers, the periodic work when no frame
     /// ran, the events, the timers of the pop-ups.
-    pub fn tick(&mut self, core: Option<&NesCore>, real_seconds: f64, frames_ran: bool) {
+    pub fn tick(&mut self, core: Option<&EngineHandle>, real_seconds: f64, frames_ran: bool) {
         self.badges.get_mut().poll();
         self.library.poll();
         self.log.extend(self.library.take_log());
@@ -489,7 +489,7 @@ impl AchievementSystem {
         self.advance(real_seconds);
     }
 
-    fn request_game(&mut self, core: &NesCore) {
+    fn request_game(&mut self, core: &EngineHandle) {
         if self.game_requested || !matches!(self.account, Account::SignedIn { .. }) {
             return;
         }
@@ -528,7 +528,7 @@ impl AchievementSystem {
 
     // ------------------------------------------------------------------ events
 
-    fn on_event(&mut self, core: Option<&NesCore>, event: Event) {
+    fn on_event(&mut self, core: Option<&EngineHandle>, event: Event) {
         match event {
             Event::Login(result) => self.on_login(core, result),
             Event::GameLoaded(result) => self.on_game_loaded(core, result),
@@ -597,7 +597,7 @@ impl AchievementSystem {
         }
     }
 
-    fn on_login(&mut self, core: Option<&NesCore>, result: Result<(), String>) {
+    fn on_login(&mut self, core: Option<&EngineHandle>, result: Result<(), String>) {
         match result {
             Ok(()) => {
                 let Some(user) = self.client.as_ref().and_then(Client::user) else {
@@ -636,7 +636,7 @@ impl AchievementSystem {
         }
     }
 
-    fn on_game_loaded(&mut self, core: Option<&NesCore>, result: Result<(), String>) {
+    fn on_game_loaded(&mut self, core: Option<&EngineHandle>, result: Result<(), String>) {
         let Some(client) = &mut self.client else {
             return;
         };
@@ -824,16 +824,24 @@ fn unlock_text(item: &Item) -> String {
 /// The ROM of `core` as rcheevos hashes a NES game: an iNES header (left out of the hash) and
 /// the PRG and CHR data. The player's ROM when a built-in patch changed it in memory.
 #[must_use]
-pub fn hash_image(core: &NesCore) -> Option<Vec<u8>> {
+pub fn hash_image(core: &EngineHandle) -> Option<Vec<u8>> {
     let mut image = vec![0x4E, 0x45, 0x53, 0x1A, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-    if let Some(original) = core.original_image() {
-        let rom = zax_nes::rom::RomImage::try_load(original, "").ok()?;
-        image.extend_from_slice(rom.prg_rom());
-        image.extend_from_slice(rom.chr_rom());
-    } else {
-        let rom = core.cartridge()?.rom();
-        image.extend_from_slice(rom.prg_rom());
-        image.extend_from_slice(rom.chr_rom());
+    // The cartridge is the first choice where there is one and no patch changed the ROM, which is
+    // the Zaxnes path and is unchanged by lot FCEUX-23; `original_image` is the player's own ROM
+    // when a built-in patch rewrote it in memory, and on an engine with no cartridge of its own
+    // it is the image the handle kept.
+    match (core.original_image(), core.cartridge()) {
+        (None, Some(cartridge)) => {
+            let rom = cartridge.rom();
+            image.extend_from_slice(rom.prg_rom());
+            image.extend_from_slice(rom.chr_rom());
+        }
+        (Some(original), _) => {
+            let rom = zax_nes::rom::RomImage::try_load(original, "").ok()?;
+            image.extend_from_slice(rom.prg_rom());
+            image.extend_from_slice(rom.chr_rom());
+        }
+        (None, None) => return None,
     }
     Some(image)
 }

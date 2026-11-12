@@ -4,15 +4,11 @@
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::RegionTiming;
 
-/// What is plugged into a controller port (REQ-CORE-024).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum ControllerPortType {
-    /// A standard pad.
-    #[default]
-    Controller = 0,
-    /// A Zapper light gun.
-    Zapper = 1,
-}
+// What is plugged into a port, and a port number out of range, are on the `Engine` trait
+// (`port_type`/`set_port_type`), so they live in `zax-core-api` since lot FCEUX-23 step 2 beside
+// the input word; re-exported here at the paths they were at. The ports *themselves* below — the
+// shift registers, the strobe, the Zapper — are Zaxnes's machine and stay here.
+pub use zax_core_api::{ControllerPortType, InvalidPort};
 
 /// Where a Zapper is aimed, in image pixels; outside the image means "pointing off screen"
 /// (REQ-CORE-060).
@@ -40,18 +36,6 @@ impl ZapperPosition {
         self.x >= 0 && self.x < 256 && self.y >= 0 && self.y < RegionTiming::VISIBLE_SCANLINES
     }
 }
-
-/// A port number outside 0 to 1 (REQ-CORE-024).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct InvalidPort(pub usize);
-
-impl std::fmt::Display for InvalidPort {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "port {} is out of range (0 or 1)", self.0)
-    }
-}
-
-impl std::error::Error for InvalidPort {}
 
 /// The two controller ports at $4016 and $4017 (REQ-CORE-022).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -260,7 +244,14 @@ impl InputPorts {
             return value;
         }
 
-        let bit = if self.strobe {
+        let bit = if self.types[port] == ControllerPortType::Empty {
+            // An empty socket (REQ-CORE-024). Nothing drives the data line, and there is no
+            // shift register to clock — which is what distinguishes it from a pad with no
+            // button held: a pad's **ninth** read after a strobe answers 1 and this one goes on
+            // answering 0, for ever. The strobe is still settled above, because the *other*
+            // port's registers reload on it.
+            0
+        } else if self.strobe {
             // Reads taken while the strobe is high always show button A.
             self.shift[port] & 0x01
         } else if self.shift_count[port] >= 8 {
@@ -408,6 +399,7 @@ impl InputPorts {
             self.types[port] = match reader.read_u8()? {
                 0 => ControllerPortType::Controller,
                 1 => ControllerPortType::Zapper,
+                2 => ControllerPortType::Empty,
                 other => {
                     return Err(InvalidState::corrupt(format!(
                         "Corrupt savestate: unknown controller port type {other}."

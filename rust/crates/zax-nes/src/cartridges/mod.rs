@@ -1441,6 +1441,21 @@ impl Cartridge {
         self.refresh_rom_windows();
     }
 
+    /// A press on the console's **RESET** button, which the cartridge connector has no pin for:
+    /// the mirroring the game selected, the M2 cycle counter the IRQ boards count on and every
+    /// register of the board are **kept**. See [`Mapper::soft_reset`] for the hardware, and
+    /// `NesCore::soft_reset` for the rest of the console's own after-reset state.
+    ///
+    /// The two cache refreshes are not a behaviour: they are what keeps the bus's fast windows in
+    /// step with the board, and they are needed only because a reset-detecting multicart may have
+    /// moved a bank. For every other board this call does nothing observable, which is the whole
+    /// point of it.
+    pub fn soft_reset(&mut self) {
+        self.board.soft_reset(&mut self.memory);
+        self.refresh_nametable_pages();
+        self.refresh_rom_windows();
+    }
+
     /// Clears PRG-RAM (when `clear_prg_ram`) and CHR-RAM (part of power-on, REQ-CORE-004).
     pub fn clear_volatile_ram(&mut self, clear_prg_ram: bool) {
         if clear_prg_ram {

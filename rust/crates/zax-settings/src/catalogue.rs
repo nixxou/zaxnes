@@ -136,6 +136,11 @@ setting_ids! {
     EmuTvMode => "emu.tv_mode",
     EmuAutoTvMode => "emu.auto_tv_mode",
     EmuCore => "emu.core",
+    // Lot FCEUX-23 step 5 (design note §4): which emulation engine plays a game, as a per-game
+    // option. The identifier is in the catalogue in **every** build so that a `games.json`
+    // carrying it loads and saves without error; a build without the `fceux-core` feature has
+    // only one engine, does not show the row and ignores the value.
+    EmuEngine => "emu.engine",
     EmuCatchUp => "emu.catch_up",
     // AMD-041 REQ-LOOP-064, exposed as `RunAheadFrames` (AMD-040 REQ-LUA-114).
     EmuRunAhead => "emu.run_ahead",

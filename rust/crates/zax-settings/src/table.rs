@@ -1049,6 +1049,7 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
     video_sprite_limit(out);
     video_overscan(out);
     video_nes_palette(out);
+    emulation_engine(out);
     out.push(
         SettingDescriptor::new(
             SettingId::EmuCore,
@@ -1063,6 +1064,43 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::core_index())
         .with_lua("Core")
         .with_field("22"),
+    );
+}
+
+/// The per-game engine choice of lot FCEUX-23 step 5 (`docs/review/FCEUX-ENGINE.md` §4).
+///
+/// A per-game option with a global default, both `zaxnes`, and **no "auto"** — an automatic
+/// choice would need a quality judgement the application cannot make. It takes effect at the next
+/// ROM load, because changing engines means re-powering the machine, and the options window shows
+/// "(at the next load)" for that effect of its own accord.
+///
+/// The descriptor is in **every** build so that a `games.json` written by a build with FCEUX
+/// still loads in one without it, and the other way round. A build without the `fceux-core`
+/// feature has one engine: `options::is_shown` drops the row and `EmulationHost::engine_for_game`
+/// answers Zaxnes whatever the stored value says.
+///
+/// Its own function because `emulation` is at clippy's hundred lines without it.
+fn emulation_engine(out: &mut Vec<SettingDescriptor>) {
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuEngine,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Zaxnes"),
+            opt(1, "FCEUX"),
+            // Lot NESHAWK-REWRITE: the Rust port of BizHawk's NesHawk core, which is in
+            // **every** build (safe Rust, no feature gate) -- so the row is now a real choice
+            // even where `fceux-core` is off. **3, not 2**: lot NESHAWK-COMPAT-ENGINE on
+            // `feat/neshawk-profile` gives 2 to `zaxnes-neshawk`, Zaxnes's own core on the
+            // NesHawk-compatible chip, and these values are persisted in `games.json`.
+            opt(3, "NesHawk"),
+        ]))
+        .with_label("Emulation engine"),
     );
 }
 

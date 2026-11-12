@@ -5,8 +5,10 @@ use crate::input::{ControllerPortType, InputPorts, InvalidPort, ZapperPosition};
 use crate::ppu::{Ppu2C02, MAX_TILE_RECORD_STATE_SIZE, OAM_SIZE, PALETTE_SIZE, VRAM_SIZE};
 use crate::rom::{InesHeader, RomImage, RomLoadResult};
 use crate::state::{CoreState, InvalidState, StateLoadFailure, StateReader, StateWriter};
+use crate::timing_profile::{NesHawkCompat, Standard, TimingProfile};
 use crate::{
-    FrameBatch, NametableMirroring, NesBus, NesRegion, RegionTiming, TileRecord, VideoInfo,
+    FrameBatch, NametableMirroring, NesBus, NesBusOf, NesRegion, RegionTiming, TileRecord,
+    VideoInfo,
 };
 
 /// Receives one frame batch per emulated frame (REQ-CORE-030). The emulation behaves
@@ -17,36 +19,28 @@ pub type VideoCallback = Box<dyn FnMut(&FrameBatch<'_>) + Send>;
 /// (REQ-CORE-060).
 pub type ZapperPositionSource = Box<dyn FnMut(usize) -> ZapperPosition + Send>;
 
-/// What a successful "restore state" reports (REQ-CORE-091).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StateLoaded {
-    /// Bytes the block occupied, so the host can read on.
-    pub consumed: usize,
-    /// The ROM name stored in the block.
-    pub rom_name: String,
-}
-
-/// Why a savestate could not be written: no ROM is loaded, so there is no state to save.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NoRomLoaded;
-
-impl std::fmt::Display for NoRomLoaded {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("No ROM is loaded: there is no state to save.")
-    }
-}
-
-impl std::error::Error for NoRomLoaded {}
+// What a restore reports and why a save had nothing to write are on the `Engine` trait, so they
+// live in `zax-core-api` since lot FCEUX-23 step 2; re-exported here at the paths they were at
+// (`zax_nes::StateLoaded`, `zax_nes::NoRomLoaded`) through `lib.rs`.
+pub use zax_core_api::{NoRomLoaded, StateLoaded};
 
 /// One NES machine, seen from the host (REQ-CORE-001, REQ-CORE-002).
 ///
 /// Everything an instance needs lives in the instance, so two cores in one process are
 /// independent (REQ-ARCH-011, REQ-CORE-001). Nothing advances unless the host calls
 /// [`NesCore::run_frame`]: the core owns no clock and no thread (REQ-ARCH-010).
+///
+/// **`P` is the console chip's timing profile** ([`TimingProfile`]): `NesCoreOf<Standard>` — which
+/// is what [`NesCore`] names — is Zaxnes's own 2A03, and `NesCoreOf<NesHawkCompat>` is the one a
+/// `.bk2` recorded on BizHawk's NesHawk is replayed on. The core carries the parameter because it
+/// owns the bus, which is where the DMA is; the PPU, the cartridge, the CPU and the controller
+/// ports do not, nothing the two profiles disagree about reaching them.
+///
+/// [`NesHawkCompat`]: crate::NesHawkCompat
 #[allow(clippy::struct_excessive_bools)] // Independent switches of the machine and of the host.
-pub struct NesCore {
+pub struct NesCoreOf<P: TimingProfile> {
     cpu: Cpu6502,
-    bus: NesBus,
+    bus: NesBusOf<P>,
     region: NesRegion,
     battery_ram_imported: bool,
     frame_count: i64,
@@ -127,19 +121,92 @@ pub struct NesCore {
     real_frame_held: bool,
 }
 
-impl Default for NesCore {
+/// The core every caller outside this lot means: [`NesCoreOf`] with Zaxnes's own 2A03.
+///
+/// A plain alias rather than a default type parameter, for the reason [`NesBus`] carries: Rust
+/// resolves neither `NesCore::STATE_VERSION` nor `NesCore::new()` through a default.
+pub type NesCore = NesCoreOf<Standard>;
+
+/// `run_frame` for a caller that is itself generic over the profile.
+///
+/// The inherent `run_frame` is declared once per instantiation and not on the generic `impl` (the
+/// note below says why, with the measurements), and a generic caller cannot name an inherent method
+/// that the generic `impl` does not carry. So it names this one instead; it is the same function,
+/// and in concrete code the inherent method wins by the ordinary rule, so nothing a caller writes
+/// today changes. The harness's `test-roms` and `movie-sync` are what asked for it.
+pub trait RunFrame {
+    /// As [`NesCore::run_frame`], on whichever profile `Self` carries.
+    fn run_frame(&mut self, input_word: u16) -> i64;
+}
+
+impl<P: TimingProfile> RunFrame for NesCoreOf<P> {
+    #[inline]
+    fn run_frame(&mut self, input_word: u16) -> i64 {
+        self.run_frame_profiled(input_word)
+    }
+}
+
+/// The frame entry point, **once per profile and concrete**.
+///
+/// It is deliberately not a method of the generic `impl` above, and the reason is code generation
+/// rather than design. Threading a type parameter through the core changes nothing a program can
+/// observe — `golden-core` over the 98 originals is byte-identical — but it does change what LLVM
+/// does with the frame loop, and lot NESHAWK-PROFILE step 2 measured two separate costs on the way
+/// to charging nothing for it. Both are recorded because a future lot that adds a hot entry point
+/// will meet them again.
+///
+/// *The crate the monomorphisation lands in.* Rust monomorphises a generic function in the crate
+/// that **calls** it, so a generic `run_frame` moved the whole per-cycle chain under it —
+/// `Cpu6502::step`, `CpuBus::read`, `NesBusOf::tick`, the DMA — out of this crate and into every
+/// consumer's code generation. `bench-core`, five interleaved rounds against the parent commit:
+/// **+3.8 % on Super Mario Bros. 3, +2.4 % on Mega Man 3**. Declared per instantiation, as below,
+/// `run_frame` is an ordinary cross-crate call again.
+///
+/// *The inlining.* That alone left **+1.5 % on Super Mario Bros. 3 and +3.2 % on Mega Man 2**
+/// (twelve interleaved rounds, slower in twelve of twelve), because a generic body with one call
+/// site is inlined **into** its wrapper, which the parent's `run_frame` — reached through
+/// `Box<dyn Engine>` and so never inlinable — was not. `#[inline(never)]` on
+/// [`NesCoreOf::run_frame_profiled`] puts that structure back; six interleaved rounds on five ROMs
+/// then read −3.0 %, −3.0 %, −2.2 %, +0.5 % and +0.6 %, inside the lot's +1 % budget, and `.text`
+/// grows by 5 440 bytes of 4.9 MB.
+///
+/// Every other entry point of the core is cold — a reset, a savestate, a register peek, a frame
+/// buffer copy — or lies under this one, so none of them needs the same treatment. A new hot entry
+/// point would.
+impl NesCoreOf<Standard> {
+    /// Runs one frame with `input_word` (REQ-CORE-020, REQ-CORE-022): port 1 in bits 0 to
+    /// 7, port 2 in bits 8 to 15; for a controller the order is A, B, Select, Start, Up,
+    /// Down, Left, Right (SPEC-02 §4.4).
+    ///
+    /// The frame runs from where the previous one stopped to the start of the next vblank;
+    /// the video callback is then invoked once, synchronously, even when the batch is empty
+    /// (REQ-CORE-021). Returns the CPU cycles the frame took, 0 when no ROM is loaded
+    /// (REQ-CORE-005).
+    pub fn run_frame(&mut self, input_word: u16) -> i64 {
+        self.run_frame_profiled(input_word)
+    }
+}
+
+impl NesCoreOf<NesHawkCompat> {
+    /// As [`NesCore::run_frame`], on the NesHawk-compatible chip.
+    pub fn run_frame(&mut self, input_word: u16) -> i64 {
+        self.run_frame_profiled(input_word)
+    }
+}
+
+impl<P: TimingProfile> Default for NesCoreOf<P> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl NesCore {
+impl<P: TimingProfile> NesCoreOf<P> {
     /// Creates a machine with no ROM loaded, in NTSC.
     #[must_use]
     pub fn new() -> Self {
         Self {
             cpu: Cpu6502::new(),
-            bus: NesBus::new(Ppu2C02::new(), Apu2A03::new(), InputPorts::new()),
+            bus: NesBusOf::new(Ppu2C02::new(), Apu2A03::new(), InputPorts::new()),
             region: NesRegion::Ntsc,
             battery_ram_imported: false,
             frame_count: 0,
@@ -299,20 +366,25 @@ impl NesCore {
 
     /// Name of the core, recorded at the head of savestate files (REQ-CORE-120). There is
     /// exactly one core.
-    pub const CORE_NAME: &'static str = "Zaxnes";
+    pub const CORE_NAME: &'static str =
+        zax_core_api::state_core_name(zax_core_api::EngineKind::Zaxnes);
 
     /// The name the core carried under the « Sen » working name. Still accepted when reading
     /// a state block, never written: AMD-029 §2 keeps states written before the rename
     /// loadable (Q-070).
     pub const LEGACY_CORE_NAME: &'static str = "Sen";
 
-    /// Message a savestate written by a different core is refused with (REQ-CORE-120).
-    pub const FOREIGN_CORE_MESSAGE: &'static str = "Save state used a different core.";
+    /// Message a savestate written by a different core is refused with (REQ-CORE-120). Defined
+    /// as `zax_core_api`'s since lot FCEUX-23 step 3, because FCEUX's engine returns the same
+    /// one for a block of this core's.
+    pub const FOREIGN_CORE_MESSAGE: &'static str = zax_core_api::FOREIGN_CORE_MESSAGE;
 
     /// Magic that opens a core savestate block, "SEN0". Kept as it is across the rename of
     /// AMD-029: it is a format datum, and changing it would refuse every block written
-    /// before (Q-070).
-    pub const STATE_MAGIC: u32 = 0x304E_4553;
+    /// before (Q-070). It is `zax_core_api::state_magic(EngineKind::Zaxnes)` since lot
+    /// FCEUX-23 step 3, where the first four bytes of a block became how the application tells
+    /// which engine wrote it.
+    pub const STATE_MAGIC: u32 = zax_core_api::state_magic(zax_core_api::EngineKind::Zaxnes);
 
     /// Version of the savestate format. Bumped whenever the block layout changes; L1c added
     /// the APU channel, mixer and resampler state, L1d the mapper bank windows, latches and
@@ -542,8 +614,15 @@ impl NesCore {
     /// The **soft** reset of AMD-044 REQ-CORE-122, which imitates a press on the console's
     /// RESET button: the internal RAM, the save RAM and the CHR RAM are **kept**, the CPU keeps
     /// A, X, Y and every flag but `I` while S drops by 3 and PC comes from the reset vector,
-    /// and the PPU, the APU, the mapper and the controller ports go to their documented
-    /// *after reset* state. The frame counter restarts from 0 (REQ-CORE-006 amended).
+    /// and the PPU, the APU and the controller ports go to their documented *after reset*
+    /// state. The frame counter restarts from 0 (REQ-CORE-006 amended).
+    ///
+    /// **The mapper is left alone**, which is the one way this differs from REQ-CORE-122 as
+    /// written ("le PPU, l'APU *et le mapper* suivent leur état documenté *after reset*"): the
+    /// mapper half of that clause has no documented state behind it, because the cartridge
+    /// connector has no `/RESET` pin for a mapper to see. The amendment the clause needs is
+    /// written up in `docs/review/AMD-REQ-CORE-122-mapper-reset.md`; the code implements the
+    /// hardware, on the owner's decision of 2026-11-10.
     ///
     /// The hard reset of [`Self::reset`] is unchanged: it stays a power cycle (DEC-02-Q3),
     /// which is why `cpu_reset/ram_after_reset` fails under it on purpose (REQ-CORE-004) and
@@ -564,12 +643,33 @@ impl NesCore {
         // read again on the next frame (AMD-044 §2).
         self.bus.input_mut().reset();
 
-        // The mapper follows its documented after-reset state; the volatile RAM it owns —
-        // PRG-RAM and CHR-RAM — is deliberately not cleared.
-        // `Cartridge::reset` refreshes the fast ROM windows the bus reads through itself
-        // (performance history §5.1, "plain PRG-ROM windows").
+        // **The mapper is left alone** (lot EVAL-SYNC-3 step 4, owner's decision of 2026-11-10).
+        // The NES cartridge connector has no `/RESET` pin — nesdev's "Cartridge connector" lists
+        // every pin of both edges and there is none — so a mapper cannot see the reset button:
+        // its bank registers, its IRQ unit and its A12 watcher hold whatever the game last wrote
+        // into them, across as many resets as the player presses. The boards that *do* react are
+        // the reset-detecting multicarts, which notice the absence of M2 rather than a wire, and
+        // they say so by overriding `Mapper::soft_reset`; `Cartridge::soft_reset` is the call
+        // that reaches them and that refreshes the bus's fast windows afterwards.
+        //
+        // Until this lot `Cartridge::reset` was called here, which put every board back to
+        // power-on. See `docs/review/AMD-REQ-CORE-122-mapper-reset.md` for the amendment this
+        // asks of REQ-CORE-122, whose current wording covers the mapper.
         if let Some(cartridge) = self.bus.cartridge_mut() {
-            cartridge.reset();
+            cartridge.soft_reset();
+        }
+
+        // Item 10 again, and the measurement says it applies to the RESET button too: BizHawk's
+        // frame 5 of the *Kirby* `.bk2` — the frame the movie's first reset lands in — is 27 392
+        // cycles long, exactly as its frame 1 is (`PPU.cs` `Reset()`, which the soft reset calls,
+        // sets `ppudead = 1` again).
+        // Item 14 rides on the same call, and only here: a bias at the **power-on** is absorbed
+        // by the post-reset boot's own `$2002` wait, where one applied after it is not. The
+        // shipped value is 0 on both profiles, so this is `run_ppu_start_up_dots(CONST)` as it
+        // was.
+        if P::PPU_START_UP_DOTS_SKIPPED > 0 {
+            self.bus
+                .run_ppu_start_up_dots(P::PPU_START_UP_DOTS_SKIPPED + P::SOFT_RESET_PPU_DOT_BIAS);
         }
 
         self.cpu.soft_reset(&mut self.bus);
@@ -653,11 +753,21 @@ impl NesCore {
         self.bus.ppu_mut().reset();
         self.boot_patch_window(self.builtin_patch);
         self.boot_pack_zone();
-        self.bus.apu_mut().reset();
+        // Item 11 is read inside this call, and only here: the DMC's timer powers on 1 020 CPU
+        // cycles from its first bit on the NesHawk profile and one period from it on `Standard`.
+        self.bus.apu_mut().reset::<P>();
         let clear_prg_ram = !self.battery_ram_imported;
         if let Some(cartridge) = self.bus.cartridge_mut() {
             cartridge.reset();
             cartridge.clear_volatile_ram(clear_prg_ram);
+        }
+
+        // Item 10: NesHawk's PPU runs a start-up frame of `241 * 341 - 4` dots here, which is
+        // 2 389 CPU cycles shorter than the whole frame this core's own power-on position gives
+        // it. It is run **before** the CPU's seven reset cycles because that is where NesHawk's
+        // is: `NewDeadPPU()` clocks the CPU through `runppu()` for the whole of the dead frame.
+        if P::PPU_START_UP_DOTS_SKIPPED > 0 {
+            self.bus.run_ppu_start_up_dots(P::PPU_START_UP_DOTS_SKIPPED);
         }
 
         self.cpu.reset(&mut self.bus);
@@ -762,7 +872,37 @@ impl NesCore {
     /// the video callback is then invoked once, synchronously, even when the batch is empty
     /// (REQ-CORE-021). Returns the CPU cycles the frame took, 0 when no ROM is loaded
     /// (REQ-CORE-005).
-    pub fn run_frame(&mut self, input_word: u16) -> i64 {
+    ///
+    /// The body of each profile's `run_frame`, which is the public name; `#[inline(never)]` keeps
+    /// it out of its two thin wrappers, and the measurements that asked for that are on the
+    /// [`NesCoreOf<Standard>`] block those wrappers live in.
+    #[inline]
+    pub(crate) fn run_frame_profiled(&mut self, input_word: u16) -> i64 {
+        self.run_frame_profiled_gen::<false>(input_word)
+    }
+
+    /// Runs one frame the caller is about to tap RESET after, which the `NesHawkCompat` profile's
+    /// **item 12** ends at the PPU dot the frame boundary falls on rather than after the
+    /// instruction that straddles it (`TimingProfile::RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT`).
+    /// On [`Standard`] it is [`NesCore::run_frame`] and nothing else.
+    ///
+    /// **The caller must apply the reset before the next frame** — [`NesCoreOf::soft_reset`] or a
+    /// power cycle — because the frame it leaves behind ended *before* its boundary dot, and it is
+    /// the reset's own repositioning of the PPU (item 10's start-up dots) that consumes the dot.
+    /// Run an ordinary frame after this one instead and that frame meets the boundary inside its
+    /// first instruction and ends there. The `.bk2` player is the only caller, and it reads the
+    /// next frame's command before choosing: `movie_sync.rs` `step` and `frame_trace.rs` `play`.
+    #[inline(never)]
+    pub fn run_frame_before_soft_reset(&mut self, input_word: u16) -> i64 {
+        self.run_frame_profiled_gen::<true>(input_word)
+    }
+
+    /// `BEFORE_RESET` is a const parameter rather than an argument so that neither profile's
+    /// ordinary frame carries item 12's test at all: `run_frame_profiled` instantiates it `false`,
+    /// the `&&` below folds, and the loop is the loop this core always had. The cost is one more
+    /// copy of this function per profile in `.text`, which is the cold one.
+    #[inline(never)]
+    fn run_frame_profiled_gen<const BEFORE_RESET: bool>(&mut self, input_word: u16) -> i64 {
         if self.bus.cartridge().is_none() {
             return 0;
         }
@@ -812,6 +952,20 @@ impl NesCore {
         self.bus.ppu_mut().clear_frame_boundary();
         self.bus.defer_ppu();
         loop {
+            // **Item 12**, and only on the frame the movie taps RESET after: NesHawk's frame ends
+            // at the boundary dot, mid-instruction, and its reset then abandons the instruction in
+            // flight (`MOS 6502X` `NESSoftReset`), so the straddling instruction must not run.
+            // `BEFORE_RESET` is const, so for every other frame — and for the whole of `Standard`
+            // — this is not emitted.
+            if BEFORE_RESET
+                && P::RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT
+                && self.bus.frame_boundary_is_the_next_cycle()
+            {
+                // The boundary dot takes the frame's palette and mask for the 2D picture, and
+                // this frame ends before reaching it.
+                self.bus.ppu_mut().capture_frame_snapshot();
+                break;
+            }
             self.cpu.step(&mut self.bus);
             if let Some((first, last)) = idle_loop {
                 if (first..=last).contains(&self.cpu.pc) && self.bus.ppu().wide().stalling() {
@@ -882,7 +1036,7 @@ impl NesCore {
     /// Never: the capture can only fail with no ROM loaded, which is checked first.
     pub fn run_frame_ahead(&mut self, input_word: u16, ahead: u8) -> i64 {
         if ahead == 0 {
-            return self.run_frame(input_word);
+            return self.run_frame_profiled(input_word);
         }
 
         self.run_ahead_sequence(input_word, ahead)
@@ -902,7 +1056,7 @@ impl NesCore {
         let callback = self.video_callback.take();
         self.bus.apu_mut().set_output_enabled(false);
 
-        self.run_frame(input_word);
+        self.run_frame_profiled(input_word);
 
         // Step 2: the complete state of the real frame, in memory. The buffer is lent out and
         // put back, which moves three words and allocates nothing.
@@ -913,13 +1067,13 @@ impl NesCore {
         debug_assert!(captured, "a ROM is loaded, so the capture cannot fail");
 
         for _ in 1..ahead.min(Self::MAX_RUN_AHEAD) {
-            self.run_frame(input_word);
+            self.run_frame_profiled(input_word);
         }
 
         // Step 4: the displayed frame, with its sound and its picture.
         self.bus.apu_mut().set_output_enabled(true);
         self.video_callback = callback;
-        self.run_frame(input_word)
+        self.run_frame_profiled(input_word)
     }
 
     /// Step 5 of REQ-LOOP-065: puts the state of the real frame back, the sound the displayed
@@ -1615,18 +1769,18 @@ impl NesCore {
     }
 
     /// The CPU and the bus, mutably, to step instructions by hand.
-    pub fn cpu_and_bus_mut(&mut self) -> (&mut Cpu6502, &mut NesBus) {
+    pub fn cpu_and_bus_mut(&mut self) -> (&mut Cpu6502, &mut NesBusOf<P>) {
         (&mut self.cpu, &mut self.bus)
     }
 
     /// The bus.
     #[must_use]
-    pub const fn bus(&self) -> &NesBus {
+    pub const fn bus(&self) -> &NesBusOf<P> {
         &self.bus
     }
 
     /// The bus, mutably.
-    pub fn bus_mut(&mut self) -> &mut NesBus {
+    pub fn bus_mut(&mut self) -> &mut NesBusOf<P> {
         &mut self.bus
     }
 
@@ -1771,7 +1925,11 @@ impl NesCore {
         } else {
             Self::STATE_VERSION
         });
-        writer.write_string(Self::CORE_NAME);
+        // `P::STATE_CORE_NAME`, not `Self::CORE_NAME`: the two profiles are two machines, and a
+        // block of one restored into the other would drift from the frame after the restore. The
+        // standard profile's value *is* `CORE_NAME`, so a block it writes is byte for byte the
+        // block this core has always written.
+        writer.write_string(P::STATE_CORE_NAME);
         writer.write_bool(include_rom_image);
         writer.write_string(rom.name());
         let image = self.original_image.as_deref().unwrap_or_else(|| rom.raw());
@@ -1782,7 +1940,7 @@ impl NesCore {
         self.bus.save_state(&mut writer);
         self.cpu.save_state(&mut writer);
         self.bus.ppu().save_state(&mut writer);
-        self.bus.apu().save_state(&mut writer);
+        self.bus.apu().save_state::<P>(&mut writer);
         self.bus.input().save_state(&mut writer);
         cartridge.save_state(&mut writer);
         if wide.unlocked() {
@@ -1855,7 +2013,7 @@ impl NesCore {
         self.bus.save_state(&mut writer);
         self.cpu.save_state(&mut writer);
         self.bus.ppu().save_machine_state(&mut writer);
-        self.bus.apu().save_state(&mut writer);
+        self.bus.apu().save_state::<P>(&mut writer);
         self.bus.input().save_state(&mut writer);
         cartridge.save_state(&mut writer);
         self.bus.ppu().wide().save_state(&mut writer);
@@ -1900,7 +2058,9 @@ impl NesCore {
         self.bus.load_state(&mut reader)?;
         self.cpu.load_state(&mut reader)?;
         self.bus.ppu_mut().load_machine_state(&mut reader)?;
-        self.bus.apu_mut().load_state_keeping_samples(&mut reader)?;
+        self.bus
+            .apu_mut()
+            .load_state_keeping_samples::<P>(&mut reader)?;
         self.bus.input_mut().load_state(&mut reader)?;
         // The cartridge is the one already attached: the ROM never left, so there is nothing to
         // rebuild. `Cartridge::load_state` refreshes the fast ROM windows itself.
@@ -1942,6 +2102,26 @@ impl NesCore {
         loaded
     }
 
+    /// Refuses a savestate block written by a different core, which since lot NESHAWK-PROFILE
+    /// includes **the other timing profile**: the two are two machines, and a block of one
+    /// restored into the other would drift from the frame after the restore.
+    ///
+    /// The « Sen » working name is accepted only by the profile whose own name is `CORE_NAME` —
+    /// the standard one — because no block was ever written under both.
+    fn check_core_name(core_name: &str) -> Result<(), InvalidState> {
+        let legacy_name =
+            P::STATE_CORE_NAME == Self::CORE_NAME && core_name == Self::LEGACY_CORE_NAME;
+        if core_name != P::STATE_CORE_NAME && !legacy_name {
+            // REQ-CORE-120 fixes this message to the character; it is one of the few
+            // literal strings of the spec (AMD-002, answer to Q-001).
+            return Err(InvalidState {
+                failure: StateLoadFailure::ForeignCore,
+                message: Self::FOREIGN_CORE_MESSAGE.to_owned(),
+            });
+        }
+        Ok(())
+    }
+
     fn restore_state(&mut self, data: &[u8], offset: usize) -> Result<StateLoaded, InvalidState> {
         let mut reader = StateReader::new(data, offset)?;
 
@@ -1962,15 +2142,7 @@ impl NesCore {
         // MMC5's sound registers are written only from `STATE_VERSION` on.
         reader.set_format_version(version);
 
-        let core_name = reader.read_string()?;
-        if core_name != Self::CORE_NAME && core_name != Self::LEGACY_CORE_NAME {
-            // REQ-CORE-120 fixes this message to the character; it is one of the few
-            // literal strings of the spec (AMD-002, answer to Q-001).
-            return Err(InvalidState {
-                failure: StateLoadFailure::ForeignCore,
-                message: Self::FOREIGN_CORE_MESSAGE.to_owned(),
-            });
-        }
+        Self::check_core_name(&reader.read_string()?)?;
 
         let has_rom_image = reader.read_bool()?;
         let stored_name = reader.read_string()?;
@@ -2028,7 +2200,7 @@ impl NesCore {
         self.bus.load_state(&mut reader)?;
         self.cpu.load_state(&mut reader)?;
         self.bus.ppu_mut().load_state(&mut reader)?;
-        self.bus.apu_mut().load_state(&mut reader)?;
+        self.bus.apu_mut().load_state::<P>(&mut reader)?;
         self.bus.input_mut().load_state(&mut reader)?;
         cartridge.load_state(&mut reader)?;
         // A state of the hack restored without it: the original ROM never unlocks the

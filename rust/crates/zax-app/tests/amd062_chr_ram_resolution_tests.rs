@@ -182,6 +182,7 @@ impl Run {
             two_dimensional_mode: Some(false),
             console_interface: false,
             tiles: Some(resolver),
+            engine: zax_core_api::EngineKind::Zaxnes,
         };
         let mut session = GameSession::create(request, &mut model).unwrap();
         assert!(session.load_rom(&chr_ram_rom(), "ChrRam.nes").success);
@@ -242,7 +243,7 @@ impl Run {
 
     /// Writes sixteen bytes at a PPU address through `$2006` and `$2007`, as the game would.
     fn write_tile(&mut self, address: u16, raw: &RawTile) {
-        let bus = self.session.core_mut().bus_mut();
+        let bus = self.session.core_mut().bus_mut().expect("Zaxnes's bus");
         bus.poke(0x2000, 0x00);
         #[allow(clippy::cast_possible_truncation)] // The two halves of an address.
         bus.poke(0x2006, (address >> 8) as u8);
@@ -255,7 +256,7 @@ impl Run {
 
     /// Puts sprite 0 on screen and turns sprite rendering on.
     fn show_sprite(&mut self, tile: u8, x: u8, y: u8) {
-        let bus = self.session.core_mut().bus_mut();
+        let bus = self.session.core_mut().bus_mut().expect("Zaxnes's bus");
         bus.poke(0x2003, 0x00);
         bus.poke(0x2004, y.wrapping_sub(1));
         bus.poke(0x2004, tile);

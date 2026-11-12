@@ -17,7 +17,8 @@ use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-use zax_nes::{ControllerPortType, NesCore};
+use crate::emulation::engine_handle::EngineHandle;
+use zax_core_api::ControllerPortType;
 
 use super::movie_timeline::{machine_digest, CHECKPOINT_INTERVAL};
 
@@ -109,8 +110,13 @@ impl Drop for MovieExplorer {
 }
 
 /// The explorer's core: the start state, the session's ports and margin, no sound.
-fn explorer_core(setup: &ExplorerSetup) -> Option<NesCore> {
-    let mut core = NesCore::new();
+///
+/// Always a **Zaxnes** engine, whatever the game is being played on: this thread explores a
+/// movie's timeline by replaying it in a second machine, and FCEUX keeps one machine per process
+/// — a second one is impossible. The movie explorer is therefore a Zaxnes-only tool, which is
+/// what `Capabilities` already says of movies' exactness (lot FCEUX-23 step 4).
+fn explorer_core(setup: &ExplorerSetup) -> Option<EngineHandle> {
+    let mut core = EngineHandle::zaxnes_core();
     core.try_load_state(&setup.start_state, 0).ok()?;
     for (port, kind) in setup.ports.iter().enumerate() {
         core.set_port_type(port, *kind).ok()?;
@@ -121,6 +127,6 @@ fn explorer_core(setup: &ExplorerSetup) -> Option<NesCore> {
     let _ = core.set_sample_rate(rate);
     let _ = core.set_speed(speed);
     let _ = core.set_audio_ratio_adjustment(ratio);
-    core.bus_mut().apu_mut().set_output_enabled(false);
+    core.set_audio_output_enabled(false);
     Some(core)
 }

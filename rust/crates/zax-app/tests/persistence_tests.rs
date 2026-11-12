@@ -402,7 +402,7 @@ fn req_pers_060_the_battery_ram_survives_a_restart() {
     harness.run_frames(10);
     assert_eq!(
         0x5A,
-        harness.host.session().unwrap().core().export_battery_ram()[0]
+        harness.host.session().unwrap().core().battery_ram()[0]
     );
     harness.run(Command::Stop);
     let files: Vec<_> = std::fs::read_dir(&harness.paths.battery_directory)
@@ -421,7 +421,7 @@ fn req_pers_060_the_battery_ram_survives_a_restart() {
     harness.run_with(Command::LaunchGame, CommandArgs::of_text("bat"));
     assert_eq!(
         0x5A,
-        harness.host.session().unwrap().core().export_battery_ram()[0]
+        harness.host.session().unwrap().core().battery_ram()[0]
     );
 }
 

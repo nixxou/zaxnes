@@ -373,7 +373,33 @@ pub trait Mapper {
     }
 
     /// Puts the registers back to their power-on values and recomputes the windows.
+    ///
+    /// This is the **power-on** path (REQ-CORE-004): `NesCore::reset` is a power cycle
+    /// (DEC-02-Q3), and [`Mapper::soft_reset`] is what a press on RESET does.
     fn reset(&mut self, _memory: &mut CartridgeMemory) {}
+
+    /// What a press on the console's **RESET** button does to the board.
+    ///
+    /// **Nothing**, and that is the hardware's answer rather than a simplification. nesdev's
+    /// "Cartridge connector" lists every pin of both the 60-pin Famicom and the 72-pin NES edge
+    /// — power, the CPU address, data and control lines, the PPU lines, CIRAM, audio, `/IRQ`,
+    /// `M2`, `/ROMSEL`, `SYSTEM CLK`, the expansion pins and the CIC's two — and there is **no
+    /// `/RESET` among them**. A mapper cannot see the reset button, so its registers, its IRQ
+    /// unit and its A12 watcher hold whatever the game last put there, across as many resets as
+    /// the player presses. nesdev, "CPU power up state", *after reset*: the internal RAM is
+    /// "unchanged", and the cartridge is not mentioned at all.
+    ///
+    /// A board **may** still react, and two or three do: the *reset-detecting multicarts* notice
+    /// the **absence of M2** rather than a reset line. nesdev, "NES 2.0 Mapper 313" (reset-based
+    /// multicarts around the MMC3 ASIC): *"When an interruption of the M2 signal is detected, the
+    /// higher address lines are automatically incremented."* Of the boards this build has, one is
+    /// of that family — see `Mmc3Unl8237::soft_reset`, whose page states the behaviour in so many
+    /// words — and it is the only one that overrides this.
+    ///
+    /// Overriding it is therefore a claim about a **documented** reset reaction of a particular
+    /// board, and the default is what every ordinary cartridge does. (AMD proposed for
+    /// REQ-CORE-122: `docs/review/AMD-REQ-CORE-122-mapper-reset.md`.)
+    fn soft_reset(&mut self, _memory: &mut CartridgeMemory) {}
 
     /// Whether the board asserts the CPU IRQ line.
     fn irq_asserted(&self) -> bool {

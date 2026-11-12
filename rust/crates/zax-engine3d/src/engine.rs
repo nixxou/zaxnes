@@ -7,7 +7,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use zax_nes::{FrameBatch, TileRecord};
+use zax_core_api::{FrameBatch, TileRecord};
 use zax_profiles::hash::tiles::TileResolver;
 use zax_profiles::pattern::ProfilePattern;
 use zax_profiles::profile::GameProfile;

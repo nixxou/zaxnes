@@ -16,6 +16,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 
+use zax_core_api::{ControllerPortType, FrameBatch, RomLoadResult, TileRecord};
 use zax_engine3d::draw_list::FrameDrawList;
 use zax_engine3d::engine::ConversionEngine;
 use zax_engine3d::error::EngineError;
@@ -23,9 +24,11 @@ use zax_engine3d::palette::Rgb24;
 use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::vectors::Vec3;
 use zax_nes::movie::{Movie, MovieRun};
-use zax_nes::rom::RomLoadResult;
-use zax_nes::{ControllerPortType, FrameBatch, NesBus, NesCore, TileRecord, ZapperPosition};
+use zax_nes::{NesBus, NesCore, ZapperPosition};
 use zax_profiles::hash::tiles::TileResolver;
+
+use crate::emulation::engine_handle::EngineHandle;
+use zax_core_api::EngineKind;
 use zax_profiles::profile::GameProfile;
 use zax_profiles::setting_application;
 use zax_render::scene::SceneState;
@@ -83,7 +86,7 @@ struct ScriptInputState {
 /// The machine as scripts see it, borrowed for one call into the engine: the players' action
 /// masks, the ports and the CPU address space of the core, and the Zapper aim offset.
 struct CoreMachine<'a> {
-    core: &'a mut NesCore,
+    core: &'a mut EngineHandle,
     input: &'a mut ScriptInputState,
     /// The console RAM of the frame being converted while the core runs the next one
     /// (emulation ahead); `None` reads the core itself.
@@ -135,7 +138,7 @@ impl ScriptInput for CoreMachine<'_> {
 
     fn port_byte(&self, port: usize) -> i32 {
         if port < 2 {
-            i32::from(self.core.bus().input().port_byte(port))
+            i32::from(self.core.port_byte(port))
         } else {
             0
         }
@@ -183,7 +186,7 @@ impl ScriptMemory for CoreMachine<'_> {
 /// Runs `operation` with the scene, the core and the script inputs lent to the script API.
 fn with_context<R>(
     scene: &mut SceneState,
-    core: &mut NesCore,
+    core: &mut EngineHandle,
     input: &mut ScriptInputState,
     snapshot: Option<&MemorySnapshot>,
     operation: impl FnOnce(&mut ScriptContext<'_>) -> R,
@@ -226,6 +229,11 @@ pub struct SessionRequest<'a> {
     /// the ROM gave; what is still waiting is looked for in each displayed frame and in the
     /// cartridge's CHR-RAM.
     pub tiles: Option<TileResolver>,
+    /// The engine this game plays on (lot FCEUX-23 step 5, `emu.engine`). It is chosen **here**,
+    /// when the session is made, because changing engines means a new machine: the host decides
+    /// to rebuild the session when the choice changed, and the setting's effect is
+    /// `NextRomLoad`.
+    pub engine: EngineKind,
 }
 
 /// The inputs of one emulated frame.
@@ -243,7 +251,7 @@ pub struct SessionFrame {
 
 /// What [`GameSession::capture_batch`] keeps of a frame's batch besides its records: palettes
 /// (the PPU's and a margin decoder's own), edge masks, widescreen margin and visible rows.
-type CapturedBatch = (Palettes, i32, i32, (i32, zax_nes::VisibleRows, i32));
+type CapturedBatch = (Palettes, i32, i32, (i32, zax_core_api::VisibleRows, i32));
 
 /// A frame's PPU palette and the margin decoder's own background palette, if any.
 type Palettes = ([u8; 32], Option<[u8; 16]>);
@@ -251,7 +259,7 @@ type Palettes = ([u8; 32], Option<[u8; 16]>);
 /// One game being played.
 #[allow(clippy::struct_excessive_bools)] // Independent states of the session.
 pub struct GameSession {
-    core: Box<NesCore>,
+    core: EngineHandle,
     engine: ConversionEngine,
     input: ScriptInputState,
     events: Receiver<SessionEvent>,
@@ -305,8 +313,12 @@ pub struct GameSession {
 #[derive(Default)]
 struct FramePipeline {
     worker: Option<CoreWorker>,
-    /// A core without a ROM that stands in `GameSession::core` while the real one is away.
-    spare: Option<Box<NesCore>>,
+    /// An engine without a ROM that stands in `GameSession::core` while the real one is away.
+    ///
+    /// Always a **Zaxnes** core, whatever engine the game is running: it is only ever a
+    /// placeholder for a moved-out field, nothing is ever asked of it, and FCEUX cannot have two
+    /// instances in one process (lot FCEUX-23 step 4).
+    spare: Option<EngineHandle>,
     /// The input word of the prepared frame that has not started yet.
     prepared: Option<u16>,
     /// Whether the emulation thread holds the core.
@@ -404,8 +416,9 @@ impl GameSession {
             two_dimensional_mode,
             console_interface,
             tiles,
+            engine: engine_kind,
         } = request;
-        let mut core = NesCore::new();
+        let mut core = EngineHandle::of_kind(engine_kind);
         let mut input = ScriptInputState::default();
         let mut engine = ConversionEngine::new();
         engine.use_geometry();
@@ -460,7 +473,7 @@ impl GameSession {
         }
         engine.set_script_host(Box::new(runtime));
         let mut session = Self {
-            core: Box::new(core),
+            core,
             engine,
             input,
             events,
@@ -633,13 +646,13 @@ impl GameSession {
 
     /// The core, for reading.
     #[must_use]
-    pub fn core(&self) -> &NesCore {
+    pub fn core(&self) -> &EngineHandle {
         &self.core
     }
 
     /// The core, for writing.
     #[must_use]
-    pub fn core_mut(&mut self) -> &mut NesCore {
+    pub fn core_mut(&mut self) -> &mut EngineHandle {
         &mut self.core
     }
 
@@ -841,10 +854,7 @@ impl GameSession {
         clock.add_thread(Thread::Emulation, finished.elapsed);
         let captured = self.capture_batch(clock);
         self.pipeline.pending = Some(captured);
-        self.pipeline
-            .memory
-            .ram
-            .copy_from_slice(self.core.bus().ram());
+        self.core.work_ram_into(&mut self.pipeline.memory.ram);
         self.pipeline.picture_height = self.core.wide_picture_into(&mut self.pipeline.picture);
         self.pipeline.picture_shift = self.core.picture_shift();
         self.pipeline.picture_motion = self.core.picture_motion();
@@ -1040,6 +1050,20 @@ impl GameSession {
     /// no conversion, no frame hook (a seek, when [`GameSession::core_follows_the_inputs`]).
     /// Returns `false`, running nothing, outside the movie.
     pub fn run_movie_frame_core_only(&mut self) -> bool {
+        // Lot FCEUX-48 step 4: a movie the **engine** plays itself needs no word from us — its
+        // movie mode loads each frame's record over the pad state inside `run_frame` — and has no
+        // `MovieRun` to take one from. The word handed over is therefore ignored, and the only
+        // question is whether the movie still has a frame.
+        if self.movie.is_none() {
+            if let Some((frame, length)) = self.core.own_movie_position() {
+                if frame >= length {
+                    return false;
+                }
+                self.core.run_frame(0);
+                return true;
+            }
+            return false;
+        }
         let frame_count = self.core.frame_count();
         let Some(word) = self
             .movie
@@ -1298,7 +1322,7 @@ impl GameSession {
             match CoreWorker::spawn() {
                 Ok(worker) => {
                     self.pipeline.worker = Some(worker);
-                    self.pipeline.spare = Some(Box::new(NesCore::new()));
+                    self.pipeline.spare = Some(EngineHandle::zaxnes_core());
                 }
                 Err(error) => {
                     crate::app_log::error(&format!(
@@ -1488,7 +1512,7 @@ impl GameSession {
         clock: &mut StageClock,
         (palette, margin_palette): Palettes,
         (mask_x, mask_y): (i32, i32),
-        (margin, visible_rows, margin_y): (i32, zax_nes::VisibleRows, i32),
+        (margin, visible_rows, margin_y): (i32, zax_core_api::VisibleRows, i32),
     ) {
         if (self.paused_3d || self.catching_up) && self.pipeline.ahead_allowed {
             // Kept for when the 3D comes back; the scripts' clock goes on.
@@ -1667,10 +1691,16 @@ impl GameSession {
         // its widescreen was turned off). A profile whose scripts reach into the core is still
         // converted while paused (`convert_batch_lent`): its frames hold the colour, the core's
         // snapshot not (a grey sky in SMB3's 2D on a handheld). The kept frame's palette comes
-        // first: the core may be on its own thread, its copy here not the frame's.
+        // first: the core may be on its own thread, its copy here not the frame's. An engine with
+        // no Zaxnes PPU gives its frame's palette.
         if self.paused_3d && self.pipeline.ahead_allowed {
             let backdrop = self.skipped_batch.as_ref().map_or_else(
-                || self.core.ppu().snapshot_palette()[0],
+                || {
+                    self.core.ppu().map_or_else(
+                        || self.core.frame_batch().palette[0],
+                        |ppu| ppu.snapshot_palette()[0],
+                    )
+                },
                 |((palette, _), ..)| palette[0],
             ) & 0x3F;
             return zax_engine3d::palette::nes_color(usize::from(backdrop));

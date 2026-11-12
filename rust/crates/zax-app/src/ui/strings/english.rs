@@ -29,6 +29,8 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::SLOT_EMPTY, "empty"),
     (keys::SLOT_OTHER_PATCH, "made with the built-in patches set the other way"),
     (keys::SLOT_OTHER_HACK_VERSION, "made with another version of the built-in hack"),
+    (keys::SLOT_ENGINE, "engine: {engine}"),
+    (keys::SLOT_OTHER_ENGINE, "made with the {engine} engine: set this game's engine to {engine} to load it"),
     (keys::MENU_MOVIES, "Play a movie"),
     (keys::WINDOW_MOVIE_NOTE, "Note on this frame"),
     (keys::MOVIE_NOTE_WRITE, "Write"),
@@ -158,6 +160,32 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         keys::HINT_SINGLE_CORE,
         "(this version has one core: the value is always 0)",
+    ),
+    (
+        keys::HINT_FCEUX_NO_WIDESCREEN,
+        "(this engine has no widescreen: choose the Zaxnes engine for this game)",
+    ),
+    (
+        keys::HINT_FCEUX_NO_HACKS,
+        "(this engine applies no hack pack: choose the Zaxnes engine for this game)",
+    ),
+    (
+        keys::HINT_FCEUX_NO_SPRITE_LIMIT,
+        "(this engine keeps the 8 sprites a line: choose the Zaxnes engine for this game)",
+    ),
+    (
+        keys::HINT_FCEUX_NO_RUN_AHEAD,
+        "(run-ahead is not implemented on this engine)",
+    ),
+    (keys::STATUS_ENGINE_FCEUX, "FCEUX engine"),
+    (keys::STATUS_ENGINE_NESHAWK, "NesHawk engine"),
+    (
+        keys::HINT_FCEUX_VALIDATED,
+        "(this ROM is validated for 3D on the FCEUX engine)",
+    ),
+    (
+        keys::HINT_FCEUX_NOT_VALIDATED,
+        "(this ROM is not validated for 3D on the FCEUX engine: the 3D may differ from Zaxnes's)",
     ),
     (
         keys::HINT_CLASSIC_AUDIO,
@@ -475,6 +503,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.auto_tv_mode", "Region detected automatically"),
     ("setting.emu.tv_mode", "Video region"),
     ("setting.emu.core", "Emulation core"),
+    ("setting.emu.engine", "Emulation engine (this game)"),
     ("setting.emu.catch_up", "Catch-up when late (frames)"),
     // AMD-041 §3: the title and the four values of the Run-ahead list.
     ("setting.emu.run_ahead", "Run-ahead"),
@@ -1111,6 +1140,19 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
          nothing uses it. The row is kept because the key is part of the settings file and of the \
          script surface (Setting.Core). Default: 0.",
     ),
+    (
+        "detail.emu.engine",
+        "Which emulator plays this game: Zaxnes's own core, FCEUX, or NesHawk. It is a choice per \
+         game, not a preference, because the reason to reach for another engine is always a \
+         particular game. FCEUX is for coverage — a game Zaxnes runs badly, or on a board it \
+         does not have. NesHawk is the Rust port of BizHawk's own core, and it is what makes a \
+         BizHawk movie replay exactly: a .bk2 recorded on NesHawk plays back on it frame for \
+         frame, which no other engine can promise. It takes effect at the next load, since \
+         changing engines means starting the machine again. Neither FCEUX nor NesHawk has \
+         widescreen, hack packs, a sprite-limit control or run-ahead: those are part of Zaxnes's \
+         own machine, and their rows say so while another engine is chosen. A save state made on \
+         one engine cannot be loaded on another. Default: Zaxnes.",
+    ),
 
     // ----------------------------------------------------------- Interface tab
     (
@@ -1218,6 +1260,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::HANDHELD_GLOBAL_VALUE, "Global: {0}"),
     (keys::HANDHELD_OWN_COUNT, "{0} own"),
     (keys::HANDHELD_RUN_AHEAD_FORCED, "(forced to 0: scripts)"),
+    (keys::HANDHELD_ZAXNES_ONLY, "(Zaxnes engine only)"),
     (keys::HANDHELD_HINT_GAME_OPTIONS, "Game options"),
     (keys::HANDHELD_HINT_FAVORITE, "Favorite"),
     (keys::HANDHELD_HINT_RESET_ALL, "Reset all"),

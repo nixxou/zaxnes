@@ -11,12 +11,12 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use zax_core_api::{FrameBatch, TileRecord};
 use zax_engine3d::draw_list::{DrawTile, FrameDrawList};
 use zax_engine3d::engine::ConversionEngine;
 use zax_engine3d::frame::{FrameInstance, FrameInstanceId};
 use zax_engine3d::palette::nes_color;
 use zax_engine3d::settings::ConversionSettings;
-use zax_nes::{FrameBatch, TileRecord};
 use zax_profiles::enums::{ProfileLayer, TileFlip, VariantRenderStyle};
 use zax_profiles::pattern::ProfilePattern;
 use zax_profiles::profile::GameProfile;
@@ -621,7 +621,7 @@ impl SceneFixture {
             mask_x: 0,
             mask_y: 0,
             margin: 0,
-            visible_rows: zax_nes::STANDARD_ROWS,
+            visible_rows: zax_core_api::STANDARD_ROWS,
             margin_y: 0,
         };
         engine.convert(&batch, 0);

@@ -78,6 +78,9 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
     // video.overscan_*, video.nes_palette, input.touch_pad and achievements.*:
     // Rust-only settings (owner request). audio.latency_ms: the output latency of AUDIO-1
     // (Q-153 §2). audio.classic_output: AUDIO-2's fallback to the output of v0.4.2.
+    // emu.engine: the per-game engine choice of lot FCEUX-23 step 5 (`docs/review/FCEUX-ENGINE.md`
+    // §4), which only a build with the `fceux-core` feature offers but every build carries the key
+    // of, so a `games.json` crosses between them.
     assert_eq!(
         additions,
         [
@@ -94,6 +97,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "emu.builtin_patches",
             "emu.catch_up",
             "emu.catch_up_last_3d",
+            "emu.engine",
             "emu.forced_patch",
             "emu.hack_options",
             "emu.lua_experimental",

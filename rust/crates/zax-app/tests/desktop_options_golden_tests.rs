@@ -28,6 +28,16 @@ use zax_settings::meta::SettingKind;
 /// The tag of a line only a `wgpu` build shows.
 const WGPU_TAG: &str = "[wgpu]";
 
+/// The tag of a line only a build with the FCEUX engine shows (lot FCEUX-23 step 5).
+const FCEUX_TAG: &str = "[fceux-core]";
+
+/// Every tag, with whether *this* build carries the feature it names. A table rather than an `if`
+/// on two `cfg!`s, which clippy folds into a constant and then complains about.
+const TAGS: [(&str, bool); 2] = [
+    (WGPU_TAG, cfg!(feature = "wgpu")),
+    (FCEUX_TAG, cfg!(feature = "fceux-core")),
+];
+
 fn golden_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../goldens/desktop-options-shown.txt")
 }
@@ -40,8 +50,12 @@ fn expected() -> BTreeSet<String> {
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .filter_map(|line| match line.split_once(char::is_whitespace) {
             Some((key, tag)) => {
-                assert_eq!(WGPU_TAG, tag.trim(), "unknown tag on {key}");
-                cfg!(feature = "wgpu").then(|| key.to_owned())
+                let tag = tag.trim();
+                let (_, built) = TAGS
+                    .iter()
+                    .find(|(name, _)| *name == tag)
+                    .expect("a tag the test knows");
+                built.then(|| key.to_owned())
             }
             None => Some(line.to_owned()),
         })
@@ -136,10 +150,14 @@ fn ro_1_the_layout_table_places_every_shown_setting_exactly_once() {
             "{} is placed twice",
             id.key()
         );
-        // A line for a setting the window never shows would be a silent lie in the table. The
-        // graphics API is the one exception: `is_shown` drops it off a `wgpu` build.
+        // A line for a setting the window never shows would be a silent lie in the table. Two
+        // settings are the exceptions, and for the same reason: `is_shown` drops a choice the
+        // build cannot offer. The graphics API goes off a build without `wgpu`, and the emulation
+        // engine off one without `fceux-core` (lot FCEUX-23 step 5).
         assert!(
-            options::is_shown(catalogue::descriptor(*id)) || *id == SettingId::VideoBackend,
+            options::is_shown(catalogue::descriptor(*id))
+                || *id == SettingId::VideoBackend
+                || *id == SettingId::EmuEngine,
             "{} is in LAYOUT but never shown",
             id.key()
         );
@@ -430,8 +448,10 @@ fn ro_1_every_detail_text_belongs_to_a_shown_setting() {
         .iter()
         .map(|(key, _)| *key)
         .filter(|key| key.starts_with(keys::DETAIL_PREFIX) && !shown.contains(*key))
-        // The graphics API has its text in every build; only a `wgpu` build shows the row.
-        .filter(|key| *key != "detail.video.backend")
+        // Two have their text in every build, because the table is one list and the row is what
+        // a feature gates: the graphics API off a build without `wgpu`, and the emulation engine
+        // off one without `fceux-core` (lot FCEUX-23 step 5).
+        .filter(|key| *key != "detail.video.backend" && *key != "detail.emu.engine")
         .collect();
     assert_eq!(Vec::<&str>::new(), orphans);
 }

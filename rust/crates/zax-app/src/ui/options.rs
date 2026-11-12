@@ -27,6 +27,7 @@ use zax_settings::model::SettingsModel;
 use super::keys;
 use super::strings;
 use super::text;
+use crate::emulation::fceux_validated;
 use crate::persistence::app_settings::AppSettings as _;
 use crate::render_scaling;
 
@@ -298,6 +299,9 @@ const EMULATION: &[LayoutEntry] = &[
     LayoutEntry::Group(OptionsGroup::Advanced),
     LayoutEntry::Row(SettingId::InputEmulatedMenuButton),
     LayoutEntry::Row(SettingId::EmuCore),
+    // Lot FCEUX-23 step 5: the per-game engine. `is_shown` drops it off a build without the
+    // `fceux-core` feature, as it drops the graphics API off a build without `wgpu`.
+    LayoutEntry::Row(SettingId::EmuEngine),
 ];
 
 /// The rows of the **Interface** tab, from the most common to the most advanced.
@@ -565,6 +569,9 @@ pub fn inert_note(id: SettingId, model: &SettingsModel) -> Option<String> {
 /// [`inert_note`]'s key, so a test can name the reason it expects.
 #[must_use]
 pub fn inert_reason(id: SettingId, model: &SettingsModel) -> Option<&'static str> {
+    if let Some(reason) = engine_reason(id, model) {
+        return Some(reason);
+    }
     let scale_applies = render_scaling::scale_applies(model.render_method());
     let optimized_lua = model.get(SettingId::EmuLuaOptimized).as_bool();
     Some(match id {
@@ -642,6 +649,67 @@ pub fn inert_reason(id: SettingId, model: &SettingsModel) -> Option<&'static str
         }
         _ => return None,
     })
+}
+
+/// Why `id` does nothing on the engine chosen for the game in play, or `None` when the engine is
+/// Zaxnes or `id` is not one of the controls only Zaxnes has.
+///
+/// The one list of those controls, shared by the desktop window ([`inert_reason`]) and the
+/// console pages (`handheld::options::engine_lock`), so the two cannot disagree.
+#[must_use]
+pub fn engine_reason(id: SettingId, model: &SettingsModel) -> Option<&'static str> {
+    if !engine_is_not_zaxnes(model) {
+        return None;
+    }
+    Some(match id {
+        // Lot FCEUX-23 step 5, §4 of `docs/review/FCEUX-ENGINE.md`: with FCEUX chosen for this
+        // game the widescreen extension, the hack packs, the sprite limit and the run-ahead are
+        // **shown disabled with the reason, not hidden** — "a hidden control reads as a bug".
+        // Each is Zaxnes's own bus or PPU rather than a feature of an emulator, so
+        // `EngineHandle` ignores it on the other engine (`Capabilities::FCEUX`).
+        SettingId::VideoWidescreen
+        | SettingId::VideoWidescreenExtra
+        | SettingId::VideoWidescreenAdvanced
+        | SettingId::VideoWidescreenStrictEdges => keys::HINT_FCEUX_NO_WIDESCREEN,
+        SettingId::EmuBuiltinPatches | SettingId::EmuForcedPatch | SettingId::EmuHackOptions => {
+            keys::HINT_FCEUX_NO_HACKS
+        }
+        SettingId::VideoRemoveSpriteLimit => keys::HINT_FCEUX_NO_SPRITE_LIMIT,
+        SettingId::EmuRunAhead
+        | SettingId::EmuSmoothScrollAhead
+        | SettingId::EmuSmoothScrollView => keys::HINT_FCEUX_NO_RUN_AHEAD,
+        _ => return None,
+    })
+}
+
+/// The engine chosen for the game in play, from the setting.
+///
+/// Reads the setting rather than the live engine, deliberately: the options window is drawn from
+/// the model, the setting is what the *next* load will use, and a user who has just chosen another
+/// engine should see the consequence at once rather than after reloading. FCEUX chosen in a build
+/// without it is Zaxnes, which is what that build plays the game on.
+fn chosen_engine(model: &SettingsModel) -> zax_core_api::EngineKind {
+    let chosen = zax_core_api::EngineKind::from_u8(
+        u8::try_from(model.get(SettingId::EmuEngine).as_int()).unwrap_or(0),
+    )
+    .unwrap_or_default();
+    if chosen == zax_core_api::EngineKind::Fceux && !cfg!(feature = "fceux-core") {
+        return zax_core_api::EngineKind::Zaxnes;
+    }
+    chosen
+}
+
+/// Whether the engine in force for the game in play is **not** Zaxnes's own core, which is what
+/// greys the four groups of controls above.
+///
+/// The widescreen extension, the hack packs, the sprite limit and the run-ahead are all patches to
+/// *Zaxnes's* bus or PPU rather than features of an emulator, so neither FCEUX nor NesHawk has
+/// them (`Capabilities::FCEUX` and `Capabilities::NESHAWK` agree on all four). The test is
+/// therefore "is the engine Zaxnes" and not "is the engine FCEUX": a lot that adds a third engine
+/// without those features needs no change here.
+#[must_use]
+pub fn engine_is_not_zaxnes(model: &SettingsModel) -> bool {
+    chosen_engine(model) != zax_core_api::EngineKind::Zaxnes
 }
 
 /// Whether any of the three curvature angles of AMD-043 is set.
@@ -888,6 +956,12 @@ pub fn is_shown(descriptor: &SettingDescriptor) -> bool {
     if id == SettingId::VideoBackend && !cfg!(feature = "wgpu") {
         return false;
     }
+    // The engine row was gated on `fceux-core` by lot FCEUX-23 step 5, because a build without it
+    // had one engine and the row would have been a choice of one. Lot NESHAWK-REWRITE added
+    // `zax-neshawk`, which is safe Rust behind no feature at all, so **every** build now has at
+    // least two engines and the row is always a real choice. In a build without `fceux-core` the
+    // FCEUX value is still offered and `EngineHandle::of_kind` falls back to Zaxnes with a line in
+    // the log saying why, which is the mechanism that lot already built.
     if INCLUDED_PROFILE.contains(&id) {
         return true;
     }
@@ -984,6 +1058,33 @@ pub fn is_folder(row: &OptionsRow) -> bool {
 #[must_use]
 pub fn forced_run_ahead_note(id: SettingId, forced: bool) -> Option<String> {
     (forced && id == SettingId::EmuRunAhead).then(text::run_ahead_forced_to_zero)
+}
+
+/// Lot FCEUX-48 step 2: the note the window shows beside the **engine** row, once FCEUX is the
+/// engine chosen for the game, saying whether lot FCEUX-6's sweep validated this ROM for 3D on it
+/// — `None` for every other row, for Zaxnes, and for a ROM whose CRC the application has not read
+/// (`Status::Unknown`: "nothing is known" is not "not validated").
+///
+/// The row itself stays **live**, like `forced_run_ahead_note` and unlike `inert_note`: the engine
+/// option is available for every game, which is the owner's choice (§7 of
+/// `docs/review/FCEUX-ENGINE.md`), so there is nothing to grey out, only something to say.
+// FCEUX-48
+#[must_use]
+pub fn fceux_validation_note(
+    id: SettingId,
+    model: &SettingsModel,
+    status: fceux_validated::Status,
+) -> Option<String> {
+    // FCEUX in particular: the validated-games list of lot FCEUX-48 is FCEUX's own, and says
+    // nothing about any other engine.
+    if id != SettingId::EmuEngine || chosen_engine(model) != zax_core_api::EngineKind::Fceux {
+        return None;
+    }
+    match status {
+        fceux_validated::Status::Validated(_) => Some(text::fceux_validated()),
+        fceux_validated::Status::NotValidated => Some(text::fceux_not_validated()),
+        fceux_validated::Status::Unknown => None,
+    }
 }
 
 fn is_editable(descriptor: &SettingDescriptor) -> bool {

@@ -9,9 +9,10 @@ use zax_app::emulation::commands::{Command, CommandArgs};
 use zax_app::input::routing;
 use zax_app::input::zapper::{self, ZapperInput, ZapperState, PRESSED_BYTE, RELEASED_BYTE};
 use zax_app::input::{InputAction, InputSnapshot};
+use zax_core_api::ControllerPortType;
 use zax_engine3d::settings::ConversionSettings;
 use zax_engine3d::space_bend::SpaceBend;
-use zax_nes::{ControllerPortType, NesCore, ZapperPosition};
+use zax_nes::{NesCore, ZapperPosition};
 use zax_profiles::values::Vec4F;
 use zax_render::camera::{to_gl, CameraView, SceneCamera};
 use zax_render::numerics::Vector3;
@@ -318,16 +319,7 @@ fn req_inp_004_a_zapper_port_shows_the_trigger_and_no_button_to_the_core() {
         ..InputSnapshot::EMPTY
     };
     harness.tick_snapshot(1.0 / 60.0, &held);
-    let port_byte = |harness: &LoopHarness| {
-        harness
-            .host
-            .session()
-            .unwrap()
-            .core()
-            .bus()
-            .input()
-            .port_byte(1)
-    };
+    let port_byte = |harness: &LoopHarness| harness.host.session().unwrap().core().port_byte(1);
     assert_eq!(0x00, port_byte(&harness));
     assert!(harness.host.zapper.trigger_held());
     let position = harness.host.zapper.position();

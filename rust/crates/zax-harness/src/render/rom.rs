@@ -9,13 +9,14 @@
 use std::fs;
 use std::path::Path;
 
+use zax_core_api::{ControllerPortType, FrameBatch, TileRecord};
 use zax_engine3d::engine::ConversionEngine;
 use zax_engine3d::geometry::builder::GeometryBuilder;
 use zax_engine3d::palette::Rgb24;
 use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::vectors::Vec3;
 use zax_nes::ppu::SpriteLimit;
-use zax_nes::{ControllerPortType, FrameBatch, NesCore, TileRecord};
+use zax_nes::NesCore;
 use zax_profiles::hash::tile_cache;
 use zax_profiles::hash::tiles::TileResolver;
 use zax_profiles::profile::GameProfile;
@@ -293,7 +294,7 @@ fn start_fm2(host: &Host, path: &Path, rom: &Path) -> Result<zax_nes::movie::Mov
         .map_err(|error| HarnessError::Rom(format!("{}: {error}", path.display())))?;
     let pal = matches!(
         host.core.region(),
-        zax_nes::NesRegion::Pal | zax_nes::NesRegion::Dendy
+        zax_core_api::NesRegion::Pal | zax_core_api::NesRegion::Dendy
     );
     if movie.header.pal != pal {
         println!("render: warning: the movie's region (palFlag) is not the ROM's");

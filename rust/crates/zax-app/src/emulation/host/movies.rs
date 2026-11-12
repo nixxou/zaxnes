@@ -8,8 +8,8 @@
 
 use std::path::{Path, PathBuf};
 
+use zax_core_api::NesRegion;
 use zax_nes::movie::{Movie, MovieMode};
-use zax_nes::NesRegion;
 
 use crate::emulation::movie_explorer::{ExplorerSetup, MovieExplorer};
 use crate::emulation::movie_timeline::{machine_digest, MovieTimeline, WARM_FRAMES};
@@ -28,12 +28,27 @@ pub const LISTED_MOVIES: usize = 15;
 
 impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// The movie the session is recording or playing, if any.
+    ///
+    /// Lot FCEUX-48 step 4: a movie the **engine** plays itself reports `Playing` here too, so
+    /// that everything keyed on "a movie is playing" — the movie bar, Stop, the editor's prompt —
+    /// works for both sources. What differs is [`EmulationHost::movie_takes_notes`].
     #[must_use]
     pub fn movie_mode(&self) -> Option<MovieMode> {
+        if self.own_movie_playing() {
+            return Some(MovieMode::Playing);
+        }
         self.session
             .as_ref()
             .and_then(GameSession::movie)
             .map(zax_nes::movie::MovieRun::mode)
+    }
+
+    /// Whether notes can be written on the movie playing: only on a Zaxnes movie, which has a
+    /// file of ours to write them to. An `.fm2` played by the engine is never written over, and
+    /// `Ctrl+M` says so rather than doing nothing (lot FCEUX-48 step 4).
+    #[must_use]
+    pub fn movie_takes_notes(&self) -> bool {
+        self.session.as_ref().and_then(GameSession::movie).is_some()
     }
 
     /// Starts recording from the current state, or stops and saves the recording.
@@ -60,6 +75,13 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     pub(super) fn play_movie(&mut self, path: &str) {
         self.complete_frame_in_flight();
         self.finish_movie();
+        // Lot FCEUX-48 step 4: an `.fm2` plays on the engine that recorded it, which is the only
+        // engine it stays in sync on (§5). Without that engine in the build, and for a `.fcm`
+        // whose format FCEUX's own movie code refuses, Zaxnes's clean-room importer below.
+        if Self::plays_fm2_on_its_own_engine(Path::new(path)) {
+            self.play_fm2_on_its_own_engine(path);
+            return;
+        }
         if zax_nes::movie::fceu_kind(Path::new(path)).is_some() {
             self.play_fm2(path);
             return;
@@ -110,7 +132,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// Plays the `.fm2` movie `path` (FCEUX's text format) or `.fcm` movie (FCE Ultra's
     /// binary one): the game is reset as on a power cycle (`End`, the core powered on, `Start`) and the movie plays from there. A region or
     /// ROM that differs from the movie's is warned about, not refused: the movie may desync.
-    fn play_fm2(&mut self, path: &str) {
+    pub(super) fn play_fm2(&mut self, path: &str) {
         let parsed = std::fs::read(path)
             .map_err(|error| error.to_string())
             .and_then(|bytes| {
@@ -229,6 +251,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         if !session.core_follows_the_inputs() {
             return;
         }
+        // Lot FCEUX-48 step 4: the explorer replays the movie in a **second** core, and an engine
+        // that plays its own movies keeps one machine per process. Its records would be a Zaxnes
+        // machine's, which the timeline's own trust check would throw away after the work.
+        if session.core().plays_its_own_movies() {
+            return;
+        }
         let core = session.core();
         let setup = ExplorerSetup {
             start_state: movie.movie().start_state.clone(),
@@ -321,8 +349,15 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     }
 
     /// The movie frame on screen and the movie's length, while a movie plays with a timeline.
+    ///
+    /// A movie the engine plays itself answers from the **engine's** own clock rather than from
+    /// the timeline's arithmetic, so the bar shows what FCEUX is actually playing (lot FCEUX-48
+    /// step 4).
     #[must_use]
     pub fn movie_position(&self) -> Option<(u32, u32)> {
+        if let Some(position) = self.own_movie_position() {
+            return Some(position);
+        }
         let timeline = self.movie_timeline.as_ref()?;
         let frame_count = self.session.as_ref()?.core().frame_count();
         Some((timeline.movie_frame(frame_count), timeline.length()))
@@ -364,11 +399,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         else {
             return false;
         };
-        session
-            .core_mut()
-            .bus_mut()
-            .apu_mut()
-            .set_output_enabled(false);
+        session.core_mut().set_audio_output_enabled(false);
         let current = session.core().frame_count();
         if let Some((_, state)) = timeline.seek_origin(current, target) {
             if let Err(error) = session.restore_core(state) {
@@ -426,9 +457,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// The sound comes back after a seek, without the samples of the frames it ran.
     fn end_seek_sound(&mut self) {
         if let Some(session) = self.session.as_mut() {
-            let apu = session.core_mut().bus_mut().apu_mut();
-            apu.set_output_enabled(true);
-            apu.drop_pending_samples();
+            let core = session.core_mut();
+            core.set_audio_output_enabled(true);
+            core.drop_pending_samples();
         }
     }
 
@@ -441,6 +472,15 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// Writes a note on the frame on screen: `args.text`, or, without one, the game pauses and
     /// the interface asks for it.
     pub(super) fn annotate_movie(&mut self, args: &CommandArgs) {
+        if !self.movie_takes_notes() {
+            // Lot FCEUX-48 step 4: an `.fm2` the engine plays is never written over, so there is
+            // nowhere for a note to go. Said rather than silently dropped.
+            self.notifications.show_error(&text(
+                "Notes are written on a Zaxnes movie; this is an .fm2 played by the engine.",
+                "Les notes s'écrivent sur un film Zaxnes ; ceci est un .fm2 lu par le moteur.",
+            ));
+            return;
+        }
         let Some(note) = args.text.as_deref() else {
             self.pause();
             self.request_ui(Command::AnnotateMovie, args);
@@ -466,6 +506,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
 
     /// Once a tick: a movie played to its end gives the game back to the player.
     pub(super) fn check_movie_end(&mut self) {
+        // Lot FCEUX-48 step 4: a movie the engine plays itself has its own clock, and the engine
+        // answers for it.
+        if self.check_own_movie_end() {
+            return;
+        }
         let finished = self
             .session
             .as_ref()
@@ -491,6 +536,14 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// Ends the movie being recorded or played, if any: a recording is saved to a new file, the
     /// notes written on a played one to its file.
     pub(super) fn finish_movie(&mut self) {
+        // Lot FCEUX-48 step 4: a movie the engine plays itself has no file of ours to write and
+        // no `MovieRun` to take, so it ends on its own path. The engine stays the one it is until
+        // the next load, which is what `own_movies.rs` explains.
+        if self.own_movie_playing() || self.movie_engine.is_some() {
+            self.end_movie_timeline();
+            self.finish_own_movie();
+            return;
+        }
         self.end_movie_timeline();
         let mode = self.movie_mode();
         let header = self.movie_header();

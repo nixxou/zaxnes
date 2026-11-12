@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 
+use zax_core_api::{FrameBatch, TileRecord};
 use zax_engine3d::engine::{ConversionEngine, ConversionState};
 use zax_engine3d::frame::ConversionFrame;
 use zax_engine3d::image::TileImageKey;
-use zax_nes::{FrameBatch, TileRecord};
 use zax_profiles::enums::{ProfileLayer, TileFlip, VariantRenderStyle};
 use zax_profiles::format;
 use zax_profiles::pattern::ProfilePattern;
@@ -134,7 +134,7 @@ impl Batch {
             mask_x: 0,
             mask_y: 0,
             margin: 0,
-            visible_rows: zax_nes::STANDARD_ROWS,
+            visible_rows: zax_core_api::STANDARD_ROWS,
             margin_y: 0,
         };
         engine.convert(&batch, counter)

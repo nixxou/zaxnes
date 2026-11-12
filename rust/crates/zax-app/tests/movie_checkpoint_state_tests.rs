@@ -27,8 +27,8 @@
 
 use std::path::{Path, PathBuf};
 
+use zax_app::emulation::engine_handle::EngineHandle;
 use zax_app::emulation::movie_timeline::{machine_digest, CHECKPOINT_INTERVAL};
-use zax_nes::NesCore;
 
 /// The demo ROMs, or `None` when `ZAXNES_ROMS` is not set.
 fn roms_folder() -> Option<PathBuf> {
@@ -37,9 +37,9 @@ fn roms_folder() -> Option<PathBuf> {
 }
 
 /// A core with `file` of the demo folder loaded, or `None` when that ROM is not there.
-fn core_of(folder: &Path, file: &str) -> Option<NesCore> {
+fn core_of(folder: &Path, file: &str) -> Option<EngineHandle> {
     let image = std::fs::read(folder.join(file)).ok()?;
-    let mut core = NesCore::new();
+    let mut core = EngineHandle::zaxnes_core();
     let load = core.load_rom(&image, file);
     assert!(load.success, "{file}: {:?}", load.error);
     Some(core)
@@ -103,7 +103,7 @@ fn a_checkpoint_restores_into_a_fresh_core_on_every_demo_board() {
             restored.cycle_count(),
             "{file} ({board}): the restored checkpoint is at another cycle"
         );
-        let ram_of = |core: &NesCore| {
+        let ram_of = |core: &EngineHandle| {
             (0..0x0800u16)
                 .map(|address| core.read_memory(address))
                 .collect::<Vec<_>>()

@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 
-use zax_nes::NesCore;
+use crate::emulation::engine_handle::EngineHandle;
 
 /// A checkpoint is taken on every core frame count that is a multiple of this.
 pub const CHECKPOINT_INTERVAL: i64 = 60;
@@ -27,7 +27,7 @@ pub const WARM_FRAMES: i64 = 60;
 /// filter history (REQ-CORE-090), which follow the host's drift correction and differ between
 /// two runs of the same frames while nothing the emulation reads depends on them.
 #[must_use]
-pub fn machine_digest(core: &NesCore) -> u64 {
+pub fn machine_digest(core: &EngineHandle) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     core.frame_count().hash(&mut hasher);
     core.cycle_count().hash(&mut hasher);
@@ -37,6 +37,9 @@ pub fn machine_digest(core: &NesCore) -> u64 {
     // LUA-MERGE: `pixel_frame` became `pixel_frame_with_mask` on `dev` (AMD-050 REQ-CORE-049
     // put the opacity bit in bit 6 of each byte). It is the same slice, so the digest keeps the
     // meaning it had — and the opacity bit only makes it finer.
+    // `None` on an engine that does not keep the picture with its mask; the digest is then the
+    // counters and the work RAM, which is still a digest of the machine — and the movie explorer
+    // this serves is Zaxnes's own tool, where it is always `Some`.
     core.pixel_frame_with_mask().hash(&mut hasher);
     hasher.finish()
 }

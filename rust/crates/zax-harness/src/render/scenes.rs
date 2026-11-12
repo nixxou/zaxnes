@@ -4,11 +4,11 @@
 
 use std::sync::Arc;
 
+use zax_core_api::{FrameBatch, TileRecord};
 use zax_engine3d::draw_list::FrameDrawList;
 use zax_engine3d::engine::ConversionEngine;
 use zax_engine3d::palette::Rgb24;
 use zax_engine3d::settings::{ConversionSettings, RenderAlgorithm, ZLayer};
-use zax_nes::{FrameBatch, TileRecord};
 use zax_profiles::enums::{ProfileLayer, TileFlip, VariantRenderStyle};
 use zax_profiles::pattern::ProfilePattern;
 use zax_profiles::profile::GameProfile;
@@ -463,7 +463,7 @@ impl Builder {
             mask_x: 0,
             mask_y: 0,
             margin: 0,
-            visible_rows: zax_nes::STANDARD_ROWS,
+            visible_rows: zax_core_api::STANDARD_ROWS,
             margin_y: 0,
         };
         engine.convert(&batch, 0);

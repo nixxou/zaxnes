@@ -1,7 +1,7 @@
 //! Save states and rollback (SPEC-07 §3.4, SPEC-09 REQ-PERS-050 to REQ-PERS-058).
 
 use zax_engine3d::state_codec;
-use zax_nes::{builtin_patches, NesCore};
+use zax_nes::builtin_patches;
 use zax_render::assets::png_image;
 
 use super::{EmulationHost, GameView, THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH};
@@ -94,8 +94,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             .unwrap_or_default();
         Some(SaveStateContent {
             header: SaveStateHeader {
-                core_id: NesCore::CORE_NAME.to_owned(),
-                core_state_version: NesCore::STATE_VERSION,
+                // Lot FCEUX-23 step 5: the engine that wrote the state, so that loading it on
+                // the other one is refused with a clear message rather than attempted. On Zaxnes
+                // these two are `NesCore::CORE_NAME` and `STATE_VERSION`, what they always were.
+                core_id: session.core().state_core_id().to_owned(),
+                core_state_version: session.core().state_version(),
                 game_id,
                 rom_sha1: fingerprint,
                 saved_at,

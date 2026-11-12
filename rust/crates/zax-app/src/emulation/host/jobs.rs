@@ -4,9 +4,10 @@
 
 use std::path::Path;
 
+use zax_core_api::{EngineKind, NesRegion};
 use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::state_codec;
-use zax_nes::{NesCore, NesRegion};
+use zax_nes::NesCore;
 use zax_profiles::enums::TvRegionMode;
 use zax_settings::catalogue::SettingId;
 use zax_settings::values::SettingValue;
@@ -15,6 +16,7 @@ use super::games::{ConfirmationRequest, ConfirmedAction, NO_LABEL};
 use super::{EmulationHost, GameView};
 use crate::emulation::commands::{Command, CommandArgs};
 use crate::emulation::emulation_state::EmulationState;
+use crate::emulation::fceux_validated;
 use crate::emulation::game_catalog::{GameCatalog, ResolvedGame};
 use crate::emulation::rom_file::{self, RomData, INVALID_ROM_MESSAGE};
 use crate::game_session::{GameSession, SessionRequest};
@@ -411,6 +413,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         // in the cache and then in the ROM **before** its patterns are built, so that the first
         // converted frame already has them. Nothing happens for a 3dn profile.
         let game = &self.prepare_hash_tiles(game, rom_image);
+        // Read before the mutable borrow of `self.scene` below.
+        // Lot FCEUX-48 step 4: a `.fm2` playback forces the engine that can replay it for this
+        // session, over the game's own choice, which is left stored as it was.
+        let engine = self.movie_engine.unwrap_or_else(|| self.chosen_engine());
         let request = SessionRequest {
             profile: &game.profile,
             title: &game.title,
@@ -422,6 +428,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             two_dimensional_mode: game.is_default_three_dimensional.then_some(false),
             console_interface: self.console_interface,
             tiles: game.tiles.clone(),
+            // `apply_game_options` has just run, so the model carries this game's own choice.
+            engine,
         };
         match GameSession::create(request, &mut self.settings) {
             Ok(session) => {
@@ -484,8 +492,14 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 // profile data is unloaded only when the game differs or is "2D Mode"
                 // (REQ-LOOP-021, REQ-PERS-006).
                 job.different_game = self.current_game_id() != Some(game.id.as_str());
-                job.reload_profile =
-                    self.session.is_none() || job.different_game || game.is_generic();
+                job.reload_profile = self.session.is_none()
+                    || job.different_game
+                    || game.is_generic()
+                    // Lot FCEUX-23 step 5: a changed engine is a new machine, so the session
+                    // cannot be kept. The choice takes effect on load and never mid-game.
+                    || self.session.as_ref().is_some_and(|session| {
+                        session.core().kind() != self.engine_for_game(&game.id)
+                    });
                 self.stop_current_game(false, job.reload_profile);
                 job.stage = 1;
                 Step::Continue
@@ -614,6 +628,19 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let Some(session) = self.session.as_mut() else {
             return Step::Failed(CORRUPTED_MESSAGE.to_owned());
         };
+        // Lot FCEUX-23 step 5: a state written by the other engine is refused **here**, before
+        // the engine is asked to read it, and with a message that says what to do. The two
+        // engines' blocks have nothing in common; each would also refuse the other's itself (its
+        // first four bytes name its engine), but "corrupted" is not what happened and not what a
+        // user can act on.
+        let wrote_it = session.core().state_core_id();
+        if !state.header.core_id.is_empty() && state.header.core_id != wrote_it {
+            self.log(&format!(
+                "savestate refused: it was written by {} and the engine in play is {wrote_it}",
+                state.header.core_id
+            ));
+            return Step::Failed(save_state_file::OTHER_ENGINE_MESSAGE.to_owned());
+        }
         // The state carries the original ROM: the hack applies to it as the setting says now.
         session.core_mut().set_builtin_patches(builtin_patches);
         session.core_mut().set_advanced_patches(advanced);
@@ -720,11 +747,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         // ring here, and the classic output of AUDIO-2 has nothing else that would — its mixer
         // keeps no gate and no ramp. On the default output `resynchronise_audio` below empties it
         // too, so this is simply the first of two idempotent calls there (AUDIO-2).
-        session
-            .core_mut()
-            .bus_mut()
-            .apu_mut()
-            .drop_pending_samples();
+        session.core_mut().drop_pending_samples();
         self.rollback.clear();
         self.frame_steps.clear();
         self.fast_forward.clear();
@@ -733,6 +756,31 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.start_achievements(job.state.as_ref());
         self.load_progress = 1.0;
         self.set_state(EmulationState::Running);
+        // Lot FCEUX-23 step 5: the visible marker. A user who reports "the 3D is wrong" has to be
+        // able to say which engine drew it (§6 of `docs/review/FCEUX-ENGINE.md` is why that
+        // matters), so a game that is **not** on Zaxnes's own core says so at every load; the
+        // performance overlay names the engine from then on, and the game's options carry the row
+        // itself. Zaxnes is the default and says nothing, as it always did.
+        // Lot FCEUX-48 step 2 adds the second half of the sentence: whether lot FCEUX-6's sweep
+        // validated this ROM for 3D on that engine. It is a marker and not a gate (§7), so a game
+        // nobody checked still plays — it is just told so, once, where the user will read it.
+        if let Some(engine) = self
+            .running_engine()
+            .filter(|kind| *kind != EngineKind::Zaxnes)
+        {
+            let message = match self.fceux_validation() {
+                fceux_validated::Status::Validated(rom) => format!(
+                    "Playing on the {engine} engine; this ROM is validated for 3D ({}).",
+                    rom.game
+                ),
+                fceux_validated::Status::NotValidated => format!(
+                    "Playing on the {engine} engine; this ROM is not validated for 3D on it."
+                ),
+                fceux_validated::Status::Unknown => format!("Playing on the {engine} engine."),
+            };
+            self.log(&message);
+            self.notifications.show_normal(&message);
+        }
         // REQ-AUD-010: no sound of the previous session is ever replayed. `set_state` has
         // already done this when the game was not running, but a slot loaded while it plays
         // leaves the state alone, so it is asked for here too (Q-153 §4). The call empties the
@@ -742,7 +790,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     }
 
     /// Q-031: the region of the ROM when the automatic mode is on, the profile's otherwise.
-    fn apply_region_on_load(
+    pub(super) fn apply_region_on_load(
         &mut self,
         detected: NesRegion,
         profile_reloaded: bool,
@@ -858,7 +906,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         };
         let enabled = self.builtin_patches_wanted();
         let key = (slot_id.to_owned(), record.saved_at, enabled);
-        if let Some(&status) = self.slot_patch_cache.borrow().get(&key) {
+        if let Some(&status) = self.slot_caches.patch.borrow().get(&key) {
             return status;
         }
         let status = std::fs::read(self.slot_state_file(slot_id))
@@ -867,8 +915,35 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             .map_or(SlotPatchStatus::Fits, |state| {
                 self.state_patch_status(&state)
             });
-        self.slot_patch_cache.borrow_mut().insert(key, status);
+        self.slot_caches.patch.borrow_mut().insert(key, status);
         status
+    }
+
+    /// The engine that wrote the state of `slot_id`, read from the core name its header records;
+    /// `None` for an empty slot, an unreadable file or a name this build does not know. A state
+    /// from before engines were recorded has an empty name, which is Zaxnes's.
+    #[must_use]
+    pub fn slot_engine(&self, slot_id: &str) -> Option<zax_core_api::EngineKind> {
+        let record = self
+            .slots
+            .find(slot_id)
+            .filter(|record| record.is_occupied())?;
+        let key = (slot_id.to_owned(), record.saved_at);
+        if let Some(&engine) = self.slot_caches.engine.borrow().get(&key) {
+            return engine;
+        }
+        let engine = std::fs::read(self.slot_state_file(slot_id))
+            .ok()
+            .and_then(|bytes| save_state_file::try_read(&bytes))
+            .and_then(|state| engine_of_core_id(&state.header.core_id));
+        self.slot_caches.engine.borrow_mut().insert(key, engine);
+        engine
+    }
+
+    /// The engine the game in play runs on, `None` without a game.
+    #[must_use]
+    pub fn engine_in_play(&self) -> Option<zax_core_api::EngineKind> {
+        self.session.as_ref().map(|session| session.core().kind())
     }
 
     /// Sets the components of the built-in hack as the state of `slot_id` had them, then loads it:
@@ -935,7 +1010,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         ))
     }
 
-    fn attach_battery(&mut self, import_saved: bool) {
+    pub(super) fn attach_battery(&mut self, import_saved: bool) {
         let Some(fingerprint) = self.current_rom_fingerprint() else {
             return;
         };
@@ -983,4 +1058,15 @@ fn state_components(state: &SaveStateContent) -> Vec<String> {
             Vec::new()
         }
     })
+}
+
+/// The engine a savestate header's core name names: empty is Zaxnes (states written before the
+/// name was recorded), otherwise the engine whose [`zax_core_api::state_core_name`] it is.
+fn engine_of_core_id(core_id: &str) -> Option<zax_core_api::EngineKind> {
+    if core_id.is_empty() {
+        return Some(zax_core_api::EngineKind::Zaxnes);
+    }
+    zax_core_api::EngineKind::ALL
+        .into_iter()
+        .find(|&engine| zax_core_api::state_core_name(engine) == core_id)
 }

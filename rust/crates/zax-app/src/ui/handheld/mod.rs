@@ -1359,6 +1359,9 @@ impl HandheldUi {
             }
             OverlayCommand::SetCamera(preset) => apply_camera(preset, host),
             OverlayCommand::Options => self.open_options(host),
+            // Zaxnes's own bus: nothing to open on another engine, which the row says.
+            OverlayCommand::Widescreen | OverlayCommand::Hacks
+                if !draw::playing_on_zaxnes(host) => {}
             OverlayCommand::Widescreen => {
                 if let Some(rom) = host.current_rom_path().map(PathBuf::from) {
                     let title = host.current_game_title().map(str::to_owned);
