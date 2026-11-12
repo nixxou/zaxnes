@@ -158,11 +158,33 @@ impl Orientation {
         }
     }
 
-    const fn hint(self) -> &'static str {
+    /// The code `ZaxnesActivity` reads: 0 landscape, 1 portrait, 2 either.
+    #[must_use]
+    pub const fn code(self) -> i32 {
         match self {
-            Self::Landscape => "LandscapeLeft LandscapeRight",
-            Self::Portrait => "Portrait PortraitUpsideDown",
-            Self::Auto => "LandscapeLeft LandscapeRight Portrait PortraitUpsideDown",
+            Self::Landscape => 0,
+            Self::Portrait => 1,
+            Self::Auto => 2,
+        }
+    }
+}
+
+/// The application's messages to its Android activity, through SDL's own channel.
+#[cfg(target_os = "android")]
+mod android {
+    /// SDL's first command for the application (`SDLActivity.COMMAND_USER`) plus one: the
+    /// orientation, which `ZaxnesActivity.onUnhandledMessage` applies.
+    pub const ORIENTATION_COMMAND: u32 = 0x8001;
+
+    extern "C" {
+        fn SDL_AndroidSendMessage(command: u32, param: i32) -> i32;
+    }
+
+    /// Sends `command` with `param` to the activity, which handles it on its own thread.
+    pub fn send_message(command: u32, param: i32) {
+        // SAFETY: SDL's exported function, which only posts a message to the activity's handler.
+        unsafe {
+            SDL_AndroidSendMessage(command, param);
         }
     }
 }
@@ -188,7 +210,7 @@ impl HostWindow {
             // Back reaches the application (the in-game menu) instead of leaving the activity.
             sdl2::hint::set("SDL_ANDROID_TRAP_BACK_BUTTON", "1");
             // Landscape until the settings say otherwise ([`HostWindow::set_orientation`]).
-            sdl2::hint::set(ORIENTATIONS_HINT, Orientation::Landscape.hint());
+            sdl2::hint::set(ORIENTATIONS_HINT, "LandscapeLeft LandscapeRight");
         }
 
         let sdl = sdl2::init()?;
@@ -295,16 +317,16 @@ impl HostWindow {
         &self.window
     }
 
-    /// Lets the screen turn to `orientation` (Android; nothing elsewhere). SDL hands its hint to
-    /// the activity when the window's resizable flag is set, so the flag is set off and on again:
-    /// the window stays resizable, which lets "Auto" follow the sensor.
+    /// Lets the screen turn to `orientation` (Android; nothing elsewhere). SDL hands its own hint
+    /// to the activity only when a window is made or its resizable flag changes, which it
+    /// refuses for a full-screen window, and an Android window always is one: the choice goes to
+    /// `ZaxnesActivity` as a message of the application's own instead.
+    #[allow(clippy::unused_self)] // The window's activity, on Android.
     pub fn set_orientation(&mut self, orientation: Orientation) {
-        if !cfg!(target_os = "android") {
-            return;
-        }
-        sdl2::hint::set(ORIENTATIONS_HINT, orientation.hint());
-        self.window.set_resizable(false);
-        self.window.set_resizable(true);
+        #[cfg(target_os = "android")]
+        android::send_message(android::ORIENTATION_COMMAND, orientation.code());
+        #[cfg(not(target_os = "android"))]
+        let _ = orientation;
     }
 
     /// The refresh rate of the display the window is on, in hertz; none when SDL does not know it.

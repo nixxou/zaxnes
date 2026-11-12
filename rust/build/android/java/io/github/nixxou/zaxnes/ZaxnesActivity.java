@@ -1,5 +1,6 @@
 package io.github.nixxou.zaxnes;
 
+import android.content.pm.ActivityInfo;
 import android.view.KeyEvent;
 
 import org.libsdl.app.SDLActivity;
@@ -14,6 +15,33 @@ public class ZaxnesActivity extends SDLActivity {
         // SDL (its hidapi, which SDL's Java controller code calls, is built into it), then the
         // app's library, whose SDL_main SDL runs.
         return new String[] { "SDL2", "main" };
+    }
+
+    /** The orientation the application asks for (its native code, through SDL's channel). */
+    private static final int COMMAND_ORIENTATION = COMMAND_USER + 1;
+
+    /**
+     * The application's own messages: the orientation of the screen, 0 landscape, 1 portrait,
+     * 2 either as the device is held (owner request). SDL's own orientation hint cannot be
+     * changed once its full-screen window exists.
+     */
+    @Override
+    protected boolean onUnhandledMessage(int command, Object param) {
+        if (command == COMMAND_ORIENTATION && param instanceof Integer) {
+            switch ((Integer) param) {
+                case 1:
+                    setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT);
+                    break;
+                case 2:
+                    setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_USER);
+                    break;
+                default:
+                    setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+                    break;
+            }
+            return true;
+        }
+        return super.onUnhandledMessage(command, param);
     }
 
     /**
