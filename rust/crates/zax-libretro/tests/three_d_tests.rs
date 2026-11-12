@@ -155,5 +155,8 @@ fn a_3d_state_comes_back() {
     assert!(core.load_state(&state));
     let mut again = vec![0; core.state_size()];
     assert!(core.save_state(&mut again));
-    assert_eq!(state, again, "the machine and the scripts' PData as they were");
+    assert_eq!(
+        state, again,
+        "the machine and the scripts' PData as they were"
+    );
 }

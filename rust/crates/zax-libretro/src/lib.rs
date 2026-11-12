@@ -4,9 +4,9 @@
 //!
 //! Step 1 (owner request, 2026-11-12): the NES in 2D, its widescreen hacks and their options,
 //! the frontend's states, rewind and run-ahead, the battery RAM and the work RAM that
-//! RetroAchievements reads. The 3D comes in step 2.
+//! RetroAchievements reads. Step 2: the 3D of a game with a profile, with the frontend's OpenGL.
 //!
-//! [`core`] and [`options`] are safe Rust; [`ffi`], the C interface, is the crate's only
+//! [`core`], [`options`], [`profiles`] and [`three_d`] are safe Rust; [`ffi`], the C interface, is the crate's only
 //! `unsafe` code.
 
 pub mod core;
