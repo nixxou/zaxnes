@@ -211,7 +211,10 @@ fn read_options(hacks: &[zax_nes::builtin_patches::HackOption]) -> Options {
 }
 
 fn hack_list(core: &Core) -> Vec<zax_nes::builtin_patches::HackOption> {
-    core.hack_options().into_iter().map(|(option, _)| option).collect()
+    core.hack_options()
+        .into_iter()
+        .map(|(option, _)| option)
+        .collect()
 }
 
 fn av_info(core: Option<&Core>) -> SystemAvInfo {
@@ -460,7 +463,10 @@ pub unsafe extern "C" fn retro_load_game(info: *const GameInfo) -> bool {
         return false;
     };
     if info.data.is_null() {
-        log(LOG_ERROR, "the ROM came without its data (need_fullpath is off)");
+        log(
+            LOG_ERROR,
+            "the ROM came without its data (need_fullpath is off)",
+        );
         return false;
     }
     // SAFETY: `data` is `size` readable bytes for the call.
@@ -470,9 +476,10 @@ pub unsafe extern "C" fn retro_load_game(info: *const GameInfo) -> bool {
     } else {
         // SAFETY: a NUL-terminated path.
         let path = unsafe { CStr::from_ptr(info.path) }.to_string_lossy();
-        std::path::Path::new(path.as_ref())
-            .file_name()
-            .map_or_else(|| "game.nes".to_owned(), |name| name.to_string_lossy().into_owned())
+        std::path::Path::new(path.as_ref()).file_name().map_or_else(
+            || "game.nes".to_owned(),
+            |name| name.to_string_lossy().into_owned(),
+        )
     };
     let mut format = PIXEL_FORMAT_XRGB8888;
     if !environment(ENVIRONMENT_SET_PIXEL_FORMAT, &mut format) {

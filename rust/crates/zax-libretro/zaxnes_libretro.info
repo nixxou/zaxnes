@@ -1,0 +1,32 @@
+# Software Information
+display_name = "Nintendo - NES / Famicom (Zaxnes)"
+authors = "nixxou"
+supported_extensions = "nes"
+corename = "Zaxnes"
+license = "GPLv3"
+permissions = ""
+display_version = "0.5.0"
+categories = "Emulator"
+
+# Hardware Information
+manufacturer = "Nintendo"
+systemname = "Nintendo Entertainment System"
+systemid = "nes"
+
+# Libretro Features
+database = "Nintendo - Nintendo Entertainment System"
+supports_no_game = "false"
+savestate = "true"
+savestate_features = "deterministic"
+cheats = "false"
+input_descriptors = "true"
+memory_descriptors = "false"
+libretro_saves = "true"
+core_options = "true"
+load_subsystem = "false"
+hw_render = "false"
+needs_fullpath = "false"
+disk_control = "false"
+is_experimental = "true"
+
+description = "Zaxnes, a NES emulator with widescreen hacks for a growing list of games (Super Mario Bros. 3, Zelda II, Mega Man, Kirby's Adventure, Faxanadu...): the level is shown past the edges of the original screen. 144 mappers. The 3D of the Zaxnes application is not in the core yet."

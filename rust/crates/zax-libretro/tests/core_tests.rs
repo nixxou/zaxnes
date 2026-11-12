@@ -69,7 +69,10 @@ fn the_demo_plays_wide_with_sound_and_switches_while_playing() {
     assert_eq!((width, height), (416, 240));
     assert_eq!(pixels.len(), 416 * 240);
     assert_eq!(core.picture_size(), (416, 240));
-    assert!(pixels.iter().any(|pixel| *pixel != pixels[0]), "a picture, not one colour");
+    assert!(
+        pixels.iter().any(|pixel| *pixel != pixels[0]),
+        "a picture, not one colour"
+    );
     // 48 kHz at about 60.1 frames a second: about 799 stereo frames each.
     let frames = core.sound().len() / 2;
     assert!((700..=900).contains(&frames), "{frames} sound frames");

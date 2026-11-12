@@ -143,7 +143,8 @@ impl Core {
             self.nes.set_region(region);
             changed.timing = true;
         }
-        if (options.widescreen, options.advanced) != (self.options.widescreen, self.options.advanced)
+        if (options.widescreen, options.advanced)
+            != (self.options.widescreen, self.options.advanced)
         {
             changed.hack_options = self.switch_patch(options.widescreen, options.advanced);
         }
@@ -156,7 +157,8 @@ impl Core {
         if changed.geometry || changed.hack_options {
             self.framed = false;
         }
-        self.nes.set_widescreen_margin(i32::try_from(margin.0).unwrap_or(0));
+        self.nes
+            .set_widescreen_margin(i32::try_from(margin.0).unwrap_or(0));
         self.nes
             .set_widescreen_vertical_margin(i32::try_from(margin.1).unwrap_or(0));
         self.nes.set_hack_options(self.hack_bits());
@@ -346,8 +348,8 @@ impl Core {
         let dots_per_second = f64::from(timing.cpu_clock_hz)
             * f64::from(timing.dots_per_cycle_numerator)
             / f64::from(timing.dots_per_cycle_denominator);
-        let mut dots_per_frame = f64::from(RegionTiming::DOTS_PER_SCANLINE)
-            * f64::from(timing.scanlines_per_frame);
+        let mut dots_per_frame =
+            f64::from(RegionTiming::DOTS_PER_SCANLINE) * f64::from(timing.scanlines_per_frame);
         if timing.skips_dot_on_odd_frames {
             dots_per_frame -= 0.5;
         }

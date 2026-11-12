@@ -134,13 +134,18 @@ mod tests {
     #[test]
     fn the_first_choice_is_the_default_and_values_come_back() {
         let list = declarations(&[OPTION]);
-        assert!(list.iter().any(|(key, text)| key == "zaxnes_hack_invincible"
-            && text == "Hack: Invincible; disabled|enabled"));
+        assert!(list
+            .iter()
+            .any(|(key, text)| key == "zaxnes_hack_invincible"
+                && text == "Hack: Invincible; disabled|enabled"));
         let none = read(&|_| None, &[OPTION]);
-        assert_eq!(none, Options {
-            hacks: vec![("invincible".to_owned(), false)],
-            ..Options::default()
-        });
+        assert_eq!(
+            none,
+            Options {
+                hacks: vec![("invincible".to_owned(), false)],
+                ..Options::default()
+            }
+        );
         let set = read(
             &|key| match key {
                 "zaxnes_widescreen" => Some("disabled".to_owned()),
