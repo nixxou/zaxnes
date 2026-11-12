@@ -23,6 +23,7 @@ use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
 use zax_settings::values::SettingValue;
 
+use crate::head_on_pull::{HeadOnPull, Pull};
 use crate::scene_settings;
 
 /// How fast the right stick turns the camera, in degrees a second at full tilt.
@@ -30,6 +31,31 @@ const TURN_SPEED: f32 = 90.0;
 /// How fast the shoulder triggers bring the camera nearer or farther, a share of the distance
 /// a second.
 const ZOOM_SPEED: f32 = 1.0;
+/// How long Y is held to see the game in 2D head on, and L2 to keep the camera (the
+/// application's `CAMERA_KEEP_SECONDS`).
+const HOLD_SECONDS: f32 = 0.6;
+
+/// What a button of the camera did, for the frontend to tell the player.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CameraNews {
+    /// L2 held: the camera's angles and distance are kept.
+    Kept,
+    /// L2 pressed: the kept angles and distance are back.
+    Restored,
+}
+
+/// The two held buttons of the camera, as the application's handheld interface times them.
+#[derive(Debug, Default)]
+struct Buttons {
+    /// How long Y has been held, and whether this hold already acted.
+    flat: Option<(f32, bool)>,
+    /// How long L2 has been held, while it is.
+    memory: Option<f32>,
+    /// Whether this hold of L2 already kept the camera.
+    kept: bool,
+    /// The kept angles and distance.
+    saved: Option<(zax_render::numerics::Vector3, f32)>,
+}
 
 /// The render settings the core options choose, written in the user layer of the settings as
 /// the application's options window writes them: a profile or a script may still change them.
@@ -86,6 +112,11 @@ pub struct ThreeD {
     frame: i32,
     /// The settings changed since the scene last followed them (the scripts', the options').
     changes: Arc<Mutex<Vec<SettingId>>>,
+    /// The pull on the head-on 2D picture.
+    pull: HeadOnPull,
+    /// Whether the scene was in 2D at the last frame.
+    was_two_dimensional: bool,
+    buttons: Buttons,
     /// The 2D view of a profile's 3D game, the player's choice (L3).
     pub flat: bool,
 }
@@ -118,6 +149,9 @@ impl ThreeD {
             picture_height: 240,
             frame: 0,
             changes: Arc::default(),
+            pull: HeadOnPull::new(),
+            was_two_dimensional: false,
+            buttons: Buttons::default(),
             flat: false,
         };
         let mut model = SettingsModel::new();
@@ -229,6 +263,11 @@ impl ThreeD {
         scene.clipping = self.engine.settings().clipping;
         let two_dimensional = self.engine.two_dimensional_mode || self.flat;
         scene.two_dimensional_mode = two_dimensional;
+        // As in the application: going into 2D puts the picture head on.
+        if two_dimensional && !self.was_two_dimensional {
+            scene.picture_head_on = true;
+        }
+        self.was_two_dimensional = two_dimensional;
         #[allow(clippy::cast_precision_loss)] // Small margins.
         if two_dimensional {
             let width = self.picture.len() / self.picture_height.max(1);
@@ -247,6 +286,41 @@ impl ThreeD {
     /// Moves the camera along `real_seconds` of real time, turned by the right stick (`turn`,
     /// each axis -1 to 1) and brought nearer or farther by `zoom` (-1 to 1).
     pub fn advance(&mut self, real_seconds: f32, turn: (f32, f32), zoom: f32) {
+        if self.scene.two_dimensional_mode && self.scene.picture_head_on {
+            self.pull_head_on(real_seconds, turn);
+        } else {
+            self.pull.clear();
+            self.scene.picture_tilt = [0.0; 2];
+            self.steer(real_seconds, turn, zoom);
+        }
+        self.scene.camera.advance(real_seconds);
+        self.scene.real_time += real_seconds;
+    }
+
+    /// The 2D picture seen head on, as the application has it: the camera does not turn, the
+    /// stick pulls the picture, which gives way to the camera past the gauge's limit.
+    fn pull_head_on(&mut self, real_seconds: f32, turn: (f32, f32)) {
+        let asked = [
+            turn.1 * TURN_SPEED * real_seconds,
+            turn.0 * TURN_SPEED * real_seconds,
+        ];
+        match self.pull.update(asked, real_seconds) {
+            Pull::Held(tilt) => self.scene.picture_tilt = tilt,
+            Pull::Released(tilt, whole) => {
+                use zax_render::numerics::Vector3;
+                let clipping = self.scene.picture_clipping();
+                self.scene.camera.leave_picture_view(
+                    clipping,
+                    Vector3::new(tilt[0], tilt[1], 0.0),
+                    Vector3::new(whole[0], whole[1], 0.0),
+                );
+                self.scene.picture_head_on = false;
+                self.scene.picture_tilt = [0.0; 2];
+            }
+        }
+    }
+
+    fn steer(&mut self, real_seconds: f32, turn: (f32, f32), zoom: f32) {
         let camera = &mut self.scene.camera;
         if turn != (0.0, 0.0) || zoom != 0.0 {
             let setpoint = camera.current_mut();
@@ -256,8 +330,47 @@ impl ThreeD {
             let distance = setpoint.distance();
             setpoint.set_distance(distance * (1.0 + zoom * ZOOM_SPEED * real_seconds));
         }
-        camera.advance(real_seconds);
-        self.scene.real_time += real_seconds;
+    }
+
+    /// Y and L2 for a frame of `real_seconds`, as the application's handheld interface has them.
+    /// Y: a short press switches between 2D and 3D, a hold shows the game in 2D head on. L2: a
+    /// hold keeps the camera's angles and distance, a short press puts them back.
+    pub fn buttons(&mut self, real_seconds: f32, y: bool, l2: bool) -> Option<CameraNews> {
+        let buttons = &mut self.buttons;
+        if y {
+            let (held, acted) = buttons.flat.get_or_insert((0.0, false));
+            *held += real_seconds;
+            if *held >= HOLD_SECONDS && !*acted {
+                *acted = true;
+                if !self.scene.two_dimensional_mode {
+                    self.flat = true;
+                }
+                self.scene.picture_head_on = true;
+                self.pull.clear();
+            }
+        } else if let Some((_, acted)) = buttons.flat.take() {
+            if !acted {
+                self.flat = !self.flat;
+            }
+        }
+        if l2 {
+            let held = buttons.memory.get_or_insert(0.0);
+            *held += real_seconds;
+            if *held >= HOLD_SECONDS && !buttons.kept {
+                buttons.kept = true;
+                let current = self.scene.camera.current();
+                buttons.saved = Some((current.angles, current.distance()));
+                return Some(CameraNews::Kept);
+            }
+        } else if buttons.memory.take().is_some() && !std::mem::take(&mut buttons.kept) {
+            if let Some((angles, distance)) = buttons.saved {
+                let setpoint = self.scene.camera.current_mut();
+                setpoint.angles = angles;
+                setpoint.set_distance(distance);
+                return Some(CameraNews::Restored);
+            }
+        }
+        None
     }
 
     /// Puts the render settings `render` chooses in force at once.
@@ -315,6 +428,9 @@ impl ThreeD {
     /// The camera back where the profile puts it.
     pub fn reset_view(&mut self) {
         self.scene.camera.reset_view();
+        // The head-on picture comes back with the default view.
+        self.scene.picture_head_on = true;
+        self.pull.clear();
     }
 
     /// The scene to draw.

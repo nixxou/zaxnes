@@ -8,7 +8,7 @@
 //! OpenGL renderer live in thread-local storage: the frontend calls a core from one thread, and
 //! the Lua runtime and the GL objects are not to be shared between threads anyway.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::ffi::{c_char, c_uint, c_void, CStr, CString};
 use std::num::NonZeroU32;
 use std::path::PathBuf;
@@ -21,9 +21,11 @@ use zax_render::SceneRenderer;
 use crate::core::{Core, Options, MAX_HEIGHT, MAX_WIDTH, SAMPLE_RATE};
 use crate::options;
 use crate::profiles;
+use crate::three_d::CameraNews;
 
 const API_VERSION: c_uint = 1;
 
+const ENVIRONMENT_SET_MESSAGE: c_uint = 6;
 const ENVIRONMENT_GET_SYSTEM_DIRECTORY: c_uint = 9;
 const ENVIRONMENT_SET_PIXEL_FORMAT: c_uint = 10;
 const ENVIRONMENT_SET_INPUT_DESCRIPTORS: c_uint = 11;
@@ -45,6 +47,7 @@ const JOYPAD_Y: c_uint = 1;
 const JOYPAD_X: c_uint = 9;
 const JOYPAD_L: c_uint = 10;
 const JOYPAD_R: c_uint = 11;
+const JOYPAD_L2: c_uint = 12;
 const MEMORY_SAVE_RAM: c_uint = 0;
 const MEMORY_SYSTEM_RAM: c_uint = 2;
 const REGION_NTSC: c_uint = 0;
@@ -69,13 +72,14 @@ const PAD: [(c_uint, &CStr); 8] = [
 
 /// The other controls of the 3D, named in the frontend's input menu: the application's own
 /// places (HOWTO-RUN, the gamepad table): west 2D / 3D, north the default view, LB / RB the
-/// camera farther / nearer, the right stick turns it.
-const CAMERA: [(c_uint, c_uint, c_uint, &CStr); 6] = [
+/// camera farther / nearer, L2 keeps and puts back its angle, the right stick turns it.
+const CAMERA: [(c_uint, c_uint, c_uint, &CStr); 7] = [
     (DEVICE_ANALOG, ANALOG_RIGHT, 0, c"Camera: turn"),
     (DEVICE_ANALOG, ANALOG_RIGHT, 1, c"Camera: tilt"),
     (DEVICE_JOYPAD, 0, JOYPAD_L, c"Camera: farther"),
     (DEVICE_JOYPAD, 0, JOYPAD_R, c"Camera: nearer"),
-    (DEVICE_JOYPAD, 0, JOYPAD_Y, c"2D / 3D"),
+    (DEVICE_JOYPAD, 0, JOYPAD_Y, c"2D / 3D (hold: 2D head on)"),
+    (DEVICE_JOYPAD, 0, JOYPAD_L2, c"Camera: put back (hold: keep)"),
     (DEVICE_JOYPAD, 0, JOYPAD_X, c"Default view"),
 ];
 
@@ -205,8 +209,6 @@ thread_local! {
     static GAME: RefCell<Option<Box<Core>>> = const { RefCell::new(None) };
     /// The 3D renderer, from the frontend's `context_reset` to its `context_destroy`.
     static GL: RefCell<Option<Gl>> = const { RefCell::new(None) };
-    /// The 2D / 3D button as it was at the last frame, to see it go down.
-    static FLAT_HELD: Cell<bool> = const { Cell::new(false) };
 }
 
 fn frontend() -> Frontend {
@@ -229,6 +231,22 @@ fn environment<T>(cmd: c_uint, data: &mut T) -> bool {
     };
     // SAFETY: `data` is the structure `libretro.h` gives for `cmd`, alive for the call.
     unsafe { callback(cmd, std::ptr::from_mut(data).cast()) }
+}
+
+/// `struct retro_message`.
+#[repr(C)]
+struct Message {
+    msg: *const c_char,
+    frames: c_uint,
+}
+
+/// Shows `text` on the frontend's screen for two seconds.
+fn show(text: &'static CStr) {
+    let mut message = Message {
+        msg: text.as_ptr(),
+        frames: 120,
+    };
+    environment(ENVIRONMENT_SET_MESSAGE, &mut message);
 }
 
 fn log(level: c_uint, message: &str) {
@@ -474,14 +492,11 @@ fn steer(frontend: &Frontend, core: &mut Core, seconds: f32) {
     let turn = (dead(axis(0)), dead(axis(1)));
     let button = |id| pressed(frontend, 0, DEVICE_JOYPAD, 0, id) != 0;
     let zoom = f32::from(i8::from(button(JOYPAD_L)) - i8::from(button(JOYPAD_R)));
-    let flat = button(JOYPAD_Y);
-    let flat_pressed = flat && !FLAT_HELD.with(|held| held.replace(flat));
-    if !flat {
-        FLAT_HELD.with(|held| held.set(false));
-    }
     if let Some(three_d) = core.three_d_mut() {
-        if flat_pressed {
-            three_d.flat = !three_d.flat;
+        match three_d.buttons(seconds, button(JOYPAD_Y), button(JOYPAD_L2)) {
+            Some(CameraNews::Kept) => show(c"Camera kept"),
+            Some(CameraNews::Restored) => show(c"Camera put back"),
+            None => {}
         }
         if button(JOYPAD_X) {
             three_d.reset_view();

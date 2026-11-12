@@ -176,6 +176,50 @@ fn the_render_options_reach_the_scene_at_once() {
 }
 
 #[test]
+fn y_and_l2_work_as_in_the_application() {
+    use zax_libretro::three_d::CameraNews;
+    let Some(mut core) = three_d("FlappyZaxNes.nes") else {
+        return;
+    };
+    play(&mut core, 30, |_| 0);
+    let frame = 1.0 / 60.0;
+    let three_d = core.three_d_mut().expect("in 3D");
+    // A short press of Y: 2D, another: 3D.
+    for held in [true, true, false] {
+        three_d.buttons(frame, held, false);
+    }
+    assert!(three_d.flat);
+    for held in [true, false] {
+        three_d.buttons(frame, held, false);
+    }
+    assert!(!three_d.flat);
+    // Y held: 2D head on, staying so once let go.
+    for _ in 0..40 {
+        three_d.buttons(frame, true, false);
+    }
+    three_d.buttons(frame, false, false);
+    assert!(three_d.flat && three_d.scene().picture_head_on);
+    three_d.flat = false;
+    // L2 held keeps the camera; turned, a short press puts it back.
+    let news: Vec<_> = (0..40)
+        .filter_map(|_| three_d.buttons(frame, false, true))
+        .collect();
+    assert_eq!(news, [CameraNews::Kept]);
+    assert_eq!(three_d.buttons(frame, false, false), None);
+    let kept = three_d.scene().camera.current().angles;
+    for _ in 0..30 {
+        three_d.advance(frame, (1.0, 0.0), 0.0);
+    }
+    assert_ne!(three_d.scene().camera.current().angles, kept);
+    three_d.buttons(frame, false, true);
+    assert_eq!(
+        three_d.buttons(frame, false, false),
+        Some(CameraNews::Restored)
+    );
+    assert_eq!(three_d.scene().camera.current().angles, kept);
+}
+
+#[test]
 fn a_3d_state_comes_back() {
     let Some(mut core) = three_d("FlappyZaxNes.nes") else {
         return;

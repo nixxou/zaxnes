@@ -12,6 +12,7 @@
 pub mod core;
 #[allow(unsafe_code)]
 pub mod ffi;
+pub mod head_on_pull;
 pub mod options;
 pub mod profiles;
 pub mod scene_settings;

@@ -34,8 +34,13 @@ only".
 |---|---|
 | Right stick | turn and tilt the camera |
 | L / R | the camera farther / nearer |
-| Y (west) | the 2D picture / the 3D |
+| Y (west) | the 2D picture / the 3D; held, the 2D seen head on |
 | X (north) | the default view, where the profile puts the camera |
+| L2 | held, keeps the camera's angle and distance; pressed, puts them back |
+
+In 2D seen head on the right stick pulls the picture, which gives way to the camera past a
+limit, as in the application. The settings a profile's scripts change while playing (the light,
+the field of view, the sky...) reach the picture at the next frame.
 
 In 3D a state carries the machine and the scripts' 64 `PData` values, as the application's
 rollback does. The editor mode is the application's only.
@@ -53,6 +58,14 @@ rollback does. The editor mode is the application's only.
 | Hack: ... | the options of the game's hack, when it has some |
 | Renderer (restart) | 3D for games with a profile, 2D only |
 | 3D resolution (restart) | 1280x720, 1920x1080, 2560x1440, 3840x2160, 960x540 |
+| 3D anti-aliasing | MSAA 4x, Off, MSAA 8x, SMAA |
+| 3D shadows | enabled, disabled |
+| 3D visual style | Classic, Enhanced |
+| 3D reflections (Enhanced style) | disabled, enabled |
+| 3D sky | Default, Colour, Gradient, Fantasy |
+
+The 3D options apply at once; they are the application's settings, so a profile or its scripts
+may still change them.
 
 The picture has square pixels, like the application's 2D picture: keep RetroArch's aspect ratio
 on "Core provided" so that the widescreen keeps its shape.
@@ -74,7 +87,8 @@ for the frontends.
 
 `src/core.rs` (the game in play), `src/options.rs` (the core options), `src/profiles.rs` (the
 profile of a game) and `src/three_d.rs` (the 3D, put together as the harness's headless runner
-does) are safe Rust. `src/ffi.rs`,
+does) are safe Rust, as are `src/scene_settings.rs` and `src/head_on_pull.rs`, copies of the
+application's code (keep them the same). `src/ffi.rs`,
 the C interface of `libretro.h`, is the only `unsafe` code of the crate.
 
 Tests: `cargo test -p zax-libretro --profile libretro`. They play the FlappyZaxNes demo, and with
