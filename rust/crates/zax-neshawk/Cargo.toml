@@ -1,0 +1,13 @@
+[package]
+name = "zax-neshawk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "BizHawk's NesHawk NES core, ported to Rust. See LICENSE-BizHawk."
+
+[dependencies]
+
+[lints]
+workspace = true

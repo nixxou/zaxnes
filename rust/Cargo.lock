@@ -2144,6 +2144,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "zax-neshawk"
+version = "0.5.0"
+
+[[package]]
 name = "zax-platform"
 version = "0.5.0"
 dependencies = [
