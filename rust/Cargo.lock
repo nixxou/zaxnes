@@ -2074,6 +2074,7 @@ dependencies = [
  "zax-engine3d",
  "zax-fceux",
  "zax-nes",
+ "zax-neshawk",
  "zax-platform",
  "zax-profiles",
  "zax-render",
@@ -2149,6 +2150,7 @@ name = "zax-neshawk"
 version = "0.5.0"
 dependencies = [
  "zax-core-api",
+ "zax-nes",
 ]
 
 [[package]]

@@ -169,21 +169,27 @@ fn the_speed_of_the_port_in_frames_a_second() {
         if !path.exists() {
             continue;
         }
-        let mut nes = load(&path, &db);
-        // 60 frames of warm-up, so the boot's PPU-off frames do not flatter the figure.
-        for _ in 0..60 {
-            nes.frame_advance(false, false);
+        // Both ways round, because the application's engine runs with the 3D tile capture **on**
+        // and the harness's tools run with it off: one figure would describe only half the uses.
+        for capture in [false, true] {
+            let mut nes = load(&path, &db);
+            nes.set_tile_capture(capture);
+            // 60 frames of warm-up, so the boot's PPU-off frames do not flatter the figure.
+            for _ in 0..60 {
+                nes.frame_advance(false, false);
+            }
+            let frames = 600;
+            let started = std::time::Instant::now();
+            for _ in 0..frames {
+                nes.frame_advance(false, false);
+            }
+            let elapsed = started.elapsed().as_secs_f64();
+            println!(
+                "{name}: {:.0} frames/s ({:.3} ms a frame) over {frames} frames, 3D capture {}",
+                f64::from(frames) / elapsed,
+                elapsed * 1000.0 / f64::from(frames),
+                if capture { "ON" } else { "off" },
+            );
         }
-        let frames = 600;
-        let started = std::time::Instant::now();
-        for _ in 0..frames {
-            nes.frame_advance(false, false);
-        }
-        let elapsed = started.elapsed().as_secs_f64();
-        println!(
-            "{name}: {:.0} frames/s ({:.3} ms a frame) over {frames} frames",
-            f64::from(frames) / elapsed,
-            elapsed * 1000.0 / f64::from(frames),
-        );
     }
 }

@@ -17,6 +17,11 @@ field names intact, and then held against BizHawk until the two agreed.
 They agree. The whole 156 312-frame Kirby movie, the whole of both Faxanadu dumps, and 34 026
 cycle-dated bus events.
 
+It is also, now, a **second engine of the application**: `emu.engine = "neshawk"` beside `zaxnes`
+and `fceux`, with a serialised savestate, the 3D tile capture the renderer reads, thirteen board
+classes and a marked fallback on Zaxnes's own board for any mapper it has not got — so no
+cartridge is refused for want of a board. §7 is the honest list of what is still missing.
+
 ## 2. The result
 
 | what | reference | compared | result |
@@ -37,13 +42,18 @@ consecutive frames. The instrument is `movie-sync --engine neshawk --neshawk-eve
 writes the ledger in the exact shape `ext-tools/scripts/bk2cyc*.lua` writes it on BizHawk, so the
 check is a file diff rather than a judgement.
 
-Speed, release build, after 60 frames of warm-up (a figure, not a budget):
+Speed, release build, after 60 frames of warm-up (a figure, not a budget). Both ways round,
+because the application's engine runs with the 3D tile capture **on** and the harness's tools run
+with it off — one figure would describe half the uses:
 
-| ROM | frames/s | ms a frame |
-|---|---|---|
-| Super Mario Bros. 3 | 594 | 1.68 |
-| Mega Man 2 | 556 | 1.80 |
-| Super Mario Bros. | 622 | 1.61 |
+| ROM | frames/s, capture off | frames/s, capture on | ms a frame (on) |
+|---|---|---|---|
+| Super Mario Bros. 3 | 582 | 571 | 1.75 |
+| Mega Man 2 | 547 | 539 | 1.86 |
+| Super Mario Bros. | 602 | 601 | 1.66 |
+
+So about nine to ten times real time, and the capture costs **about 2 %**. Mega Man **3** is not in
+`ZAXNES_ROMS`; Mega Man 2 (MMC1) stands in for it and SMB (NROM) is the third point.
 
 ## 3. What is ported, and from where
 
@@ -61,10 +71,14 @@ Every file carries a header naming its C# source. `LICENSE-BizHawk` carries BizH
 | `src/ppu/mod.rs` | `PPU.cs`'s state, `PPUREGS`, `Reg_2000`, `Reg_2001`, `PpuOpenBusDecay`, `pipeline` |
 | `src/ppu/run.rs` | `PPU.run.cs` and `PPU.cs`'s `runppu` |
 | `src/ppu/regs.rs` | `PPU.regs.cs`'s `$2000`-`$2007` |
-| `src/boards/` | `NesBoardBase.cs`, `NROM`, `UxROM`, `CNROM`, `AxROM`, `SxROM` (MMC1, with `SuROM`/`SXROM`/`SoROM`), `MMC3.cs`, `TxROM` |
+| `src/boards/` | `NesBoardBase.cs`, `NROM`, `UxROM`, `CNROM`, `AxROM`, `SxROM` (MMC1, with `SuROM`/`SXROM`/`SoROM`), `MMC3.cs`, `TxROM` — then the second board set: `GxROM.cs` (66), `IC_74x377.cs` (11 and the Color Dreams/AGCI boards), `PxROM_FxROM.cs` (MMC2 = 9, MMC4 = 10), `Camerica.cs` (71 and 232), `Mapper069.cs`'s `Sunsoft_FME7` (69), `VRC2_4.cs` (21, 22, 23, 25, 27, 116) |
+| `src/boards/zaxnes.rs` | **nothing** — the fallback of §4b, which is Zaxnes's own board behind NesHawk's `INesBoard` |
 | `src/cart.rs` | `CartInfo.cs`, `NES.iNES.cs` |
 | `src/gamedb.rs` | `BootGodDB.cs` (the `NesCarts.xml` state machine), `IdentifyFromGameDB`, `Database.cs`'s record format |
 | `src/controllers.rs` | `NESControllers.cs`'s `StrobeInfo`, `NesDeck`, `ControllerNES`, `UnpluggedNES` |
+| `src/state.rs` | the `SyncState(Serializer)` members of `NES`, `PPU`, `APU`, `MOS6502X` and every board — see §4c |
+| `src/engine.rs` | **nothing**: `zax_core_api::Engine` over the port, which is Zaxnes's own interface |
+| `src/tiles.rs` | **nothing**: the 3D tile capture, which is Zaxnes's own (SPEC-02 §4.1, REQ-CORE-030 to 046) |
 
 ### Why the game databases are part of the port
 
@@ -99,6 +113,57 @@ Three deviations exist and each is documented at its site:
 All three are consequences of one fact, and it is the lesson of the lot: **a C# field written from
 both sides needs an explicit crossing in Rust**, and a port that quietly drops one of those
 writes will pass every test that does not exercise it. §5 is what that cost.
+
+## 4b. The fallback: a mapper with no ported board runs on Zaxnes's
+
+The owner's decision of 2026-11-12. Porting every NesHawk board was never the plan — the brief
+asks for the boards covering about 80-95 % of the commercial library — and the question is what
+happens to the rest. The answer is **not a load error**: `boards::zaxnes::ZaxnesBoard` puts a whole
+`zax-nes` cartridge behind NesHawk's `INesBoard`, and the cartridge runs with the port's CPU, PPU
+and APU and the other engine's board. One component differs, and **everything that can tell a user
+or a tool says so**: the load report, `RomLoadResult::note`, `NesHawkEngine::board_is_from_zaxnes`,
+`movie-sync`'s printed note, and every `test-roms` row (`neshawk_board`, `board_from_zaxnes`, and
+the words "board from Zaxnes, not NesHawk-exact" in the message).
+
+Three things it loses, listed because "not NesHawk-exact" otherwise means nothing:
+
+1. **The IRQ counter's clock.** A NesHawk board counts PPU A12 rises through `AddressPPU`; a
+   Zaxnes board of the same mapper may count them through its own `A12Watcher` with its own
+   filter, or count scanlines. On an MMC3-like mapper that is a cycle or two on the IRQ — exactly
+   what a `.bk2` notices.
+2. **The fetch kind on a PPU read.** NesHawk's `ReadPPU` does not carry one, so the adapter says
+   `ChrFetch::Background` — the pessimistic choice for a board that distinguishes them.
+3. **Four-screen nametables.** NesHawk's CIRAM is on the console and a board supplies a mirroring
+   map; Zaxnes's cartridge may serve nametable bytes itself. The adapter honours that through
+   `nametable_page`, but the console's 2 KiB and the cartridge's view of them are two memories
+   here where in Zaxnes they are one.
+
+One implementation note worth keeping, because it is load-bearing rather than clever: the
+cartridge is behind a **`RefCell`**. NesHawk's `INesBoard` read hooks are `&self` in this port
+(every ported board leaves no trace on a read) while `Cartridge::try_cpu_read` is `&mut` — the
+MMC5's `$5204` clears its IRQ flag when read. Without the cell those side effects would silently
+not happen, which is the worst kind of defect: a game that mostly works.
+
+## 4c. The savestate, and the one guarantee it has that the C# has not
+
+`src/state.rs` is the port of `SyncState`. BizHawk's `Serializer` is one visitor that both reads
+and writes, so a class lists its fields once; this port cannot do that in a single method, because
+`Engine::save_state_to` takes `&self` and `try_load_state` a `&mut self`. So `sync_struct!`
+generates **both halves from one field list** — the same token sequence, so the write order and the
+read order cannot drift apart.
+
+What the macro adds over the reference: each generated body begins with an **exhaustive**
+destructuring of the struct (`let Self { a, b, c } = self`, no `..`), so a field added later and
+named in neither the saved list nor the `skip:` list is a **compile error**. A savestate that
+silently forgets a new field is the classic emulator defect — a game returns from a state with the
+wrong banks mapped — and here it cannot happen. `Board::write_state`/`read_state` are **required**
+trait methods for the same reason: a new board does not compile until it has answered the question.
+
+The block carries the engine's magic (`ZXNH`), the version, the **board class** and the host's
+region, and refuses a block of another engine with REQ-CORE-120's own message, a block of another
+board class, and a payload whose length the machine does not read exactly. The frame buffer is in
+the block only for a self-contained state; a rollback slot leaves it out, which is what
+REQ-CORE-121's own in-memory snapshot does and is 120 KiB a slot.
 
 ## 5. The divergence that was found, and the line that caused it
 
@@ -144,18 +209,35 @@ of the 8 991 lines — as are `PC`, `X`, `Y`, `SP` and every cycle count.
 
 ## 7. Known gaps
 
-Stated rather than papered over. Nothing below is a measured difference from NesHawk; each is work
-this lot did not reach.
+Stated rather than papered over. Nothing below is a measured difference from NesHawk on a path
+this port claims; each is work this lot did not reach, or a scope line drawn on purpose.
 
 | gap | what it means | what it would take |
 |---|---|---|
-| **The `Engine` trait is not implemented** | `zax-neshawk` is reachable from `movie-sync --engine neshawk` through the harness's own small `Machine` trait, but not from the application: there is no `EngineKind::NesHawk`, no `emu.engine = "neshawk"`, and no `.bk2` default-engine choice | a `NesHawkEngine` over the 30-method trait of `zax-core-api`; the only real work in it is a **savestate**, since the port has no `SyncState` yet and currently snapshots by cloning the whole machine |
-| **No savestate format** | rollback, run-ahead and cross-engine refusal all need a serialised block. `Nes: Clone` is exact and is what the harness's input-sensitivity probe uses, but it is not a format | port `SyncState` from each C# class, in the C#'s field order |
-| **No tile capture, so no 3D** | the renderer needs the per-frame tile records `zax-nes` and `zax-fceux` produce | the capture of `docs/review/FCEUX-ENGINE.md` §2 and lot FCEUX-6's `fceux-tiles` parity tool |
-| **The second board set is not ported** | MMC2/MMC4 (9/10), Color Dreams (11), GxROM (66), Camerica (71), MMC5 (5), FME-7 (69), VRC2/4 (23/25). The six ported boards cover NROM, MMC1, UxROM, CNROM, MMC3 and AxROM | each is a short file; MMC5 is the one that would widen the `Board` trait, because its `ReadReg2xxx` is a *mutable* read |
-| **No fallback to Zaxnes's boards** | the owner's decision of 2026-11-12 is that any unported mapper falls back on `zax-nes` through an adapter, marked "board from Zaxnes, not NesHawk-exact". Today an unported mapper is a load error naming the board type, which is honest but is not the decision | the adapter, plus the marker in capabilities, the log and the harness output |
-| **VS. System, FDS, NSF, UNIF, the light gun, the cheat engine, the code-data logger, the memory domains, `Palettes.cs`** | not ported; a UNIF/FDS/NSF image is refused by name rather than guessed at | — |
-| **Audio is deltas, not samples** | `RunCpuOne` records every `blip.AddDelta(sampleclock, delta)` into `Nes::audio_deltas`; nothing resamples them yet | a `BlipBuffer` port or the host's own resampler |
+| **MMC5 (mapper 5) is not ported** | it runs on Zaxnes's board through the adapter of §4b, marked "board from Zaxnes, not NesHawk-exact". `ExROM.cs` is 799 lines and wants two things this port's `Board` trait cannot express: a **mutable** PPU-register read (`ReadReg2xxx`) and nametable bytes the *cartridge* serves (`ExRAM`, fill mode) | widening `Board` for both, then the port. The five MMC5 ROMs in the collection already run on the fallback |
+| **`SUNSOFT-5B` is refused by `Sunsoft_FME7`** | so Gimmick! (J) takes the fallback. The C#'s `Sunsoft_5` is the FME-7 plus the 5B's own sound chip, and this port has no expansion audio; a board that silently drops a third of that game's music would be worse than one marked | a `Sunsoft5BAudio` port, which needs expansion audio first |
+| **Mapper 71 is ported but unexercised** | the collection has no mapper-71 ROM and no mapper-71 game, so `Camerica_Mapper071` is a faithful transcription that nothing has run | a cartridge |
+| **Audio is this engine's own waveform** | the *timing* of every `blip.AddDelta` is NesHawk's to the cycle, and that is what the port is verified on. The reconstruction is not: `BlipBuffer.cs` is a `DllImport` shim over Blargg's native `blip_buf`, so **there is no C# to port**, and `NesHawkEngine` integrates the deltas and box-filters them to the output rate instead. A `.wav` from this engine is not bit-identical to BizHawk's | a `blip_buf` port, which means fetching a C library this lot may not fetch |
+| **A region change is a power cycle** | `set_region` rebuilds the machine when the timing really changes, because `_display_type` is read by `HardReset` — in BizHawk changing a NES core's region needs a core reboot too. REQ-CORE-016 asks for no reset; `zax-nes` can do that and NesHawk cannot | nothing: it is NesHawk's own constraint, and the host's own order (`load_rom` then `set_region`) loses no state |
+| **No run-ahead, no widescreen, no hack packs, no sprite-limit control, no machine internals** | `Capabilities::NESHAWK` says so and the application greys those rows with the reason. The four are patches to *Zaxnes's* bus or PPU, not features of an emulator | the first would be save/run/take/load per frame, as on FCEUX; the rest would mean reimplementing Zaxnes's bus |
+| **The application cannot open a `.bk2`** | it opens `.fm2`, `.fcm` and Zaxnes's own. So "a `.bk2` defaults to the NesHawk engine" is delivered as the *rule* plus its one live use — `EngineKind::for_bizhawk_core`, `MovieFile::recorded_engine`, and `movie-sync`'s default engine — and not as an application feature | a `.bk2` importer in `zax-app`, which has the rule waiting for it |
+| **MMC2/MMC4 capture reads the latch as the frame left it** | `zax-nes`'s capture walks a line moving the `$FD`/`$FE` latch forward tile by tile and puts it back (REQ-CORE-039); this port's capture reads through `Board::peek_ppu`, which by the C#'s own design does not touch the latch. For a mapper-9/10 game a captured tile can come from the other 4 KiB bank | the per-column latch walk, in `crate::tiles` |
+| **VS. System, FDS, NSF, UNIF, the light gun, the cheat engine, the code-data logger, the memory domains, `Palettes.cs`** | not ported; such an image is refused by name rather than guessed at | — |
+
+### The one capture difference found, and why it is not patched
+
+Over the 330-ROM collection at frames 60 and 300, `neshawk-tiles` puts **2 frames** in the
+`capture` class — the class where the two engines' pictures are identical and only the records
+differ, which is the only class this lot answers for. Both are `other/window_old_ntsc.nes`, and in
+both the port emits **one extra background record** on `y = 233`, the frame's last row, with **no
+field differing on any record**: 2 048 of 2 050 capture-class records are identical in order,
+99.90 %.
+
+The mechanism, named rather than tuned away: a background row carries 33 records instead of 32
+only when fine X is not 0 (REQ-CORE-038), and that ROM rewrites the scroll every scanline, so the
+fine X the two cores hold **at the capture instant** differs by a cycle's worth of dot alignment on
+the last line. Making it agree would mean moving when the capture samples fine X to suit one
+torture-test ROM, which is exactly the tuning constant this lot's rules forbid.
 
 ## 7b. The ROM suites, and the correction they forced
 
@@ -165,15 +247,28 @@ readers on both machines is the only way a verdict comparison means anything.
 
 | | pass | fail | unsupported | manual |
 |---|---|---|---|---|
-| `--engine neshawk` | 183 | 18 | **31** | 99 |
+| `--engine neshawk` | **199** | 20 | **1** | 111 |
 | `--engine zaxnes` (unchanged by this lot) | 212 | 7 | 1 | 111 |
 
-The 31 unsupported are the **unported boards** — mappers 11, 28, 5, 34, 10, 180, 69, 118, 66, 78,
-9, 22 and two mapper-4 variants that go to a different MMC3 board class. That is the gap table's
-last-but-one row, not a defect.
+**The one unsupported ROM is `other/LINUSMUS.NES`**, a headerless image with no database entry,
+which *Zaxnes* refuses too. Before the fallback and the second board set there were **31**, all of
+them unported boards.
 
-Of the 18 failures, three also fail on Zaxnes. The other 15 were each run down, and **none is a
-port defect**:
+Of the 20 failures, every one is accounted for and **none is a port defect**:
+
+* **2 mapper-4 variants** (`mmc3_test/6-MMC6`, `mmc3_test_2/6-MMC3_alt`) which were *unsupported*
+  before: NesHawk routes them to board classes this port has not got, and Zaxnes's mapper-4 board
+  does not implement MMC6 either. The fallback's honest limit.
+* **AccuracyCoin at 130/147**, which is NesHawk's own figure — all 147 verdicts identical.
+* **12 `holy-mapperel` MMC1 ROMs**: ten are the `$E000` bit 4 case below, and **two are SNROM
+  boards that fail on Zaxnes as well**, checked by running both engines over them.
+* **Five DMC/DMA ROMs** that NesHawk fails identically, below.
+
+And against the other engine, on the 40 `holy-mapperel` ROMs: the two engines give the **same
+verdict on 30 and differ on 10**, and all ten are the MMC1 case. **Not one ROM of a board this lot
+added disagrees with Zaxnes.**
+
+The two detailed findings:
 
 * **Ten `holy-mapperel` MMC1 ROMs**, all reporting "WRAM 1: `$E000` bit 4 does not disable WRAM".
   `SxROM.cs` honours `mmc1.wram_disable` **only when `_is_snrom`**, which only `NES-SNROM` sets,
@@ -219,16 +314,53 @@ zax-harness movie-sync <kirby.bk2> <kirby.nes> --engine neshawk --no-lag --frame
   --neshawk-event-log ours-cyc0.txt --neshawk-watch-pc C37C,C06E,80FC,804C
 ```
 
-The crate's own tests: `cargo test -p zax-neshawk --release -- --ignored` with
+```
+# the whole 331-ROM collection on the port, scored by the readers that score Zaxnes
+zax-harness test-roms <test-roms dir> out.json --engine neshawk
+
+# where the port's 3D tile records differ from Zaxnes's, field by field, with the class column
+zax-harness neshawk-tiles <roms dir|rom.nes> out.jsonl --frames 60,300,1200 --detail --records 4
+
+# and a .bk2 needs no --engine at all: one recorded on NesHawk defaults to the port of that core
+zax-harness movie-sync <movie.bk2> <rom.nes> --no-lag
+```
+
+In the application the engine is the per-game setting `emu.engine` (`Zaxnes` / `FCEUX` /
+`NesHawk`), which takes effect at the next load. Choosing NesHawk greys the widescreen rows, the
+hack packs, the sprite limit and the run-ahead, each with the reason beside it.
+
+The crate's own tests: `cargo test -p zax-neshawk --release -- --include-ignored` with
 `ZAXNES_TEST_ROMS`, `ZAXNES_BIZHAWK_GAMEDB` and `ZAXNES_ROMS` set — `nestest` against its
-reference log, the 16 `instr_test-v5` ROMs, a power-on smoke test and the speed figure.
+reference log, the 16 `instr_test-v5` ROMs, a power-on smoke test, the speed figures, the
+savestate round trip, the foreign-engine refusal, and the 3D capture proved to change nothing
+(120 frames of work RAM, picture and cycle count with it on and off).
 
 ## 9. Suites, at the end of the lot
 
 | | result |
 |---|---|
-| `golden-core`, 98 originals x 1 200 frames, **Zaxnes** engine | `8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773` — **byte-identical**; `zax-nes` was not touched |
-| `test-roms --engine zaxnes` | **212 pass / 7 fail**, the documented figure — so making the four readers engine-generic changed nothing for Zaxnes |
-| `cargo test --release --workspace` | all green, excluding three **pre-existing environment gaps**: `zax-platform` and `zax-app` need `SDL2.lib`, which this worktree has not got, and `zax-harness`'s `bench_core_tests` need the untracked `rust/test-roms/nestest.nes` (supplied from `assets-free` to run them) |
+| `golden-core`, 98 originals x 1 200 frames, **Zaxnes** engine | `8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773` — **byte-identical**; `zax-nes` was not touched by this lot (`git diff` over the crate is empty) |
+| *Hoshi no Kirby* `.bk2`, frames 1-400, re-run after every step | **400 of 400 byte-identical** at each of the five |
+| `nestest`, re-run after the capture hooks were cut into the dot loop | still exact on all 8 991 instructions |
+| `test-roms --engine neshawk` | **199 pass / 20 fail / 1 unsupported / 111 manual** (was 183 / 18 / 31 / 99) |
+| `test-roms --engine zaxnes` | **212 pass / 7 fail**, the documented figure, unchanged |
+| `neshawk-tiles`, 18 originals x 3 frames | **44 of 54 frames identical on all ten fields, 0 capture-class** |
+| `neshawk-tiles`, 330 test ROMs x 2 frames | 566 identical, 88 emulation, 4 uniform, **2 capture** — 2 048 of 2 050 capture-class records identical in order, **99.90 %** |
+| `cargo test --release --workspace` | **2 527 passed, 0 failed, 93 ignored** (excluding the two SDL2 crates below) |
+| the same with `fceux-core` on | **205 passed, 0 failed, 17 ignored** |
 | `cargo fmt --all --check` | clean |
-| `cargo clippy --workspace --all-targets -- -D warnings` | clean (same two crates excluded, for the same link reason) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+
+**The two environment gaps, both pre-existing and neither reachable from this lot.**
+`zax-platform` and `zax-app` fail to *link* their tests (`LNK1181: SDL2.lib`); `cargo check -p
+zax-app --all-targets` and `cargo clippy -p zax-app --lib --all-features` are both clean, so the
+code compiles and only the link is missing. `zax-harness`'s `bench_core_tests` want
+`rust/test-roms/nestest.nes`, which nothing tracks and `.gitignore` ignores, so it is a
+per-worktree asset like `zax-app`'s two demo files; copied in from `assets-free`, the four pass.
+
+**One pre-existing break this lot found and fixed**: `ControllerPortType::Empty` was added by lot
+NESHAWK-PROFILE-13 and `zax-fceux`'s `set_port_type` never got its arm, so the **`fceux-core`
+configuration had not compiled since**. `Empty` is now refused as `Zapper` is, which is the right
+answer rather than a convenience: `Empty` is BizHawk's `UnpluggedNES`, whose read answers 0 for
+ever where a pad answers 1 from the ninth read, and accepting it would hand back a pad while
+reporting an unplugged socket.

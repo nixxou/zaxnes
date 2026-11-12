@@ -88,13 +88,13 @@ step 2. If a file you ported was fetched before the clone, it is the same tag; n
       Namco 163 are out of scope. For any other mapper, **fall back on Zaxnes's own boards** from
       `zax-nes` through an adapter, accepting the loss of NesHawk timing fidelity; mark that case
       explicitly (capabilities/log/harness output: "board from Zaxnes, not NesHawk-exact").
-- [~] 3. The `Engine` implementation (`EngineKind::NesHawk`, savestates tagged and refusing other
+- [x] 3. The `Engine` implementation (`EngineKind::NesHawk`, savestates tagged and refusing other
       engines), wired into `zax-harness` (`movie-sync`/`frame-trace`/`test-roms --engine
       neshawk`), the application's `emu.engine = "neshawk"`, and `.bk2` playback.
 - [x] 4. Verification against BizHawk: the *Kirby* `.bk2` to the last frame (156 312) against the
       per-frame references and the cycle ledger; *Faxanadu*; AccuracyCoin and the blargg suites
       with the **same verdicts as NesHawk** (including the `$8B ANE` hang).
-- [ ] 5. 3D: the tile capture the renderer needs, as `zax-fceux` does; capture parity measured on
+- [x] 5. 3D: the tile capture the renderer needs, as `zax-fceux` does; capture parity measured on
       the profiled games.
 - [x] 6. Speed and final pass: bench, fmt, clippy `-D warnings`, `cargo test --release`,
       golden-core unchanged for the Zaxnes engine, and `docs/review/NESHAWK-REWRITE.md`.
@@ -730,3 +730,56 @@ One more fact the sweep turned up and is worth recording: `first_pixel_diff` is 
 of the 18 originals**, including the fourteen whose sampled frames are all identical. The two
 engines part on frame 2 and come back together — the PPU warm-up (`ppudead`) differs — which is an
 engine difference of long standing and not this lot's to fix.
+
+### Resumption 2, step F — the final pass
+
+| | result |
+|---|---|
+| `golden-core`, 98 originals x 1 200 frames, **Zaxnes** engine | `8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773` — **byte-identical**, and `git diff` over `crates/zax-nes` is empty |
+| `cargo test --release --workspace` (less the two SDL2 crates) | **2 527 passed, 0 failed, 93 ignored** |
+| the same with `fceux-core` on | **205 passed, 0 failed, 17 ignored** |
+| `cargo fmt --all --check` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo check -p zax-app --all-targets`, and clippy `--lib --all-features` | clean |
+| `cargo test -p zax-neshawk --release -- --include-ignored` | 26 passed, 0 failed |
+
+**One trap worth recording so nobody re-finds it.** `golden-core` was first run as
+`golden-core <originals> <out.jsonl>` and gave `8d5f0bd3…`, which looks like a regression and is
+not one: the documented invocation is `golden-core "G:/3DSen/test-originals" <out.jsonl> **1200**`,
+and the trailing frame count changes which frames are *sampled* into the digest. With the
+documented arguments the digest is byte-identical. `zax-nes` and `golden_core.rs` were both
+untouched by the lot, which is what said the first number had to be the instrument.
+
+Speed, release, 600 frames after 60 of warm-up, measured **both ways round** because the
+application's engine runs the 3D capture and the harness's tools do not:
+
+| ROM | capture off | capture on |
+|---|---|---|
+| Super Mario Bros. 3 | 582 f/s | 571 f/s |
+| Mega Man 2 | 547 f/s | 539 f/s |
+| Super Mario Bros. | 602 f/s | 601 f/s |
+
+About nine to ten times real time, and **the capture costs about 2 %**.
+
+`docs/review/NESHAWK-REWRITE.md` rewritten: §3's file table covers the second board set, the
+savestate, the engine and the capture; §4b is the fallback and the three things it loses; §4c is
+the savestate and the exhaustive-destructuring guarantee; §7's gap table is replaced; §7b carries
+the new suite figures; §8 lists the new tools; §9 is the final table.
+
+### What is left after this session — the honest list
+
+Everything the resumption asked for is done. What the gap table still names:
+
+* **MMC5** is on the fallback, not ported (`ExROM.cs` needs a mutable PPU-register read and
+  cartridge-served nametables, which `Board` cannot express today).
+* **`SUNSOFT-5B`** is deliberately refused so Gimmick! keeps its expansion audio on Zaxnes's board.
+* **Mapper 71** is ported but no ROM in the collection exercises it.
+* **Audio** is this engine's own waveform: the delta *timing* is NesHawk's to the cycle, but
+  `BlipBuffer.cs` is a shim over native `blip_buf`, so there is no C# to port.
+* **A region change is a power cycle**, which is NesHawk's own constraint.
+* **The application cannot open a `.bk2`** — the rule is delivered and used by `movie-sync`, but an
+  importer in `zax-app` is a feature lot.
+* **MMC2/MMC4's capture** reads the CHR latch as the frame left it rather than walking it per
+  column.
+* One capture-class difference in 330 ROMs: `window_old_ntsc.nes`, one extra edge record on the
+  frame's last row, mechanism named in the review and not patched with a constant.
