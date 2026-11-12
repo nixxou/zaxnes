@@ -1763,6 +1763,37 @@ does. It needs a latch in `Ppu2C02` one dot before `vblank_just_started` and a p
 in `run_frame_profiled`'s loop — and then item 1c's own measurement says it goes back on.
 `docs/progress/NESHAWK-PROFILE-8.md`.
 
+## 4m. The reset lands where NesHawk's does, and the OAM transfer does not (NESHAWK-PROFILE-9)
+
+### The result first
+
+**§4l's one job is done and it was not enough.** The reset now begins on NesHawk's own cycle (item
+12), item 1c's gate is open and the item is measured right, a *third* difference was found and
+measured — NesHawk's OAM transfer pays its wait cycle at the **end**, so the two machines take the
+hardware's 513 and 514 cycles on opposite phases (item 13) — and **all three ship off**, because
+together they take the *Kirby* `.bk2` from 45 095 to **9 353** and item 13 alone takes *Faxanadu*
+from 247 and 314 of 832 checksum lines to 202 and 210.
+
+| | |
+|---|---|
+| item 12, where it comes from | `PPU.run.cs` `TickPPU_preVBL()` sets `nes.frame_is_done = true` at a **dot**, with the CPU clocked from inside the same loop, and `NES.Core.cs` `FrameAdvance` opens the next frame with `cpu.NESSoftReset()` — `opcode = VOP_RESET; mi = 0;`, which **abandons the instruction in flight**. So NesHawk's seven reset cycles begin on the boundary dot's own CPU cycle |
+| item 12, measured | the four once-a-frame marks of frames 1-56 read a constant **−1** before the movie's reset **and after it**, where §4l measured −1 and then +2. Frame 4 is 29 778 cycles instead of 29 781 and the reset's cycles are 116 734-116 740 against NesHawk's 116 735-116 741 |
+| item 12, the mechanism | not a constant: `NesCoreOf::run_frame_profiled_gen`'s loop asks, before each instruction, whether the boundary dot falls inside the **next** CPU cycle, through `NesBusOf::frame_boundary_is_the_next_cycle`. `BEFORE_RESET` is a **const** parameter, so no ordinary frame of either profile carries the test |
+| item 1c with it | frame **40**'s strobe collision closes (8 against 8 where it was 8 against 10), the marks hold −1 to BizHawk frame 12, and the movie parts at **9 353** |
+| item 13, measured first | `q184.lua`, the whole bus stream of tree frames 11 to 17. Every NesHawk transfer reads on an **even reported cycle** and ends with **one cycle carrying no bus access at all**; the leading dead cycle is spent only when the `$4014` write itself lands on an even one. This core's accesses land on the same cycles and it spends the halt plus an alignment cycle, with nothing at the end — so the totals are **swapped**, not offset: 514 where this core charges 513 and 513 where it charges 514 |
+| item 13, what it is worth | the movie's **first difference of any kind**, at tree frame 11's first transfer. With it the transfer agrees to the cycle, the marks read −1 on BizHawk frames 2-12 **and 16-26**, and `step1`'s frames identical to the byte go from 288 to **318** of 400 |
+| why all three ship off | every configuration that changes anything parts at **9 353**: item 13 alone, 12 + 1c, 12 + 13, all three. The shipped trio-off reaches 45 095 **because its errors cancel**, which §4l predicted in writing. And item 13 alone costs *Faxanadu* 45 and 104 checksum lines, where item 1c is exactly inert on it — so the second movie says item 13 is incomplete, not that it is wrong |
+| the wall | 9 353 is **lot NESHAWK-PROFILE-3's own wall**, the frame item 8 (the retracted /NMI lag) was invented to pass and the frame the movie parted at before item 10 replaced it. So one more difference around the NMI's own cycle stands between these three items and shipping |
+| and `Standard` | untouched: `golden-core` **byte-identical** (`8d508070…`), 212 pass / 7 fail and `AccuracyCoin` **128/147**, and the NesHawk profile exactly where lot 8 left it — 207 pass / 12 fail, **121/147**, both *Faxanadu* dumps 247 and 314, *Kirby* 45 095. The bench reads **−3.0 %** and **−2.8 %** against `428c50e6` over three interleaved rounds |
+
+### What the next lot does
+
+**Frame 9 353, and it has a window rather than a guess**: the four marks and the bus stream across
+it, with the three items on, and the first instruction whose start cycle differs. The second thing
+worth one round is item 13's unmeasured half — what NesHawk does when a DMC fetch is owed on the
+transfer's own halt cycle, which is every frame of a game with DPCM under its OAM transfer and
+nowhere in the measured window. `docs/progress/NESHAWK-PROFILE-9.md`.
+
 ## 5. What is still unknown
 
 Said plainly, because the result in §4 is strong enough to be worth bounding.

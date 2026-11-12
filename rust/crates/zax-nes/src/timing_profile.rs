@@ -383,14 +383,23 @@ impl TimingProfile for NesHawkCompat {
     const DMC_FETCH_HAS_TWO_DUMMIES: bool = true;
     const DMC_LENGTH_LAGS_THE_FETCH: bool = true;
     const DMC_ENABLE_WRITES_MID_SAMPLE: bool = true;
-    /// **On since lot NESHAWK-PROFILE-9**, whose step 1 closed the gate the constant's own note
-    /// names: with item 12 the movie's reset lands on NesHawk's own cycle, so the slip this item
-    /// fires on is read off a CPU in the same place inside the instruction as NesHawk's.
-    const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool = true;
+    /// **Still off, and lot NESHAWK-PROFILE-9 moved its gate rather than opening it.** That lot's
+    /// step 1 did what the note below asks — item 12 puts the movie's reset on NesHawk's own cycle,
+    /// so this item's slip is now read off a CPU in the same place inside the instruction as
+    /// NesHawk's — and with the two on the *Kirby* `.bk2` parts at **9 353** against the shipped
+    /// pair's 45 095. 9 353 is lot NESHAWK-PROFILE-3's own wall, so **one more difference stands
+    /// between this item and shipping**, and the three measured-right items wait together: `true`
+    /// here, on `RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT` and on `OAM_DMA_WAITS_AT_THE_END` is the
+    /// whole of turning them on. It is **inert** on both *Faxanadu* dumps (247 and 314 either way),
+    /// so nothing but that movie is waiting on it.
+    const DMC_HALT_LANDS_ON_A_WRITE_CYCLE: bool = false;
     const DMC_FETCH_STALLS_AN_OAM_TRANSFER: bool = true;
     const PPU_START_UP_DOTS_SKIPPED: i64 = 7165;
 
-    /// **Item 11 is implemented and deliberately left OFF, and `1019` is the value to put here.**
+    /// **Item 11 is ON since lot NESHAWK-PROFILE-6**, which answered Q-182 and retracted item 1c:
+    /// with `1019` here the *Kirby* `.bk2` went from parting at frame 8 005 to **45 095**. The note
+    /// below is the lot that shipped it off and what it was waiting for, kept because the trade it
+    /// records is the one every later lot has had to re-read.
     ///
     /// The item is not in doubt: NesHawk's `DMCUnit` constructor sets `timer = 1020`, and with
     /// `1019` here every DMC sample fetch of *Kirby*'s frame 11 lands at a constant offset from
@@ -418,6 +427,27 @@ impl TimingProfile for NesHawkCompat {
     /// mechanism at `1019` through a profile of its own, so the item stays covered while it is off.
     const DMC_POWER_ON_TIMER: i32 = 1019;
 
-    const OAM_DMA_WAITS_AT_THE_END: bool = true;
-    const RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT: bool = true;
+    /// **Item 13 is implemented and shipped OFF** (lot NESHAWK-PROFILE-9 step 3), the shape item 11
+    /// and item 1c both shipped in: the measurement is not in doubt — BizHawk's own bus stream puts
+    /// the hardware's 513 and 514 cycles on the opposite phases of the `$4014` write, and the
+    /// constant's note has the table — and it **costs the second movie**. On its own it takes
+    /// *Faxanadu* `[USA]` from **247** of 832 checksum lines to **202** and the `[Rev 1]` dump from
+    /// 314 to 210, and the *Kirby* `.bk2` from 45 095 to 9 353; item 1c is inert on *Faxanadu*, so
+    /// those 45 and 104 lines are this item's alone.
+    ///
+    /// **What is probably missing is the half the measurement could not reach**: NesHawk's
+    /// behaviour when a DMC fetch is owed on the transfer's own halt cycle, which `run_dma` leaves
+    /// as this core's halt plus the trailing cycle because no transfer of the measured window does
+    /// it. A game with DPCM under a transfer — which *Faxanadu* has and *Kirby*'s measured frames
+    /// do not — meets that case every frame. The window to measure it in is named in the progress
+    /// note.
+    const OAM_DMA_WAITS_AT_THE_END: bool = false;
+
+    /// **Item 12 is implemented and shipped OFF**, with the rest of the group (lot
+    /// NESHAWK-PROFILE-9 step 1). It is the one of the three whose *own* measurement is a clean
+    /// pass — the four once-a-frame marks read the same −1 either side of the movie's reset where
+    /// they read −1 and then +2 — and it is off because it is worth something only with item 1c
+    /// beside it, and the pair parts at 9 353. On its own it takes the movie from 45 095 to
+    /// **4 665**, which is the two-errors-cancelling arithmetic and not a fault of the item.
+    const RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT: bool = false;
 }

@@ -14,7 +14,10 @@ Branch `feat/neshawk-profile`, worktree `cleanroom/wt-bk2`, base `f1c0faa8` (lot
 - [x] 3. **One round of five**: item 13, the OAM transfer's wait cycle, measured from BizHawk's
       own stream. The movie's first difference moves from tree frame 11 to the wall at **9 353**,
       which is lot 3's own wall and the next lot's named window.
-- [ ] 4. No regression, report, final pass.
+- [x] 4. **No regression** (`golden-core` byte-identical, every suite and both movies exactly where
+      lot 8 left them, the bench −3.0 % and −2.8 %), and **all three items ship off**: item 13
+      alone costs *Faxanadu* 45 and 104 checksum lines and every changed configuration costs
+      *Kirby* 35 742 frames. Report, documents, final pass.
 
 ## The environment this lot runs in
 
@@ -303,3 +306,68 @@ tree frame 9 353, the four marks and the bus stream across it.
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE-9 step 3 done: round 1, item 13 measured and shipped, the wall at 9 353 named
+
+---
+
+## Step 4 — no regression, and the three items ship off
+
+### The answer first
+
+**The three items are implemented, measured, tested and shipped OFF**, which is the shape item 11
+shipped in at lot 5 and item 1c at lot 8. Two movies say so and the second is the one that decides:
+
+| | *Kirby* (`step1c` / `step1e`) | *Faxanadu* `[USA]` / `[Rev 1]`, of 832 |
+|---|---|---|
+| shipped: 12, 1c, 13 all off | **10 000** / **45 095** | **247** / **314** |
+| item 1c alone | parted at 1 100 (lot 8) | 247 / — (**inert**) |
+| item 12 alone | 4 665 | inert (the movie never presses RESET) |
+| item 13 alone | 9 353 | **202** / **210** |
+| 12 + 1c | 9 353 | 247 |
+| 12 + 1c + 13 | 9 353 | 202 / 210 |
+
+So item 13 costs the second movie **45 and 104 checksum lines** on its own, and every configuration
+that changes anything costs the first movie **35 742 frames**. `ItemsWaiting` in
+`tests/neshawk_profile_tests.rs` is `NesHawkCompat` with the three in place, so each stays measured
+to the cycle; `true` on the three constants is the whole of turning them on.
+
+### The suites, both profiles
+
+| | shipped before | this lot |
+|---|---|---|
+| `golden-core`, 98 originals × 1 200 frames | `8d508070…` | **`8d508070850b24228285b6f04df6f98c310dbdab65e7577921c91ad4d0689773`** |
+| `test-roms --profile standard` | 212 pass, 7 fail, `AccuracyCoin` 128/147 | **212 / 7 / 128/147** |
+| `test-roms --profile neshawk` | 207 pass, 12 fail, `AccuracyCoin` 121/147 | **207 / 12 / 121/147** |
+| `apu_test`, `cpu_interrupts_v2`, `ppu_vbl_nmi`, `vbl_nmi_timing`, `sprdma_and_dmc_dma` (standard) | 9/9, 6/6, 11/11, 7/7, 2/2 | **unchanged** |
+| *Kirby* `.bk2`, neshawk | 45 095 | **45 095** |
+| *Faxanadu*, both dumps, neshawk | 247 and 314 | **247 and 314** |
+| *Faxanadu*, both dumps, standard | 207 and 220 | **207 and 220** |
+| `bench-core`, 600 frames, 3 interleaved rounds against `428c50e6` | — | **−3.0 %** (Super Mario Bros. 3, 1.3901 → 1.3480 ms) and **−2.8 %** (Mega Man 3, 0.9555 → 0.9291) |
+| the binary | — | **+9 728 bytes** for three items' arms and the const-generic frame entry |
+
+### The final pass
+
+| | |
+|---|---|
+| `cargo fmt --all --check` | clean |
+| `cargo clippy --workspace --all-targets --release -- -D warnings` | clean |
+| `cargo test --release` | **2 500 passed, 0 failed, 88 ignored** over every crate that links without SDL2 |
+| the same `-- --ignored`, with `ZAXNES_ROMS`, `ZAXNES_TEST_ROMS` and `ZAXNES_PROFILES` | `zax-nes` **11 passed, 0 failed**, `zax-harness` **1 passed, 0 failed** |
+| two pre-existing environment failures, named rather than passed over | `zax-app` and `zax-platform` do not **link** here at all (`LNK1181: SDL2.lib`), and six ignored `zax-profiles` tests want the real 3dSen installation, which the clean side may not read. Neither touches anything this lot changed, and neither is new |
+
+### What this lot did not do, said plainly
+
+* **It did not take the movie past 45 095** — it took it to 9 353 three different ways and put the
+  shipped pair back. What it bought is the clock: the four marks hold **−1** across the movie's
+  reset and on BizHawk frames 2-12 and 16-26, where lot 8 had −1 and then +2 from frame 7 onwards.
+* **It did not measure item 13's other half**: what NesHawk does when a DMC fetch is owed on an OAM
+  transfer's own halt cycle. No transfer of the measured window does it, and *Faxanadu*'s loss says
+  that is where the item's remaining cycle is.
+* **It did not open frame 9 353.** That is the next lot's one job, and it now has a window instead
+  of a guess: the wall is lot 3's own, the frame item 8 — the retracted /NMI lag — was invented to
+  pass.
+* **It changed `Standard` not at all**, by construction: every arm of the three items is behind a
+  constant that is `false` on both profiles, and `golden-core` is byte-identical.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-9 step 4 done: no regression, the three items ship off with their measurements, the documents
