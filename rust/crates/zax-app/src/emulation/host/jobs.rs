@@ -845,7 +845,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         };
         let enabled = self.builtin_patches_wanted();
         let key = (slot_id.to_owned(), record.saved_at, enabled);
-        if let Some(&status) = self.slot_patch_cache.borrow().get(&key) {
+        if let Some(&status) = self.slot_caches.patch.borrow().get(&key) {
             return status;
         }
         let status = std::fs::read(self.slot_state_file(slot_id))
@@ -854,8 +854,35 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             .map_or(SlotPatchStatus::Fits, |state| {
                 self.state_patch_status(&state)
             });
-        self.slot_patch_cache.borrow_mut().insert(key, status);
+        self.slot_caches.patch.borrow_mut().insert(key, status);
         status
+    }
+
+    /// The engine that wrote the state of `slot_id`, read from the core name its header records;
+    /// `None` for an empty slot, an unreadable file or a name this build does not know. A state
+    /// from before engines were recorded has an empty name, which is Zaxnes's.
+    #[must_use]
+    pub fn slot_engine(&self, slot_id: &str) -> Option<zax_core_api::EngineKind> {
+        let record = self
+            .slots
+            .find(slot_id)
+            .filter(|record| record.is_occupied())?;
+        let key = (slot_id.to_owned(), record.saved_at);
+        if let Some(&engine) = self.slot_caches.engine.borrow().get(&key) {
+            return engine;
+        }
+        let engine = std::fs::read(self.slot_state_file(slot_id))
+            .ok()
+            .and_then(|bytes| save_state_file::try_read(&bytes))
+            .and_then(|state| engine_of_core_id(&state.header.core_id));
+        self.slot_caches.engine.borrow_mut().insert(key, engine);
+        engine
+    }
+
+    /// The engine the game in play runs on, `None` without a game.
+    #[must_use]
+    pub fn engine_in_play(&self) -> Option<zax_core_api::EngineKind> {
+        self.session.as_ref().map(|session| session.core().kind())
     }
 
     /// Sets the components of the built-in hack as the state of `slot_id` had them, then loads it:
@@ -970,4 +997,15 @@ fn state_components(state: &SaveStateContent) -> Vec<String> {
             Vec::new()
         }
     })
+}
+
+/// The engine a savestate header's core name names: empty is Zaxnes (states written before the
+/// name was recorded), otherwise the engine whose [`zax_core_api::state_core_name`] it is.
+fn engine_of_core_id(core_id: &str) -> Option<zax_core_api::EngineKind> {
+    if core_id.is_empty() {
+        return Some(zax_core_api::EngineKind::Zaxnes);
+    }
+    zax_core_api::EngineKind::ALL
+        .into_iter()
+        .find(|&engine| zax_core_api::state_core_name(engine) == core_id)
 }

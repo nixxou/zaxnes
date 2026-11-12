@@ -563,6 +563,9 @@ pub fn inert_note(id: SettingId, model: &SettingsModel) -> Option<String> {
 /// [`inert_note`]'s key, so a test can name the reason it expects.
 #[must_use]
 pub fn inert_reason(id: SettingId, model: &SettingsModel) -> Option<&'static str> {
+    if let Some(reason) = engine_reason(id, model) {
+        return Some(reason);
+    }
     let scale_applies = render_scaling::scale_applies(model.render_method());
     let optimized_lua = model.get(SettingId::EmuLuaOptimized).as_bool();
     Some(match id {
@@ -615,34 +618,6 @@ pub fn inert_reason(id: SettingId, model: &SettingsModel) -> Option<&'static str
         // always had — `application.rs` never gives it the latency, and `stream.rs`, which is
         // where the prefill, the ramps and the counters live, is not open at all.
         SettingId::AudioLatencyMs if model.classic_audio_output() => keys::HINT_CLASSIC_AUDIO,
-        // Lot FCEUX-23 step 5, §4 of `docs/review/FCEUX-ENGINE.md`: with FCEUX chosen for this
-        // game the widescreen extension, the hack packs, the sprite limit and the run-ahead are
-        // **shown disabled with the reason, not hidden** — "a hidden control reads as a bug".
-        // Each is Zaxnes's own bus or PPU rather than a feature of an emulator, so
-        // `EngineHandle` ignores it on the other engine (`Capabilities::FCEUX`).
-        SettingId::VideoWidescreen
-        | SettingId::VideoWidescreenExtra
-        | SettingId::VideoWidescreenAdvanced
-        | SettingId::VideoWidescreenStrictEdges
-            if fceux_is_the_engine(model) =>
-        {
-            keys::HINT_FCEUX_NO_WIDESCREEN
-        }
-        SettingId::EmuBuiltinPatches | SettingId::EmuForcedPatch | SettingId::EmuHackOptions
-            if fceux_is_the_engine(model) =>
-        {
-            keys::HINT_FCEUX_NO_HACKS
-        }
-        SettingId::VideoRemoveSpriteLimit if fceux_is_the_engine(model) => {
-            keys::HINT_FCEUX_NO_SPRITE_LIMIT
-        }
-        SettingId::EmuRunAhead
-        | SettingId::EmuSmoothScrollAhead
-        | SettingId::EmuSmoothScrollView
-            if fceux_is_the_engine(model) =>
-        {
-            keys::HINT_FCEUX_NO_RUN_AHEAD
-        }
         // `jobs.rs`: the detection *writes* `emu.tv_mode` at the next ROM load, so whatever is
         // chosen here is overwritten rather than merely ignored.
         SettingId::EmuTvMode if model.get(SettingId::EmuAutoTvMode).as_bool() => {
@@ -670,6 +645,37 @@ pub fn inert_reason(id: SettingId, model: &SettingsModel) -> Option<&'static str
     })
 }
 
+/// Why `id` does nothing on the engine chosen for the game in play, or `None` when the engine is
+/// Zaxnes or `id` is not one of the controls only Zaxnes has.
+///
+/// The one list of those controls, shared by the desktop window ([`inert_reason`]) and the
+/// console pages (`handheld::options::engine_lock`), so the two cannot disagree.
+#[must_use]
+pub fn engine_reason(id: SettingId, model: &SettingsModel) -> Option<&'static str> {
+    if !engine_is_not_zaxnes(model) {
+        return None;
+    }
+    Some(match id {
+        // Lot FCEUX-23 step 5, §4 of `docs/review/FCEUX-ENGINE.md`: with FCEUX chosen for this
+        // game the widescreen extension, the hack packs, the sprite limit and the run-ahead are
+        // **shown disabled with the reason, not hidden** — "a hidden control reads as a bug".
+        // Each is Zaxnes's own bus or PPU rather than a feature of an emulator, so
+        // `EngineHandle` ignores it on the other engine (`Capabilities::FCEUX`).
+        SettingId::VideoWidescreen
+        | SettingId::VideoWidescreenExtra
+        | SettingId::VideoWidescreenAdvanced
+        | SettingId::VideoWidescreenStrictEdges => keys::HINT_FCEUX_NO_WIDESCREEN,
+        SettingId::EmuBuiltinPatches | SettingId::EmuForcedPatch | SettingId::EmuHackOptions => {
+            keys::HINT_FCEUX_NO_HACKS
+        }
+        SettingId::VideoRemoveSpriteLimit => keys::HINT_FCEUX_NO_SPRITE_LIMIT,
+        SettingId::EmuRunAhead
+        | SettingId::EmuSmoothScrollAhead
+        | SettingId::EmuSmoothScrollView => keys::HINT_FCEUX_NO_RUN_AHEAD,
+        _ => return None,
+    })
+}
+
 /// The engine chosen for the game in play, from the setting.
 ///
 /// Reads the setting rather than the live engine, deliberately: the options window is drawn from
@@ -690,7 +696,8 @@ fn chosen_engine(model: &SettingsModel) -> zax_core_api::EngineKind {
 /// them (`Capabilities::FCEUX` and `Capabilities::NESHAWK` agree on all four). The test is
 /// therefore "is the engine Zaxnes" and not "is the engine FCEUX": a lot that adds a third engine
 /// without those features needs no change here.
-fn fceux_is_the_engine(model: &SettingsModel) -> bool {
+#[must_use]
+pub fn engine_is_not_zaxnes(model: &SettingsModel) -> bool {
     chosen_engine(model) != zax_core_api::EngineKind::Zaxnes
 }
 

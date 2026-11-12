@@ -184,6 +184,20 @@ impl<C: GameCatalog, V: GameView> EmulationHostOptions<C, V> {
     }
 }
 
+/// What the slot lists read from each slot's state file, kept so a menu drawn every frame does
+/// not read the files every frame.
+#[derive(Default)]
+struct SlotCaches {
+    /// Whether each slot's state fits the built-in ROM patches, by slot, save time and setting.
+    patch:
+        std::cell::RefCell<std::collections::HashMap<(String, i64, bool), jobs::SlotPatchStatus>>,
+    /// The engine that wrote each slot's state, by slot and save time (`None`: not one this
+    /// build knows, or no readable state).
+    engine: std::cell::RefCell<
+        std::collections::HashMap<(String, i64), Option<zax_core_api::EngineKind>>,
+    >,
+}
+
 /// The emulation host.
 #[allow(clippy::struct_excessive_bools)] // independent flags of the loop, as the C# class
 pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
@@ -288,9 +302,8 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     /// The slots shared by every game before the files were named after the ROM: a game's
     /// states move to its files when it is chosen.
     pub legacy_slots: SaveSlotIndex,
-    /// Whether each slot's state fits the built-in ROM patches, by slot, save time and setting.
-    slot_patch_cache:
-        std::cell::RefCell<std::collections::HashMap<(String, i64, bool), jobs::SlotPatchStatus>>,
+    /// What the slot lists read from the slots' state files.
+    slot_caches: SlotCaches,
     /// The CRC of the data of the ROM files, which tells the games a hack is made for.
     rom_crcs: std::cell::RefCell<crate::persistence::rom_crc_cache::RomCrcCache>,
     /// What the study of each ROM file found: whether a widescreen hack fits it.
@@ -447,7 +460,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             notifications: NotificationCenter::new(),
             slots: SaveSlotIndex::new(),
             legacy_slots,
-            slot_patch_cache: std::cell::RefCell::default(),
+            slot_caches: SlotCaches::default(),
             rom_crcs: std::cell::RefCell::new(rom_crcs),
             hack_compat: std::cell::RefCell::new(hack_compat),
             zapper: ZapperState::new(),

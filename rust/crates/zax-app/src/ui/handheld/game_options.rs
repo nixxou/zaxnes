@@ -567,6 +567,10 @@ impl GameOptionsModel {
             {
                 return Some(GameOptionsCommand::OpenOverscan);
             }
+            // Zaxnes's own controls do not step, and the widescreen and the hacks do not open,
+            // while this game runs on another engine.
+            PadButton::Left | PadButton::Right | PadButton::A
+                if self.selected_locked_by_engine() => {}
             PadButton::A | PadButton::Right
                 if !self.in_advanced() && self.selected == Self::HACKS_ROW =>
             {
@@ -597,6 +601,23 @@ impl GameOptionsModel {
                 GameRow::ResetAll | GameRow::Widescreen | GameRow::Hacks => None,
             },
         }
+    }
+
+    /// Whether the selected row is a control only Zaxnes's own engine has while this game's
+    /// engine is another one: the widescreen and the hacks of the main screen, or an option row
+    /// [`options::engine_lock`] locks.
+    #[must_use]
+    pub fn selected_locked_by_engine(&self) -> bool {
+        if self.page_rows().is_none()
+            && matches!(
+                GAME_MAIN.get(self.selected),
+                Some(GameRow::Widescreen | GameRow::Hacks)
+            )
+        {
+            return crate::ui::options::engine_is_not_zaxnes(&self.edited);
+        }
+        self.selected_row()
+            .is_some_and(|row| options::engine_lock(row, &self.edited).is_some())
     }
 
     /// The global values with the game's own over them.

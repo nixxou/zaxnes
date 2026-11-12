@@ -26,6 +26,10 @@ pub const MENU_CAMERA_FIRST_PERSON: &str = "menu.camera.first_person";
 pub const SLOT_EMPTY: &str = "slot.empty";
 pub const SLOT_OTHER_PATCH: &str = "slot.other_patch";
 pub const SLOT_OTHER_HACK_VERSION: &str = "slot.other_hack_version";
+/// The engine a state was made with, shown when it is not Zaxnes or the game runs on another.
+pub const SLOT_ENGINE: &str = "slot.engine";
+/// A state made with another engine than the one the game runs on: it cannot load.
+pub const SLOT_OTHER_ENGINE: &str = "slot.other_engine";
 /// Submenu of the movies to play.
 pub const MENU_MOVIES: &str = "menu.movies";
 /// Title of the window that asks for a note on the frame on screen.
@@ -398,6 +402,8 @@ pub const HANDHELD_GLOBAL_VALUE: &str = "handheld.game_options.global";
 pub const HANDHELD_OWN_COUNT: &str = "handheld.game_options.own_count";
 /// Q-103, the console's own, shorter note: Run-ahead is held at 0 by this game's scripts.
 pub const HANDHELD_RUN_AHEAD_FORCED: &str = "handheld.options.run_ahead_forced";
+/// A console row of a control only Zaxnes's own engine has, while another engine is chosen.
+pub const HANDHELD_ZAXNES_ONLY: &str = "handheld.options.zaxnes_only";
 pub const HANDHELD_HINT_GAME_OPTIONS: &str = "handheld.hint.game_options";
 /// L2 on the home screen: the favourite mark of the selected game (AMD-053 REQ-UI-210).
 pub const HANDHELD_HINT_FAVORITE: &str = "handheld.hint.favorite";
@@ -614,6 +620,8 @@ pub const PUBLISHED: &[&str] = &[
     SLOT_EMPTY,
     SLOT_OTHER_PATCH,
     SLOT_OTHER_HACK_VERSION,
+    SLOT_ENGINE,
+    SLOT_OTHER_ENGINE,
     MENU_MOVIES,
     WINDOW_MOVIE_NOTE,
     MOVIE_NOTE_WRITE,
@@ -865,6 +873,7 @@ pub const PUBLISHED: &[&str] = &[
     HANDHELD_GLOBAL_VALUE,
     HANDHELD_OWN_COUNT,
     HANDHELD_RUN_AHEAD_FORCED,
+    HANDHELD_ZAXNES_ONLY,
     HANDHELD_HINT_GAME_OPTIONS,
     HANDHELD_HINT_FAVORITE,
     HANDHELD_HINT_RESET_ALL,
