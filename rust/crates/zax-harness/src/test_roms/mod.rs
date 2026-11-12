@@ -665,7 +665,9 @@ fn run_one_neshawk(
         .as_ref()
         .map_or("?", |report| report.board_name)
         .to_owned();
-    result.detail.insert("board".into(), json!(board));
+    // `neshawk_board`, not `board`: `mapperel.rs` already writes `board` with the name the ROM
+    // prints on its own screen, and the two would overwrite each other.
+    result.detail.insert("neshawk_board".into(), json!(board));
     result
         .detail
         .insert("board_from_zaxnes".into(), json!(from_zaxnes));

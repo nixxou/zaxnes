@@ -586,3 +586,76 @@ An application `.bk2` importer therefore has the rule waiting for it; the gap ta
 since**. Fixed by refusing `Empty` as it refuses `Zapper`, which is the right answer and not a
 convenience: `Empty` is BizHawk's `UnpluggedNES`, whose read answers 0 for ever where a pad
 answers 1 from the ninth read, and accepting it would hand back a pad while reporting a socket.
+
+### Resumption 2, step D — the second board set
+
+Six board classes ported from the C#, ~1 320 lines of reference: `GxROM` (66), `IC_74x377`
+(11 and the Color Dreams/AGCI boards, incl. 144), `PxROM_FxROM` (MMC2 = 9 and MMC4 = 10),
+`Camerica_Mapper071` and `Camerica_Mapper232`, `Sunsoft_FME7` (69), and `VRC2_4` (21, 22, 23, 25,
+27, 116).
+
+#### Verified against NesHawk itself, not against "it looks right"
+
+Every ROM in the collection that reaches one of the new boards was put to **NesHawk running in
+BizHawk** (`scripts/nhr4.lua`, `--config=config-neshawk.ini`) and the two screens compared through
+**one** decoder, so that a verdict difference could not be a decoder difference. `nhr4.lua` dumps
+all four nametable pages as raw bytes and the Python side applies the harness's own `Font::Ascii6`
+rule and its own most-text page choice.
+
+| ROM | NesHawk on BizHawk | the port | class picked |
+|---|---|---|---|
+| `M9_P128K_C64K` | `PNROM (MMC2)` / `0000` | identical | `PxROM_FxROM` |
+| `M10_P128K_C64K_S8K` | `F*ROM (MMC4)` / `0000` | identical | `PxROM_FxROM` |
+| `M10_P128K_C64K_W8K` | `F*ROM (MMC4)` / `0000` | identical | `PxROM_FxROM` |
+| `M11_P64K_C64K_V` | `COLOR DREAMS` / `0000` | identical | `IC_74x377` |
+| `M66_P64K_C16K_V` | `G*ROM` / `0000` | identical | `GxROM` |
+| `M69_P128K_C64K_S8K` | `J*ROM (FME-7)` / `0000` | identical | `Sunsoft_FME7` |
+| `M69_P128K_C64K_W8K` | `J*ROM (FME-7)` / `0000` | identical | `Sunsoft_FME7` |
+| `m22chrbankingtest/0-127` | the 128-tile CHR grid, 16 lines | **character for character identical** | `VRC2_4` |
+
+New references, new files only: `bizhawk-runs/nhr4-*.txt` (8), script
+`ext-tools/scripts/nhr4.lua`.
+
+**And against Zaxnes**: of the 40 `holy-mapperel` ROMs, the two engines now give the **same
+verdict on 30 and differ on 10** — and all ten are the documented MMC1 `$E000 bit 4` cases, which
+is NesHawk's own behaviour. Not one ROM of a *new* board disagrees with Zaxnes.
+
+The campaign totals are unchanged at **199 pass / 20 fail / 1 unsupported / 111 manual**, which is
+the point: these ROMs already passed on the Zaxnes fallback, and they pass on the ported boards
+too. What changed is *which* board runs them — 9 cartridges still fall back, down from 18.
+
+#### Three scope lines drawn on purpose
+
+1. **MMC5 (mapper 5) is not ported**, and runs on the Zaxnes fallback. `ExROM.cs` is 799 lines and
+   needs two things this port's `Board` trait cannot express: a **mutable** PPU-register read
+   (`ReadReg2xxx`) and nametable bytes the *cartridge* serves (`ExRAM`, fill mode). The fallback
+   already runs all five MMC5 ROMs in the collection and is marked, so the honest trade was the
+   six boards that fit over the one that does not. It is the gap table's entry, not a silence.
+2. **`SUNSOFT-5B` is refused by `Sunsoft_FME7`** and left to the fallback. The C#'s `Sunsoft_5` is
+   this board plus the 5B's own sound chip; this port has no expansion audio at all, and a board
+   that silently drops a third of Gimmick!'s music is worse than one marked "not NesHawk-exact".
+3. **Mapper 71 (Camerica) is ported but unexercised**: the collection has no mapper-71 ROM and no
+   mapper-71 game. Stated rather than claimed.
+
+#### Four C# details a tidy-up would have changed
+
+* **`IC_74x377`'s `bus_conflict` is `true` at construction**, not at `Configure`
+  (`private bool bus_conflict = true;`), and `Configure` only ever *clears* it. A
+  `derive(Default)` would start it `false` and give every Color Dreams cartridge the wrong write
+  path — so the `Default` impl is written out, with the reason.
+* **`PxROM_FxROM` does not serialise `prg_banks_8k`**: `SyncState` ends `if (ser.IsReader)
+  SyncPRG();` and recomputes them from `prg_reg`. Transcribed, so a block of this board is the
+  shape the reference's is.
+* **`VRC2_4`'s `$9002` on a VRC2 falls through** (`goto case 0x1000`) and then runs `SyncPRG()`
+  anyway, so a VRC2 write there sets the mirroring **and** re-syncs PRG. Both, in that order.
+* **`latch6k_value` is in the block only when `latch6k_exists`**, which makes a VRC2 block's
+  length depend on the board. Kept.
+* Where the C# **throws** — an unknown PCB for a `KONAMI-VRC-2`/`VRC-4` — this port *refuses the
+  board* instead, because this crate may not panic. The cartridge then falls through to the Zaxnes
+  board with its marker, which is a better outcome than aborting the load and is visible.
+
+One instrument bug of this step's own: `test-roms`'s new `board` detail key **collided** with
+`mapperel.rs`'s, which writes the board name the ROM prints on its own screen. Renamed
+`neshawk_board`.
+
+*Kirby* frames 1-400 re-run after the registry changed: still **400 of 400 byte-identical**.

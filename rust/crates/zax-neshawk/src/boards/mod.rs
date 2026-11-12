@@ -21,12 +21,18 @@
 use crate::cart::{CartInfo, DetectionOrigin};
 
 mod axrom;
+mod camerica;
 mod cnrom;
+mod fme7;
+mod gxrom;
+mod ic74x377;
 mod mmc3;
 mod nrom;
+mod pxrom;
 mod sxrom;
 mod txrom;
 mod uxrom;
+mod vrc2_4;
 pub mod zaxnes;
 
 pub use mmc3::Mmc3;
@@ -333,6 +339,21 @@ pub enum BoardKind {
     SxRom512,
     SoRom,
     TxRom,
+    // --- the second board set (lot NESHAWK-REWRITE, resumption 2 step D) ---
+    /// `GxROM`, mapper 66.
+    GxRom,
+    /// `IC_74x377`, mapper 11 and the Color Dreams boards.
+    Ic74x377,
+    /// `PxROM_FxROM`: MMC2 (mapper 9) and MMC4 (mapper 10).
+    PxRom,
+    /// `Camerica_Mapper071`.
+    Camerica071,
+    /// `Camerica_Mapper232`.
+    Camerica232,
+    /// `Sunsoft_FME7`, mapper 69.
+    SunsoftFme7,
+    /// `VRC2_4`: mappers 21, 22, 23, 25, 27, 116.
+    Vrc24,
     /// Not a NesHawk class at all: [`zaxnes::ZaxnesBoard`], the fallback for a mapper no ported
     /// board implements (the owner's decision of 2026-11-12). It is in this enum so that a
     /// savestate can record which board a block was taken on, and [`create_board`] answers
@@ -349,6 +370,8 @@ const BOARD_ORDER: &[BoardKind] = &[
     BoardKind::UxRom,
     BoardKind::CnRom,
     BoardKind::AxRom,
+    BoardKind::GxRom,
+    BoardKind::Ic74x377,
     // SxROM must come before SuROM/SXROM/SoROM: it takes `MAPPER001` with PRG <= 256 and refuses
     // the rest, and SuROM takes `MAPPER001` with PRG > 256. Both carry the priority attribute via
     // their base class in the C#; only SxROM has it directly, and SuROM/SXROM/SoROM are normal
@@ -359,6 +382,13 @@ const BOARD_ORDER: &[BoardKind] = &[
     BoardKind::SuRom,
     BoardKind::SxRom512,
     BoardKind::SoRom,
+    // The second board set, none of which carries `[NesBoardImplPriority]` in the C#. Their
+    // order among themselves does not matter: no two of them accept the same board type.
+    BoardKind::PxRom,
+    BoardKind::Camerica071,
+    BoardKind::Camerica232,
+    BoardKind::SunsoftFme7,
+    BoardKind::Vrc24,
 ];
 
 /// Make an empty instance of a board class, or `None` for [`BoardKind::Zaxnes`], which needs the
@@ -375,6 +405,13 @@ pub fn create_board(kind: BoardKind) -> Option<Box<dyn Board>> {
         BoardKind::SxRom512 => Box::new(sxrom::SxRom::new(sxrom::SxVariant::SxRom512)),
         BoardKind::SoRom => Box::new(sxrom::SxRom::new(sxrom::SxVariant::SoRom)),
         BoardKind::TxRom => Box::new(txrom::TxRom::default()),
+        BoardKind::GxRom => Box::new(gxrom::GxRom::default()),
+        BoardKind::Ic74x377 => Box::new(ic74x377::Ic74x377::default()),
+        BoardKind::PxRom => Box::new(pxrom::PxRom::default()),
+        BoardKind::Camerica071 => Box::new(camerica::Camerica071::default()),
+        BoardKind::Camerica232 => Box::new(camerica::Camerica232::default()),
+        BoardKind::SunsoftFme7 => Box::new(fme7::SunsoftFme7::default()),
+        BoardKind::Vrc24 => Box::new(vrc2_4::Vrc24::default()),
         BoardKind::Zaxnes => return None,
     })
 }
@@ -434,6 +471,13 @@ crate::state::sync_enum!(BoardKind {
     7 => BoardKind::SoRom,
     8 => BoardKind::TxRom,
     9 => BoardKind::Zaxnes,
+    10 => BoardKind::GxRom,
+    11 => BoardKind::Ic74x377,
+    12 => BoardKind::PxRom,
+    13 => BoardKind::Camerica071,
+    14 => BoardKind::Camerica232,
+    15 => BoardKind::SunsoftFme7,
+    16 => BoardKind::Vrc24,
 });
 
 /// `impl Board::write_state`/`read_state` for a board whose own `SyncState` impl is generated:
