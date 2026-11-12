@@ -4,18 +4,30 @@
 //! layers of `zax-achievements` and `zax-android`): a C interface hands raw pointers both ways.
 //! It only moves data between them and [`Core`]; every decision is made in safe code.
 //!
-//! The structures and numbers are those of `libretro.h` (API version 1).
+//! The structures and numbers are those of `libretro.h` (API version 1). The game and the
+//! OpenGL renderer live in thread-local storage: the frontend calls a core from one thread, and
+//! the Lua runtime and the GL objects are not to be shared between threads anyway.
 
+use std::cell::{Cell, RefCell};
 use std::ffi::{c_char, c_uint, c_void, CStr, CString};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::num::NonZeroU32;
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::sync::{Mutex, PoisonError};
+
+use zax_render::target::RenderTarget;
+use zax_render::SceneRenderer;
 
 use crate::core::{Core, Options, MAX_HEIGHT, MAX_WIDTH, SAMPLE_RATE};
 use crate::options;
+use crate::profiles;
 
 const API_VERSION: c_uint = 1;
 
+const ENVIRONMENT_GET_SYSTEM_DIRECTORY: c_uint = 9;
 const ENVIRONMENT_SET_PIXEL_FORMAT: c_uint = 10;
 const ENVIRONMENT_SET_INPUT_DESCRIPTORS: c_uint = 11;
+const ENVIRONMENT_SET_HW_RENDER: c_uint = 14;
 const ENVIRONMENT_GET_VARIABLE: c_uint = 15;
 const ENVIRONMENT_SET_VARIABLES: c_uint = 16;
 const ENVIRONMENT_GET_VARIABLE_UPDATE: c_uint = 17;
@@ -24,13 +36,22 @@ const ENVIRONMENT_SET_SYSTEM_AV_INFO: c_uint = 32;
 const ENVIRONMENT_SET_GEOMETRY: c_uint = 37;
 
 const PIXEL_FORMAT_XRGB8888: c_uint = 1;
+const HW_CONTEXT_OPENGL_CORE: c_uint = 3;
 const DEVICE_JOYPAD: c_uint = 1;
+const DEVICE_ANALOG: c_uint = 5;
+const ANALOG_RIGHT: c_uint = 1;
+const JOYPAD_L2: c_uint = 12;
+const JOYPAD_R2: c_uint = 13;
+const JOYPAD_L3: c_uint = 14;
+const JOYPAD_R3: c_uint = 15;
 const MEMORY_SAVE_RAM: c_uint = 0;
 const MEMORY_SYSTEM_RAM: c_uint = 2;
 const REGION_NTSC: c_uint = 0;
 const REGION_PAL: c_uint = 1;
 const LOG_INFO: c_uint = 1;
 const LOG_ERROR: c_uint = 3;
+/// The widest and tallest the 3D is drawn at.
+const MAX_3D: (c_uint, c_uint) = (3840, 2160);
 
 /// The libretro joypad buttons in the NES pad's bit order: A, B, Select, Start, Up, Down,
 /// Left, Right (`RETRO_DEVICE_ID_JOYPAD_*`).
@@ -45,6 +66,16 @@ const PAD: [(c_uint, &CStr); 8] = [
     (7, c"Right"),
 ];
 
+/// The other controls of the 3D, named in the frontend's input menu.
+const CAMERA: [(c_uint, c_uint, c_uint, &CStr); 6] = [
+    (DEVICE_ANALOG, ANALOG_RIGHT, 0, c"Camera: turn"),
+    (DEVICE_ANALOG, ANALOG_RIGHT, 1, c"Camera: tilt"),
+    (DEVICE_JOYPAD, 0, JOYPAD_L2, c"Camera: nearer"),
+    (DEVICE_JOYPAD, 0, JOYPAD_R2, c"Camera: farther"),
+    (DEVICE_JOYPAD, 0, JOYPAD_L3, c"2D / 3D"),
+    (DEVICE_JOYPAD, 0, JOYPAD_R3, c"Camera: reset"),
+];
+
 type EnvironmentFn = unsafe extern "C" fn(cmd: c_uint, data: *mut c_void) -> bool;
 type VideoRefreshFn =
     unsafe extern "C" fn(data: *const c_void, width: c_uint, height: c_uint, pitch: usize);
@@ -54,6 +85,9 @@ type InputPollFn = unsafe extern "C" fn();
 type InputStateFn =
     unsafe extern "C" fn(port: c_uint, device: c_uint, index: c_uint, id: c_uint) -> i16;
 type LogFn = unsafe extern "C" fn(level: c_uint, format: *const c_char, ...);
+type HwContextFn = unsafe extern "C" fn();
+type HwFramebufferFn = unsafe extern "C" fn() -> usize;
+type HwProcAddressFn = unsafe extern "C" fn(symbol: *const c_char) -> *const c_void;
 
 #[repr(C)]
 pub struct SystemInfo {
@@ -116,6 +150,23 @@ struct LogCallback {
     log: Option<LogFn>,
 }
 
+/// `struct retro_hw_render_callback`.
+#[repr(C)]
+struct HwRenderCallback {
+    context_type: c_uint,
+    context_reset: Option<HwContextFn>,
+    get_current_framebuffer: Option<HwFramebufferFn>,
+    get_proc_address: Option<HwProcAddressFn>,
+    depth: bool,
+    stencil: bool,
+    bottom_left_origin: bool,
+    version_major: c_uint,
+    version_minor: c_uint,
+    cache_context: bool,
+    context_destroy: Option<HwContextFn>,
+    debug_context: bool,
+}
+
 /// The frontend's callbacks.
 #[derive(Clone, Copy)]
 struct Frontend {
@@ -125,6 +176,8 @@ struct Frontend {
     input_poll: Option<InputPollFn>,
     input_state: Option<InputStateFn>,
     log: Option<LogFn>,
+    framebuffer: Option<HwFramebufferFn>,
+    proc_address: Option<HwProcAddressFn>,
 }
 
 static FRONTEND: Mutex<Frontend> = Mutex::new(Frontend {
@@ -134,18 +187,36 @@ static FRONTEND: Mutex<Frontend> = Mutex::new(Frontend {
     input_poll: None,
     input_state: None,
     log: None,
+    framebuffer: None,
+    proc_address: None,
 });
 
-/// The game loaded. Boxed so that the memory handed out by [`retro_get_memory_data`] stays where
-/// it is until the game is unloaded.
-static GAME: Mutex<Option<Box<Core>>> = Mutex::new(None);
+/// The renderer of the 3D, on the frontend's OpenGL context, and the size it draws at.
+struct Gl {
+    renderer: SceneRenderer,
+}
+
+thread_local! {
+    /// The game loaded. Boxed so that the memory handed out by [`retro_get_memory_data`] stays
+    /// where it is until the game is unloaded.
+    static GAME: RefCell<Option<Box<Core>>> = const { RefCell::new(None) };
+    /// The 3D renderer, from the frontend's `context_reset` to its `context_destroy`.
+    static GL: RefCell<Option<Gl>> = const { RefCell::new(None) };
+    /// The 2D / 3D button as it was at the last frame, to see it go down.
+    static FLAT_HELD: Cell<bool> = const { Cell::new(false) };
+}
 
 fn frontend() -> Frontend {
     *FRONTEND.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-fn game() -> MutexGuard<'static, Option<Box<Core>>> {
-    GAME.lock().unwrap_or_else(PoisonError::into_inner)
+fn set_frontend(change: impl FnOnce(&mut Frontend)) {
+    change(&mut FRONTEND.lock().unwrap_or_else(PoisonError::into_inner));
+}
+
+/// Runs `operation` on the game loaded, when there is one.
+fn with_game<R>(operation: impl FnOnce(&mut Core) -> R) -> Option<R> {
+    GAME.with(|game| game.borrow_mut().as_deref_mut().map(operation))
 }
 
 /// Asks the frontend `cmd`, with `data` as `libretro.h` says for it.
@@ -168,6 +239,11 @@ fn log(level: c_uint, message: &str) {
     unsafe { callback(level, c"%s".as_ptr(), text.as_ptr()) };
 }
 
+/// The scripts' log.
+fn log_line(line: &str) {
+    log(LOG_INFO, line);
+}
+
 /// The value of core option `key`, as the frontend has it.
 fn variable(key: &str) -> Option<String> {
     let key = CString::new(key).ok()?;
@@ -181,6 +257,17 @@ fn variable(key: &str) -> Option<String> {
     // SAFETY: the frontend answered with a NUL-terminated string, valid until the next call.
     let value = unsafe { CStr::from_ptr(variable.value) };
     Some(value.to_string_lossy().into_owned())
+}
+
+/// The frontend's system folder.
+fn system_directory() -> Option<PathBuf> {
+    let mut folder: *const c_char = std::ptr::null();
+    if !environment(ENVIRONMENT_GET_SYSTEM_DIRECTORY, &mut folder) || folder.is_null() {
+        return None;
+    }
+    // SAFETY: a NUL-terminated path the frontend keeps.
+    let folder = unsafe { CStr::from_ptr(folder) };
+    Some(PathBuf::from(folder.to_string_lossy().into_owned()))
 }
 
 /// Declares the core options, the game's hack options with them.
@@ -211,23 +298,34 @@ fn read_options(hacks: &[zax_nes::builtin_patches::HackOption]) -> Options {
 }
 
 fn hack_list(core: &Core) -> Vec<zax_nes::builtin_patches::HackOption> {
-    core.hack_options()
-        .into_iter()
-        .map(|(option, _)| option)
-        .collect()
+    core.hack_options().into_iter().map(|(option, _)| option).collect()
 }
 
 fn av_info(core: Option<&Core>) -> SystemAvInfo {
-    let (width, height, aspect, fps) = core.map_or((256, 240, 4.0 / 3.0, 60.098_8), |core| {
-        let (width, height) = core.picture_size();
-        (width, height, core.aspect_ratio(), core.frames_per_second())
-    });
+    let (width, height, max, aspect, fps) =
+        core.map_or((256, 240, (MAX_WIDTH, MAX_HEIGHT), 4.0 / 3.0, 60.098_8), |core| {
+            if core.is_three_d() {
+                let (width, height) = core.options().resolution;
+                #[allow(clippy::cast_precision_loss)] // Screen sizes.
+                let aspect = width as f32 / height as f32;
+                (width, height, MAX_3D, aspect, core.frames_per_second())
+            } else {
+                let (width, height) = core.picture_size();
+                (
+                    width,
+                    height,
+                    (MAX_WIDTH, MAX_HEIGHT),
+                    core.aspect_ratio(),
+                    core.frames_per_second(),
+                )
+            }
+        });
     SystemAvInfo {
         geometry: GameGeometry {
             base_width: width,
             base_height: height,
-            max_width: MAX_WIDTH,
-            max_height: MAX_HEIGHT,
+            max_width: max.0,
+            max_height: max.1,
             aspect_ratio: aspect,
         },
         timing: SystemTiming {
@@ -244,24 +342,18 @@ pub extern "C" fn retro_api_version() -> c_uint {
 
 #[no_mangle]
 pub extern "C" fn retro_set_environment(callback: Option<EnvironmentFn>) {
-    FRONTEND
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .environment = callback;
+    set_frontend(|frontend| frontend.environment = callback);
     let mut logging = LogCallback { log: None };
     let log = environment(ENVIRONMENT_GET_LOG_INTERFACE, &mut logging)
         .then_some(logging.log)
         .flatten();
-    FRONTEND.lock().unwrap_or_else(PoisonError::into_inner).log = log;
+    set_frontend(|frontend| frontend.log = log);
     declare_options(&[]);
 }
 
 #[no_mangle]
 pub extern "C" fn retro_set_video_refresh(callback: Option<VideoRefreshFn>) {
-    FRONTEND
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .video_refresh = callback;
+    set_frontend(|frontend| frontend.video_refresh = callback);
 }
 
 #[no_mangle]
@@ -269,26 +361,17 @@ pub extern "C" fn retro_set_audio_sample(_callback: Option<AudioSampleFn>) {}
 
 #[no_mangle]
 pub extern "C" fn retro_set_audio_sample_batch(callback: Option<AudioSampleBatchFn>) {
-    FRONTEND
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .audio_sample_batch = callback;
+    set_frontend(|frontend| frontend.audio_sample_batch = callback);
 }
 
 #[no_mangle]
 pub extern "C" fn retro_set_input_poll(callback: Option<InputPollFn>) {
-    FRONTEND
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .input_poll = callback;
+    set_frontend(|frontend| frontend.input_poll = callback);
 }
 
 #[no_mangle]
 pub extern "C" fn retro_set_input_state(callback: Option<InputStateFn>) {
-    FRONTEND
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .input_state = callback;
+    set_frontend(|frontend| frontend.input_state = callback);
 }
 
 #[no_mangle]
@@ -296,7 +379,7 @@ pub extern "C" fn retro_init() {}
 
 #[no_mangle]
 pub extern "C" fn retro_deinit() {
-    *game() = None;
+    GAME.with(|game| *game.borrow_mut() = None);
 }
 
 /// # Safety
@@ -321,7 +404,7 @@ pub unsafe extern "C" fn retro_get_system_info(info: *mut SystemInfo) {
 /// `info` points to a `retro_system_av_info` the frontend owns.
 #[no_mangle]
 pub unsafe extern "C" fn retro_get_system_av_info(info: *mut SystemAvInfo) {
-    let av = av_info(game().as_deref());
+    let av = GAME.with(|game| av_info(game.borrow().as_deref()));
     // SAFETY: the frontend passes a writable structure.
     if let Some(info) = unsafe { info.as_mut() } {
         *info = av;
@@ -333,9 +416,7 @@ pub extern "C" fn retro_set_controller_port_device(_port: c_uint, _device: c_uin
 
 #[no_mangle]
 pub extern "C" fn retro_reset() {
-    if let Some(core) = game().as_mut() {
-        core.reset();
-    }
+    with_game(Core::reset);
 }
 
 /// Applies the options the frontend changed, and tells it what that changed.
@@ -357,16 +438,20 @@ fn follow_options(core: &mut Core) {
     }
 }
 
-fn input_word(frontend: &Frontend) -> u16 {
+/// Whether button `id` of pad `port` is down.
+fn pressed(frontend: &Frontend, port: c_uint, device: c_uint, index: c_uint, id: c_uint) -> i16 {
     let Some(state) = frontend.input_state else {
         return 0;
     };
+    // SAFETY: the frontend's input callback, called as `libretro.h` says.
+    unsafe { state(port, device, index, id) }
+}
+
+fn input_word(frontend: &Frontend) -> u16 {
     let mut word = 0_u16;
     for port in 0..2_u16 {
         for (bit, (id, _)) in PAD.iter().enumerate() {
-            // SAFETY: the frontend's input callback, called as `libretro.h` says.
-            let pressed = unsafe { state(c_uint::from(port), DEVICE_JOYPAD, 0, *id) } != 0;
-            if pressed {
+            if pressed(frontend, c_uint::from(port), DEVICE_JOYPAD, 0, *id) != 0 {
                 word |= 1 << (usize::from(port) * 8 + bit);
             }
         }
@@ -374,51 +459,120 @@ fn input_word(frontend: &Frontend) -> u16 {
     word
 }
 
+/// The camera controls of pad 1, applied to the 3D for one frame of `seconds`.
+fn steer(frontend: &Frontend, core: &mut Core, seconds: f32) {
+    let axis = |id| f32::from(pressed(frontend, 0, DEVICE_ANALOG, ANALOG_RIGHT, id)) / 32768.0;
+    let dead = |value: f32| if value.abs() < 0.2 { 0.0 } else { value };
+    let turn = (dead(axis(0)), dead(axis(1)));
+    let button = |id| pressed(frontend, 0, DEVICE_JOYPAD, 0, id) != 0;
+    let zoom = f32::from(i8::from(button(JOYPAD_R2)) - i8::from(button(JOYPAD_L2)));
+    let flat = button(JOYPAD_L3);
+    let flat_pressed = flat && !FLAT_HELD.with(|held| held.replace(flat));
+    if !flat {
+        FLAT_HELD.with(|held| held.set(false));
+    }
+    if let Some(three_d) = core.three_d_mut() {
+        if flat_pressed {
+            three_d.flat = !three_d.flat;
+        }
+        if button(JOYPAD_R3) {
+            three_d.reset_view();
+        }
+        three_d.advance(seconds, turn, zoom);
+    }
+}
+
+/// Draws the 3D into the frontend's framebuffer and hands it over; false when there is no
+/// renderer yet (the frontend has not reset the context).
+fn draw_three_d(frontend: &Frontend, core: &mut Core) -> bool {
+    let (width, height) = core.options().resolution;
+    let Some(framebuffer) = frontend.framebuffer else {
+        return false;
+    };
+    // SAFETY: the frontend's callback, called while its context is current.
+    let id = unsafe { framebuffer() };
+    let target = RenderTarget {
+        framebuffer: NonZeroU32::new(u32::try_from(id).unwrap_or(0)),
+        width: i32::try_from(width).unwrap_or(1),
+        height: i32::try_from(height).unwrap_or(1),
+    };
+    let Some(three_d) = core.three_d_mut() else {
+        return false;
+    };
+    let drawn = GL.with(|gl| {
+        let mut gl = gl.borrow_mut();
+        let gl = gl.as_mut()?;
+        let (scene, frame) = three_d.scene_and_frame();
+        Some(gl.renderer.render(&target, scene, &frame))
+    });
+    match drawn {
+        Some(Ok(())) => {}
+        Some(Err(error)) => log(LOG_ERROR, &format!("3D: {error}")),
+        None => return false,
+    }
+    if let Some(refresh) = frontend.video_refresh {
+        // RETRO_HW_FRAME_BUFFER_VALID: the frame is in the frontend's framebuffer.
+        // SAFETY: the frontend's video callback, with the marker `libretro.h` defines.
+        unsafe { refresh(usize::MAX as *const c_void, width, height, 0) };
+    }
+    true
+}
+
 #[no_mangle]
 pub extern "C" fn retro_run() {
     let frontend = frontend();
-    let mut guard = game();
-    let Some(core) = guard.as_mut() else {
-        return;
-    };
-    follow_options(core);
-    if let Some(poll) = frontend.input_poll {
-        // SAFETY: the frontend's poll callback, called once a frame.
-        unsafe { poll() };
-    }
-    core.run(input_word(&frontend));
-    if core.take_new_size() {
-        let mut geometry = av_info(Some(core)).geometry;
-        environment(ENVIRONMENT_SET_GEOMETRY, &mut geometry);
-    }
-    if let Some(refresh) = frontend.video_refresh {
-        let (pixels, width, height) = core.picture();
-        // SAFETY: `pixels` holds `width * height` pixels of 4 bytes, alive for the call.
-        unsafe {
-            refresh(
-                pixels.as_ptr().cast(),
-                width,
-                height,
-                usize::try_from(width).unwrap_or(0) * 4,
-            );
-        };
-    }
-    if let Some(batch) = frontend.audio_sample_batch {
-        let mut sound = core.sound();
-        while sound.len() >= 2 {
-            // SAFETY: `sound` holds `len / 2` stereo frames, alive for the call.
-            let taken = unsafe { batch(sound.as_ptr(), sound.len() / 2) };
-            if taken == 0 {
-                break;
-            }
-            sound = sound.get(taken * 2..).unwrap_or(&[]);
+    with_game(|core| {
+        follow_options(core);
+        if let Some(poll) = frontend.input_poll {
+            // SAFETY: the frontend's poll callback, called once a frame.
+            unsafe { poll() };
         }
-    }
+        core.run(input_word(&frontend));
+        #[allow(clippy::cast_possible_truncation)] // A frame's length.
+        let seconds = (1.0 / core.frames_per_second()) as f32;
+        if core.is_three_d() {
+            steer(&frontend, core, seconds);
+            if !draw_three_d(&frontend, core) {
+                if let Some(refresh) = frontend.video_refresh {
+                    // SAFETY: a null frame asks the frontend to show the last one again.
+                    unsafe { refresh(std::ptr::null(), 0, 0, 0) };
+                }
+            }
+        } else {
+            if core.take_new_size() {
+                let mut geometry = av_info(Some(core)).geometry;
+                environment(ENVIRONMENT_SET_GEOMETRY, &mut geometry);
+            }
+            if let Some(refresh) = frontend.video_refresh {
+                let (pixels, width, height) = core.picture();
+                // SAFETY: `pixels` holds `width * height` pixels of 4 bytes, alive for the call.
+                unsafe {
+                    refresh(
+                        pixels.as_ptr().cast(),
+                        width,
+                        height,
+                        usize::try_from(width).unwrap_or(0) * 4,
+                    );
+                };
+            }
+        }
+        if let Some(batch) = frontend.audio_sample_batch {
+            let mut sound = core.sound();
+            while sound.len() >= 2 {
+                // SAFETY: `sound` holds `len / 2` stereo frames, alive for the call.
+                let taken = unsafe { batch(sound.as_ptr(), sound.len() / 2) };
+                if taken == 0 {
+                    break;
+                }
+                sound = sound.get(taken * 2..).unwrap_or(&[]);
+            }
+        }
+    });
 }
 
 #[no_mangle]
 pub extern "C" fn retro_serialize_size() -> usize {
-    game().as_ref().map_or(0, |core| core.state_size())
+    with_game(|core| core.state_size()).unwrap_or(0)
 }
 
 /// # Safety
@@ -431,7 +585,7 @@ pub unsafe extern "C" fn retro_serialize(data: *mut c_void, size: usize) -> bool
     }
     // SAFETY: the frontend hands `size` writable bytes.
     let out = unsafe { std::slice::from_raw_parts_mut(data.cast::<u8>(), size) };
-    game().as_ref().is_some_and(|core| core.save_state(out))
+    with_game(|core| core.save_state(out)).unwrap_or(false)
 }
 
 /// # Safety
@@ -444,7 +598,7 @@ pub unsafe extern "C" fn retro_unserialize(data: *const c_void, size: usize) -> 
     }
     // SAFETY: the frontend hands `size` readable bytes.
     let state = unsafe { std::slice::from_raw_parts(data.cast::<u8>(), size) };
-    game().as_mut().is_some_and(|core| core.load_state(state))
+    with_game(|core| core.load_state(state)).unwrap_or(false)
 }
 
 #[no_mangle]
@@ -452,6 +606,81 @@ pub extern "C" fn retro_cheat_reset() {}
 
 #[no_mangle]
 pub extern "C" fn retro_cheat_set(_index: c_uint, _enabled: bool, _code: *const c_char) {}
+
+/// The frontend made its OpenGL context (again): the renderer is made on it.
+extern "C" fn context_reset() {
+    let Some(proc_address) = frontend().proc_address else {
+        log(LOG_ERROR, "3D: the frontend gave no get_proc_address");
+        return;
+    };
+    // SAFETY: the frontend's loader, called with NUL-terminated names while its context is
+    // current, as glow asks.
+    let gl = unsafe {
+        glow::Context::from_loader_function_cstr(|name| proc_address(name.as_ptr()))
+    };
+    match SceneRenderer::new(Rc::new(gl), None) {
+        Ok(renderer) => {
+            GL.with(|gl| *gl.borrow_mut() = Some(Gl { renderer }));
+            log(LOG_INFO, "3D renderer ready");
+        }
+        Err(error) => log(LOG_ERROR, &format!("3D renderer refused: {error}")),
+    }
+}
+
+/// The frontend is about to destroy its context: the renderer goes first.
+extern "C" fn context_destroy() {
+    GL.with(|gl| *gl.borrow_mut() = None);
+}
+
+/// Asks the frontend for an OpenGL 3.3 core context, depth and stencil included.
+fn request_opengl() -> bool {
+    let mut callback = HwRenderCallback {
+        context_type: HW_CONTEXT_OPENGL_CORE,
+        context_reset: Some(context_reset),
+        get_current_framebuffer: None,
+        get_proc_address: None,
+        depth: true,
+        stencil: true,
+        bottom_left_origin: true,
+        version_major: 3,
+        version_minor: 3,
+        cache_context: false,
+        context_destroy: Some(context_destroy),
+        debug_context: false,
+    };
+    if !environment(ENVIRONMENT_SET_HW_RENDER, &mut callback) {
+        return false;
+    }
+    let (framebuffer, proc_address) = (callback.get_current_framebuffer, callback.get_proc_address);
+    set_frontend(|frontend| {
+        frontend.framebuffer = framebuffer;
+        frontend.proc_address = proc_address;
+    });
+    true
+}
+
+/// Starts the 3D of `core` when the options ask for it and a profile suits the ROM.
+fn start_three_d(core: &mut Core, name: &str, image: &[u8]) {
+    if !core.options().three_d {
+        return;
+    }
+    let Some(document) = profiles::find(name, image, system_directory().as_deref()) else {
+        log(LOG_INFO, &format!("{name}: no 3D profile, 2D"));
+        return;
+    };
+    let title = document.profile.title.clone().unwrap_or_default();
+    let tiles = document.hash_state().map(|state| state.tiles.clone());
+    if let Err(error) = core.start_three_d(&document.profile, tiles, log_line) {
+        log(LOG_ERROR, &format!("{title}: the profile is refused ({error}), 2D"));
+        return;
+    }
+    if request_opengl() {
+        log(LOG_INFO, &format!("3D with the profile {title}"));
+    } else {
+        core.stop_three_d();
+        log(LOG_ERROR, "the frontend has no OpenGL 3.3 core context: 2D");
+    }
+}
 
 /// # Safety
 ///
@@ -463,10 +692,7 @@ pub unsafe extern "C" fn retro_load_game(info: *const GameInfo) -> bool {
         return false;
     };
     if info.data.is_null() {
-        log(
-            LOG_ERROR,
-            "the ROM came without its data (need_fullpath is off)",
-        );
+        log(LOG_ERROR, "the ROM came without its data (need_fullpath is off)");
         return false;
     }
     // SAFETY: `data` is `size` readable bytes for the call.
@@ -476,10 +702,9 @@ pub unsafe extern "C" fn retro_load_game(info: *const GameInfo) -> bool {
     } else {
         // SAFETY: a NUL-terminated path.
         let path = unsafe { CStr::from_ptr(info.path) }.to_string_lossy();
-        std::path::Path::new(path.as_ref()).file_name().map_or_else(
-            || "game.nes".to_owned(),
-            |name| name.to_string_lossy().into_owned(),
-        )
+        std::path::Path::new(path.as_ref())
+            .file_name()
+            .map_or_else(|| "game.nes".to_owned(), |name| name.to_string_lossy().into_owned())
     };
     let mut format = PIXEL_FORMAT_XRGB8888;
     if !environment(ENVIRONMENT_SET_PIXEL_FORMAT, &mut format) {
@@ -506,11 +731,12 @@ pub unsafe extern "C" fn retro_load_game(info: *const GameInfo) -> bool {
                 .unwrap_or_default()
         ),
     );
-    *game() = Some(Box::new(core));
+    start_three_d(&mut core, &name, image);
+    GAME.with(|game| *game.borrow_mut() = Some(Box::new(core)));
     true
 }
 
-/// Names the pad's buttons for the frontend's input menu.
+/// Names the pad's buttons and the camera controls for the frontend's input menu.
 fn describe_input() {
     let mut descriptors: Vec<InputDescriptor> = (0..2)
         .flat_map(|port| {
@@ -523,6 +749,13 @@ fn describe_input() {
             })
         })
         .collect();
+    descriptors.extend(CAMERA.iter().map(|(device, index, id, name)| InputDescriptor {
+        port: 0,
+        device: *device,
+        index: *index,
+        id: *id,
+        description: name.as_ptr(),
+    }));
     descriptors.push(InputDescriptor {
         port: 0,
         device: 0,
@@ -547,12 +780,12 @@ pub extern "C" fn retro_load_game_special(
 
 #[no_mangle]
 pub extern "C" fn retro_unload_game() {
-    *game() = None;
+    GAME.with(|game| *game.borrow_mut() = None);
 }
 
 #[no_mangle]
 pub extern "C" fn retro_get_region() -> c_uint {
-    if game().as_ref().is_some_and(|core| core.is_pal()) {
+    if with_game(|core| core.is_pal()).unwrap_or(false) {
         REGION_PAL
     } else {
         REGION_NTSC
@@ -561,31 +794,27 @@ pub extern "C" fn retro_get_region() -> c_uint {
 
 #[no_mangle]
 pub extern "C" fn retro_get_memory_data(id: c_uint) -> *mut c_void {
-    let mut guard = game();
-    let Some(core) = guard.as_mut() else {
-        return std::ptr::null_mut();
-    };
-    let memory = match id {
-        MEMORY_SAVE_RAM => core.save_ram(),
-        MEMORY_SYSTEM_RAM => core.system_ram(),
-        _ => return std::ptr::null_mut(),
-    };
-    if memory.is_empty() {
-        return std::ptr::null_mut();
-    }
-    // The memory lives in the boxed game, which stays put until it is unloaded.
-    memory.as_mut_ptr().cast()
+    with_game(|core| {
+        let memory = match id {
+            MEMORY_SAVE_RAM => core.save_ram(),
+            MEMORY_SYSTEM_RAM => core.system_ram(),
+            _ => return std::ptr::null_mut(),
+        };
+        if memory.is_empty() {
+            return std::ptr::null_mut();
+        }
+        // The memory lives in the boxed game, which stays put until it is unloaded.
+        memory.as_mut_ptr().cast()
+    })
+    .unwrap_or(std::ptr::null_mut())
 }
 
 #[no_mangle]
 pub extern "C" fn retro_get_memory_size(id: c_uint) -> usize {
-    let mut guard = game();
-    let Some(core) = guard.as_mut() else {
-        return 0;
-    };
-    match id {
+    with_game(|core| match id {
         MEMORY_SAVE_RAM => core.save_ram().len(),
         MEMORY_SYSTEM_RAM => core.system_ram().len(),
         _ => 0,
-    }
+    })
+    .unwrap_or(0)
 }

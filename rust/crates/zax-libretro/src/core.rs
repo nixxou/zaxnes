@@ -41,6 +41,10 @@ pub struct Options {
     /// The options of the game's hack the player turned on or off, by key; the others keep
     /// their default.
     pub hacks: Vec<(String, bool)>,
+    /// The 3D of a game that has a profile, drawn with the frontend's OpenGL (at the next load).
+    pub three_d: bool,
+    /// The size the 3D is drawn at (at the next load).
+    pub resolution: (u32, u32),
 }
 
 impl Default for Options {
@@ -53,6 +57,8 @@ impl Default for Options {
             sprite_limit: SpriteLimit::Kept,
             palette: 0,
             hacks: Vec::new(),
+            three_d: true,
+            resolution: (1280, 720),
         }
     }
 }
@@ -84,6 +90,8 @@ pub struct Core {
     framed: bool,
     /// The size the frontend was last told.
     announced: (u32, u32),
+    /// The 3D of the game, when it has a profile and the frontend draws it.
+    three_d: Option<crate::three_d::ThreeD>,
 }
 
 impl Core {
@@ -121,12 +129,50 @@ impl Core {
             audio: Vec::new(),
             framed: false,
             announced: (256, 240),
+            three_d: None,
         };
         core.options.widescreen = options.widescreen;
         core.options.advanced = options.advanced;
         core.set_options(options);
         core.announced = core.picture_size();
         Ok(core)
+    }
+
+    /// Plays the game in 3D with `profile` (its tiles resolved by `tiles` for a "3dh" one): its
+    /// scripts start and the machine resets. `log` receives what the scripts print.
+    ///
+    /// # Errors
+    ///
+    /// Why the scripts or the profile were refused; the game then stays in 2D.
+    pub fn start_three_d(
+        &mut self,
+        profile: &zax_profiles::profile::GameProfile,
+        tiles: Option<zax_profiles::hash::tiles::TileResolver>,
+        log: fn(&str),
+    ) -> Result<(), String> {
+        self.three_d = Some(crate::three_d::ThreeD::start(
+            &mut self.nes,
+            profile,
+            tiles,
+            log,
+        )?);
+        Ok(())
+    }
+
+    /// Back to 2D (the frontend cannot draw the 3D).
+    pub fn stop_three_d(&mut self) {
+        self.three_d = None;
+    }
+
+    /// The 3D of the game, while it plays in 3D.
+    pub fn three_d_mut(&mut self) -> Option<&mut crate::three_d::ThreeD> {
+        self.three_d.as_mut()
+    }
+
+    /// Whether the game plays in 3D.
+    #[must_use]
+    pub const fn is_three_d(&self) -> bool {
+        self.three_d.is_some()
     }
 
     /// The options in force.
@@ -261,7 +307,11 @@ impl Core {
     /// bits 0 to 7 of each byte, port 1 in the low byte), then makes its picture and sound.
     pub fn run(&mut self, input: u16) {
         self.nes.run_frame(input);
-        self.make_picture();
+        if let Some(three_d) = self.three_d.as_mut() {
+            three_d.convert(&mut self.nes);
+        } else {
+            self.make_picture();
+        }
         self.make_sound();
     }
 

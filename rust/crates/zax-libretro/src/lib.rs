@@ -13,3 +13,5 @@ pub mod core;
 #[allow(unsafe_code)]
 pub mod ffi;
 pub mod options;
+pub mod profiles;
+pub mod three_d;

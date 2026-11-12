@@ -17,6 +17,11 @@ workspace = true
 [dependencies]
 zax-nes = { path = "../zax-nes" }
 zax-engine3d = { path = "../zax-engine3d" }
+zax-profiles = { path = "../zax-profiles" }
+zax-render = { path = "../zax-render" }
+zax-scripting = { path = "../zax-scripting" }
+zax-settings = { path = "../zax-settings" }
+glow = "0.16"
 
 [dev-dependencies]
 png = "0.17"

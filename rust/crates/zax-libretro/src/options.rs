@@ -13,6 +13,16 @@ const ADVANCED: &str = "zaxnes_widescreen_advanced";
 const REGION: &str = "zaxnes_region";
 const SPRITE_LIMIT: &str = "zaxnes_sprite_limit";
 const PALETTE: &str = "zaxnes_palette";
+const RENDERER: &str = "zaxnes_renderer";
+const RESOLUTION: &str = "zaxnes_3d_resolution";
+
+const RESOLUTIONS: [(u32, u32); 5] = [
+    (1280, 720),
+    (1920, 1080),
+    (2560, 1440),
+    (3840, 2160),
+    (960, 540),
+];
 /// The prefix of the options of the game's hack: the option's own key follows.
 const HACK: &str = "zaxnes_hack_";
 
@@ -42,7 +52,19 @@ const PALETTES: [&str; 11] = [
 /// (`hacks`, each with its default) after the others.
 #[must_use]
 pub fn declarations(hacks: &[HackOption]) -> Vec<(String, String)> {
+    let resolutions: Vec<String> = RESOLUTIONS
+        .iter()
+        .map(|(width, height)| format!("{width}x{height}"))
+        .collect();
     let mut list = vec![
+        (
+            RENDERER.to_owned(),
+            "Renderer (restart); 3D for games with a profile|2D only".to_owned(),
+        ),
+        (
+            RESOLUTION.to_owned(),
+            format!("3D resolution (restart); {}", resolutions.join("|")),
+        ),
         (
             WIDESCREEN.to_owned(),
             "Widescreen (games with a widescreen hack); enabled|disabled".to_owned(),
@@ -109,6 +131,15 @@ pub fn read(value: &dyn Fn(&str) -> Option<String>, hacks: &[HackOption]) -> Opt
             .and_then(|text| PALETTES.iter().position(|name| *name == text))
             .and_then(|index| u8::try_from(index).ok())
             .unwrap_or(0),
+        three_d: value(RENDERER).is_none_or(|text| text != "2D only"),
+        resolution: value(RESOLUTION)
+            .and_then(|text| {
+                RESOLUTIONS
+                    .iter()
+                    .find(|(width, height)| format!("{width}x{height}") == text)
+                    .copied()
+            })
+            .unwrap_or(defaults.resolution),
         hacks: hacks
             .iter()
             .map(|option| {
