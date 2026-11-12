@@ -2370,6 +2370,10 @@ struct Ledger {
     watch_pc: Vec<u16>,
     /// The NMI vector, read off the cartridge once the machine is up.
     nmi_vector: u16,
+    /// The IRQ vector, which the ledgers tag `irq`. `$FFFE` is `BRK`'s vector too, so a `BRK`
+    /// would be tagged `irq` here — exactly as BizHawk's own `event.onmemoryexecute` on that
+    /// address does, since neither can tell them apart from the address alone.
+    irq_vector: u16,
 }
 
 impl Ledger {
@@ -2385,6 +2389,8 @@ impl Ledger {
                 BusEventKind::Exec => {
                     let tag = if event.address == self.nmi_vector {
                         "nmi".to_owned()
+                    } else if event.address == self.irq_vector {
+                        "irq".to_owned()
                     } else if self.watch_pc.contains(&event.address) {
                         format!("pc${:04X}", event.address)
                     } else {
@@ -2464,6 +2470,8 @@ impl NeshawkMachine {
                 text: format!("romhash {}\n", "zax-neshawk"),
                 watch_pc: options.neshawk_watch_pc.clone(),
                 nmi_vector: u16::from(lo) | (u16::from(hi) << 8),
+                irq_vector: u16::from(machine.nes.peek_memory(0xFFFE))
+                    | (u16::from(machine.nes.peek_memory(0xFFFF)) << 8),
             });
             machine.nes.bus_log.arm(0);
         }

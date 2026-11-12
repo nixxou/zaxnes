@@ -296,3 +296,38 @@ another component calls into it will silently drop the writes that cross back. T
 `&mut`-splitting devices this port uses — the `Bus` split, `BoardEnv`, and the link's four pin
 accessors — are each there because a C# field is written from both sides, and each one had to be
 found by a diff rather than by reading.
+
+### Step 4 — verification against BizHawk: the result
+
+**The port and BizHawk are the same machine on every reference this lot has.**
+
+| what | reference | frames compared | result |
+|---|---|---|---|
+| *Hoshi no Kirby* `.bk2`, **the whole movie** | `kirby-jp-step1g.txt` | 56 313 (frames 100 000 - 156 312) | **all identical to the byte** |
+| the same, frames 60 000 - 100 000 | `kirby-jp-step1f.txt` | 40 001 | all identical to the byte |
+| the same, frames 30 000 - 60 000 | `kirby-jp-step1e.txt` | 30 001 | all identical to the byte |
+| the same, frames 10 000 - 30 000 | `kirby-jp-step1d.txt` | 20 001 | all identical to the byte |
+| the same, frames 1 100 - 10 000 | `kirby-jp-step1c.txt` | 8 901 | all identical to the byte |
+| the same, frames 400 - 1 100 | `kirby-jp-step1b.txt` | 701 | all identical to the byte |
+| the same, frames 1 - 400 | `kirby-jp-step1.txt` | 400 | all identical to the byte |
+| *Faxanadu* (USA), all 83 218 frames | `fax-usa.txt` | 832 checksum lines | all agree, to frame 83 200; every lag count agrees |
+| *Faxanadu* (USA Rev 1), all 83 218 frames | `fax-rev1.txt` | 832 checksum lines | all agree, to frame 83 200; every lag count agrees |
+| **the cycle ledger**, Kirby frames 2 - 1 200 | `kirby-jp-cyc0.txt` | **34 026 event lines** | **every line identical, and every frame's `start=` CPU cycle identical** |
+
+So the 2 KiB of work RAM agrees byte for byte on **every single frame of the 156 312-frame Kirby
+movie, with no gap between the reference windows**, and on both Faxanadu revisions' whole movies.
+
+The cycle ledger is the stronger statement: every `$4000-$401F` write, every `$2002` and `$4015`
+read, every NMI and IRQ entry and every traced PC lands on the **same CPU cycle of the same
+frame** with the **same `A`/`X`/`Y`/`SP`**, over 1 199 frames and 34 026 events. Two details of
+the comparison worth stating so that nobody re-finds them:
+
+* The `lag=` column differs by one everywhere, and is **not** a divergence: the Lua counts lag
+  *before* running frame `f` and the port reports it *after*, so `ours(f) == bizhawk(f+1)`
+  everywhere — checked on all 1 200 frames. The harness's own offset-aware lag comparison
+  (`--trace-ref`) agrees on every line of both Faxanadu runs.
+* Frame 1 201 is where `bk2cyc0.lua` stopped recording (0 events), not a difference.
+
+Kirby's vectors, for whoever reads a ledger next: NMI `$C341`, RESET `$FFF0`, IRQ `$0029` — the
+IRQ vector points into **work RAM**, a trampoline the game writes, which is why the ledgers tag
+`$0029` as `irq`.
