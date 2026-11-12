@@ -353,6 +353,33 @@ pub trait TimingProfile: Copy + Clone + Default + core::fmt::Debug + Send + Sync
     /// PPU moves the dot the flag rises on **and** the dot the loop sees it on. A dot dropped
     /// **after** that wait moves only the first, and nothing in the game can put it back.
     const SOFT_RESET_PPU_DOT_BIAS: i64;
+
+    /// **Item 15** (lot NESHAWK-PROFILE-12 step 2), the **OAM/DMC interleave** — item 13's
+    /// unmeasured half. A DMC sample fetch that falls **inside an OAM transfer** lands three
+    /// cycles after the request on NesHawk, exactly as one outside a transfer does, because the
+    /// transfer's own cycles stand in for the halt and both re-reads from the request cycle
+    /// **inclusive**. This core's transfer loop can only date a halt on the cycle it is *about
+    /// to* run, and a request is raised from inside one of the loop's own `tick`s, so its halt
+    /// lands one cycle late and every in-transfer fetch is one cycle late with it.
+    ///
+    /// **Read from `NES.Core.cs` `RunCpuOne`**, whose OAM block and DMC block are two independent
+    /// blocks of the *same* cycle: the OAM block runs on every cycle of the transfer except the
+    /// fetch's (`oam_dma_exec && apu.dmc_dma_countdown != 1 && !dmc_realign`) and the realign's,
+    /// while the DMC block counts `apu.dmc_dma_countdown` down from the 3 the request set and
+    /// calls `apu.RunDMCHaltFetch()` — the re-read of the CPU's own address — on each cycle before
+    /// the fetch. So the halt and the two re-reads cost the transfer **nothing** and the fetch and
+    /// the realign cost it **two** cycles ([`TimingProfile::DMC_FETCH_STALLS_AN_OAM_TRANSFER`],
+    /// item 7, is that pair).
+    ///
+    /// **Measured off BizHawk's own bus stream first** (`q191.lua`, BizHawk frames 35-37), and the
+    /// measurement needs no cross-machine calibration at all: the DMC's requests are spaced by the
+    /// sample period, so the interval between consecutive **fetch reads** says where each fetch
+    /// sits relative to its own request, inside one machine. Over the five fetches that straddle
+    /// tree frame 38's transfer NesHawk reads `$FE56`-`$FE5A` at a uniform **432** cycles apart —
+    /// the two fetches inside the transfer at the same offset as the three outside it — where this
+    /// core reads 432, **431**, 432, 432. Each of the two in-transfer fetches is one cycle late,
+    /// and the two cycles are the whole of the movie's first difference at that frame.
+    const DMC_FETCH_IN_AN_OAM_TRANSFER_STARTS_AT_THE_REQUEST: bool;
 }
 
 /// Zaxnes's own 2A03: the behaviour every lot before NESHAWK-PROFILE measured, and the one every
@@ -380,6 +407,7 @@ impl TimingProfile for Standard {
     const OAM_DMA_WAITS_AT_THE_END: bool = false;
     const RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT: bool = false;
     const SOFT_RESET_PPU_DOT_BIAS: i64 = 0;
+    const DMC_FETCH_IN_AN_OAM_TRANSFER_STARTS_AT_THE_REQUEST: bool = false;
 }
 
 /// A 2A03 that makes BizHawk NesHawk's timing choices where they differ from Zaxnes's, so that a
@@ -508,4 +536,15 @@ impl TimingProfile for NesHawkCompat {
     /// is what the next item is measured against — an item hunt whose window opens on a machine
     /// known to be one dot out measures that dot and not the item.
     const SOFT_RESET_PPU_DOT_BIAS: i64 = -1;
+
+    /// Item 15 — the **OAM/DMC interleave**, measured off BizHawk's own stream by lot
+    /// NESHAWK-PROFILE-12 step 2 and read in `RunCpuOne` second. The trait's note carries both,
+    /// and the measurement is calibration-free: the fetch-read spacing inside one machine.
+    ///
+    /// It is what the movie's first difference at tree frame **38** is made of, and its size
+    /// there is exactly its two in-transfer fetches: the frame's `nmi` and its `$4014` write are
+    /// at residual 0, every event from `pc$C37C` to `r$4015` is at **+2**, and the frame's own
+    /// `pc$C06E` is back at 0 — because what the transfer's middle loses its end gives back, the
+    /// held request's halt and re-reads landing on transfer cycles that were going to run anyway.
+    const DMC_FETCH_IN_AN_OAM_TRANSFER_STARTS_AT_THE_REQUEST: bool = true;
 }

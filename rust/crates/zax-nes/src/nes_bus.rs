@@ -730,6 +730,19 @@ impl<P: TimingProfile> NesBusOf<P> {
                     self.dma |= DMA_DMC | DMA_DUMMY | DMA_HALT;
                     return;
                 }
+                // **Item 15**, the OAM/DMC interleave: inside an OAM transfer NesHawk's countdown
+                // starts on the **request cycle itself**, and that cycle is one of the transfer's
+                // own, so it stands in for the halt — its fetch lands three cycles after the
+                // request whether a transfer is running or not. This loop can only date a halt on
+                // the cycle it is *about to* run, and a request is raised from inside one of its
+                // own `tick`s, so one of the three cycles the fetch owes has already run: owe two.
+                if P::DMC_FETCH_IN_AN_OAM_TRANSFER_STARTS_AT_THE_REQUEST
+                    && (self.dma & DMA_OAM) != 0
+                    && halt_cycle > self.dmc_ready_cycle
+                {
+                    self.dma |= DMA_DMC | DMA_DUMMY | DMA_HALT;
+                    return;
+                }
                 // **Item 1b.** A reload is a fixed four cycles — the halt, two re-reads of the
                 // CPU's own address, the fetch — so it owes one re-read more than the `Standard`
                 // profile does, and no alignment. A fetch a `$4015` write started is item 3's

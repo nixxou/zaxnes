@@ -1185,3 +1185,103 @@ fn item_14_the_soft_reset_dot_bias_moves_the_ppu_and_nothing_else_does() {
         "item 10 still reaches the PPU through the site item 14 rides on"
     );
 }
+
+/// **Item 15** — the **OAM/DMC interleave**: a DMC fetch that falls inside an OAM transfer is
+/// serviced from the **request cycle itself**, so it lands where a fetch outside a transfer does
+/// and costs the transfer the two cycles item 7 names and no more.
+///
+/// **What it is measured against.** `q191.lua`'s bus stream of BizHawk frames 35-37, read with no
+/// cross-machine calibration at all: the DMC's requests are spaced by the sample period, so the
+/// interval between consecutive **fetch reads** says where each fetch sits relative to its own
+/// request, inside one machine. NesHawk reads `$FE56`-`$FE5A` a uniform **432** cycles apart
+/// across tree frame 38's transfer — the two fetches inside it at the same offset as the three
+/// outside — where this core read 432, **431**, 432, 432, one cycle late on each in-transfer
+/// fetch.
+///
+/// **What this test measures instead**, because the fetch's own cycle is not observable from
+/// outside a halted read: the cycles the transfer costs, at the phases where the item fires. The
+/// `delay` sweep moves the `$4014` write against the DMC's periodic request on **write** cycles —
+/// which no DMA unit may halt — so the request's own cycles do not move with it.
+#[test]
+fn item_15_a_fetch_inside_an_oam_transfer_is_serviced_from_the_request() {
+    /// `(the cycles the transfer cost above a transfer with no fetch inside it, the fetches that
+    /// ran inside it)`, with the `$4014` write `delay` cycles later against the DMC's request.
+    fn row<P: TimingProfile>(delay: u32) -> (i64, i64) {
+        let mut bus = loaded_bus::<P>();
+        bus.write(0x4010, 0x0F); // The fastest rate: 54 cycles a bit, 432 a byte.
+        bus.write(0x4012, 0x00);
+        bus.write(0x4013, 0x0F);
+        bus.write(0x4015, 0x10);
+        // Three bytes of the sample, so the output unit is in its periodic rhythm rather than
+        // wherever the power-on timer's phase left it.
+        for _ in 0..4000 {
+            if bus.dmc_dma_count() >= 3 {
+                break;
+            }
+            bus.read(0x8000);
+        }
+        assert_eq!(3, bus.dmc_dma_count(), "{}: the sample is playing", P::NAME);
+        for _ in 0..delay {
+            bus.write(0x0000, 0x00);
+        }
+        let fetches = bus.dmc_dma_count();
+        let parity = bus.cycle_count() % 2;
+        bus.write(0x4014, 0x02);
+        let cost = cost_of_a_read(&mut bus, 0x8000);
+        // Each profile's own base, at the write's own parity — since item 13 the two take the
+        // hardware's 513 and 514 on opposite phases, so a base from the other column is wrong by
+        // one (`docs/review/NESHAWK-PROFILE.md`, "a differential test can be pinning a *different*
+        // item's cycle").
+        let base = {
+            let mut b = loaded_bus::<P>();
+            while b.cycle_count() % 2 != parity {
+                b.write(0x0000, 0x00);
+            }
+            b.write(0x4014, 0x02);
+            cost_of_a_read(&mut b, 0x8000)
+        };
+        assert!(
+            (514..=515).contains(&base),
+            "{}, delay {delay}: a transfer with no fetch inside is 513 or 514 cycles plus the              CPU's own read, got {base}",
+            P::NAME
+        );
+        (cost - base, bus.dmc_dma_count() - fetches)
+    }
+
+    // The window where **two** requests fall inside one transfer, which is what tree frame 38 has:
+    // the transfer is 514 cycles and the sample period 432, so a second request fits on the phases
+    // from 345 on. 343 and 344 are left out because the NesHawk profile has only one fetch inside
+    // there and the two columns are then measuring different things.
+    let phases: Vec<u32> = (345..=360).collect();
+    let charge = |v: &[(i64, i64)]| v.iter().map(|&(c, _)| c).collect::<Vec<_>>();
+    let hawk: Vec<_> = phases.iter().map(|&d| row::<NesHawkCompat>(d)).collect();
+    let plain: Vec<_> = phases.iter().map(|&d| row::<Standard>(d)).collect();
+    println!("  phases {phases:?}");
+    println!("  neshawk  {:?}", charge(&hawk));
+    println!("  standard {:?}", charge(&plain));
+
+    for (&d, &(c, f)) in phases.iter().zip(&hawk) {
+        assert_eq!(
+            2, f,
+            "neshawk, delay {d}: two fetches inside, got {f} in {c}"
+        );
+        // **The item.** Two cycles per inside fetch — item 7's fetch cycle and its realign — on
+        // **every** phase, because the transfer's own cycles stand in for the halt and both
+        // re-reads from the request cycle inclusive. Without the item the first two phases read
+        // **5** and the next two **3**: the halt landed a cycle late there, which both lengthened
+        // the transfer and moved the fetch off the request's own grid.
+        assert_eq!(
+            4, c,
+            "neshawk, delay {d}: two inside fetches cost the transfer 2 cycles each"
+        );
+    }
+
+    // **And the standard profile is untouched at the same phases**, which is what makes this
+    // differential rather than a pin: its first two read 3 where NesHawk's read 4, because its
+    // fetch may only read on a get cycle.
+    assert_eq!(
+        vec![3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+        charge(&plain),
+        "standard: the get-cycle alignment this core has always had"
+    );
+}
