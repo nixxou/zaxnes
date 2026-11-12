@@ -107,6 +107,21 @@ struct Painter<'ui> {
     hold_ring: Option<(&'static str, f32)>,
     /// How many lines the hints drawn took, for the sizes of the next frame.
     hint_lines: &'ui Cell<u8>,
+    /// How much lower the next rows lie, for the rows drawn on two lines above them.
+    lift: Cell<f32>,
+}
+
+/// One row of a list, as a screen describes it before the painter lays the list out.
+enum RowSpec {
+    /// A group title (RO-3).
+    Group(String),
+    /// A label, badges and a value in its colour.
+    Row {
+        left: String,
+        badges: Vec<(&'static str, [f32; 4])>,
+        right: String,
+        colour: [f32; 4],
+    },
 }
 
 impl Painter<'_> {
@@ -143,7 +158,93 @@ impl Painter<'_> {
     /// The top of the row `slot` of a list that starts under the title.
     fn row_top(&self, slot: usize) -> f32 {
         let slots = f32::from(u16::try_from(slot).unwrap_or(u16::MAX));
-        self.metrics.title_band() + self.metrics.padding * 0.5 + slots * self.metrics.row
+        self.metrics.title_band()
+            + self.metrics.padding * 0.5
+            + slots * self.metrics.row
+            + self.lift.get()
+    }
+
+    /// The step from a label to its value set under it (owner request): a line of text, closer
+    /// than the next row.
+    fn wrap_step(&self) -> f32 {
+        (self.metrics.font + self.metrics.padding * 0.3).round()
+    }
+
+    /// Whether `left`, its `badges` and `right` overflow a row from `x0` to `x1`: the value then
+    /// goes under the label.
+    fn wraps(
+        &self,
+        left: &str,
+        badges: &[(&str, [f32; 4])],
+        right: &str,
+        (x0, x1): (f32, f32),
+    ) -> bool {
+        if left.is_empty() || right.is_empty() {
+            return false;
+        }
+        let padding = self.metrics.padding;
+        let badges: f32 = badges
+            .iter()
+            .map(|(badge, _)| self.width(badge) + padding)
+            .sum();
+        x0 + padding + self.width(left) + padding + badges + self.width(right) + padding > x1
+    }
+
+    /// The height of a row, on one line or on two.
+    fn row_height(&self, wrapped: bool) -> f32 {
+        self.metrics.row + if wrapped { self.wrap_step() } else { 0.0 }
+    }
+
+    /// The pixels a list has between the title and the hints.
+    fn list_room(&self) -> f32 {
+        self.size[1] - self.metrics.title_band() - self.metrics.hint_band() - self.metrics.padding
+    }
+
+    /// The height `spec` takes on a full-width row.
+    fn spec_height(&self, spec: &RowSpec) -> f32 {
+        match spec {
+            RowSpec::Group(_) => self.metrics.row,
+            RowSpec::Row {
+                left,
+                badges,
+                right,
+                ..
+            } => {
+                let span = (
+                    self.metrics.padding * 0.5,
+                    self.size[0] - self.metrics.padding * 0.5,
+                );
+                self.row_height(self.wraps(left, badges, right, span))
+            }
+        }
+    }
+
+    /// Draws the window of `specs` that shows `selected`, in `room` pixels (the whole list's room
+    /// unless something takes some of it), rows of two lines included.
+    fn spec_list(&self, specs: &[RowSpec], selected: usize, room: f32) {
+        let heights: Vec<f32> = specs.iter().map(|spec| self.spec_height(spec)).collect();
+        let rows = self.metrics.visible_rows(self.size[1]);
+        let start = first_visible(selected, rows, specs.len());
+        let (first, count) = layout::list_window(&heights, selected, room, start);
+        let x1 = self.size[0] - self.metrics.padding * 0.5;
+        for (slot, (index, spec)) in specs.iter().enumerate().skip(first).take(count).enumerate() {
+            match spec {
+                RowSpec::Group(title) => self.group_row(slot, title),
+                RowSpec::Row {
+                    left,
+                    badges,
+                    right,
+                    colour,
+                } => self.row_parts(
+                    slot,
+                    (index == selected, FOCUS),
+                    left,
+                    badges,
+                    (right, *colour),
+                    x1,
+                ),
+            }
+        }
     }
 
     /// One row of a list: `left` clipped to leave room for `right`.
@@ -191,9 +292,15 @@ impl Painter<'_> {
         let metrics = &self.metrics;
         let top = self.row_top(slot);
         let x0 = metrics.padding * 0.5;
+        // Owner request: a value that does not fit beside its label goes under it.
+        let wrapped = self.wraps(left, badges, right.0, (x0, x1));
+        let height = self.row_height(wrapped);
+        if wrapped {
+            self.lift.set(self.lift.get() + self.wrap_step());
+        }
         if selected {
             self.list
-                .add_rect([x0, top], [x1, top + metrics.row], focus)
+                .add_rect([x0, top], [x1, top + height], focus)
                 .filled(true)
                 .rounding(metrics.padding * 0.4)
                 .build();
@@ -206,21 +313,30 @@ impl Painter<'_> {
             (TEXT, right.1)
         };
         let right_width = self.width(right.0);
-        let right_x = x1 - metrics.padding - right_width;
+        let (right_x, right_y) = if wrapped {
+            (x0 + metrics.padding * 2.0, y + self.wrap_step())
+        } else {
+            (x1 - metrics.padding - right_width, y)
+        };
         if !right.0.is_empty() {
-            self.text(right_x, y, side, right.0);
+            self.text(right_x, right_y, side, right.0);
         }
-        let value = right.0.starts_with('<').then_some((right_x, x1));
+        let value_end = if wrapped {
+            right_x + right_width + metrics.padding
+        } else {
+            x1
+        };
+        let value = right.0.starts_with('<').then_some((right_x, value_end));
         self.zone(
             [x0, top],
-            [x1, top + metrics.row],
+            [x1, top + height],
             ZoneAction::Row {
                 slot,
                 selected,
                 value,
             },
         );
-        let mut clip_to = if right.0.is_empty() {
+        let mut clip_to = if right.0.is_empty() || wrapped {
             x1
         } else {
             right_x - metrics.padding
@@ -498,7 +614,9 @@ impl HandheldUi {
     pub fn draw(&mut self, ui: &Ui, frame: &UiFrame<'_>) {
         self.zones.get_mut().clear();
         let size = ui.io().display_size;
-        self.metrics = self.metrics_for(size[1]);
+        // By the shorter side: the sizes of the landscape in portrait (owner request), which are
+        // the sizes the fonts were baked at.
+        self.metrics = self.metrics_for(size[0].min(size[1]));
         self.metrics.hint_lines = self.hint_lines.get();
         let _body = self.body_font().map(|font| ui.push_font(font));
         self.follow_the_state_picture(frame.host);
@@ -535,6 +653,7 @@ impl HandheldUi {
             heading: self.heading_font,
             zones: &self.zones,
             hint_lines: &self.hint_lines,
+            lift: Cell::new(0.0),
             hold_ring: self
                 .widescreen_hold
                 .as_ref()
@@ -666,7 +785,6 @@ impl HandheldUi {
             &strings::get(keys::HANDHELD_GAME_OPTIONS_TITLE),
             &[options.name()],
         );
-        let rows = self.metrics.visible_rows(painter.size[1]);
         let selected = options.selected_index();
         painter.title(&title, &page_path(&options.path()));
         // Q-103, read once for the screen, as the console's global pages do.
@@ -680,35 +798,34 @@ impl HandheldUi {
             || GAME_MAIN.to_vec(),
             |page| page.iter().copied().map(GameRow::Option).collect(),
         );
-        let first = first_visible(selected, rows, main.len());
-        for (slot, (index, row)) in main.iter().enumerate().skip(first).take(rows).enumerate() {
+        let mut specs = Vec::with_capacity(main.len());
+        for (index, row) in main.iter().enumerate() {
             let focused = index == selected;
             let own_colour = |own: bool| match (own, focused) {
                 (true, true) => GAME_OWN_ON_FOCUS,
                 (true, false) => GAME_OWN,
                 (false, _) => DIM,
             };
-            match row {
-                GameRow::ResetAll => {
-                    let colour = own_colour(options.has_options());
-                    painter.row(
-                        slot,
-                        focused,
-                        &strings::get(keys::HANDHELD_GAME_OPTIONS_RESET),
-                        ("", colour),
-                    );
-                }
-                GameRow::Widescreen => painter.row(
-                    slot,
-                    focused,
-                    &strings::get(keys::HACK_WIDESCREEN),
-                    (&strings::get(keys::HANDHELD_HOLD_FOR_SETTINGS), DIM),
+            let plain = |left: String, right: String, colour: [f32; 4]| RowSpec::Row {
+                left,
+                badges: Vec::new(),
+                right,
+                colour,
+            };
+            specs.push(match row {
+                GameRow::ResetAll => plain(
+                    strings::get(keys::HANDHELD_GAME_OPTIONS_RESET),
+                    String::new(),
+                    own_colour(options.has_options()),
                 ),
-                GameRow::Hacks => {
-                    painter.row(slot, focused, &strings::get(keys::MENU_AIDS), (">", DIM));
-                }
+                GameRow::Widescreen => plain(
+                    strings::get(keys::HACK_WIDESCREEN),
+                    strings::get(keys::HANDHELD_HOLD_FOR_SETTINGS),
+                    DIM,
+                ),
+                GameRow::Hacks => plain(strings::get(keys::MENU_AIDS), ">".to_owned(), DIM),
                 GameRow::Option(options::OptionRow::Group(key)) => {
-                    painter.group_row(slot, &strings::get(key));
+                    RowSpec::Group(strings::get(key))
                 }
                 // RO-3 §2 rule 2: a row that climbs to a page says how many values of its own the
                 // game has under it, and nothing when it has none.
@@ -719,12 +836,11 @@ impl HandheldUi {
                     } else {
                         format!("{count} >")
                     };
-                    painter.row(
-                        slot,
-                        focused,
-                        &strings::get(page.title_key()),
-                        (&shown, own_colour(!count.is_empty())),
-                    );
+                    plain(
+                        strings::get(page.title_key()),
+                        shown,
+                        own_colour(!count.is_empty()),
+                    )
                 }
                 GameRow::Option(row) => {
                     let own = options.is_own(*row);
@@ -734,21 +850,21 @@ impl HandheldUi {
                         None => shown,
                     };
                     // RO-3 §2 rule 1: the global value is dimmed, the game's own is marked.
-                    let badges: &[(&str, [f32; 4])] = if own {
-                        &[(GAME_OWN_MARKER, GAME_OWN)]
+                    let badges = if own {
+                        vec![(GAME_OWN_MARKER, GAME_OWN)]
                     } else {
-                        &[]
+                        Vec::new()
                     };
-                    painter.row_badged(
-                        slot,
-                        focused,
-                        &options::label(*row),
+                    RowSpec::Row {
+                        left: options::label(*row),
                         badges,
-                        (&shown, own_colour(own)),
-                    );
+                        right: shown,
+                        colour: own_colour(own),
+                    }
                 }
-            }
+            });
         }
+        painter.spec_list(&specs, selected, painter.list_room());
         painter.hints(layout::hints(Screen::GameOptions));
     }
 
@@ -799,23 +915,26 @@ impl HandheldUi {
             visible
         };
         let selected = hacks.selected_index();
-        let first = first_visible(selected, visible, rows.len());
-        for (slot, (index, row)) in rows
+        let specs: Vec<RowSpec> = rows
             .iter()
             .enumerate()
-            .skip(first)
-            .take(visible)
-            .enumerate()
-        {
-            let focused = index == selected;
-            let colour = match (hacks.is_own(*row), focused) {
-                (true, true) => GAME_OWN_ON_FOCUS,
-                (true, false) => GAME_OWN,
-                (false, _) => DIM,
-            };
-            let shown = format!("< {} >", hacks.value_text(*row));
-            painter.row(slot, focused, &hacks.label(*row), (&shown, colour));
-        }
+            .map(|(index, row)| {
+                let colour = match (hacks.is_own(*row), index == selected) {
+                    (true, true) => GAME_OWN_ON_FOCUS,
+                    (true, false) => GAME_OWN,
+                    (false, _) => DIM,
+                };
+                RowSpec::Row {
+                    left: hacks.label(*row),
+                    badges: Vec::new(),
+                    right: format!("< {} >", hacks.value_text(*row)),
+                    colour,
+                }
+            })
+            .collect();
+        #[allow(clippy::cast_precision_loss)] // A few rows.
+        let room = (visible as f32 * self.metrics.row).min(painter.list_room());
+        painter.spec_list(&specs, selected, room);
         if let Some(other) = other {
             painter.note(visible, &other);
         } else if let Some(note) = hacks.patch_note() {
@@ -867,18 +986,17 @@ impl HandheldUi {
         let page = page_path(&self.options.path());
         painter.title(&text::options_title(), &page);
         // The list scrolls with the selection when it is longer than the screen.
-        let rows = self.metrics.visible_rows(painter.size[1]);
         let selected = self.options.selected_index();
         let list = self.options.rows();
-        let first = first_visible(selected, rows, list.len());
         // Q-103: whether the game being played holds Run-ahead at 0, read once for the page.
         let run_ahead_forced = frame
             .host
             .session()
             .is_some_and(crate::game_session::GameSession::forces_run_ahead_to_zero);
-        for (slot, (index, row)) in list.iter().enumerate().skip(first).take(rows).enumerate() {
+        let mut specs = Vec::with_capacity(list.len());
+        for row in list {
             if let options::OptionRow::Group(_) = row {
-                painter.group_row(slot, &options::label(*row));
+                specs.push(RowSpec::Group(options::label(*row)));
                 continue;
             }
             let value = options::value_text(*row, frame.host.settings(), self.overlay.camera());
@@ -896,13 +1014,14 @@ impl HandheldUi {
                 Some(note) => format!("{shown} {note}"),
                 None => shown,
             };
-            painter.row(
-                slot,
-                index == selected,
-                &options::label(*row),
-                (&shown, DIM),
-            );
+            specs.push(RowSpec::Row {
+                left: options::label(*row),
+                badges: Vec::new(),
+                right: shown,
+                colour: DIM,
+            });
         }
+        painter.spec_list(&specs, selected, painter.list_room());
         painter.hints(layout::hints(Screen::Options));
     }
 
@@ -922,10 +1041,9 @@ impl HandheldUi {
         });
         painter.title(&title, "");
         let ids = self.overscan.rows();
-        let rows = self.metrics.visible_rows(painter.size[1]);
         let selected = self.overscan.selected_index();
-        let first = first_visible(selected, rows, ids.len());
-        for (slot, (index, id)) in ids.iter().enumerate().skip(first).take(rows).enumerate() {
+        let mut specs = Vec::with_capacity(ids.len());
+        for (index, id) in ids.iter().enumerate() {
             let focused = index == selected;
             let (shown, colour) = match game {
                 Some(options) => {
@@ -945,9 +1063,14 @@ impl HandheldUi {
                 }
                 None => (overscan::value_text(*id, frame.host.settings()), DIM),
             };
-            let shown = format!("< {shown} >");
-            painter.row(slot, focused, &overscan::label(*id), (&shown, colour));
+            specs.push(RowSpec::Row {
+                left: overscan::label(*id),
+                badges: Vec::new(),
+                right: format!("< {shown} >"),
+                colour,
+            });
         }
+        painter.spec_list(&specs, selected, painter.list_room());
         painter.hints(layout::hints(Screen::Overscan));
     }
 
@@ -1013,12 +1136,24 @@ impl HandheldUi {
         let painter = self.painter(ui);
         let metrics = &self.metrics;
         // The menu is a panel in the middle, so the game stays visible around it.
-        let rows = self.overlay.items().len();
-        let panel_height = metrics.title_band()
-            + metrics.row * f32::from(u16::try_from(rows).unwrap_or(u16::MAX))
-            + metrics.padding;
         let panel_width = (size[0] - 4.0 * metrics.padding).min(metrics.font * 24.0);
         let left = (size[0] - panel_width) * 0.5;
+        let rows: f32 = self
+            .overlay
+            .items()
+            .iter()
+            .map(|item| {
+                let value = self.overlay_value(*item, frame);
+                painter.row_height(Self::overlay_wraps(
+                    &painter,
+                    *item,
+                    &value,
+                    left,
+                    panel_width,
+                ))
+            })
+            .sum();
+        let panel_height = metrics.title_band() + rows + metrics.padding;
         let top = ((size[1] - metrics.hint_band() - panel_height) * 0.5).max(0.0);
         painter
             .list
@@ -1048,35 +1183,49 @@ impl HandheldUi {
                 &strings::get(keys::HANDHELD_MENU_TITLE),
             );
         }
+        let mut row_top = top + metrics.title_band();
         for (index, item) in self.overlay.items().iter().enumerate() {
-            let slot = f32::from(u16::try_from(index).unwrap_or(0));
-            let row_top = top + metrics.title_band() + slot * metrics.row;
             let selected = index == self.overlay.selected_index();
+            let value = self.overlay_value(*item, frame);
+            // Owner request: a value that does not fit beside its label goes under it.
+            let wrapped = Self::overlay_wraps(painter, *item, &value, left, width);
+            let height = painter.row_height(wrapped);
             if selected {
                 painter
                     .list
                     .add_rect(
                         [left + metrics.padding * 0.5, row_top],
-                        [left + width - metrics.padding * 0.5, row_top + metrics.row],
+                        [left + width - metrics.padding * 0.5, row_top + height],
                         FOCUS,
                     )
                     .filled(true)
                     .rounding(metrics.padding * 0.4)
                     .build();
             }
-            let value = self.overlay_value(*item, frame);
-            let value_x = left + width - metrics.padding * 1.5 - painter.width(&value);
+            let y = row_top + (metrics.row - metrics.font) * 0.5;
+            let (value_x, value_y) = if wrapped {
+                (left + metrics.padding * 2.5, y + painter.wrap_step())
+            } else {
+                (
+                    left + width - metrics.padding * 1.5 - painter.width(&value),
+                    y,
+                )
+            };
+            let value_end = if wrapped {
+                value_x + painter.width(&value) + metrics.padding
+            } else {
+                left + width
+            };
             painter.zone(
                 [left + metrics.padding * 0.5, row_top],
-                [left + width - metrics.padding * 0.5, row_top + metrics.row],
+                [left + width - metrics.padding * 0.5, row_top + height],
                 ZoneAction::Row {
                     slot: index,
                     selected,
-                    value: (!value.is_empty()).then_some((value_x, left + width)),
+                    value: (!value.is_empty()).then_some((value_x, value_end)),
                 },
             );
             let colour = if selected { ON_FOCUS } else { TEXT };
-            let y = row_top + (metrics.row - metrics.font) * 0.5;
             painter.text(
                 left + metrics.padding * 1.5,
                 y,
@@ -1084,9 +1233,33 @@ impl HandheldUi {
                 &Self::overlay_label(*item),
             );
             if !value.is_empty() {
-                painter.text(value_x, y, if selected { ON_FOCUS } else { DIM }, &value);
+                painter.text(
+                    value_x,
+                    value_y,
+                    if selected { ON_FOCUS } else { DIM },
+                    &value,
+                );
             }
+            row_top += height;
         }
+    }
+
+    /// Whether the in-game menu's row `item` with `value` overflows the panel `width` wide at
+    /// `left`: its value then goes under its label.
+    fn overlay_wraps(
+        painter: &Painter<'_>,
+        item: OverlayItem,
+        value: &str,
+        left: f32,
+        width: f32,
+    ) -> bool {
+        let padding = painter.metrics.padding;
+        painter.wraps(
+            &Self::overlay_label(item),
+            &[],
+            value,
+            (left + padding, left + width - padding * 0.5),
+        )
     }
 
     fn overlay_label(item: OverlayItem) -> String {

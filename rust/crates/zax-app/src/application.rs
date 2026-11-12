@@ -419,7 +419,9 @@ impl Running {
         if options.editor {
             host.update_settings(|model| model.set_editor_mode(true));
         }
-        let mut ui = ImguiFrontend::new(ui_graphics, &host, options, height)?;
+        // The interface is sized by the screen's shorter side, its height in landscape (owner
+        // request: a phone held upright keeps the sizes it has on its side, and its baked fonts).
+        let mut ui = ImguiFrontend::new(ui_graphics, &host, options, width.min(height))?;
         ui.set_clipboard(window.clipboard());
         // REQ-LOOP-077 is presentation, so it only exists for the renderer that presents here.
         let gpu_queue = match &graphics {
