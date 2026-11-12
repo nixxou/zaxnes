@@ -6,8 +6,10 @@ Branch `feat/neshawk-profile`, worktree `cleanroom/wt-bk2`, base `08a881b8` (lot
 
 - [x] 1. **Ship the exact configuration**: items 12, 1c and 13 **on**. Every comparison of this lot
       is against it; the baseline it reproduces is lot 9's **9 353**.
-- [ ] 2. **The wall at 9 353.** The four marks over frames 26-9 360 on both machines, the first
-      frame whose residual leaves −1, then an execute-to-execute bus stream of that frame.
+- [x] 2. **The wall at 9 353.** The clock parts **9 326 frames earlier than the work does**: the
+      first frame whose residual leaves −1 is BizHawk frame **27**, and the bus stream of it shows
+      8 363 instructions in step to the cycle and no DMA at all, parting on whether the vblank NMI
+      displaces the spin loop's `BEQ`. The candidate history named first is **closed three ways**.
 - [ ] 3. **Rounds** — until frame 156 312 or five rounds.
 - [ ] 4. **No regression**, report, final pass.
 
@@ -51,3 +53,129 @@ instruction's first cycle.
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE-10 step 1/4 done: the exact configuration ships, the baseline is 9 353
+
+---
+
+## Step 2 — the wall at 9 353, and the clock that parts 9 326 frames before it
+
+### The answer first
+
+1. **The wall is not where the clock parts.** Over BizHawk frames 25-9 360 (`q185.lua`, 9 336
+   frames, four late-registered callbacks, 48 s) the four marks read a constant **-1** — the two
+   machines in step — to BizHawk frame **26**, and frame **27** is the first to leave it. The movie
+   runs on to 9 353 because the residual *recovers*: 1 866 of the 9 336 frames read -1 on all four
+   marks, in runs.
+2. **The first difference is three cycles at the NMI boundary, with nothing else in the frame.** The
+   bus stream of BizHawk frames 25-27 (`q186.lua`, 2.1 MB) against `frame-trace --out`: from frame
+   26's `$C06E` to the boundary the two machines run the **same 8 363 instructions at a residual of
+   exactly -1**, every one, and those frames carry **`dmc=0/0`** — no DMC DMA at all, the one OAM
+   transfer being inside the frame's work before `$C06E`. They part on **whether the vblank NMI
+   displaces the spin loop's `BEQ $C070`**: NesHawk runs it and this core does not.
+3. **It is not a phase constant, and this is the first lot to ask at one-dot resolution.** Every
+   earlier sweep moved the start-up dots in **multiples of three** — lot 7's 7 156...7 174 step 3 and
+   lot 8's reset biases 0, 3, 6, 9, 12 — so all twenty values are **one residue class mod 3** and
+   the CPU/PPU *sub-cycle* phase had never been varied at all. Swept at one-dot steps over the
+   thirteen values 7 158-7 172, measured two ways, the best is 7 163 — and it leaves **376 of
+   3 985** in-step frames still disagreeing by exactly 3, and **does not move the wall at 9 353 by
+   one frame**.
+4. **Nor is it a non-uniform CPU/dot sequence**: `NES.Core.cs`'s `cpu_sequence_NTSC = { 3, 3, 3, 3,
+   3 }` is uniform — the same three dots a cycle this core runs. (`cpu_sequence_PAL = { 3, 3, 3, 4,
+   3 }` is this core's 16/5.)
+5. **And what the source does describe at that site is item 8, which lot 4 already refuted.**
+   `PPU.run.cs` `TickPPU_VBL` asserts `nes.cpu.NMI = true` at `ppur.status.cycle == 3 + NMI_offset`
+   of the NMI scanline, with `NMI_offset` = 0, 2, 1 for `cpu_stepcounter` 0, 1, 2 — so the
+   assignment **always lands on a dot where `cpu_stepcounter` is 0**, the first dot at or after 3
+   that begins a CPU cycle. Against this core's assertion at dot 1 of the vblank scanline that is 3
+   to 5 dots later and **exactly one CPU cycle in every alignment** — which is item 8, the item
+   lot NESHAWK-PROFILE-3 implemented in three shapes and lot NESHAWK-PROFILE-4 retracted because
+   `ppu_vbl_nmi` `05-nmi_timing` sweeps that very question at one-dot resolution and **NesHawk
+   passes it**. A fourth reading does not beat that measurement.
+
+So the three cycles at the NMI boundary are a **symptom**, and its cause is upstream of the NMI.
+
+### The marks, over the window
+
+`frame-trace --frame 26 --frames 9336 --profile neshawk --event-log --event-pc C3A1 --event-pc C06E
+--event-pc C074` (19 s) against `bizhawk-runs/q185.txt`, `zaxnes - bizhawk` on the absolute cycle,
+BizHawk frame *f* against this core's *f+1*:
+
+| BizHawk frame | 25-26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35-36 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| nmi, rti, c06e, c074 | **-1** | -4,-5,-2,-2 | 1,1,4,4 | -2,-3,-3,-3 | -3,-3,-3,-3 | -3,-4,-5,-4 | -3,-3,-1,0 | -4,164,163,167 | 1,-1,-1,-1 | **-1** |
+
+| | |
+|---|---|
+| frames all four at -1 | **1 866** of 9 336 (20.0 %) |
+| the nmi mark alone, most common residuals | -1 (2 802), -3 (2 304), -2 (1 406), -4 (1 221), 0 (971) |
+
+### The bus stream across the boundary, BizHawk frame 27
+
+Execute-to-execute, the window frame 26's `$C06E` (774 214 / 774 213, in step) to the handler. The
+first index whose PC differs is **none**; the first whose residual leaves -1 is index **8 363**, the
+handler itself:
+
+| index | 8 361 | 8 362 | 8 363 |
+|---|---|---|---|
+| bizhawk | 799 297 `$C070 LDA $39` | 799 300 `$C072 BEQ` | 799 310 `$C341 PHA` |
+| zaxnes | 799 296 `$C070 LDA $39` | 799 299 `$C072 BEQ` (**displaced**) | 799 306 `$C341 PHA` |
+| residual | -1 | -1 | **-4** |
+
+BizHawk's own records say which it is, with no inference: `799300 x C072`, reads at `C072`, `C073`,
+`C074` — the taken branch's three cycles — then `799303 r C070`, `799304 r C070`, the pushes at
+799 305-799 307, the vector at 799 308-799 309 and the handler at 799 310. This core's handler is
+`799299 + 7`, so the seven cycles ran **in place of** the `BEQ`. That is lot NESHAWK-PROFILE-3
+step 1's mechanism exactly, now with the phase exact and the CPU streams in step to the cycle.
+
+### The one-dot sweep, which no earlier lot took
+
+`PPU_START_UP_DOTS_SKIPPED` at one-dot steps, the whole 9 336-frame window each time. Two
+statistics: the frames whose four marks all read -1, and — restricted to the frames where **`$C06E`
+itself is at -1**, so that the two machines entered that frame's loop together — the residue
+`(the next frame's NMI - this frame's $C06E) mod 6`, which is read off **one machine's own clock**
+and so carries no calibration at all. A residue gap of **3** is the `BEQ` running on one machine and
+being displaced on the other.
+
+| dots | 7 158 | 7 159 | 7 160 | 7 161 | 7 162 | **7 163** | 7 164 | **7 165** | 7 166 | 7 167 | 7 168 | 7 169 | 7 170 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| four marks at -1, % | 0.1 | 0.0 | 0.5 | 0.9 | 1.5 | **42.0** | 30.6 | *20.0* | 13.5 | 9.4 | 5.8 | 4.2 | 0.3 |
+| in-step frames | — | — | — | 492 | 603 | **3 985** | 3 116 | *2 255* | 1 822 | — | 1 026 | — | — |
+| same residue, % | — | — | — | 30.5 | 28.5 | **90.2** | 83.5 | *71.9* | 59.4 | — | 40.8 | — | — |
+| gap 3 | — | — | — | 303 | 399 | **376** | 494 | *613* | 712 | — | 585 | — | — |
+
+**7 163 is refused, and the reasons are three.** It has no reading — `PPU.run.cs` `NewDeadPPU()` is
+verbatim `if (ppur.status.cycle == 241 * 341 - start_up_offset - 1) ...; runppu(); if
+(ppur.status.cycle == 241 * 341 - start_up_offset) { ... frame_is_done = true; }` with
+`start_up_offset = 4`, so the start-up frame is **82 177** dots and `89 342 - 82 177 = 7 165` is the
+shipped value and the right one. It does not move the wall. And 7 163 and 7 166 are the **same
+residue class mod 3** yet score 90.2 % and 59.4 %, so what the statistic responds to is the
+whole-cycle offset and not the phase — the gap of 3 survives every phase, which is the result.
+
+What it costs and buys, for the record (`--ram-ref`, the same three windows):
+
+| | 7 165 (shipped) | 7 163 |
+|---|---|---|
+| `step1` identical to the byte | **318** of 400 | 220 |
+| `step1b` identical | 217 of 701 | **240** |
+| `step1c` identical | 237 of 8 901 | **4 392** |
+| `step1c` no difference outside the stack page | **8 192** | 7 387 |
+| parting frame | **9 353** | **9 353** |
+
+### A trap this step met, and it is about the metric
+
+**The byte-identical count can be moved eighteen-fold by a constant with no reading and no effect
+on the parting frame.** 7 163 takes `step1c` from 237 frames identical to the byte to 4 392 and
+costs `step1` 98 of its 318, leaving 9 353 exactly where it was. So that column is not a safe
+target to optimise against: it measures *when* each machine wrote the RAM down as much as whether
+they ran the same frame. The parting frame and the first differing instruction are the figures that
+survive a knob.
+
+### The instruments
+
+| | |
+|---|---|
+| `q185.lua` | the four marks over BizHawk frames 25-9 360, registered **late** at frame 25 so the boot runs with no Lua call. 48 s, 818 KB, `bizhawk-runs/q185.txt` |
+| `q186.lua` | q184's whole bus stream over BizHawk frames 25-27. 5 s, 2.1 MB, an intermediate |
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-10 step 2/4 done: the clock parts at BizHawk frame 27, and the NMI boundary is closed three ways
