@@ -783,3 +783,28 @@ Everything the resumption asked for is done. What the gap table still names:
   column.
 * One capture-class difference in 330 ROMs: `window_old_ntsc.nes`, one extra edge record on the
   frame's last row, mechanism named in the review and not patched with a constant.
+
+### Resumption 2, step G — `EngineKind::NesHawk` is **3**, not 2
+
+Found by writing the session journal, which is the one place both lots' entries sit side by side.
+`feat/neshawk-profile` — the branch this one was created from, since advanced by lot
+**NESHAWK-COMPAT-ENGINE** (`5c38c246..26fb7fb2`, in `wt-bk2`) — already has
+`EngineKind::ZaxnesNesHawk = 2`, option value `zaxnes-neshawk`: *Zaxnes's own core on the
+NesHawk-compatible timing chip*, which is a different engine from this crate's port of NesHawk.
+
+Those numbers are **persisted** — the per-game `emu.engine` in `games.json` and the engine stamp
+of a savestate — so a 2 taken here would silently reinterpret every file that branch has written.
+The lot's brief says as much, naming the value to add "beside `zaxnes`, `zaxnes-neshawk` and
+`fceux`"; the collision was mine to avoid and I had read `zaxnes-neshawk` as prose rather than as
+a value already allocated.
+
+`NesHawk` is now **3**, 2 is reserved with the reason at the enum, `from_u8(2)` answers `None`
+(so a `games.json` from the other branch reads as "no engine this build knows" and the caller
+falls back to the default, rather than being handed the wrong engine), the setting's domain is
+`opt(3, "NesHawk")`, and the crate's test asserts both halves. No other collision:
+`as_str` is `"neshawk"` against their `"zaxnes-neshawk"`, `state_core_name` is `"NesHawk"` against
+`"Zaxnes-NesHawk"`, and the savestate magic is `ZXNH` where theirs is Zaxnes's own `SEN0` (their
+block format is Zaxnes's; this one's is not).
+
+**For whoever merges the two branches**: both values coexist as 2 and 3 with no further change,
+and `EngineKind::ALL` and the `emu.engine` domain each gain the other's entry.

@@ -66,7 +66,15 @@ fn the_engine_reports_itself_as_neshawk() {
     let engine = loaded();
     assert_eq!(engine.kind(), EngineKind::NesHawk);
     assert_eq!(EngineKind::NesHawk.as_str(), "neshawk");
-    assert_eq!(EngineKind::from_u8(2), Some(EngineKind::NesHawk));
+    // **3, not 2.** 2 belongs to `zaxnes-neshawk` on `feat/neshawk-profile` (Zaxnes's own core
+    // on the NesHawk-compatible chip), and these values are persisted in `games.json` and in a
+    // savestate stamp, so taking it here would reinterpret that branch's files.
+    assert_eq!(EngineKind::from_u8(3), Some(EngineKind::NesHawk));
+    assert_eq!(
+        EngineKind::from_u8(2),
+        None,
+        "2 is reserved for zaxnes-neshawk"
+    );
     assert_eq!(EngineKind::parse(" NESHAWK "), Some(EngineKind::NesHawk));
     assert_eq!(
         zax_core_api::state_core_name(EngineKind::NesHawk),

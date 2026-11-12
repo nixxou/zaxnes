@@ -1091,8 +1091,10 @@ fn emulation_engine(out: &mut Vec<SettingDescriptor>) {
             opt(1, "FCEUX"),
             // Lot NESHAWK-REWRITE: the Rust port of BizHawk's NesHawk core, which is in
             // **every** build (safe Rust, no feature gate) -- so the row is now a real choice
-            // even where `fceux-core` is off.
-            opt(2, "NesHawk"),
+            // even where `fceux-core` is off. **3, not 2**: lot NESHAWK-COMPAT-ENGINE on
+            // `feat/neshawk-profile` gives 2 to `zaxnes-neshawk`, Zaxnes's own core on the
+            // NesHawk-compatible chip, and these values are persisted in `games.json`.
+            opt(3, "NesHawk"),
         ]))
         .with_label("Emulation engine"),
     );

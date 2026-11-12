@@ -18,7 +18,14 @@ use crate::{
 /// Which engine a handle, a savestate or a per-game option names.
 ///
 /// Numeric values are persisted (the per-game option of step 5 and the engine stamp of a
-/// savestate), so they must not change: Zaxnes = 0, FCEUX = 1, NesHawk = 2.
+/// savestate), so they must not change: Zaxnes = 0, FCEUX = 1, NesHawk = **3**.
+///
+/// **2 is deliberately skipped.** Lot NESHAWK-COMPAT-ENGINE, on `feat/neshawk-profile`, gives it
+/// to `ZaxnesNesHawk` — *Zaxnes's own core on the NesHawk-compatible timing chip*, which is a
+/// different thing from this crate's port of NesHawk itself and whose option value is
+/// `zaxnes-neshawk`. The two branches have not met yet; a persisted 2 already means that engine
+/// on the other one, so taking it here would silently reinterpret every `games.json` and every
+/// savestate stamp written by it. The lot's brief names both values side by side for this reason.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(u8)]
 pub enum EngineKind {
@@ -28,13 +35,16 @@ pub enum EngineKind {
     Zaxnes = 0,
     /// FCEUX's core through `zax-fceux`.
     Fceux = 1,
-    /// BizHawk's NesHawk core, ported to Rust in `zax-neshawk`. The engine a `.bk2` movie
-    /// recorded on NesHawk plays back on frame for frame; lot NESHAWK-REWRITE.
-    NesHawk = 2,
+    // 2 = `ZaxnesNesHawk` on `feat/neshawk-profile`; see this enum's own note.
+    /// BizHawk's NesHawk core, **ported** to Rust in `zax-neshawk` — not Zaxnes configured to
+    /// resemble it. The engine a `.bk2` movie recorded on NesHawk plays back on frame for frame;
+    /// lot NESHAWK-REWRITE.
+    NesHawk = 3,
 }
 
 impl EngineKind {
-    /// Every engine this build knows, in the order a chooser should offer them.
+    /// Every engine **this branch** knows, in the order a chooser should offer them. It gains
+    /// `ZaxnesNesHawk` when `feat/neshawk-profile` meets this branch; see the enum's note.
     pub const ALL: [Self; 3] = [Self::Zaxnes, Self::Fceux, Self::NesHawk];
 
     /// The kind of numeric value `value`, `None` otherwise.
@@ -43,7 +53,10 @@ impl EngineKind {
         match value {
             0 => Some(Self::Zaxnes),
             1 => Some(Self::Fceux),
-            2 => Some(Self::NesHawk),
+            // 2 is the other branch's `ZaxnesNesHawk`, which this build has not got: a
+            // `games.json` carrying it reads as "no engine this build knows" and the caller
+            // falls back to the default, which is better than answering the wrong engine.
+            3 => Some(Self::NesHawk),
             _ => None,
         }
     }
