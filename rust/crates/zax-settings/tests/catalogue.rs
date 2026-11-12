@@ -103,6 +103,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "emu.pipeline",
             "emu.smooth_scroll_ahead",
             "emu.smooth_scroll_view",
+            "input.touch_extra",
             "input.touch_haptic_buttons",
             "input.touch_haptic_dpad",
             "input.touch_pad",

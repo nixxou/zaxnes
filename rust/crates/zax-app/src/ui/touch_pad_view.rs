@@ -56,6 +56,20 @@ pub fn draw(ui: &Ui, view: &TouchPadView) {
         view.is_pressed(TouchControl::Recenter),
     );
     draw_target(&list, layout.recenter);
+    if let Some(rewind) = layout.rewind {
+        circle_button(ui, &list, rewind, "", view.is_pressed(TouchControl::Rewind));
+        draw_arrows(&list, rewind, -1.0);
+    }
+    if let Some(forward) = layout.forward {
+        circle_button(
+            ui,
+            &list,
+            forward,
+            "",
+            view.is_pressed(TouchControl::FastForward),
+        );
+        draw_arrows(&list, forward, 1.0);
+    }
     pill(
         ui,
         &list,
@@ -151,6 +165,21 @@ fn draw_padlock(list: &DrawListMut<'_>, circle: Circle, locked: bool) {
     list.add_line([right, top], [right, right_end], LABEL)
         .thickness(r * 0.12)
         .build();
+}
+
+/// Two arrow heads side by side, pointing right when `direction` is 1 (fast forward) and left
+/// when it is -1 (rewind).
+fn draw_arrows(list: &DrawListMut<'_>, circle: Circle, direction: f32) {
+    let [x, y] = circle.center;
+    let r = circle.radius;
+    let (width, half) = (r * 0.35, r * 0.32);
+    for offset in [-width * 0.5, width * 0.5] {
+        let back = x + offset - direction * width * 0.5;
+        let tip = x + offset + direction * width * 0.5;
+        list.add_triangle([back, y - half], [back, y + half], [tip, y], LABEL)
+            .filled(true)
+            .build();
+    }
 }
 
 /// A target: the camera back to its default view.

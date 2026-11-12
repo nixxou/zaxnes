@@ -1353,9 +1353,9 @@ impl HandheldUi {
                 self.states = StatesModel::new(mode, slot);
                 self.screen = Screen::States;
             }
-            OverlayCommand::ToggleFastForward => {
-                close(self, host);
-                host.enqueue(Command::FastForward, CommandArgs::default());
+            OverlayCommand::SetSpeed(tenths) => {
+                self.overlay.set_speed(tenths);
+                host.set_speed_boost(f64::from(tenths) / 10.0);
             }
             OverlayCommand::SetCamera(preset) => apply_camera(preset, host),
             OverlayCommand::Options => self.open_options(host),

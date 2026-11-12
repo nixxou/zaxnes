@@ -31,12 +31,11 @@ use zax_settings::model::SettingsModel;
 use super::commands::{Command, CommandArgs};
 use super::emulation_state::EmulationState;
 use super::fast_forward_state::FastForwardState;
-use super::frame_pacer::{system_clock, CatchUp, Clock, FramePacer};
+use super::frame_pacer::{self, system_clock, CatchUp, Clock, FramePacer};
 use super::game_catalog::{GameCatalog, ResolvedGame};
 use super::hotkey_tracker::{HotkeyEvents, HotkeyTracker};
 use super::notification_center::NotificationCenter;
 use super::rollback_history::{RollbackHistory, SnapshotExtras};
-use super::speed_setting;
 use crate::achievements::AchievementSystem;
 use crate::audio::rate_control::RateControl;
 use crate::audio::stream::{self as stream, AudioLink};
@@ -289,6 +288,9 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     pub core_ahead: bool,
     /// The fast-forward burst.
     pub fast_forward: FastForwardState,
+    /// The multiplier of the speed the console's in-game menu sets, x1 to x10 (Rust-only, owner
+    /// request); see [`EmulationHost::set_speed_boost`].
+    speed_boost: f64,
     /// The notification area.
     pub notifications: NotificationCenter,
     /// What the renderer does with the slang shaders, for the shaders window (Rust-only).
@@ -457,6 +459,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             console_interface: false,
             core_ahead: true,
             fast_forward: FastForwardState::new(),
+            speed_boost: 1.0,
             notifications: NotificationCenter::new(),
             shader_report: crate::ui::shader_panel::ShaderReport::default(),
             slots: SaveSlotIndex::new(),
@@ -1110,7 +1113,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         );
         self.pacer.max_backlog = self
             .effective_catch_up()
-            .frames_per_display(self.pacer.effective_rate(), displayed_rate);
+            .frames_per_display(self.pacer.effective_rate(), displayed_rate)
+            .max(frame_pacer::frames_for_speed(self.pacer.speed));
         let due = self.pacer.due_frames();
         let ahead = self.runs_ahead();
         let last_3d =
@@ -1461,14 +1465,34 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         audio.control.set_console_active(producing);
     }
 
+    /// The multiplier of the game speed the console's in-game menu sets.
+    #[must_use]
+    pub const fn speed_boost(&self) -> f64 {
+        self.speed_boost
+    }
+
+    /// Multiplies the game speed by `boost`, 1 to 10 (Rust-only, owner request): on top of
+    /// `emu.game_speed` and fast forward, kept until it is changed again. The clock is reset as
+    /// for a change of the speed setting (REQ-LOOP-075).
+    pub fn set_speed_boost(&mut self, boost: f64) {
+        let boost = boost.clamp(1.0, 10.0);
+        if (boost - self.speed_boost).abs() < f64::EPSILON {
+            return;
+        }
+        self.speed_boost = boost;
+        self.apply_speed();
+        self.pacer.reset();
+    }
+
     fn apply_speed(&mut self) {
         // REQ-LOOP-016: during a burst the factor is 1.5 whatever the setting says, which means
         // a setting above +2 is slowed down by fast forward. That is faithful (DEC-07-Q2).
+        // The console's in-game menu multiplies the speed (Rust-only, owner request).
         let factor = if self.fast_forward.is_active() {
-            speed_setting::fast_forward_factor()
+            self.fast_forward.factor()
         } else {
             self.settings.speed_factor()
-        };
+        } * self.speed_boost;
         self.pacer.speed = factor;
         if let Some(session) = &mut self.session {
             self.pacer.nominal_rate = f64::from(session.nominal_frame_rate());
@@ -1685,7 +1709,13 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             (HotkeyEvents::SOFT_RESET, Command::SoftReset),
         ] {
             if events.contains(flag) {
-                self.enqueue(command, CommandArgs::default());
+                // Fast forward carries how many times it was pressed in a row (Rust-only).
+                let args = if command == Command::FastForward {
+                    CommandArgs::of_number(i32::from(self.hotkeys.fast_forward_presses()))
+                } else {
+                    CommandArgs::default()
+                };
+                self.enqueue(command, args);
             }
         }
     }

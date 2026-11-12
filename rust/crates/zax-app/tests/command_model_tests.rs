@@ -300,7 +300,8 @@ fn req_ui_082_the_in_game_notifications_have_their_exact_texts() {
     harness.run(Command::Rollback);
     assert_eq!(("Roll Back".to_owned(), 1.0), latest(&harness));
     harness.run(Command::FastForward);
-    assert_eq!(("Fast Forward".to_owned(), 1.0), latest(&harness));
+    // The speed follows (owner request).
+    assert_eq!(("Fast Forward x1.5".to_owned(), 1.0), latest(&harness));
     harness.run(Command::QuickSave);
     assert_eq!(("Quick Save".to_owned(), DEFAULT_SECONDS), latest(&harness));
     harness.run(Command::QuickLoad);

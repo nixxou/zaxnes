@@ -76,6 +76,8 @@ pub struct TouchOptions {
     pub haptic_dpad: i32,
     /// The vibration of the buttons, likewise (`input.touch_haptic_buttons`).
     pub haptic_buttons: i32,
+    /// The rewind and fast-forward buttons are shown (`input.touch_extra`).
+    pub extra: bool,
 }
 
 impl Default for TouchOptions {
@@ -84,6 +86,7 @@ impl Default for TouchOptions {
             scale: 1.0,
             haptic_dpad: 0,
             haptic_buttons: 0,
+            extra: true,
         }
     }
 }
@@ -106,10 +109,14 @@ pub enum TouchControl {
     Recenter,
     /// Locks the camera against the fingers, or frees it; not a button of the controller.
     Lock,
+    /// The rollback while held (owner request); not a button of the controller either.
+    Rewind,
+    /// Fast forward while held, twice or three times faster after a double or triple press.
+    FastForward,
 }
 
 /// How many controls the pad has.
-const CONTROLS: usize = 12;
+const CONTROLS: usize = 14;
 
 impl TouchControl {
     /// The controls, in the order of [`TouchPad::pressed`].
@@ -126,6 +133,8 @@ impl TouchControl {
         Self::Flat,
         Self::Recenter,
         Self::Lock,
+        Self::Rewind,
+        Self::FastForward,
     ];
 
     const fn index(self) -> usize {
@@ -133,7 +142,7 @@ impl TouchControl {
     }
 
     /// The game-controller button it presses: A and B by their labels, as on a handheld. The
-    /// lock presses none.
+    /// lock, the rewind and the fast forward press none.
     const fn button(self) -> Option<sys::SDL_GameControllerButton> {
         use sys::SDL_GameControllerButton as B;
         Some(match self {
@@ -148,7 +157,7 @@ impl TouchControl {
             Self::Menu => B::SDL_CONTROLLER_BUTTON_GUIDE,
             Self::Flat => B::SDL_CONTROLLER_BUTTON_Y,
             Self::Recenter => B::SDL_CONTROLLER_BUTTON_X,
-            Self::Lock => return None,
+            Self::Lock | Self::Rewind | Self::FastForward => return None,
         })
     }
 }
@@ -221,6 +230,10 @@ pub struct TouchLayout {
     pub flat: Circle,
     pub lock: Circle,
     pub recenter: Circle,
+    /// The rewind and the fast forward (owner request): under the 2D/3D switch and the lock, or
+    /// along the top of the band in portrait; none when `input.touch_extra` is off.
+    pub rewind: Option<Circle>,
+    pub forward: Option<Circle>,
 }
 
 /// How far from its drawing a button still takes a finger, as a factor of its radius.
@@ -280,6 +293,14 @@ impl TouchLayout {
                 center: [unit * 0.32, unit * 0.08],
                 radius: unit * 0.045,
             },
+            rewind: Some(Circle {
+                center: [unit * 0.08, unit * 0.2],
+                radius: unit * 0.045,
+            }),
+            forward: Some(Circle {
+                center: [unit * 0.2, unit * 0.2],
+                radius: unit * 0.045,
+            }),
         }
     }
 
@@ -343,6 +364,24 @@ impl TouchLayout {
                 center: [unit * 0.31, corner],
                 radius: little,
             },
+            rewind: Some(Circle {
+                center: [width - unit * 0.31, corner],
+                radius: little,
+            }),
+            forward: Some(Circle {
+                center: [width - unit * 0.19, corner],
+                radius: little,
+            }),
+        }
+    }
+
+    /// This layout without the rewind and fast-forward buttons.
+    #[must_use]
+    pub const fn without_extra(self) -> Self {
+        Self {
+            rewind: None,
+            forward: None,
+            ..self
         }
     }
 
@@ -361,6 +400,15 @@ impl TouchLayout {
         let (top_left, top_right) = ([0.0, top], [width, top]);
         let (bottom_left, bottom_right) = ([0.0, height], [width, height]);
         let bottom_middle = [width * 0.5, height];
+        // The rewind and the fast forward keep to the top corner of their half.
+        let top_corner = |circle: Circle| {
+            let anchor = if circle.center[0] < width * 0.5 {
+                top_left
+            } else {
+                top_right
+            };
+            circle.scaled_from(anchor, scale)
+        };
         Self {
             dpad: base.dpad.scaled_from(bottom_left, scale),
             a: base.a.scaled_from(bottom_right, scale),
@@ -371,6 +419,8 @@ impl TouchLayout {
             flat: base.flat.scaled_from(top_left, scale),
             lock: base.lock.scaled_from(top_left, scale),
             recenter: base.recenter.scaled_from(top_left, scale),
+            rewind: base.rewind.map(top_corner),
+            forward: base.forward.map(top_corner),
         }
     }
 
@@ -412,6 +462,10 @@ impl TouchLayout {
             Some(TouchControl::Lock)
         } else if self.recenter.contains(point, 1.3) {
             Some(TouchControl::Recenter)
+        } else if self.rewind.is_some_and(|circle| circle.contains(point, 1.3)) {
+            Some(TouchControl::Rewind)
+        } else if self.forward.is_some_and(|circle| circle.contains(point, 1.3)) {
+            Some(TouchControl::FastForward)
         } else {
             None
         }
@@ -613,6 +667,19 @@ impl TouchPad {
         })
     }
 
+    /// Whether the pad's rewind and fast-forward buttons are held: the hotkeys they stand for
+    /// (owner request).
+    #[must_use]
+    pub const fn hotkeys_held(&self) -> (bool, bool) {
+        if self.joystick.is_null() {
+            return (false, false);
+        }
+        (
+            self.pressed[TouchControl::Rewind.index()],
+            self.pressed[TouchControl::FastForward.index()],
+        )
+    }
+
     /// Whether this pad's fingers stand for the mouse's drag and wheel on the camera: on a touch
     /// screen, not on a desktop trying the pad with the mouse.
     #[must_use]
@@ -686,9 +753,8 @@ impl TouchPad {
     ) {
         self.mode = mode;
         self.playing = playing;
-        // Compared exactly: another size lays the pad out again.
-        #[allow(clippy::float_cmp)]
-        let rescaled = options.scale != self.options.scale || pad_top != self.pad_top;
+        // Compared exactly: another size or the extra buttons lay the pad out again.
+        let rescaled = options != self.options || pad_top != self.pad_top;
         self.pad_top = pad_top;
         self.options = options;
         let [width, height] = drawable;
@@ -704,6 +770,9 @@ impl TouchPad {
                 Some(top) => TouchLayout::scaled_portrait(width, height, top, self.options.scale),
                 None => TouchLayout::scaled(width, height, self.options.scale),
             };
+            if !self.options.extra {
+                self.layout = self.layout.without_extra();
+            }
         }
         self.follow_visibility();
     }
@@ -788,7 +857,9 @@ impl TouchPad {
                 Some(button) => unsafe {
                     sys::SDL_JoystickSetVirtualButton(self.joystick, button as i32, u8::from(on));
                 },
-                None if on => self.camera_locked = !self.camera_locked,
+                None if on && control == TouchControl::Lock => {
+                    self.camera_locked = !self.camera_locked;
+                }
                 None => {}
             }
         }
@@ -1025,6 +1096,16 @@ mod tests {
         );
         assert_eq!(None, layout.button_at([960.0, 400.0]));
         assert!(layout.select.max[0] < layout.start.min[0]);
+        // The rewind and fast forward, under the 2D/3D switch and the lock (owner request).
+        let (rewind, forward) = (layout.rewind.unwrap(), layout.forward.unwrap());
+        assert_eq!(Some(TouchControl::Rewind), layout.button_at(rewind.center));
+        assert_eq!(Some(TouchControl::FastForward), layout.button_at(forward.center));
+        assert!(rewind.center[1] > layout.flat.center[1]);
+        assert!((rewind.center[0] - layout.flat.center[0]).abs() < 1e-3);
+        assert!((forward.center[0] - layout.lock.center[0]).abs() < 1e-3);
+        let bare = layout.without_extra();
+        assert_eq!(None, bare.button_at(rewind.center));
+        assert_eq!(None, bare.button_at(forward.center));
     }
 
     #[test]
@@ -1070,6 +1151,8 @@ mod tests {
             layout.flat,
             layout.lock,
             layout.recenter,
+            layout.rewind.unwrap(),
+            layout.forward.unwrap(),
         ];
         for circle in circles {
             assert!(
@@ -1090,9 +1173,13 @@ mod tests {
             (TouchControl::Flat, layout.flat.center),
             (TouchControl::Lock, layout.lock.center),
             (TouchControl::Recenter, layout.recenter.center),
+            (TouchControl::Rewind, layout.rewind.unwrap().center),
+            (TouchControl::FastForward, layout.forward.unwrap().center),
         ] {
             assert_eq!(Some(control), layout.button_at(point));
         }
+        // They keep clear of the menu.
+        assert!(layout.forward.unwrap().center[0] < layout.menu.center[0] - layout.menu.radius * 2.0);
         assert_eq!(None, layout.button_at([width * 0.5, top * 0.5]));
         assert!(!layout.takes_dpad([width * 0.5, top * 0.5]));
         // Larger, the small buttons stay on the band's top edge.

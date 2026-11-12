@@ -214,6 +214,7 @@ setting_ids! {
     InputTouchScale => "input.touch_scale",
     InputTouchHapticDpad => "input.touch_haptic_dpad",
     InputTouchHapticButtons => "input.touch_haptic_buttons",
+    InputTouchExtra => "input.touch_extra",
     UiOrientation => "ui.orientation",
     UiSortOption => "ui.sort_option",
     UiLastBrowseDir => "ui.last_browse_dir",

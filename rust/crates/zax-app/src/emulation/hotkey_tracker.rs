@@ -33,9 +33,48 @@ pub struct HotkeyTracker {
     quick_save: EdgeDetector,
     quick_load: EdgeDetector,
     soft_reset: EdgeDetector,
+    fast_forward: EdgeDetector,
+    /// Presses of fast forward in a row, 1 to [`MAX_FAST_FORWARD_PRESSES`] (0 before the first).
+    fast_forward_presses: u8,
+    /// Real seconds since fast forward was let go.
+    fast_forward_released: f32,
 }
 
+/// The longest pause between two presses of fast forward that still makes them a double or a
+/// triple press, in real seconds (Rust-only, owner request).
+pub const FAST_FORWARD_REPEAT_SECONDS: f32 = 0.35;
+/// The most presses in a row that count: the triple press.
+pub const MAX_FAST_FORWARD_PRESSES: u8 = 3;
+
 impl HotkeyTracker {
+    /// How many times fast forward was pressed in a row to make the hold in progress: 1, 2
+    /// (x2.5) or 3 (x5).
+    #[must_use]
+    pub const fn fast_forward_presses(&self) -> u8 {
+        if self.fast_forward_presses == 0 {
+            1
+        } else {
+            self.fast_forward_presses
+        }
+    }
+
+    fn count_fast_forward(&mut self, held: bool, real_seconds: f32) {
+        if self.fast_forward.rising(held) {
+            self.fast_forward_presses = if self.fast_forward_presses > 0
+                && self.fast_forward_released <= FAST_FORWARD_REPEAT_SECONDS
+            {
+                (self.fast_forward_presses + 1).min(MAX_FAST_FORWARD_PRESSES)
+            } else {
+                1
+            };
+        }
+        self.fast_forward_released = if held {
+            0.0
+        } else {
+            self.fast_forward_released + real_seconds
+        };
+    }
+
     /// Creates a tracker with nothing held.
     #[must_use]
     pub fn new() -> Self {
@@ -69,6 +108,7 @@ impl HotkeyTracker {
             events |= HotkeyEvents::ROLLBACK;
         }
         // REQ-INP-103: a request per displayed frame while the key is held.
+        self.count_fast_forward(mask.contains(InputAction::FAST_FORWARD), real_seconds);
         if mask.contains(InputAction::FAST_FORWARD) {
             events |= HotkeyEvents::FAST_FORWARD;
         }

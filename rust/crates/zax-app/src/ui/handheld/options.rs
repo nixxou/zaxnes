@@ -214,7 +214,7 @@ pub const ROWS: [OptionRow; 13] = [
 
 /// The rows of the main page where the touch pad is offered (Android): its row after the
 /// controls, which is where it was before RO-3.
-pub const TOUCH_ROWS: [OptionRow; 14] = [
+pub const TOUCH_ROWS: [OptionRow; 15] = [
     OptionRow::Language,
     OptionRow::Volume,
     OptionRow::RenderScale,
@@ -222,6 +222,8 @@ pub const TOUCH_ROWS: [OptionRow; 14] = [
     OptionRow::Palette,
     OptionRow::Overscan,
     OptionRow::Region,
+    // Owner request: the orientation of the screen.
+    OptionRow::Choice(SettingId::UiOrientation),
     OptionRow::Page(OptionsPage::Shaders),
     OptionRow::Page(OptionsPage::Optimizations),
     OptionRow::Page(OptionsPage::Advanced),
@@ -231,14 +233,14 @@ pub const TOUCH_ROWS: [OptionRow; 14] = [
     OptionRow::Profiler,
 ];
 
-/// The rows of the touch screen's page (owner request): the pad, its size and its vibrations, and
-/// the orientation of the screen.
+/// The rows of the touch screen's page (owner request): the pad, its size, its vibrations and its
+/// rewind and fast-forward buttons.
 pub const TOUCH_SCREEN_ROWS: [OptionRow; 5] = [
     OptionRow::TouchPad,
     OptionRow::Choice(SettingId::InputTouchScale),
     OptionRow::Choice(SettingId::InputTouchHapticDpad),
     OptionRow::Choice(SettingId::InputTouchHapticButtons),
-    OptionRow::Choice(SettingId::UiOrientation),
+    OptionRow::Choice(SettingId::InputTouchExtra),
 ];
 
 /// The values of a setting's choices, in their order.

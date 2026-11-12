@@ -396,7 +396,7 @@ pub enum TabEntry {
 /// The settings the window leaves out although they are user settings: the last browsed folder
 /// and the window rectangle are state, and the menu music no longer exists (AMD-024
 /// REQ-PUB-005).
-pub const EXCLUDED: [SettingId; 23] = [
+pub const EXCLUDED: [SettingId; 24] = [
     SettingId::UiLastBrowseDir,
     SettingId::UiWindowRect,
     SettingId::AudioBgMusic,
@@ -422,6 +422,7 @@ pub const EXCLUDED: [SettingId; 23] = [
     SettingId::InputTouchScale,
     SettingId::InputTouchHapticDpad,
     SettingId::InputTouchHapticButtons,
+    SettingId::InputTouchExtra,
     SettingId::UiOrientation,
     // AMD-059 REQ-LUA-116: no interface at all — they are read and written by a 2.0 script and
     // by nothing else. `vr.refresh_rate` needs no line, the Vr theme having no tab.

@@ -1372,13 +1372,26 @@ fn touch(out: &mut Vec<SettingDescriptor>) {
             .with_label(label),
         );
     }
-    // Rust-only (owner request, Android): the screen's orientation. In portrait the game takes the
-    // top of the screen and the pad the bottom.
+    // Rust-only (owner request): the rewind and fast-forward buttons of the pad.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::InputTouchExtra,
+            SettingKind::Enum,
+            SettingValue::Enum(1),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Input,
+        )
+        .with_domain(Domain::choice(vec![opt(0, "Off"), opt(1, "On")]))
+        .with_label("Rewind and fast forward"),
+    );
+    // Rust-only (owner request, Android): the screen's orientation, as the device is held by
+    // default. In portrait the game takes the top of the screen and the pad the bottom.
     out.push(
         SettingDescriptor::new(
             SettingId::UiOrientation,
             SettingKind::Enum,
-            SettingValue::Enum(0),
+            SettingValue::Enum(2),
             SettingScope::User,
             SettingEffect::Immediate,
             SettingTheme::Interface,

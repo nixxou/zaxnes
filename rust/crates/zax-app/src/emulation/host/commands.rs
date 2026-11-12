@@ -316,7 +316,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Command::Reset => self.reset_game(),
             Command::SoftReset => self.soft_reset_game(),
             Command::Stop => self.stop_current_game(true, true),
-            Command::FastForward => self.request_fast_forward(),
+            Command::FastForward => self.request_fast_forward(args.number),
             Command::Rollback => self.perform_rollback(),
             Command::FrameBack => self.step_frame_back(),
             Command::FrameAdvance => self.step_frame(),
@@ -514,15 +514,22 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 .is_some_and(crate::game_session::GameSession::has_rom)
     }
 
-    fn request_fast_forward(&mut self) {
+    /// A fast-forward request after `presses` presses in a row (0 or 1 for one, Rust-only).
+    fn request_fast_forward(&mut self, presses: i32) {
         if self.state != EmulationState::Running {
             return;
         }
-        self.fast_forward.request();
+        self.fast_forward
+            .request_at(speed_setting::fast_forward_tier_factor(presses));
         self.apply_speed();
-        // REQ-LOOP-016: the notification is refreshed for as long as the key is held.
+        // REQ-LOOP-016: the notification is refreshed for as long as the key is held; it says
+        // the speed (owner request).
+        let text = format!(
+            "Fast Forward {}",
+            speed_setting::factor_text(self.pacer.speed)
+        );
         self.notifications
-            .show("Fast Forward", SHORT_SECONDS, NotificationSeverity::Normal);
+            .show(&text, SHORT_SECONDS, NotificationSeverity::Normal);
     }
 
     /// Rebuilds the meshes with another algorithm; the state and the core do not change

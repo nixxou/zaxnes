@@ -1267,7 +1267,7 @@ impl HandheldUi {
             OverlayItem::Resume => keys::HANDHELD_MENU_RESUME,
             OverlayItem::SaveState => keys::HANDHELD_MENU_SAVE_STATE,
             OverlayItem::LoadState => keys::HANDHELD_MENU_LOAD_STATE,
-            OverlayItem::FastForward => keys::HANDHELD_MENU_FAST_FORWARD,
+            OverlayItem::Speed => keys::HANDHELD_MENU_GAME_SPEED,
             OverlayItem::Camera => keys::HANDHELD_OPTION_CAMERA,
             OverlayItem::Options => keys::WINDOW_OPTIONS,
             OverlayItem::Widescreen => keys::HACK_WIDESCREEN,
@@ -1286,6 +1286,10 @@ impl HandheldUi {
                 format!("< {} >", menu_bar::slot_label(slot, record))
             }
             OverlayItem::Camera => format!("< {} >", options::camera_label(self.overlay.camera())),
+            OverlayItem::Speed => format!(
+                "< {} >",
+                crate::emulation::speed_setting::factor_text(f64::from(self.overlay.speed()) / 10.0)
+            ),
             OverlayItem::Widescreen => {
                 let settings = frame.host.settings();
                 let on = settings.get(SettingId::VideoWidescreen).as_int() != 0;

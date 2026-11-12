@@ -107,6 +107,7 @@ fn ro_1_the_excluded_list_is_unchanged() {
             SettingId::InputTouchScale,
             SettingId::InputTouchHapticDpad,
             SettingId::InputTouchHapticButtons,
+            SettingId::InputTouchExtra,
             SettingId::UiOrientation,
             SettingId::UiLibraryView,
             SettingId::VideoMsaa20,
@@ -549,12 +550,14 @@ fn ro_3_the_handheld_main_pages_are_the_mockups() {
             OptionRow::Palette,
             OptionRow::Overscan,
             OptionRow::Region,
+            // Owner request: the orientation of the screen, on the main page.
+            OptionRow::Choice(SettingId::UiOrientation),
             OptionRow::Page(OptionsPage::Shaders),
             OptionRow::Page(OptionsPage::Optimizations),
             OptionRow::Page(OptionsPage::Advanced),
             OptionRow::Controls,
             // Owner request: the touch pad's row went into the touch screen's page, with its
-            // size, its vibrations and the orientation.
+            // size, its vibrations and its rewind and fast-forward buttons.
             OptionRow::Page(OptionsPage::Touch),
             OptionRow::Achievements,
             OptionRow::Profiler,

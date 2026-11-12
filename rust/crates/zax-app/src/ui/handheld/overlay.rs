@@ -3,6 +3,7 @@
 
 use super::pad::PadButton;
 use super::states::StatesMode;
+use crate::emulation::speed_setting::BOOSTS;
 use crate::persistence::save_slots::EXPOSED_SLOT_COUNT;
 
 /// A row of the menu.
@@ -14,8 +15,8 @@ pub enum OverlayItem {
     SaveState,
     /// Load the state of the chosen slot.
     LoadState,
-    /// Fast forward on or off.
-    FastForward,
+    /// The game speed, x1 to x10 (owner request): left and right change it at once.
+    Speed,
     /// The camera preset.
     Camera,
     /// The options.
@@ -38,7 +39,7 @@ pub const ITEMS: [OverlayItem; 11] = [
     OverlayItem::Resume,
     OverlayItem::SaveState,
     OverlayItem::LoadState,
-    OverlayItem::FastForward,
+    OverlayItem::Speed,
     OverlayItem::Camera,
     OverlayItem::Options,
     OverlayItem::Widescreen,
@@ -84,8 +85,8 @@ pub enum OverlayCommand {
     Resume,
     /// Open the save state screen, to save or to load, on this numbered slot.
     ChooseState(StatesMode, i32),
-    /// Fast forward on or off.
-    ToggleFastForward,
+    /// Run the game this many tenths of its speed (10 to 100).
+    SetSpeed(i32),
     /// Apply this camera preset.
     SetCamera(CameraPreset),
     /// Show the options.
@@ -109,6 +110,8 @@ pub struct OverlayModel {
     selected: usize,
     slot: i32,
     camera: CameraPreset,
+    /// The game speed in tenths, one of [`BOOSTS`].
+    speed: i32,
     /// Whether the achievements' row shows (RetroAchievements on).
     achievements: bool,
 }
@@ -127,6 +130,7 @@ impl OverlayModel {
             selected: 0,
             slot: 1,
             camera: CameraPreset::Orbit,
+            speed: 10,
             achievements: false,
         }
     }
@@ -170,6 +174,17 @@ impl OverlayModel {
         self.camera
     }
 
+    /// The game speed shown on its row, in tenths.
+    #[must_use]
+    pub const fn speed(&self) -> i32 {
+        self.speed
+    }
+
+    /// Shows `tenths` on the speed row (the speed the game runs at).
+    pub const fn set_speed(&mut self, tenths: i32) {
+        self.speed = tenths;
+    }
+
     /// Makes `slot` the numbered slot the state rows show (the last one used).
     pub const fn set_slot(&mut self, slot: i32) {
         self.slot = slot;
@@ -207,6 +222,14 @@ impl OverlayModel {
                 None
             }
             OverlayItem::Camera => Some(OverlayCommand::SetCamera(self.step_camera(step))),
+            OverlayItem::Speed => {
+                let here = BOOSTS.iter().position(|tenths| *tenths >= self.speed).unwrap_or(0);
+                let next = here
+                    .saturating_add_signed(isize::try_from(step).unwrap_or(0))
+                    .min(BOOSTS.len() - 1);
+                self.speed = BOOSTS[next];
+                Some(OverlayCommand::SetSpeed(self.speed))
+            }
             _ => None,
         }
     }
@@ -222,7 +245,8 @@ impl OverlayModel {
             OverlayItem::Resume => OverlayCommand::Resume,
             OverlayItem::SaveState => OverlayCommand::ChooseState(StatesMode::Save, self.slot),
             OverlayItem::LoadState => OverlayCommand::ChooseState(StatesMode::Load, self.slot),
-            OverlayItem::FastForward => OverlayCommand::ToggleFastForward,
+            // A goes back to the normal speed.
+            OverlayItem::Speed => OverlayCommand::SetSpeed(10),
             OverlayItem::Camera => OverlayCommand::SetCamera(self.camera),
             OverlayItem::Options => OverlayCommand::Options,
             OverlayItem::Widescreen => OverlayCommand::Widescreen,
@@ -280,7 +304,7 @@ mod tests {
     fn every_row_answers_its_command() {
         let mut model = OverlayModel::new();
         for (item, command) in [
-            (OverlayItem::FastForward, OverlayCommand::ToggleFastForward),
+            (OverlayItem::Speed, OverlayCommand::SetSpeed(10)),
             (OverlayItem::Options, OverlayCommand::Options),
             (OverlayItem::QuitToList, OverlayCommand::QuitToList),
             (OverlayItem::ExitToLauncher, OverlayCommand::ExitToLauncher),
@@ -288,6 +312,20 @@ mod tests {
             go_to(&mut model, item);
             assert_eq!(Some(command), model.handle(PadButton::A));
         }
+    }
+
+    #[test]
+    fn the_speed_row_steps_from_one_to_ten_without_wrapping() {
+        let mut model = OverlayModel::new();
+        go_to(&mut model, OverlayItem::Speed);
+        assert_eq!(Some(OverlayCommand::SetSpeed(10)), model.handle(PadButton::Left));
+        assert_eq!(10, model.speed());
+        assert_eq!(Some(OverlayCommand::SetSpeed(15)), model.handle(PadButton::Right));
+        for _ in 0..20 {
+            model.handle(PadButton::Right);
+        }
+        assert_eq!(100, model.speed());
+        assert_eq!(Some(OverlayCommand::SetSpeed(10)), model.handle(PadButton::A));
     }
 
     #[test]

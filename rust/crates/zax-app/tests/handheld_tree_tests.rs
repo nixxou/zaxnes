@@ -191,18 +191,23 @@ fn ro_3_every_row_the_console_offered_is_still_reachable() {
     }
     assert!(missing.is_empty(), "no longer reachable: {missing:?}");
 
-    // The Android main page is the main page and the touch screen's page, which holds the
-    // touch-pad row (owner request: the pad's size, vibrations and the orientation with it).
+    // The Android main page is the main page, the orientation and the touch screen's page, which
+    // holds the touch-pad row (owner request: the pad's size, vibrations and extra buttons).
     let touch = OptionRow::Page(OptionsPage::Touch);
+    let orientation = OptionRow::Choice(SettingId::UiOrientation);
     assert_eq!(
         TOUCH_ROWS.len(),
-        ROWS.len() + 1,
-        "the Android page is the main page and the touch screen's page"
+        ROWS.len() + 2,
+        "the Android page is the main page, the orientation and the touch screen's page"
     );
-    assert!(TOUCH_ROWS.contains(&touch));
+    assert!(TOUCH_ROWS.contains(&touch) && TOUCH_ROWS.contains(&orientation));
     assert!(!ROWS.contains(&touch));
     assert!(OptionsPage::Touch.rows().contains(&OptionRow::TouchPad));
-    let without: Vec<OptionRow> = TOUCH_ROWS.into_iter().filter(|row| *row != touch).collect();
+    assert!(!OptionsPage::Touch.rows().contains(&orientation));
+    let without: Vec<OptionRow> = TOUCH_ROWS
+        .into_iter()
+        .filter(|row| *row != touch && *row != orientation)
+        .collect();
     assert_eq!(ROWS.to_vec(), without);
 
     // Every setting the console offered is still offered, which is the same claim read of the

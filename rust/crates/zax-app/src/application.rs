@@ -676,7 +676,7 @@ impl Running {
         }
         let consumed = self.ui.consumed_keys(&self.input.keyboard);
         self.source.consume_keys(consumed);
-        let snapshot = self.source.sample(
+        let mut snapshot = self.source.sample(
             real,
             DeviceRefs {
                 keyboard: Some(&self.input.keyboard),
@@ -684,6 +684,15 @@ impl Running {
                 hub: &mut self.input.gamepads,
             },
         );
+        // The touch pad's rewind and fast forward are the first player's hotkeys (owner
+        // request), so that the double and triple press work on them too.
+        let (rewind, forward) = self.input.touch.hotkeys_held();
+        if rewind {
+            snapshot.player_one |= crate::input::input_action::InputAction::ROLL_BACK;
+        }
+        if forward {
+            snapshot.player_one |= crate::input::input_action::InputAction::FAST_FORWARD;
+        }
         let capturing = self.source.rebinding().suppresses_actions();
         self.ui.handle_shortcuts(
             &mut self.host,
@@ -2574,6 +2583,7 @@ fn touch_options(
         scale,
         haptic_dpad: settings.get(SettingId::InputTouchHapticDpad).as_int(),
         haptic_buttons: settings.get(SettingId::InputTouchHapticButtons).as_int(),
+        extra: settings.get(SettingId::InputTouchExtra).as_int() != 0,
     }
 }
 

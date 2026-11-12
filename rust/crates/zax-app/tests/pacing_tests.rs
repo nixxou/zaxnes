@@ -128,10 +128,53 @@ fn req_loop_016_holding_the_hotkey_keeps_the_rate_at_one_and_a_half() {
     assert!((81..=99).contains(&ran), "{ran}");
     // REQ-LOOP-016: the notification is shown while the key is held.
     let current = harness.host.notifications.current().unwrap();
-    assert_eq!("Fast Forward", current.text);
+    assert_eq!("Fast Forward x1.5", current.text);
     assert!((current.seconds - 1.0).abs() < f64::EPSILON);
     // On release, between 0 and 30 frames of the burst remain.
     assert!(harness.host.fast_forward.remaining() <= BURST_FRAMES);
+}
+
+/// Owner request: pressed `presses` times in a row, then held for a second of 1/60 s frames.
+fn held_after(presses: usize) -> (i64, String) {
+    let mut harness = LoopHarness::create();
+    harness.launch("g1");
+    for _ in 1..presses {
+        harness.tick_actions(1.0 / 60.0, InputAction::FAST_FORWARD, InputAction::NONE);
+        harness.tick_actions(1.0 / 60.0, InputAction::NONE, InputAction::NONE);
+    }
+    let before = harness.host.emulated_frames();
+    for _ in 0..60 {
+        harness.tick_actions(1.0 / 60.0, InputAction::FAST_FORWARD, InputAction::NONE);
+    }
+    let ran = harness.host.emulated_frames() - before;
+    let text = harness.host.notifications.current().unwrap().text.clone();
+    (ran, text)
+}
+
+#[test]
+fn a_double_press_runs_at_two_and_a_half_and_a_triple_at_five() {
+    let (once, text) = held_after(1);
+    assert_eq!("Fast Forward x1.5", text);
+    assert!((80..=100).contains(&once), "{once}");
+    let (twice, text) = held_after(2);
+    assert_eq!("Fast Forward x2.5", text);
+    assert!((135..=165).contains(&twice), "{twice}");
+    let (thrice, text) = held_after(3);
+    assert_eq!("Fast Forward x5", text);
+    assert!((270..=330).contains(&thrice), "{thrice}");
+}
+
+#[test]
+fn the_speed_boost_multiplies_the_game_speed() {
+    let mut harness = LoopHarness::create();
+    harness.launch("g1");
+    harness.host.set_speed_boost(4.0);
+    let before = harness.host.emulated_frames();
+    for _ in 0..60 {
+        harness.tick_actions(1.0 / 60.0, InputAction::NONE, InputAction::NONE);
+    }
+    let ran = harness.host.emulated_frames() - before;
+    assert!((216..=264).contains(&ran), "{ran}");
 }
 
 #[test]

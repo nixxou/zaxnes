@@ -81,6 +81,21 @@ impl CatchUp {
     }
 }
 
+/// Most emulated frames a displayed frame runs at a high speed factor.
+pub const MAX_SPEED_FRAMES: u32 = 16;
+
+/// The emulated frames one displayed frame needs at the speed factor `speed` (Rust-only): a
+/// fast forward at x5 or a boost at x10 must not be held down to the catch-up limit, which is
+/// there for late frames, not for speed. 1 at x1 and below.
+#[must_use]
+pub fn frames_for_speed(speed: f64) -> u32 {
+    let mut frames = 1;
+    while f64::from(frames) + 0.01 < speed && frames < MAX_SPEED_FRAMES {
+        frames += 1;
+    }
+    frames
+}
+
 /// A clock that starts at zero now and follows the system's monotonic time.
 pub fn system_clock() -> Clock {
     let start = Instant::now();
