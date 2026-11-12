@@ -338,11 +338,11 @@ pub trait TimingProfile: Copy + Clone + Default + core::fmt::Debug + Send + Sync
     /// cycle-stepped CPU, not a constant.
     const RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT: bool;
 
-    /// **Item 14** (lot NESHAWK-PROFILE-11 step 2). PPU dots added to — or, negative, taken off —
-    /// the start-up run of a **soft reset** only, which moves the PPU against the CPU by that many
-    /// dots for the rest of the run. **The shipped value is `0` on both profiles**, which is the
-    /// line this core always had; the measured NesHawk value is **−1** and it ships off for want
-    /// of a reading. See the note on [`NesHawkCompat`]'s value.
+    /// **Item 14** (lot NESHAWK-PROFILE-11 step 2, shipped by NESHAWK-PROFILE-12 step 1). PPU dots
+    /// added to — or, negative, taken off — the start-up run of a **soft reset** only, which moves
+    /// the PPU against the CPU by that many dots for the rest of the run. `0` on `Standard`, which
+    /// is the line this core always had, and **−1** on [`NesHawkCompat`] — measured, costless, and
+    /// shipped **on** with the source reading still open. See the note on that value.
     ///
     /// It is the one knob of its shape that is **reachable**.
     /// [`TimingProfile::PPU_START_UP_DOTS_SKIPPED`] is applied at the power-on **and** at the
@@ -468,8 +468,11 @@ impl TimingProfile for NesHawkCompat {
     /// arithmetic and not a fault of the item.
     const RESET_LANDS_ON_THE_FRAME_BOUNDARY_DOT: bool = true;
 
-    /// Item 14 — **measured at −1 and shipped at `0`, which is item 11's shape exactly: correct
-    /// in isolation is not the same as shippable, and the knowledge is kept rather than deleted.**
+    /// Item 14 — **measured at −1 by lot NESHAWK-PROFILE-11 and shipped at −1 by lot
+    /// NESHAWK-PROFILE-12, on the measurement and on its costing nothing.** It is *not* item 11's
+    /// shape: that item is right in isolation and expensive, where this one is right in isolation
+    /// and **free**, so the only thing against it is that the reading is still open — which is a
+    /// reason to keep looking, not a reason to run a clock that is known to be one dot out.
     ///
     /// **What it is worth.** At −1 the movie's first difference of any kind moves from tree frame
     /// **14** to tree frame **38**: frames 3 to 37 go in step on *every* event of the ledger where
@@ -487,14 +490,22 @@ impl TimingProfile for NesHawkCompat {
     /// refused by it — item 8 by lot NESHAWK-PROFILE-4, and the dot-grained version of the same
     /// question by step 1 of this lot, which fails six ROMs NesHawk itself passes.
     ///
-    /// **Why it ships off: there is no reading.** Three were tried and none predicts it.
-    /// `PPU.cs` `Reset()`'s `idleSynch = true` — NesHawk's odd-frame skip left **armed** where
-    /// `Ppu2C02::soft_reset` disarms it — is a real difference and the right size, but its effect
-    /// **alternates** rather than accumulating, and implemented faithfully it leaves the movie
-    /// parting at frame 14. `PPU.run.cs` `NewDeadPPU()` reads `241 * 341 - start_up_offset` =
-    /// 82 177 dots verbatim, which is the shipped 7 165 and not 7 164. And `evenOddDestiny =
-    /// PPUON` is sampled at `ppur.status.cycle == 339` against this core's dot 338, which is one
-    /// dot but only moves anything when a `$2001` write lands on it. **It does not move the wall
-    /// at 9 353 either**, so what it buys is the clock and not the work.
-    const SOFT_RESET_PPU_DOT_BIAS: i64 = 0;
+    /// **The reading is still open, and the best candidate is named.** Three were tried and none
+    /// predicts a one-dot accumulating offset. `PPU.cs` `Reset()`'s **`idleSynch = true`** is the
+    /// best of them and the one to re-read: NesHawk's reset leaves the odd-frame skip **armed**
+    /// where `Ppu2C02::soft_reset` sets `odd_frame = false` and disarms it, which is a real
+    /// difference at this site and exactly one dot in size. It was implemented faithfully
+    /// (`arm_odd_frame_skip`, under the constant, after `soft_reset`) and **its effect
+    /// alternates** 0/−1 rather than accumulating, because both machines then skip once every two
+    /// frames — so what is missing is whatever makes the first skip after the reset land on only
+    /// one of them. `PPU.run.cs` `NewDeadPPU()` reads `241 * 341 - start_up_offset` = 82 177 dots
+    /// verbatim, which is the shipped 7 165 and not 7 164, and a change to *that* constant is
+    /// applied twice and so cannot give an odd offset at all. And `evenOddDestiny = PPUON` is
+    /// sampled at `ppur.status.cycle == 339` against this core's dot 338, which is one dot but only
+    /// moves anything when a `$2001` write lands on it.
+    ///
+    /// **What it does not buy: the wall at 9 353 does not move.** What it buys is the clock, which
+    /// is what the next item is measured against — an item hunt whose window opens on a machine
+    /// known to be one dot out measures that dot and not the item.
+    const SOFT_RESET_PPU_DOT_BIAS: i64 = -1;
 }

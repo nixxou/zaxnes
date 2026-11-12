@@ -1106,12 +1106,11 @@ fn the_interrupt_phase_rom_is_written_out_for_bizhawk() {
 /// **Item 14** — a dot bias on the **soft reset's** start-up run alone, which is the only shape
 /// of PPU/CPU phase this core has that a game cannot put back.
 ///
-/// **Shipped at `0` on both profiles**, which is the line this core always had; the measured
-/// NesHawk value is `−1` and it ships off for want of a reading
-/// ([`TimingProfile::SOFT_RESET_PPU_DOT_BIAS`] carries the measurement, the sweep and the three
-/// readings that were tried). This test is **parametric**, not pinned: it reads the two profiles'
-/// own constants and asserts the PPU lands where they say, so the day the item ships the test
-/// follows it instead of failing for the wrong reason.
+/// **Shipped `−1` on `NesHawkCompat` by lot NESHAWK-PROFILE-12 step 1** and `0` on `Standard`,
+/// which is the line this core always had ([`TimingProfile::SOFT_RESET_PPU_DOT_BIAS`] carries the
+/// measurement, the sweep and the readings that were tried). This test is **parametric**, not
+/// pinned: it reads the two profiles' own constants and asserts the PPU lands where they say, so
+/// shipping the item moved its value here and not its logic.
 #[test]
 fn item_14_the_soft_reset_dot_bias_moves_the_ppu_and_nothing_else_does() {
     /// How many dots the PPU advances **across** `soft_reset()`, which removes the two cores'
@@ -1166,12 +1165,12 @@ fn item_14_the_soft_reset_dot_bias_moves_the_ppu_and_nothing_else_does() {
         "and what is left is the other items' whole cycles, not a dot count: got {slack}"
     );
 
-    // **The record of the choice.** Item 14 ships OFF, so the site is `run_ppu_start_up_dots` with
-    // the constant it always carried, and the two cores differ by item 10 alone.
+    // **The record of the choice.** Item 14 ships **ON at −1**: the sweep's window is exactly
+    // {−1, −2}, one cycle-grid position, and the site is the soft reset, so it cannot cost a ROM.
     assert_eq!(
-        0,
+        -1,
         NesHawkCompat::SOFT_RESET_PPU_DOT_BIAS,
-        "item 14 ships OFF: measured at -1, no reading, and it does not move the wall at 9 353"
+        "item 14 ships ON at -1 dot: measured, costless, and the clock the next item is hunted          against"
     );
     assert_eq!(
         0,
