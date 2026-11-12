@@ -179,3 +179,53 @@ survive a knob.
 ### [PROGRESS]
 
     [PROGRESS] NESHAWK-PROFILE-10 step 2/4 done: the clock parts at BizHawk frame 27, and the NMI boundary is closed three ways
+
+---
+
+## Step 3 — round 1: the PPU/CPU alignment, and four candidates closed
+
+### The answer first
+
+**Round 1 produced no item, and that is the result.** Step 2 left a paradox worth stating plainly:
+at BizHawk frame 27 the two machines run the same 8 363 instructions at a residual of **exactly
+-1**, with **no DMA of any kind** in the span, and then disagree about whether the vblank NMI
+displaces the spin loop's `BEQ $C070`. Three of the four quantities that could produce that are the
+same on both machines by measurement, and the fourth — the PPU's dot at a given CPU cycle — is
+refused by every experiment that can move it.
+
+| the candidate | the experiment | the answer |
+|---|---|---|
+| a **constant** dot phase | `PPU_START_UP_DOTS_SKIPPED` at **one-dot** steps over 7 158-7 172, two statistics, the whole 9 336-frame window each time (step 2) | **refused.** The best, 7 163, has no reading, leaves 376 of 3 985 in-step frames disagreeing by exactly 3, and does not move the wall by one frame |
+| an **odd** net dot offset | the constant is applied **twice** — once at the power-on and once at the reset — so every value above gives an **even** net offset `2δ` and ±1 dot was unreachable. Swept as a **post-reset-only** bias of -2, -1, +1, +2 | **exactly inert**: all four give the same 1 866 frames, the same first-off frame 27, byte for byte. The control says the knob is live: a bias of **+300** takes it to **0** of 9 336. The post-reset boot's 7-cycle `$2002` wait re-quantises any bias smaller than a loop iteration — lot 8's finding, now at one-dot resolution |
+| the **odd-frame dot skip's parity** | BizHawk's own frame lengths alternate 29 781/29 780 over the early window, summing to exactly 59 561 cycles over two frames (= 178 683 dots = 89 342 + 89 341), so the skip is live; this core's parity flipped at the NesHawk start-up | **refused.** 20.0 % → 25.5 % of frames at -1 and the spin residue 71.9 % → 78.6 %, but frame 27 is unchanged to the cycle (`-4, -5, -2, -2`), `step1c` stays at 237 identical and the wall stays at **9 353**. A statistic without a structure |
+| the **NMI's recognition rule** | read off 2.11.1 (step 2 point 5), plus `cpu_sequence_NTSC = { 3, 3, 3, 3, 3 }` | **refused, and it refutes itself.** What `TickPPU_VBL` describes is a deferral to the first dot at or after 3 that begins a CPU cycle, which works out to **exactly one CPU cycle in all three alignments** — item 8, the item `ppu_vbl_nmi` `05-nmi_timing` refuses because **NesHawk passes that ROM** |
+
+### Why the fourth candidate cannot be read any further
+
+The reading admits exactly two alignments of NesHawk's `(sl, cycle)` against this core's `(SL,
+DOT)`, and **neither** of them explains frame 27:
+
+| if NesHawk's `sl 242, cycle 0` is | then its NMI assertion is | consequence |
+|---|---|---|
+| this core's `SL 241, dot 1` | one CPU cycle after this core's, in **all three** alignments | item 8 — and `05-nmi_timing` refuses it |
+| this core's `SL 240, dot 339` | the first cycle-start dot ≥ 1, which this core's own sample point already produces | **no difference at all** — and frame 27 refuses it |
+
+So the three cycles at frame 27 are not in the NMI path. They are a symptom of a difference in the
+PPU's position that is neither constant, nor even, nor the dot skip's parity — which is as far as
+this lot's instruments reach. The next lot's window is unchanged and its candidate list is shorter
+by four.
+
+### What the rounds did not reach
+
+The brief allowed five rounds to frame 156 312. Round 1 spent itself eliminating the candidate
+history named first, which was the right order — it is the one every lot since
+NESHAWK-PROFILE-3 has come back to — and it is now closed by measurement rather than by argument.
+The two candidates the brief named after it are **untouched** and are the next lot's: the
+**OAM/DMC interleave** (item 13's unmeasured half — NesHawk with a DMC fetch owed on the transfer's
+own halt cycle, which is what probably costs *Faxanadu* its 45 and 104 checksum lines) and the
+**MMC3 IRQ polling point**. Neither can act in BizHawk frames 25-27, which carry `dmc=0/0` and no
+IRQ, so neither could have been round 1.
+
+### [PROGRESS]
+
+    [PROGRESS] NESHAWK-PROFILE-10 step 3/4 done: round 1, no item, four candidates closed by measurement
