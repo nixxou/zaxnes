@@ -994,31 +994,6 @@ impl Ppu2C02 {
         self.run_dots(dots_last - sample_after, &mut cartridge);
     }
 
-    /// Advances the PPU by `dots` dots with **no CPU cycle attached**, which is what the
-    /// `NesHawkCompat` profile's item 10 does once at a power-on and once at every soft reset.
-    ///
-    /// Nothing else in this core ever moves the PPU without the CPU, and nothing has to: this is
-    /// called while the machine is being put back together, before the CPU's own reset cycles
-    /// run, so there is no cycle for the dots to belong to. The dot accumulator is untouched,
-    /// which is the point — item 10 is a difference of **position**, and the three dots a CPU
-    /// cycle is worth are unchanged.
-    pub fn run_start_up_dots(&mut self, dots: i64, cartridge: Option<&mut Cartridge>) {
-        // NesHawk's `PPU.cs` `Reset()` calls `regs_reset()`, which does `ppur = new PPUREGS()` —
-        // so a **soft** reset puts its PPU's position back to the top of the frame exactly as a
-        // power-on does, and its dead frame is then the same 82 177 dots either way. This core's
-        // `Ppu2C02::soft_reset` deliberately leaves the position alone (Q-078: "a RESET press does
-        // not restart the frame"), so item 10 has to put it there before counting the dots. At a
-        // power-on it is already there and these two stores change nothing.
-        //
-        // Measured, not assumed: counting the dots from wherever the reset found the PPU takes
-        // *Faxanadu*, which never presses RESET, to 247 and 314 of 832 checksum lines and
-        // *Kirby*, which presses it after frame 5, to no agreement at all.
-        self.scanline = self.timing.vblank_scanline;
-        self.dot = 1;
-        let mut cart = cartridge;
-        self.run_dots(dots, &mut cart);
-    }
-
     /// Runs `count` dots, skipping in one go the stretches where a dot does nothing but
     /// move the counters (or, on a visible line with rendering off, draw the backdrop).
     fn run_dots(&mut self, mut count: i64, cart: Cart<'_, '_>) {
@@ -1100,49 +1075,6 @@ impl Ppu2C02 {
     /// Clears the one-step frame boundary flag; the core calls this each frame.
     pub fn clear_frame_boundary(&mut self) {
         self.vblank_just_started = false;
-    }
-
-    /// Whether the dot the frame boundary falls on — dot 1 of the vblank line, where
-    /// [`Ppu2C02::vblank_just_started`] is raised — lies inside the dots the **next** CPU cycle
-    /// is worth.
-    ///
-    /// The `NesHawkCompat` profile's item 12 asks it before each instruction of the frame the
-    /// movie taps RESET after: NesHawk ends a frame at that dot, mid-instruction, so the frame has
-    /// to end here and not after the instruction the dot falls inside. The caller must have
-    /// caught the PPU up (`NesBusOf::frame_boundary_is_the_next_cycle` does), because the position
-    /// is read off the counters.
-    ///
-    /// The count of dots the next cycle is worth is `run_cpu_cycles`'s own arithmetic for one
-    /// cycle — 3 on NTSC, 3 or 4 on PAL as the accumulator stands — so the answer is exact on both
-    /// regions.
-    ///
-    /// **Zero dots away is not "the next cycle"**: the boundary dot is then the one just
-    /// processed, so the frame boundary has already been taken and it is the *next* one, a whole
-    /// frame away, that this frame ends on. That state is reachable at the start of a frame whose
-    /// predecessor's last CPU cycle ended exactly on the dot, and reading it as "now" ended such a
-    /// frame after no instructions at all.
-    #[must_use]
-    pub fn frame_boundary_is_the_next_cycle(&self) -> bool {
-        let frame = i64::from(self.timing.scanlines_per_frame) * i64::from(DOTS_PER_SCANLINE);
-        let here = i64::from(self.scanline) * i64::from(DOTS_PER_SCANLINE) + i64::from(self.dot);
-        let there =
-            i64::from(self.timing.vblank_scanline) * i64::from(DOTS_PER_SCANLINE) + 1 - here;
-        let numerator = i64::from(self.timing.dots_per_cycle_numerator);
-        let denominator = i64::from(self.timing.dots_per_cycle_denominator);
-        let next_cycle = (i64::from(self.dot_accumulator) + numerator) / denominator;
-        (1..=next_cycle).contains(&there.rem_euclid(frame))
-    }
-
-    /// Takes the frame's palette and mask snapshot that dot 1 of the vblank line takes, for the
-    /// `NesHawkCompat` profile's item 12: a frame that ends **before** that dot has not had it
-    /// taken, and the 2D picture is composed from it (`Ppu2C02::frame_palette`).
-    ///
-    /// Exactly equal to what the dot itself would copy: the dots between the frame's last CPU
-    /// cycle and the boundary dot carry no CPU cycle, so nothing can write a palette entry or
-    /// PPUMASK inside them.
-    pub fn capture_frame_snapshot(&mut self) {
-        self.frame_palette = self.palette;
-        self.frame_mask = self.mask;
     }
 
     fn step_dot(&mut self, cart: Cart<'_, '_>) {

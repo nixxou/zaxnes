@@ -47,11 +47,6 @@ ppu-exact-sprite-eval = ["zax-nes/ppu-exact-sprite-eval"]
 # configuration it is scoring, and this feature is worth exactly one row of it.
 ppu-2007-render-read = ["zax-nes/ppu-2007-render-read"]
 
-# `frame-trace --dmc-census`, the DMA census of lot NESHAWK-PROFILE-2 step 2: a pass-through to
-# the core's own `dma-census`, because Cargo cannot see a dependency's feature from here. **An
-# instrument, off by default**: with it off the option is a usage error naming the flag to rebuild
-# with, and the core carries not one hook. `crates/zax-nes/src/dma_census.rs` says why.
-dma-census = ["zax-nes/dma-census"]
 
 [dependencies]
 serde_json.workspace = true

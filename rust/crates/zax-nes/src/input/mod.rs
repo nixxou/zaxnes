@@ -244,14 +244,7 @@ impl InputPorts {
             return value;
         }
 
-        let bit = if self.types[port] == ControllerPortType::Empty {
-            // An empty socket (REQ-CORE-024). Nothing drives the data line, and there is no
-            // shift register to clock — which is what distinguishes it from a pad with no
-            // button held: a pad's **ninth** read after a strobe answers 1 and this one goes on
-            // answering 0, for ever. The strobe is still settled above, because the *other*
-            // port's registers reload on it.
-            0
-        } else if self.strobe {
+        let bit = if self.strobe {
             // Reads taken while the strobe is high always show button A.
             self.shift[port] & 0x01
         } else if self.shift_count[port] >= 8 {
@@ -399,7 +392,6 @@ impl InputPorts {
             self.types[port] = match reader.read_u8()? {
                 0 => ControllerPortType::Controller,
                 1 => ControllerPortType::Zapper,
-                2 => ControllerPortType::Empty,
                 other => {
                     return Err(InvalidState::corrupt(format!(
                         "Corrupt savestate: unknown controller port type {other}."

@@ -1,7 +1,7 @@
 //! The five things a test-ROM reader asks of a machine, and the two machines that answer.
 //!
 //! The four readers of this module's siblings — `blargg`, `screen`, `coin` and `mapperel` — were
-//! written against `NesCoreOf<P>` and between them use exactly five operations. Naming those
+//! written against `NesCore` and between them use exactly five operations. Naming those
 //! five is what lets `test-roms --engine neshawk` score the *same* ROMs by the *same* evidence on
 //! the port of BizHawk's core, which is the only way a verdict comparison with NesHawk means
 //! anything: a suite read by a different reader is a different measurement.
@@ -14,11 +14,11 @@
 //! * `nametable_base` is PPUCTRL's low two bits, which is where the ROM told the PPU to draw
 //!   from — not a scan of all four pages. `screen::rows` says why that distinction matters.
 
-use zax_nes::{NesCoreOf, RunFrame, TimingProfile};
+use zax_nes::NesCore;
 
 /// One machine, as a test-ROM reader sees it.
 pub trait TestMachine {
-    /// `zaxnes`, `zaxnes/neshawk` or `neshawk` — which machine the report's row was taken on.
+    /// `zaxnes` or `neshawk` — which machine the report's row was taken on.
     fn engine_name(&self) -> &'static str;
 
     /// One byte of the CPU address space, with no side effect.
@@ -45,29 +45,25 @@ pub trait TestMachine {
     fn picture_into(&self, out: &mut Vec<u8>);
 }
 
-impl<P: TimingProfile> TestMachine for NesCoreOf<P> {
+impl TestMachine for NesCore {
     fn engine_name(&self) -> &'static str {
-        if P::NAME == zax_nes::Standard::NAME {
-            "zaxnes"
-        } else {
-            "zaxnes/neshawk"
-        }
+        "zaxnes"
     }
 
     fn read_memory(&self, address: u16) -> u8 {
-        zax_nes::NesCoreOf::<P>::read_memory(self, address)
+        NesCore::read_memory(self, address)
     }
 
     fn run_frame(&mut self, input: u16) {
-        RunFrame::run_frame(self, input);
+        NesCore::run_frame(self, input);
     }
 
     fn soft_reset(&mut self) {
-        zax_nes::NesCoreOf::<P>::soft_reset(self);
+        NesCore::soft_reset(self);
     }
 
     fn power(&mut self) {
-        zax_nes::NesCoreOf::<P>::reset(self);
+        NesCore::reset(self);
     }
 
     fn nametable_base(&self) -> u16 {

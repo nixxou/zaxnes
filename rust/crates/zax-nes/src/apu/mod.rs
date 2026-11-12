@@ -30,7 +30,6 @@ mod vrc6_audio;
 mod vrc7_audio;
 
 use crate::state::{InvalidState, StateReader, StateWriter};
-use crate::timing_profile::{Standard, TimingProfile};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::RegionTiming;
@@ -421,14 +420,6 @@ impl Apu2A03 {
         self.dmc.fetch_address()
     }
 
-    /// The DMC's timer, output bits owed and bytes left, for the `dma-census` instrument
-    /// (`DmcChannel::census_state`).
-    #[cfg(feature = "dma-census")]
-    #[must_use]
-    pub const fn dmc_census_state(&self) -> (i32, i32, i32) {
-        self.dmc.census_state()
-    }
-
     /// CPU cycles from the APU's own position until the DMC's memory reader could next ask for a
     /// byte, or `None` while no sample is playing (`DmcChannel::cycles_until_fetch`).
     ///
@@ -441,8 +432,8 @@ impl Apu2A03 {
     }
 
     /// Hands the byte a DMC DMA fetched to the memory reader.
-    pub fn supply_dmc_byte<P: TimingProfile>(&mut self, value: u8) {
-        self.dmc.supply_byte::<P>(value);
+    pub fn supply_dmc_byte(&mut self, value: u8) {
+        self.dmc.supply_byte(value);
     }
 
     /// Mono samples waiting to be read.
@@ -559,15 +550,12 @@ impl Apu2A03 {
     /// the sequencer reset lands three cycles after the write, so starting the counter at
     /// zero reproduces the 9 to 12 cycle delay the hardware shows (blargg,
     /// `09.reset_timing`).
-    /// Generic over the profile for the DMC's power-on timer alone (item 11): every other field
-    /// here is the same on both, and `Standard`'s arm of that one is the line this function had
-    /// before the profile existed.
-    pub fn reset<P: TimingProfile>(&mut self) {
+    pub fn reset(&mut self) {
         self.pulse1.reset();
         self.pulse2.reset();
         self.triangle.reset();
         self.noise.reset();
-        self.dmc.reset::<P>();
+        self.dmc.reset();
         self.apply_timing();
 
         self.cycles = 0;
@@ -612,9 +600,8 @@ impl Apu2A03 {
         self.pulse2.length.set_enabled(false);
         self.triangle.length.set_enabled(false);
         self.noise.length.set_enabled(false);
-        // A disable queues no load, so the returned delay is always 0, and the two profiles
-        // agree about a disable (see `DmcChannel::set_enabled`).
-        self.dmc.set_enabled::<Standard>(false, self.apu_cycle);
+        // A disable queues no load, so the returned delay is always 0.
+        self.dmc.set_enabled(false, self.apu_cycle);
 
         self.triangle.reset_phase();
         self.dmc.soft_reset();
@@ -669,7 +656,7 @@ impl Apu2A03 {
     }
 
     /// Advances the APU by one CPU cycle.
-    pub fn step_cpu_cycle<P: TimingProfile>(&mut self) {
+    pub fn step_cpu_cycle(&mut self) {
         // The frame counter's "set the IRQ flag" signal reaches the flag at the end of the
         // cycle it is raised on, so the CPU can only see it from the next cycle (blargg's
         // 08.irq_timing).
@@ -711,15 +698,6 @@ impl Apu2A03 {
         changed |= self.noise.clock_timer();
         changed |= self.dmc.clock_timer();
 
-        // `APU.RunOneLast()`: the `NesHawkCompat` profile counts the byte of the last fetch
-        // here, three cycles after it (item 2). After the timer, which is NesHawk's order
-        // within the cycle — `RunOneFirst` clocks the channel, `RunOneLast` spends this
-        // countdown — and after the `readable_status` latch above, which is what makes a
-        // `$4015` read on the next cycle the first one able to see it.
-        if P::DMC_LENGTH_LAGS_THE_FETCH {
-            self.dmc.step_reload_countdown();
-        }
-
         if changed || self.level_dirty {
             self.level_dirty = false;
             self.current_level();
@@ -736,7 +714,7 @@ impl Apu2A03 {
     /// level, a pending IRQ flag or a sequencer reset is due.
     #[must_use]
     #[allow(clippy::float_cmp, clippy::cast_sign_loss)] // Exact level; positive counts.
-    pub fn quiet_cycles<P: TimingProfile>(&self) -> u32 {
+    pub fn quiet_cycles(&self) -> u32 {
         if self.frame_irq_pending || self.level_dirty || self.resampler.level() != self.level {
             return 0;
         }
@@ -765,16 +743,16 @@ impl Apu2A03 {
         quiet
             .min(self.triangle.quiet_clocks())
             .min(self.noise.quiet_clocks())
-            .min(self.dmc.quiet_clocks::<P>())
+            .min(self.dmc.quiet_clocks())
     }
 
     /// Runs `count` CPU cycles, as many calls of [`Self::step_cpu_cycle`] would: the quiet
     /// stretches are skipped in one go, and the last cycle is always stepped, so $4015 holds
     /// the value latched at its start.
-    pub fn run_cpu_cycles<P: TimingProfile>(&mut self, mut count: u32) {
+    pub fn run_cpu_cycles(&mut self, mut count: u32) {
         while count > 0 {
             let skip = if count > 1 {
-                self.quiet_cycles::<P>().min(count - 1)
+                self.quiet_cycles().min(count - 1)
             } else {
                 0
             };
@@ -782,7 +760,7 @@ impl Apu2A03 {
                 self.skip_quiet_cycles(skip);
                 count -= skip;
             }
-            self.step_cpu_cycle::<P>();
+            self.step_cpu_cycle();
             count -= 1;
         }
     }
@@ -1005,7 +983,7 @@ impl Apu2A03 {
     /// `$4015` that starts a sample: the delay belongs to the bus, which owns the DMA cycles and
     /// can hold it as one absolute cycle instead of a counter the per-cycle APU code would have
     /// to look at (see [`DmcChannel::set_enabled`]).
-    pub fn write<P: TimingProfile>(&mut self, address: u16, value: u8) -> u32 {
+    pub fn write(&mut self, address: u16, value: u8) -> u32 {
         self.level_dirty = true;
         match address {
             0x4000..=0x4003 => self.pulse1.write(address - 0x4000, value, self.cycles),
@@ -1018,9 +996,7 @@ impl Apu2A03 {
                 self.pulse2.length.set_enabled((value & 0x02) != 0);
                 self.triangle.length.set_enabled((value & 0x04) != 0);
                 self.noise.length.set_enabled((value & 0x08) != 0);
-                return self
-                    .dmc
-                    .set_enabled::<P>((value & 0x10) != 0, self.apu_cycle);
+                return self.dmc.set_enabled((value & 0x10) != 0, self.apu_cycle);
             }
             0x4017 => self.write_frame_counter(value),
             _ => {}
@@ -1141,12 +1117,12 @@ impl Apu2A03 {
     pub const MAX_STATE_SIZE: usize = 512 + BandLimitedResampler::STATE_SIZE;
 
     /// Appends the APU state to `writer` (REQ-CORE-090).
-    pub fn save_state<P: TimingProfile>(&self, writer: &mut StateWriter) {
+    pub fn save_state(&self, writer: &mut StateWriter) {
         self.pulse1.save_state(writer);
         self.pulse2.save_state(writer);
         self.triangle.save_state(writer);
         self.noise.save_state(writer);
-        self.dmc.save_state::<P>(writer);
+        self.dmc.save_state(writer);
 
         writer.write_i64(self.cycles);
         writer.write_bool(self.apu_cycle);
@@ -1168,11 +1144,8 @@ impl Apu2A03 {
     ///
     /// # Errors
     /// [`InvalidState`] when the block is truncated or holds an impossible value.
-    pub fn load_state<P: TimingProfile>(
-        &mut self,
-        reader: &mut StateReader,
-    ) -> Result<(), InvalidState> {
-        self.load_state_inner::<P>(reader, false)
+    pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.load_state_inner(reader, false)
     }
 
     /// [`Apu2A03::load_state`] leaving the samples the host has not read yet where they are
@@ -1185,14 +1158,14 @@ impl Apu2A03 {
     ///
     /// # Errors
     /// [`InvalidState`] when the block is truncated or holds an impossible value.
-    pub fn load_state_keeping_samples<P: TimingProfile>(
+    pub fn load_state_keeping_samples(
         &mut self,
         reader: &mut StateReader,
     ) -> Result<(), InvalidState> {
-        self.load_state_inner::<P>(reader, true)
+        self.load_state_inner(reader, true)
     }
 
-    fn load_state_inner<P: TimingProfile>(
+    fn load_state_inner(
         &mut self,
         reader: &mut StateReader,
         keep_pending_samples: bool,
@@ -1201,7 +1174,7 @@ impl Apu2A03 {
         self.pulse2.load_state(reader)?;
         self.triangle.load_state(reader)?;
         self.noise.load_state(reader)?;
-        self.dmc.load_state::<P>(reader)?;
+        self.dmc.load_state(reader)?;
 
         self.cycles = reader.read_i64()?;
         self.apu_cycle = reader.read_bool()?;

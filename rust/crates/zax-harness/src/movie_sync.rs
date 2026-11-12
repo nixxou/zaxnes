@@ -76,11 +76,10 @@ use sha2::{Digest, Sha256};
 use zax_nes::input::ControllerPortType;
 use zax_nes::rom::InesHeader;
 use zax_nes::state::CoreState;
-use zax_nes::{NesCoreOf, NesHawkCompat, NesRegion, RunFrame, Standard, TimingProfile};
+use zax_nes::{NesCore, NesRegion};
 
 use crate::golden_core::hex;
 use crate::movie_file::{FrameCommand, FrameInput, MovieFile, RamPattern};
-use crate::profile_choice::ProfileChoice;
 use crate::ram_trace::{best_match, Comparison, RamCompare, RamTrace, Reference};
 use crate::HarnessError;
 
@@ -146,11 +145,7 @@ pub const USAGE: &str = "zax-harness movie-sync <movie.fm2|.bk2> <rom.nes> [opti
                            movie was recorded on
       --warm-up zaxnes:<n> | fceux:<n>
                            blank frames on one engine before the movie starts; the experiment
-                           that tells a difference of boot phase from one of emulation
-      --profile standard|neshawk
-                           which 2A03 Zaxnes runs. Default: the one the movie was recorded on —
-                           the NesHawk-compatible chip for a `.bk2` whose Core is NesHawk, the
-                           standard one for everything else (`--engine zaxnes`/`both`)";
+                           that tells a difference of boot phase from one of emulation";
 
 /// Pixels in a picture (256 x 240, REQ-CORE-048).
 const PICTURE_LEN: usize = 256 * 240;
@@ -333,9 +328,6 @@ pub struct Options {
     /// experiment that says whether that is what happened: if the two runs then agree, the
     /// divergence was the phase and not the emulation.
     pub warm_up: (u32, u32),
-    /// Which 2A03 Zaxnes runs, or `None` for "the one the movie was recorded on"
-    /// (`MovieFile::recorded_profile`).
-    pub profile: Option<ProfileChoice>,
 }
 
 impl Default for Options {
@@ -374,7 +366,6 @@ impl Default for Options {
             dump: None,
             dump_frames: Vec::new(),
             warm_up: (0, 0),
-            profile: None,
         }
     }
 }
@@ -496,9 +487,6 @@ impl Options {
                 "--warm-up" => {
                     options.warm_up = parse_warm_up(&value_at(args, &mut index), options.warm_up)?;
                 }
-                "--profile" => {
-                    options.profile = Some(ProfileChoice::parse(&value_at(args, &mut index))?);
-                }
                 other if other.starts_with("--") => {
                     return Err(HarnessError::Usage(format!(
                         "unknown option {other:?}\n{USAGE}"
@@ -609,13 +597,8 @@ pub(crate) trait Machine {
     fn soft_reset(&mut self) -> Result<(), String>;
     /// Runs exactly one frame with `word` on the two pads.
     fn run(&mut self, word: u16) -> Result<(), String>;
-    /// Runs exactly one frame, the movie's next command being a RESET.
-    ///
-    /// The same frame on every machine but one: the `NesHawkCompat` profile ends it at the PPU
-    /// dot the frame boundary falls on, which is where NesHawk ends a frame and so where
-    /// NesHawk's reset lands (item 12). Everything else — FCEUX, and this core's own `Standard`
-    /// profile — runs the frame it always did, which is why this is a defaulted method and not a
-    /// capability one engine has.
+    /// Runs exactly one frame, the movie's next command being a RESET: the frame it always runs,
+    /// except on a machine whose reset lands at another point of the frame (NesHawk's port).
     fn run_before_soft_reset(&mut self, word: u16) -> Result<(), String> {
         self.run(word)
     }
@@ -629,8 +612,8 @@ pub(crate) trait Machine {
     fn restore(&mut self) -> Result<(), String>;
 }
 
-pub(crate) struct ZaxnesMachine<P: TimingProfile = Standard> {
-    pub(crate) core: Box<NesCoreOf<P>>,
+pub(crate) struct ZaxnesMachine {
+    pub(crate) core: Box<NesCore>,
     region: NesRegion,
     state: CoreState,
     /// What the cartridge's PRG-RAM is filled with after every power-on, when `--prg-ram` asks.
@@ -643,7 +626,7 @@ pub(crate) struct ZaxnesMachine<P: TimingProfile = Standard> {
     since_reset: u32,
 }
 
-impl<P: TimingProfile> ZaxnesMachine<P> {
+impl ZaxnesMachine {
     /// A machine for `image`, with the **3D built-in patches off** unless `patches` asks for them.
     ///
     /// `NesCore` powers on with `builtin_patches_enabled` **true** (`nes_core.rs:134`), which is
@@ -661,7 +644,7 @@ impl<P: TimingProfile> ZaxnesMachine<P> {
         region: NesRegion,
         patches: bool,
     ) -> Result<Self, String> {
-        let mut core = Box::new(NesCoreOf::<P>::new());
+        let mut core = Box::new(NesCore::new());
         core.set_builtin_patches(patches);
         core.set_advanced_patches(false);
         if !core.load_rom(image, name).success {
@@ -716,7 +699,7 @@ impl<P: TimingProfile> ZaxnesMachine<P> {
     /// empty socket answers 0 for ever, so the two part exactly when a DMA adds a clock to a
     /// game's own eight reads. That is the *Hoshi no Kirby* movie's tree frame 40 (lot
     /// NESHAWK-PROFILE-13 step 1), and it is a property of the recorded **machine** rather than
-    /// of the 2A03's timing, which is why it is here and not an item of `NesHawkCompat`.
+    /// of the 2A03's timing.
     ///
     /// The devices survive a power cycle and a reset — `InputPorts::reset` keeps them, as the
     /// reference does — so this is set once, before [`Machine::power`].
@@ -794,15 +777,9 @@ impl<P: TimingProfile> ZaxnesMachine<P> {
     }
 }
 
-impl<P: TimingProfile> Machine for ZaxnesMachine<P> {
-    /// `zaxnes` on the standard profile, `zaxnes/neshawk` on the other, so that every report line
-    /// and every trace file names the chip the figures were taken on.
+impl Machine for ZaxnesMachine {
     fn name(&self) -> &'static str {
-        if P::NAME == Standard::NAME {
-            "zaxnes"
-        } else {
-            "zaxnes/neshawk"
-        }
+        "zaxnes"
     }
 
     fn power(&mut self, ram: RamPattern) -> Result<(), String> {
@@ -828,14 +805,7 @@ impl<P: TimingProfile> Machine for ZaxnesMachine<P> {
     }
 
     fn run(&mut self, word: u16) -> Result<(), String> {
-        RunFrame::run_frame(&mut *self.core, word);
-        self.since_reset += 1;
-        self.apply_ppu_warmup();
-        Ok(())
-    }
-
-    fn run_before_soft_reset(&mut self, word: u16) -> Result<(), String> {
-        self.core.run_frame_before_soft_reset(word);
+        self.core.run_frame(word);
         self.since_reset += 1;
         self.apply_ppu_warmup();
         Ok(())
@@ -2321,43 +2291,27 @@ fn run_fceux_movie_mode(
     Ok((run, trace))
 }
 
-/// The Zaxnes machine `options` and `movie` ask for, on the timing profile they ask for.
-///
-/// **This is the one place the profile is chosen** (lot NESHAWK-PROFILE step 4): `--profile` if it
-/// was given, otherwise `MovieFile::recorded_profile`, which is the NesHawk-compatible chip for a
-/// `.bk2` whose `Core` header says `NesHawk` and the standard one for everything else. The two
-/// arms are identical but for the type, and the result is boxed because the rest of the command
-/// drives a `dyn Machine` and has no business knowing which chip it holds.
+/// The Zaxnes machine `options` and `movie` ask for, boxed because the rest of the command drives
+/// a `dyn Machine`.
 fn zaxnes_machine(
     options: &Options,
     movie: &MovieFile,
     machines: &Machines<'_>,
 ) -> Result<Box<dyn Machine>, HarnessError> {
-    fn build<P: TimingProfile>(
-        options: &Options,
-        movie: &MovieFile,
-        machines: &Machines<'_>,
-    ) -> Result<Box<dyn Machine>, HarnessError> {
-        let mut machine = ZaxnesMachine::<P>::new(
-            machines.image,
-            machines.name,
-            machines.region,
-            options.builtin_patches,
-        )
-        .map_err(HarnessError::Rom)?;
-        if let Some(pattern) = options.prg_ram {
-            machine.want_prg_ram(pattern).map_err(HarnessError::Rom)?;
-        }
-        machine.ppu_warmup = options.ppu_warmup;
-        machine.ppu_ram = options.ppu_ram;
-        machine.plug_ports(movie.ports);
-        Ok(Box::new(machine))
+    let mut machine = ZaxnesMachine::new(
+        machines.image,
+        machines.name,
+        machines.region,
+        options.builtin_patches,
+    )
+    .map_err(HarnessError::Rom)?;
+    if let Some(pattern) = options.prg_ram {
+        machine.want_prg_ram(pattern).map_err(HarnessError::Rom)?;
     }
-
-    match options.profile.unwrap_or_else(|| movie.recorded_profile()) {
-        ProfileChoice::Standard => build::<Standard>(options, movie, machines),
-        ProfileChoice::NesHawk => build::<NesHawkCompat>(options, movie, machines),
-    }
+    machine.ppu_warmup = options.ppu_warmup;
+    machine.ppu_ram = options.ppu_ram;
+    machine.plug_ports(movie.ports);
+    Ok(Box::new(machine))
 }
 
 /// `zax-neshawk`, the Rust port of NesHawk, as a [`Machine`].

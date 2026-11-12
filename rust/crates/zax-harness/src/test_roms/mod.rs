@@ -36,9 +36,8 @@ use std::time::Instant;
 use serde_json::{json, Map, Value};
 use zax_core_api::NesRegion;
 use zax_nes::rom::InesHeader;
-use zax_nes::{NesCoreOf, NesHawkCompat, Standard, TimingProfile};
+use zax_nes::NesCore;
 
-use crate::profile_choice::ProfileChoice;
 use crate::HarnessError;
 
 /// The options of `test-roms`.
@@ -52,7 +51,6 @@ pub const USAGE: &str = "zax-harness test-roms <roms dir> <out.json> [options]
                         (with --filter, re-measures one suite without re-running the rest)
   --frames <n>          cap the frame budget of every ROM at n (default: per suite)
   --quiet               do not print one line per ROM
-  --profile <name>      timing profile: standard|neshawk (default standard)
   --engine <name>       which core: zaxnes|neshawk (default zaxnes). `neshawk` is
                         `zax-neshawk`, the Rust port of BizHawk's own core, so that a verdict
                         can be held against NesHawk's by the same readers on the same ROMs
@@ -80,8 +78,6 @@ pub struct Options {
     merge: Option<PathBuf>,
     frame_cap: Option<u32>,
     quiet: bool,
-    /// Which 2A03 to run every ROM on (lot NESHAWK-PROFILE step 3's matrix).
-    profile: ProfileChoice,
     /// Which core runs the collection.
     engine: TestEngine,
     /// BizHawk's `gamedb` directory, for `--engine neshawk`.
@@ -114,7 +110,6 @@ impl Options {
             merge: None,
             frame_cap: None,
             quiet: false,
-            profile: ProfileChoice::Standard,
             engine: TestEngine::Zaxnes,
             neshawk_gamedb: None,
             coin_run_all: None,
@@ -133,7 +128,6 @@ impl Options {
                 "--shots" => options.shots = Some(PathBuf::from(value)),
                 "--markdown" => options.markdown = Some(PathBuf::from(value)),
                 "--merge" => options.merge = Some(PathBuf::from(value)),
-                "--profile" => options.profile = ProfileChoice::parse(value)?,
                 "--engine" => {
                     options.engine = match value.as_str() {
                         "zaxnes" => TestEngine::Zaxnes,
@@ -485,14 +479,9 @@ pub fn collect(options: &Options) -> Result<Vec<RomResult>, HarnessError> {
     let mut results = Vec::with_capacity(named.len());
     for (name, file) in named {
         let image = fs::read(&file)?;
-        let mut result = match (options.engine, options.profile) {
-            (TestEngine::Zaxnes, ProfileChoice::Standard) => {
-                run_one_zaxnes::<Standard>(&name, &image, options.frame_cap, run_all)
-            }
-            (TestEngine::Zaxnes, ProfileChoice::NesHawk) => {
-                run_one_zaxnes::<NesHawkCompat>(&name, &image, options.frame_cap, run_all)
-            }
-            (TestEngine::Neshawk, _) => run_one_neshawk(
+        let mut result = match options.engine {
+            TestEngine::Zaxnes => run_one_zaxnes(&name, &image, options.frame_cap, run_all),
+            TestEngine::Neshawk => run_one_neshawk(
                 &name,
                 &image,
                 options.frame_cap,
@@ -533,10 +522,9 @@ static EMPTY_DB: std::sync::OnceLock<zax_neshawk::gamedb::GameDb> = std::sync::O
 /// Which core `--engine` names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TestEngine {
-    /// Zaxnes's own core, on whichever `--profile` says.
+    /// Zaxnes's own core.
     Zaxnes,
-    /// `zax-neshawk`, the Rust port of BizHawk's NesHawk (lot NESHAWK-REWRITE). `--profile` does
-    /// not apply to it: it *is* NesHawk, not a chip configured to resemble one.
+    /// `zax-neshawk`, the Rust port of BizHawk's NesHawk (lot NESHAWK-REWRITE).
     Neshawk,
 }
 
@@ -548,10 +536,7 @@ struct Finished {
 }
 
 /// Loads `image`, runs it with the reader its suite documents and returns the row.
-///
-/// Generic over the timing profile so that `--profile neshawk` runs the whole collection on the
-/// NesHawk-compatible chip; `ProfileChoice` above is where the one dispatch happens.
-fn run_one_zaxnes<P: TimingProfile>(
+fn run_one_zaxnes(
     name: &str,
     image: &[u8],
     frame_cap: Option<u32>,
@@ -577,7 +562,7 @@ fn run_one_zaxnes<P: TimingProfile>(
         shot: None,
     };
 
-    let mut core = NesCoreOf::<P>::new();
+    let mut core = NesCore::new();
     // The built-in widescreen patches rewrite game code; a test ROM must run as it is.
     core.set_builtin_patches(false);
     core.set_advanced_patches(false);

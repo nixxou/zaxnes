@@ -1,5 +1,4 @@
 use crate::state::{InvalidState, StateReader, StateWriter};
-use crate::timing_profile::TimingProfile;
 use crate::RegionTiming;
 
 /// Timer periods in CPU cycles per output bit, NTSC (nesdev).
@@ -38,10 +37,6 @@ pub(crate) struct DmcChannel {
     output: i32,
     /// Whether the channel is pulling /IRQ low (bit 7 of $4015).
     irq_flag: bool,
-    /// CPU cycles still owed before the byte the last fetch brought in is **counted**: the
-    /// `NesHawkCompat` profile's item 2, and 0 on every cycle of the `Standard` profile, which
-    /// counts it at the fetch (see [`Self::supply_byte`] and [`Self::step_reload_countdown`]).
-    reload_countdown: i32,
 }
 
 impl Default for DmcChannel {
@@ -64,7 +59,6 @@ impl Default for DmcChannel {
             silence: true,
             output: 0,
             irq_flag: false,
-            reload_countdown: 0,
         }
     }
 }
@@ -99,15 +93,6 @@ impl DmcChannel {
     /// Address the next DMA fetch reads.
     pub const fn fetch_address(&self) -> u16 {
         self.current_address
-    }
-
-    /// The timer, the bits the output unit still owes and the bytes left of the sample — the three
-    /// numbers NesHawk's own `fill_glitch` tests, for the DMA census of the `dma-census` feature
-    /// (an instrument, off by default: see [`crate::dma_census`]).
-    #[cfg(feature = "dma-census")]
-    #[must_use]
-    pub const fn census_state(&self) -> (i32, i32, i32) {
-        (self.timer, self.bits_remaining, self.bytes_remaining)
     }
 
     /// CPU cycles from the channel's own position until [`Self::needs_sample_fetch`] could next
@@ -229,44 +214,12 @@ impl DmcChannel {
     /// instructions a cycle whether a sample plays or not (lot MF-4a-bis step 1). The bus turns
     /// the delay into one absolute cycle at this write and gates its own DMA path on it, which
     /// costs the cycles that run no DMA nothing at all.
-    ///
-    /// On the `NesHawkCompat` profile this is **item 3**: `set_lenctr_en` tests
-    /// `!sample_buffer_filled` as a *sibling* of the restart rather than as a child of it, so a
-    /// write with bit 4 set while a sample is already playing and the buffer happens to be empty
-    /// also starts a write-style fetch. Its delay is the **DMC timer's** parity and not the APU
-    /// cycle's (`if (timer % 2 == 0) delay = 3; else delay = 2;`), and the fetch it leads to costs
-    /// three cycles rather than four — which the bus reads off
-    /// [`NesBus::dmc_from_write`](crate::NesBus).
     // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
-    pub fn set_enabled<P: TimingProfile>(&mut self, enabled: bool, apu_cycle: bool) -> u32 {
+    pub fn set_enabled(&mut self, enabled: bool, apu_cycle: bool) -> u32 {
         self.irq_flag = false;
 
         if !enabled {
-            // NesHawk's `pending_disable` — a disable that lands while a DMA, a `delay` or a
-            // reload countdown is in flight does not stop the sample until the countdown does — is
-            // item 6 of the step-1 reading and is **not** implemented on either profile. It is the
-            // post-halt DMA abort EVAL-SYNC-4 §4 records as this core's one named gap.
             self.bytes_remaining = 0;
-            return 0;
-        }
-
-        if P::DMC_ENABLE_WRITES_MID_SAMPLE {
-            if self.bytes_remaining == 0 {
-                self.restart();
-            }
-            if self.buffer_empty {
-                // NesHawk writes `if (timer % 2 == 0) delay = 3; else delay = 2;` — and **its
-                // timer is this one plus one**, so the test here is the opposite parity. Its
-                // `timer_reload` is the rate table's own value (`DMC_RATE[val & 0xF]`, 428 for
-                // index 0) and `Run()` reloads to it, so its timer runs 428 → 1; this core stores
-                // `rates[i] - 1` and runs 427 → 0 (`clock_timer`). Both are read after the same
-                // cycle's clock — NesHawk's `set_lenctr_en` is reached from `_WriteReg` inside
-                // `RunOneLast`, after `RunOneFirst` ran `dmc.Run()` — so the two values differ by
-                // exactly one at every instant and nothing else has to move.
-                // Lot NESHAWK-PROFILE-2 step 4 round 2; the parity was the other way round when
-                // item 3 was first written and that was a misreading of the convention.
-                return if self.timer % 2 == 1 { 3 } else { 2 };
-            }
             return 0;
         }
 
@@ -280,17 +233,8 @@ impl DmcChannel {
 
     /// Timer clocks from now on which the timer only counts down: [`Self::clock_timer`]
     /// returns `false` on each of them.
-    ///
-    /// A pending reload countdown (`NesHawkCompat`, item 2) makes the answer **0**: the cycles it
-    /// is owed are not quiet at all — the one it lands on moves `$4015` bit 4, the loop and the
-    /// IRQ — and the APU may not be batched across them. The test is behind the profile, so the
-    /// `Standard` profile's answer is the `else` arm and nothing else.
     #[allow(clippy::cast_sign_loss)] // Checked non-negative.
-    pub const fn quiet_clocks<P: TimingProfile>(&self) -> u32 {
-        if P::DMC_LENGTH_LAGS_THE_FETCH && self.reload_countdown > 0 {
-            return 0;
-        }
-
+    pub const fn quiet_clocks(&self) -> u32 {
         if self.timer > 0 {
             self.timer as u32
         } else {
@@ -345,19 +289,7 @@ impl DmcChannel {
     /// Hands the byte the DMA read over to the memory reader. Advances the address, which
     /// wraps from $FFFF back to $8000, and ends or loops the sample when the last byte has
     /// been consumed (nesdev).
-    ///
-    /// On the `NesHawkCompat` profile the second half of that — the length, the loop and the IRQ —
-    /// is **not** done here but three CPU cycles later (item 2): `DMCUnit.Fetch()` advances the
-    /// address and sets `apu.dmc_reload_countdown = 3`, and `APU.RunOneLast()` spends it. So bit 4
-    /// of `$4015` goes on reading *set* for three cycles after the last byte of a sample has been
-    /// fetched, which is the window *Kirby* reads at `$823C` and branches on at `$8241`
-    /// (EVAL-SYNC-4 §3).
-    ///
-    /// The countdown is stepped once **here**, which is the cycle's own `RunOneLast`: this core
-    /// performs a DMA read after the cycle's APU step rather than before it, so without that step
-    /// the three cycles would be counted from the one after the fetch and the window would land a
-    /// cycle late. [`Self::step_reload_countdown`] carries the arithmetic.
-    pub fn supply_byte<P: TimingProfile>(&mut self, value: u8) {
+    pub fn supply_byte(&mut self, value: u8) {
         self.sample_buffer = value;
         self.buffer_empty = false;
         self.current_address = if self.current_address == 0xFFFF {
@@ -365,40 +297,6 @@ impl DmcChannel {
         } else {
             self.current_address + 1
         };
-
-        if P::DMC_LENGTH_LAGS_THE_FETCH {
-            self.reload_countdown = 3;
-            self.step_reload_countdown();
-            return;
-        }
-
-        self.bytes_remaining -= 1;
-        if self.bytes_remaining > 0 {
-            return;
-        }
-
-        if self.looping {
-            self.restart();
-        } else if self.irq_enabled {
-            self.irq_flag = true;
-        }
-    }
-
-    /// Spends one cycle of the `NesHawkCompat` profile's reload countdown, and counts the byte
-    /// when it runs out (item 2; `APU.RunOneLast()`'s `dmc_reload_countdown` block).
-    ///
-    /// Called once per CPU cycle from [`Apu2A03::step_cpu_cycle`](super::Apu2A03), after the
-    /// channel's timer, and only on that profile: the `Standard` profile never reaches it and
-    /// never stores a non-zero countdown.
-    pub fn step_reload_countdown(&mut self) {
-        if self.reload_countdown == 0 {
-            return;
-        }
-
-        self.reload_countdown -= 1;
-        if self.reload_countdown != 0 {
-            return;
-        }
 
         self.bytes_remaining -= 1;
         if self.bytes_remaining > 0 {
@@ -432,23 +330,13 @@ impl DmcChannel {
     /// every ROM of `dmc_dma_during_read4` and `sprdma_and_dmc_dma`. Mesen 2 sets the same
     /// phase at reset for the same reason.
     ///
-    /// **Item 11** is the one profile difference here: NesHawk powers the timer on at a flat 1 020
-    /// CPU cycles (`DMCUnit`'s constructor, `timer = 1020` beside `timer_reload = DMC_RATE[0]`)
-    /// rather than one period of the rate in force, which puts its whole output phase 592 cycles
-    /// further on. 592 is even, so the alignment parity the paragraphs above depend on is the same
-    /// on both profiles — which is what makes the item an item rather than a hang.
-    ///
     /// [`NesBus::run_dma`]: crate::NesBus
     // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
-    pub fn reset<P: TimingProfile>(&mut self) {
+    pub fn reset(&mut self) {
         let rates = self.rates;
         *self = Self::default();
         self.rates = rates;
-        if P::DMC_POWER_ON_TIMER > 0 {
-            self.timer = P::DMC_POWER_ON_TIMER;
-        } else {
-            self.timer = rates[0] - 1;
-        }
+        self.timer = rates[0] - 1;
     }
 
     /// The documented *after reset* state of the DMC (AMD-044 REQ-CORE-122): the output level
@@ -458,21 +346,12 @@ impl DmcChannel {
     pub fn soft_reset(&mut self) {
         self.output &= 1;
         self.irq_flag = false;
-        // A reset's `$4015 = 0` has already stopped the sample, so a countdown still in flight
-        // has nothing left to count; dropped so that it cannot take `bytes_remaining` negative.
-        // Always 0 on the `Standard` profile.
-        self.reload_countdown = 0;
     }
 }
 
 impl DmcChannel {
     /// Appends the state to `writer` (REQ-CORE-090).
-    ///
-    /// The `NesHawkCompat` profile's reload countdown is appended **only on that profile**, so the
-    /// `Standard` profile's block is byte for byte the block every earlier version wrote and
-    /// `NesCore::STATE_VERSION` does not move. The two profiles' savestates are told apart by the
-    /// core name at the head of the block, not by this.
-    pub fn save_state<P: TimingProfile>(&self, writer: &mut StateWriter) {
+    pub fn save_state(&self, writer: &mut StateWriter) {
         writer.write_usize(self.rate_index);
         writer.write_i32(self.timer);
         writer.write_bool(self.irq_enabled);
@@ -488,19 +367,13 @@ impl DmcChannel {
         writer.write_bool(self.silence);
         writer.write_i32(self.output);
         writer.write_bool(self.irq_flag);
-        if P::DMC_LENGTH_LAGS_THE_FETCH {
-            writer.write_i32(self.reload_countdown);
-        }
     }
 
     /// Restores the state from `reader` (REQ-CORE-091).
     ///
     /// # Errors
     /// [`InvalidState`] when the block is truncated or holds an impossible value.
-    pub fn load_state<P: TimingProfile>(
-        &mut self,
-        reader: &mut StateReader,
-    ) -> Result<(), InvalidState> {
+    pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
         self.rate_index = reader.read_index(self.rates.len())?;
         self.timer = reader.read_i32()?;
         self.irq_enabled = reader.read_bool()?;
@@ -516,11 +389,6 @@ impl DmcChannel {
         self.silence = reader.read_bool()?;
         self.output = reader.read_i32()?;
         self.irq_flag = reader.read_bool()?;
-        self.reload_countdown = if P::DMC_LENGTH_LAGS_THE_FETCH {
-            reader.read_i32()?
-        } else {
-            0
-        };
         Ok(())
     }
 }

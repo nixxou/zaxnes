@@ -1202,20 +1202,6 @@ ppu-exact-sprite-eval = []
 # left-out *boards*. `docs/review/BOARD-FEATURES.md` has the row and the command.
 ppu-2007-render-read = []
 
-# **An instrument, not emulation** (lot NESHAWK-PROFILE-2 step 2): `crate::dma_census`, a per-frame
-# record of every DMC sample fetch with its request cycle, its kind and its cost, of the OAM
-# transfers, of every APU register write and of every `$4015` and `$2002` read.
-#
-# It exists because frame 4666 of the *Kirby* `.bk2` could not be diagnosed from aggregate counts:
-# lot NESHAWK-PROFILE had "52 DMC sample fetch(es)" for the frame and needed to know *which* of them
-# cost what. `zax-harness frame-trace --dmc-census` is the only reader.
-#
-# **Every call site carries `#[cfg(feature = "dma-census")]` on the statement itself**, not just the
-# module and the field, so with the feature off the hooks are removed before type-checking and the
-# shipped core is byte for byte the core without them — which is what makes `golden-core` and
-# `bench-core` answerable at all. Not in `parked-boards`: that umbrella is for left-out boards.
-dma-census = []
-
 # The types the two engines share (lot FCEUX-23 step 2). Everything of it is re-exported below at
 # the path it used to be at, so a consumer of this crate need not know it moved.
 [dependencies]

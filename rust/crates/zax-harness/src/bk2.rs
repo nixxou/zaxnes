@@ -846,59 +846,6 @@ mod tests {
         assert_eq!(odd.rom_sha1, None);
     }
 
-    /// Which 2A03 the movie asks to be replayed on (lot NESHAWK-PROFILE step 4).
-    ///
-    /// `NesHawk` and nothing else. A `QuickNes` movie is a movie of a third core whose timing this
-    /// lot did not read, so it gets the standard chip rather than a guess; a header with no `Core`
-    /// line names no core at all.
-    #[test]
-    fn a_neshawk_movie_asks_for_the_neshawk_profile_and_nothing_else_does() {
-        use crate::profile_choice::ProfileChoice;
-
-        let neshawk = read(&movie("", SYNC, &["|..|........|........|"])).unwrap_or_default();
-        assert_eq!(
-            neshawk.header.get("Core").map(String::as_str),
-            Some("NesHawk")
-        );
-        assert_eq!(neshawk.recorded_profile(), ProfileChoice::NesHawk);
-
-        for (core_line, what) in [
-            (
-                "Core QuickNes
-",
-                "a QuickNes movie",
-            ),
-            ("", "a header with no Core line"),
-        ] {
-            let members: Vec<(&str, &str)> = vec![
-                (
-                    "Header.txt",
-                    if core_line.is_empty() {
-                        "Platform NES
-GameName Test
-"
-                    } else {
-                        "Platform NES
-GameName Test
-Core QuickNes
-"
-                    },
-                ),
-                ("SyncSettings.json", SYNC),
-                ("Input Log.txt", "[Input]
-LogKey:#Reset|Power|Reserved|Up|Down|Left|Right|Start|Select|B|A|Up|Down|Left|Right|Start|Select|B|A|
-[/Input]
-"),
-            ];
-            let file = read(&archive(&members)).unwrap_or_default();
-            assert_eq!(
-                file.recorded_profile(),
-                ProfileChoice::Standard,
-                "{what} runs on the standard chip"
-            );
-        }
-    }
-
     #[test]
     fn sha1_matches_the_published_examples() {
         let hex = |digest: [u8; 20]| {

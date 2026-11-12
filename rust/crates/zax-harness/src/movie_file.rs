@@ -25,7 +25,6 @@ use std::fmt;
 use zax_nes::input::ControllerPortType;
 use zax_nes::movie::fm2::{Fm2Movie, COMMAND_HARD_RESET, COMMAND_SOFT_RESET};
 
-use crate::profile_choice::ProfileChoice;
 
 /// What a frame's command column asks for before the frame runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -211,30 +210,6 @@ pub struct MovieFile {
 }
 
 impl MovieFile {
-    /// Which timing profile of the 2A03 the movie was **recorded** on (lot NESHAWK-PROFILE).
-    ///
-    /// Only a `.bk2` whose `Core` header is exactly `NesHawk` asks for the NesHawk-compatible
-    /// chip. Everything else gets the standard one, and that is deliberate rather than a
-    /// fall-back:
-    ///
-    /// * a `.bk2` recorded on **`QuickNes`** is a movie of a different core again, whose timing
-    ///   this lot did not read and whose differences are not the ones in the profile — running it
-    ///   on the NesHawk chip would be a guess dressed as a measurement;
-    /// * an **`.fm2`** is FCEUX's, and lot FCEUX-48 already gives that format its own engine
-    ///   switch;
-    /// * a header with **no** `Core` line names no core at all.
-    ///
-    /// `--profile` overrides this, which is how the test-ROM matrix and the Kirby experiment of
-    /// step 5 measured the same movie on both chips.
-    #[must_use]
-    pub fn recorded_profile(&self) -> ProfileChoice {
-        if self.kind == "bk2" && self.header.get("Core").map(String::as_str) == Some("NesHawk") {
-            ProfileChoice::NesHawk
-        } else {
-            ProfileChoice::Standard
-        }
-    }
-
     /// The **engine** this movie should be replayed on, `None` when nothing in the header asks
     /// for a particular one.
     ///

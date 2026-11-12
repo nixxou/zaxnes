@@ -17,7 +17,7 @@ use std::f64::consts::PI;
 
 use common::minimal;
 use zax_nes::apu::{mixer, Apu2A03};
-use zax_nes::{NesCore, RegionTiming, Standard};
+use zax_nes::{NesCore, RegionTiming};
 
 fn core_at(sample_rate: i32) -> NesCore {
     let mut core = NesCore::new();
@@ -220,7 +220,7 @@ fn req_core_076_a_move_of_m_alone_reaches_the_mixer() {
 
     for level in [1_000, 2_000, 1_000, 0, 32_767] {
         apu.set_expansion_level(level);
-        apu.run_cpu_cycles::<Standard>(1);
+        apu.run_cpu_cycles(1);
 
         // Every channel is silent, so `A` is 0, the key is 0 on each of the five passes, and
         // `S = 0 − M` is `−M` — AMD-061 §6.2's reversed polarity, where AMD-054 read `+M`.
