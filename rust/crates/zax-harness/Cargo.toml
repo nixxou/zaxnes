@@ -8,10 +8,11 @@ publish.workspace = true
 
 [features]
 # Mirrors `zax-nes`'s own default, so that `cargo test -p zax-harness` builds the same core the
-# crate's own default builds. **Empty since MF-VS step 7 parked `board-vs-system`**: the `vs`
+# crate's own default builds. **No `vs-system` since MF-VS step 7 parked `board-vs-system`**: the `vs`
 # subcommand is then not in the default build either, which is what a build whose core has no VS
 # layer wants.
-default = []
+# `ppu-2007-render-read` since Q-139 closed (2026-11-12), as in `zax-nes`'s default.
+default = ["ppu-2007-render-read"]
 
 # The configuration that turns the parked boards on, `zax-nes`'s `parked-boards` with this
 # crate's own `vs` subcommand beside it, so that one flag gives the same machine on both sides.

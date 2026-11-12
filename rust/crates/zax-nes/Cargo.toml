@@ -20,6 +20,8 @@ workspace = true
 # ROM on both runs and the one command that flips it.
 [features]
 default = [
+    # Q-139 closed 2026-11-12: the owner validated SMB3 and Zelda II by eye (lot ACCURACY-1).
+    "ppu-2007-render-read",
     "board-94",
     "board-105",
     "board-116",
@@ -1200,6 +1202,12 @@ ppu-exact-sprite-eval = []
 #
 # Not in `parked-boards`, for the reason `ppu-exact-sprite-eval` is not: that umbrella is for
 # left-out *boards*. `docs/review/BOARD-FEATURES.md` has the row and the command.
+#
+# **In `default` since 2026-11-12 (Q-139 closed).** Lot ACCURACY-1 measured SMB3's status bar one
+# line low without it against both MesenCE and NesHawk, and identical to NesHawk with it; the owner
+# then validated SMB3 and Zelda II by eye, with and without the widescreen pack. Golden-core over
+# the 98 originals moves on the 8 SMB3 and 3 Zelda II dumps only, picture and tiles only (cycles
+# and audio unchanged): `268b4adbd7ce36155bb02f591c892f08c91a4b9ff063aba7fea2d48198341840`.
 ppu-2007-render-read = []
 
 # BizHawk's `.bk2` movies and the TAS reader the harness and the application share (owner request:

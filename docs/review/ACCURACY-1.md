@@ -52,3 +52,18 @@ was inconclusive. The work RAM is unambiguous and is what the verdicts rest on.
 
 Raw measurements (not committed): the session scratchpad's `acc/` directory — `smb3-*.txt`,
 `mesen-ram*`, `scan-*`.
+
+## Decision (2026-11-12): `ppu-2007-render-read` joins `default` — Q-139 closed
+
+The owner played SMB3 and Zelda II on a build with the rule, with his own 0.5.0 settings and the
+widescreen packs, beside MesenCE, and validated the picture. The feature is now in `zax-nes`'s
+`default` (and `zax-harness`'s, which mirrors it).
+
+| Check | Result |
+|---|---|
+| golden-core, 98 originals × 1 200 frames | **only the 8 SMB3 and 3 Zelda II dumps move**, `pixel_sha256` and `tiles_sha256` only — `cycles` and audio identical on all 98. New digest `268b4adbd7ce36155bb02f591c892f08c91a4b9ff063aba7fea2d48198341840` (was `8d508070…`) |
+| `cargo test --release -p zax-nes -p zax-harness` | 1 314 passed, 0 failed |
+| the same with `--ignored` and the ROM directories | 14 passed, 0 failed — among them `amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line` and `zr_2_a_zone_fetch_leaves_smb3s_ground_row_whole_under_the_widescreen_hack` |
+| AccuracyCoin | **129 / 147** (was 128): `PPU Misc. / $2007 read w/ rendering` passes |
+
+Cost: +0.000 % to +0.005 % on PR-1's set (lot MF-4e-gate's measurement; the code is unchanged).
