@@ -395,7 +395,8 @@ pub const CAMERA_ROWS: [OptionRow; 2] =
 /// run-ahead's frames and does nothing without it. The debugging view that goes with it
 /// (`emu.smooth_scroll_view`) is **not** here: like `audio.latency_ms` it stays a desktop row,
 /// this screen being a short curated list.
-pub const EMULATION_ROWS: [OptionRow; 6] = [
+pub const EMULATION_ROWS: [OptionRow; 7] = [
+    OptionRow::Setting(SettingId::EmuEngine),
     OptionRow::Setting(SettingId::EmuRunAhead),
     OptionRow::Setting(SettingId::EmuSmoothScrollAhead),
     OptionRow::Setting(SettingId::EmuGameSpeed),

@@ -95,6 +95,7 @@ options
       row.camera
       camera.fov
     page.emulation
+      emu.engine
       emu.run_ahead
       emu.smooth_scroll_ahead
       emu.game_speed
@@ -151,6 +152,7 @@ game options
     page.light_shadows
       render.backdrop_lighting
     page.emulation
+      emu.engine
       emu.run_ahead
       emu.smooth_scroll_ahead
   page.hacks

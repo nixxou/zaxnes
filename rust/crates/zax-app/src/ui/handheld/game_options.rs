@@ -118,7 +118,9 @@ pub const GAME_LIGHT_ROWS: [OptionRow; 1] = [OptionRow::Setting(SettingId::Rende
 /// the game's run-ahead frames, so it belongs where the run-ahead is and not on a page of its
 /// own. The branch had written both into a flat `GAME_ROWS` that RO-3 has since replaced; the
 /// run-ahead was already here.
-pub const GAME_EMULATION_ROWS: [OptionRow; 2] = [
+pub const GAME_EMULATION_ROWS: [OptionRow; 3] = [
+    // The engine the game plays on (owner request, 2026-11-12), taken at the next load.
+    OptionRow::Setting(SettingId::EmuEngine),
     OptionRow::Setting(SettingId::EmuRunAhead),
     OptionRow::Setting(SettingId::EmuSmoothScrollAhead),
 ];
@@ -215,6 +217,7 @@ pub const fn row_settings(row: OptionRow) -> &'static [SettingId] {
 const fn one_setting(id: SettingId) -> &'static [SettingId] {
     match id {
         SettingId::EmuRunAhead => &[SettingId::EmuRunAhead],
+        SettingId::EmuEngine => &[SettingId::EmuEngine],
         // KIRBY-MERGE: the smooth scrolling spends a frame of the game's own run-ahead, so it is
         // an option of the game beside it (owner request: a game whose own lag is two frames
         // takes run-ahead 2, smooth with the latency of 1).
@@ -895,9 +898,9 @@ mod tests {
         assert!(!is_game_row_setting(SettingId::LightIntensity));
     }
 
-    /// Each of the thirty-one rows a game can have stores a value of its own, "Use Global" takes
+    /// Each of the thirty-two rows a game can have stores a value of its own, "Use Global" takes
     /// it back, and "Put everything back to global" clears the lot. Thirty until KIRBY-MERGE
-    /// added the smooth scrolling from the run-ahead.
+    /// added the smooth scrolling from the run-ahead; thirty-one stepped since the engine row.
     #[test]
     fn ro_3_every_row_stores_its_own_value_and_goes_back_to_global() {
         let steppable: Vec<OptionRow> = all_game_rows()
@@ -905,7 +908,7 @@ mod tests {
             // own test above.
             .filter(|row| *row != OptionRow::Overscan)
             .collect();
-        assert_eq!(30, steppable.len(), "{steppable:?}");
+        assert_eq!(31, steppable.len(), "{steppable:?}");
         let mut model = model(GameOptions::new());
         for row in &steppable {
             let row = *row;
