@@ -33,7 +33,11 @@ if [[ "${1:-}" == "--native" ]]; then
     binary="$target_dir/release/zaxnes"
 else
     export SDL2_TOOLCHAIN="${SDL2_TOOLCHAIN:-$script_dir/aarch64-sdl2-zig.cmake}"
-    (cd "$rust_dir" && cargo zigbuild --release -p zax-app --features firmware-sdl \
+    # The FCEUX engine is built in (owner decision, 2026-11-12), from the fork built with zig for
+    # the same glibc (`sh zax/build-linux-zig.sh build-aarch64-zig aarch64-linux-gnu.2.31`).
+    : "${ZAX_FCEUX_DIR:?set ZAX_FCEUX_DIR to the root of the fceux-zax fork}"
+    export ZAX_FCEUX_LIB="${ZAX_FCEUX_LIB:-$ZAX_FCEUX_DIR/build-aarch64-zig}"
+    (cd "$rust_dir" && cargo zigbuild --release -p zax-app --features firmware-sdl,fceux-core \
         --target "$target.$glibc")
     binary="$target_dir/$target/release/zaxnes"
 fi
@@ -65,6 +69,11 @@ mkdir -p "$port/licenses" "$port/profiles" "$port/roms"
 install -m 755 "$binary" "$port/zaxnes.aarch64"
 cp "$root_dir/LICENSE" "$root_dir/THIRD-PARTY-NOTICES.md" "$root_dir/ASSETS-LICENSES.md" \
     "$port/licenses/"
+# GPL: the corresponding source of the FCEUX fork linked into the binary, at the commit built.
+if [[ -n "${ZAX_FCEUX_DIR:-}" ]]; then
+    git -C "$ZAX_FCEUX_DIR" archive --format=zip --prefix=fceux-zax/ \
+        -o "$port/licenses/fceux-zax-source.zip" HEAD
+fi
 if grep -q $'\r' "$script_dir/portmaster/Zaxnes.sh"; then
     echo "error: Zaxnes.sh has CRLF line ends; the firmware's bash needs LF" >&2
     exit 1
