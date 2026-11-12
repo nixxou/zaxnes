@@ -17,7 +17,7 @@ use zax_render::scene::{BackdropState, SceneFrame, SceneState};
 use zax_scripting::{
     lend_context, LuaColor, ProfileScriptRuntime, ScriptBackdrop, ScriptCamera, ScriptContext,
     ScriptEnvironment, ScriptInput, ScriptLight, ScriptLog, ScriptMemory, ScriptProfileInfo,
-    ScriptSettings,
+    ScriptNotification, ScriptSettings,
 };
 use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
@@ -112,6 +112,9 @@ pub struct ThreeD {
     frame: i32,
     /// The settings changed since the scene last followed them (the scripts', the options').
     changes: Arc<Mutex<Vec<SettingId>>>,
+    /// What the scripts raised through `NotiCenter` and the frontend has not shown yet: the
+    /// text and how many seconds it stays.
+    notices: Arc<Mutex<Vec<(String, f32)>>>,
     /// The pull on the head-on 2D picture.
     pull: HeadOnPull,
     /// Whether the scene was in 2D at the last frame.
@@ -134,6 +137,7 @@ impl ThreeD {
         profile: &GameProfile,
         tiles: Option<TileResolver>,
         render: RenderOptions,
+        optimized_lua: bool,
         log: fn(&str),
     ) -> Result<Self, String> {
         let mut engine = ConversionEngine::new();
@@ -149,6 +153,7 @@ impl ThreeD {
             picture_height: 240,
             frame: 0,
             changes: Arc::default(),
+            notices: Arc::default(),
             pull: HeadOnPull::new(),
             was_two_dimensional: false,
             buttons: Buttons::default(),
@@ -163,9 +168,16 @@ impl ThreeD {
                 changes.push(id);
             }
         });
+        let notices = Arc::clone(&three.notices);
         let environment = ScriptEnvironment {
             settings,
             log: Box::new(Log(log)),
+            notify: Some(Box::new(move |notice: ScriptNotification| {
+                if let Ok(mut notices) = notices.lock() {
+                    notices.push((notice.message, notice.seconds));
+                }
+            })),
+            optimized: optimized_lua,
             profile: ScriptProfileInfo {
                 title: profile.title.clone().unwrap_or_default(),
                 maker: profile.author.clone().unwrap_or_default(),
@@ -381,6 +393,16 @@ impl ThreeD {
         render.write(runtime.settings_mut().model_mut());
         self.sync_settings(nes);
         self.follow_settings();
+    }
+
+    /// What the scripts raised through `NotiCenter` since the last call, for the frontend to
+    /// show: the text and how many seconds it stays.
+    #[must_use]
+    pub fn take_notices(&self) -> Vec<(String, f32)> {
+        self.notices
+            .lock()
+            .map(|mut notices| std::mem::take(&mut *notices))
+            .unwrap_or_default()
     }
 
     fn take_changes(&self) -> Vec<SettingId> {

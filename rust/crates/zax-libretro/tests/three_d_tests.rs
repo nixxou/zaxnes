@@ -26,11 +26,15 @@ fn rom(name: &str) -> Option<Vec<u8>> {
 
 /// A game loaded in 3D, or none with a line saying why.
 fn three_d(name: &str) -> Option<Core> {
+    three_d_with(name, Options::default())
+}
+
+fn three_d_with(name: &str, options: Options) -> Option<Core> {
     let Some(image) = rom(name) else {
         eprintln!("skipped: no {name}");
         return None;
     };
-    let mut core = Core::load(&image, name, Options::default()).ok()?;
+    let mut core = Core::load(&image, name, options).ok()?;
     // FlappyZaxNes's profile is not in the core (owner decision): the tests take the demo's.
     let demo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../zax-app/demo/flappyzaxnes.3dn");
     let own = (name == "FlappyZaxNes.nes")
@@ -217,6 +221,24 @@ fn y_and_l2_work_as_in_the_application() {
         Some(CameraNews::Restored)
     );
     assert_eq!(three_d.scene().camera.current().angles, kept);
+}
+
+#[test]
+fn the_optimised_lua_plays_the_same() {
+    let options = Options {
+        optimized_lua: true,
+        ..Options::default()
+    };
+    let (Some(mut fast), Some(mut plain)) = (
+        three_d_with("FlappyZaxNes.nes", options),
+        three_d("FlappyZaxNes.nes"),
+    ) else {
+        return;
+    };
+    let input = |frame: u32| u16::from(frame % 40 < 3) | u16::from(frame == 100) << 3;
+    play(&mut fast, 400, input);
+    play(&mut plain, 400, input);
+    assert_eq!(fast.system_ram(), plain.system_ram());
 }
 
 #[test]

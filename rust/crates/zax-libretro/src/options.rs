@@ -27,6 +27,7 @@ const SHADOWS: &str = "zaxnes_3d_shadows";
 const STYLE: &str = "zaxnes_3d_style";
 const REFLECTIONS: &str = "zaxnes_3d_reflections";
 const SKY: &str = "zaxnes_3d_sky";
+const FAST_LUA: &str = "zaxnes_3d_fast_lua";
 
 /// The anti-aliasing levels of `video.anti_alias`, by their value, the default first.
 const ANTI_ALIASES: [(&str, i32); 4] = [("MSAA 4x", 1), ("Off", 0), ("MSAA 8x", 2), ("SMAA", 3)];
@@ -103,6 +104,10 @@ pub fn declarations(hacks: &[HackOption]) -> Vec<(String, String)> {
         (
             SKY.to_owned(),
             format!("3D sky; {}", SKIES.map(|(name, _)| name).join("|")),
+        ),
+        (
+            FAST_LUA.to_owned(),
+            "3D optimised Lua (restart, unsafe code); disabled|enabled".to_owned(),
         ),
         (
             WIDESCREEN.to_owned(),
@@ -186,6 +191,7 @@ pub fn read(value: &dyn Fn(&str) -> Option<String>, hacks: &[HackOption]) -> Opt
             reflections: enabled(REFLECTIONS, defaults.render.reflections),
             skybox: choice(&SKIES, value(SKY), defaults.render.skybox),
         },
+        optimized_lua: enabled(FAST_LUA, defaults.optimized_lua),
         hacks: hacks
             .iter()
             .map(|option| {

@@ -25,6 +25,7 @@ pub enum RegionChoice {
 
 /// What the core options of the frontend set.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::struct_excessive_bools)] // One per core option.
 pub struct Options {
     /// The widescreen hack of the game, when it has one: its patch runs and the picture widens.
     pub widescreen: bool,
@@ -47,6 +48,8 @@ pub struct Options {
     pub resolution: (u32, u32),
     /// The render settings of the 3D (at once).
     pub render: crate::three_d::RenderOptions,
+    /// The application's optimised Lua paths, `unsafe` code (at the next load).
+    pub optimized_lua: bool,
 }
 
 impl Default for Options {
@@ -62,6 +65,7 @@ impl Default for Options {
             three_d: true,
             resolution: (1280, 720),
             render: crate::three_d::RenderOptions::default(),
+            optimized_lua: false,
         }
     }
 }
@@ -158,6 +162,7 @@ impl Core {
             profile,
             tiles,
             self.options.render,
+            self.options.optimized_lua,
             log,
         )?);
         Ok(())

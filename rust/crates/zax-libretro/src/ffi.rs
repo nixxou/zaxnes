@@ -249,6 +249,21 @@ fn show(text: &'static CStr) {
     environment(ENVIRONMENT_SET_MESSAGE, &mut message);
 }
 
+/// Shows a script's notification `text` for `seconds` on the frontend's screen.
+fn show_text(text: &str, seconds: f32) {
+    let Ok(text) = CString::new(text.replace('\0', "")) else {
+        return;
+    };
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // A few seconds.
+    let frames = (seconds.clamp(0.5, 30.0) * 60.0) as c_uint;
+    let mut message = Message {
+        msg: text.as_ptr(),
+        frames,
+    };
+    // The frontend copies the text.
+    environment(ENVIRONMENT_SET_MESSAGE, &mut message);
+}
+
 fn log(level: c_uint, message: &str) {
     let Some(callback) = frontend().log else {
         return;
@@ -502,6 +517,9 @@ fn steer(frontend: &Frontend, core: &mut Core, seconds: f32) {
             three_d.reset_view();
         }
         three_d.advance(seconds, turn, zoom);
+        for (text, shown) in three_d.take_notices() {
+            show_text(&text, shown);
+        }
     }
 }
 
