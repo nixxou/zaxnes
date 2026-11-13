@@ -335,6 +335,7 @@ const AUDIO: &[LayoutEntry] = &[
     LayoutEntry::Group(OptionsGroup::Advanced),
     LayoutEntry::Row(SettingId::AudioLatencyMs),
     LayoutEntry::Row(SettingId::AudioClassicOutput),
+    LayoutEntry::Row(SettingId::AudioConsoleProfile),
 ];
 
 /// The rows of the **RetroAchievements** tab, under the account block the tab draws itself.

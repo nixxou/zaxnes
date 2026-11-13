@@ -226,7 +226,7 @@ Each one is exact on every test we have, but is a modelling shortcut, not the me
 
 ## E. APU and audio output
 
-### E1. Console output chain — open (cheap, option)
+### E1. Console output chain — done as an option (`audio.console_profile`, none, step 22)
 - Hardware: the mixed signal goes through RC filters that differ per console model and revision.
 - Zaxnes: one DC-blocking high-pass at 20 Hz (`apu/band_limited_resampler.rs:6`, `:104`).
 - BeesNES: measured profiles per console serial (`Src/Audio/LSNAudioOptions.cpp:20-36`): LPF,
@@ -236,6 +236,22 @@ Each one is exact on every test we have, but is a modelling shortcut, not the me
   446-450, 725-741`. MIT, reusable with notice. Verified by the author against recordings (README
   "Audio Accuracy", MDFourier).
 - Cost: a few biquads per output sample; zero when the option is off.
+- **Done (branch `feat/fidelity-poweron`, step 22)**: `apu/console_profile.rs`, the 14 profiles
+  verbatim; gains in the mix (exact nesdev formulas, cold `profile_mix`, only when the level
+  moves), filters once per output sample in `BandLimitedResampler::drain` in place of the 20 Hz
+  DC blocker, letterless noise (N0260073). Default "none" is bit-identical (golden-core audio
+  unchanged). **Approximations left, for Fidelity+**: (1) BeesNES's low-pass runs at the CPU rate
+  as a pole-zero filter; ours at the output rate, pole pre-warped, **zero dropped** (it sits at
+  144-189 kHz, above any output Nyquist) — to do properly, run it on the band-limited signal
+  before decimation (per-step cost); (2) the overall profile volume (0.34 to 4.5) is not applied,
+  only its sign: our output is normalised to full scale, applying it would clip; (3) BeesNES's
+  sample box applies HPF0 inside its windowed-sinc resampler, ours after our own resampler (same
+  one-pole formula, a few samples of phase apart); (4) the expansion audio (VRC6, MMC5, N163...)
+  is added after the gains and is not weighted per console, while BeesNES lets the mapper
+  post-process between HPF1 and HPF2 (`PostHpf`, `LSNApu2A0X.h:1919-1931`); (5) filter state is
+  not in the savestate (a load restarts it at rest: inaudible click at most); (6) the
+  N20914398 profile was measured with a Sunsoft 5B cartridge and has no low-pass and no
+  inversion — kept as BeesNES lists it.
 
 ### E2. Per-console clock — open (free)
 - Each console's crystal differs (E1 table). Option "measured clock of console X" changes speed and

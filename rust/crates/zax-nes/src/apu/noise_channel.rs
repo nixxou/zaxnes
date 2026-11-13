@@ -21,6 +21,9 @@ pub(crate) struct NoiseChannel {
     period_index: usize,
     timer: i32,
     short_mode: bool,
+    /// A letterless RP2A03 has no short mode: bit 7 of `$400E` does nothing (`BeesNES`
+    /// `SetModeFlag`, its `bRp2A02` profiles). A setting of the console profile, not state.
+    letterless: bool,
     // The shift register is seeded with 1 at power-on; seeded with 0 it would never leave 0.
     shift_register: i32,
     pub envelope: Envelope,
@@ -34,6 +37,7 @@ impl Default for NoiseChannel {
             period_index: 0,
             timer: 0,
             short_mode: false,
+            letterless: false,
             shift_register: 1,
             envelope: Envelope::default(),
             length: LengthCounter::default(),
@@ -60,6 +64,14 @@ impl NoiseChannel {
         };
     }
 
+    /// Makes the channel a letterless RP2A03's, which has no short mode.
+    pub fn set_letterless(&mut self, letterless: bool) {
+        self.letterless = letterless;
+        if letterless {
+            self.short_mode = false;
+        }
+    }
+
     /// Writes register `index` (0 to 3) at APU cycle `cycle`.
     pub fn write(&mut self, index: u16, value: u8, cycle: i64) {
         match index {
@@ -70,7 +82,7 @@ impl NoiseChannel {
                 self.envelope.period = value & 0x0F;
             }
             2 => {
-                self.short_mode = (value & 0x80) != 0;
+                self.short_mode = (value & 0x80) != 0 && !self.letterless;
                 self.period_index = usize::from(value & 0x0F);
             }
             3 => {

@@ -15,6 +15,7 @@
 //! clipped (AMD-061 §6.2).
 
 mod band_limited_resampler;
+pub mod console_profile;
 mod dmc_channel;
 mod envelope;
 mod length_counter;
@@ -207,6 +208,9 @@ pub struct Apu2A03 {
     noise: NoiseChannel,
     dmc: DmcChannel,
     resampler: BandLimitedResampler,
+    /// The console whose analog audio path is imitated (`console_profile`); `None`, the default,
+    /// keeps the output as it always was.
+    console_profile: Option<&'static console_profile::ConsoleAudioProfile>,
     ring: Arc<Mutex<SampleRing>>,
 
     timing: RegionTiming,
@@ -269,6 +273,7 @@ impl Clone for Apu2A03 {
             noise: self.noise.clone(),
             dmc: self.dmc.clone(),
             resampler: self.resampler.clone(),
+            console_profile: self.console_profile,
             ring: Arc::new(Mutex::new(ring)),
             timing: self.timing,
             sample_rate: self.sample_rate,
@@ -327,6 +332,7 @@ impl Apu2A03 {
             noise: NoiseChannel::default(),
             dmc: DmcChannel::default(),
             resampler: BandLimitedResampler::new(),
+            console_profile: None,
             ring: Arc::new(Mutex::new(SampleRing::new(Self::MIN_BUFFER_SAMPLES))),
             timing: RegionTiming::default(),
             sample_rate: Self::DEFAULT_SAMPLE_RATE,
@@ -1086,6 +1092,24 @@ impl Apu2A03 {
 
         self.resampler
             .set_ratio(samples_per_cycle, self.sample_rate);
+        self.resampler
+            .set_profile(self.console_profile, self.sample_rate);
+    }
+
+    /// Imitates the analog audio path of one measured console (`console_profile`): `index` 0 for
+    /// none, the output as it always was; `n` for `CONSOLE_AUDIO_PROFILES[n - 1]`. Out-of-range
+    /// indices mean none. Nothing changes per CPU cycle: the channel gains apply when the level
+    /// moves and the filters once per output sample.
+    pub fn set_console_profile(&mut self, index: usize) {
+        self.console_profile = index
+            .checked_sub(1)
+            .and_then(|slot| console_profile::CONSOLE_AUDIO_PROFILES.get(slot));
+        self.noise
+            .set_letterless(self.console_profile.is_some_and(|profile| profile.letterless));
+        self.resampler
+            .set_profile(self.console_profile, self.sample_rate);
+        self.level_key = -1;
+        self.level_dirty = true;
     }
 
     /// The mixed output level, in [-1, 1] (REQ-CORE-073): the non-linear mix `A` of the five
@@ -1125,7 +1149,10 @@ impl Apu2A03 {
 
         self.level_key = key;
         self.level_expansion = self.expansion_level;
-        self.mixer_apu = mixer::mix(pulse1, pulse2, triangle, noise, dmc);
+        self.mixer_apu = match self.console_profile {
+            None => mixer::mix(pulse1, pulse2, triangle, noise, dmc),
+            Some(profile) => profile_mix(profile, [pulse1, pulse2, triangle, noise, dmc]),
+        };
         self.mixer_output = mixer::clip(self.mixer_apu, self.expansion_level);
         self.level = mixer::to_float(self.mixer_output);
         self.level
@@ -1244,13 +1271,17 @@ impl Apu2A03 {
         //
         // The mix is written out rather than calling `current_level`, which must keep its single
         // call site to stay inlined in the per-cycle step (see the note there).
-        self.mixer_apu = mixer::mix(
+        let levels = [
             self.pulse1.output(),
             self.pulse2.output(),
             self.triangle.output(),
             self.noise.output(),
             self.dmc.output(),
-        );
+        ];
+        self.mixer_apu = match self.console_profile {
+            None => mixer::mix(levels[0], levels[1], levels[2], levels[3], levels[4]),
+            Some(profile) => profile_mix(profile, levels),
+        };
         self.mixer_output = mixer::clip(self.mixer_apu, 0);
         self.level = mixer::to_float(self.mixer_output);
 
@@ -1264,4 +1295,12 @@ impl Apu2A03 {
         }
         Ok(())
     }
+}
+
+/// `A` of REQ-CORE-073 for a console profile: its weighted exact mix, on the tables' scale.
+#[cold]
+#[inline(never)]
+#[allow(clippy::cast_possible_truncation)] // At most FULL_SCALE.
+fn profile_mix(profile: &console_profile::ConsoleAudioProfile, levels: [i32; 5]) -> i32 {
+    (mixer::NORMALISATION * profile.mix(levels)).round() as i32
 }

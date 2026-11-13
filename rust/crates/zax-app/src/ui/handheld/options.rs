@@ -416,7 +416,10 @@ pub const EMULATION_ROWS: [OptionRow; 14] = [
 /// *Advanced options › Audio* (AUDIO-2): the choice of output. The volume stays on the main page,
 /// and `audio.latency_ms` is deliberately not here — AUDIO-1 left it out of the console screen
 /// (owner request: that screen is a short curated list), and nothing of this lot changes that.
-pub const AUDIO_ROWS: [OptionRow; 1] = [OptionRow::Setting(SettingId::AudioClassicOutput)];
+pub const AUDIO_ROWS: [OptionRow; 2] = [
+    OptionRow::Setting(SettingId::AudioClassicOutput),
+    OptionRow::Setting(SettingId::AudioConsoleProfile),
+];
 
 /// The values of the palette row (`video.nes_palette`): the setting's choices.
 fn palettes() -> Vec<i32> {

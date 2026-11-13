@@ -222,6 +222,7 @@ setting_ids! {
     AudioBgMusic => "audio.bg_music",
     AudioLatencyMs => "audio.latency_ms",
     AudioClassicOutput => "audio.classic_output",
+    AudioConsoleProfile => "audio.console_profile",
     InputZapperEnable => "input.zapper_enable",
     InputEmulatedMenuButton => "input.emulated_menu_button",
     InputTouchPad => "input.touch_pad",

@@ -111,6 +111,7 @@ options
       input.emulated_menu_button
     page.audio
       audio.classic_output
+      audio.console_profile
   page.controls
   page.achievements
   row.profiler

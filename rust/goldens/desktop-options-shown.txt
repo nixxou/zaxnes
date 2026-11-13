@@ -17,6 +17,7 @@ achievements.encore
 achievements.sound
 achievements.unofficial
 audio.classic_output
+audio.console_profile
 audio.latency_ms
 audio.volume
 camera.fov

@@ -837,6 +837,13 @@ impl EngineHandle {
         }
     }
 
+    /// The console audio profile of `audio.console_profile` (lot FIDELITY); Zaxnes only.
+    pub fn set_console_audio_profile(&mut self, index: usize) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_console_audio_profile(index);
+        }
+    }
+
     /// What the work RAM holds at the next power-on (lot CARTDB); likewise.
     pub fn set_power_on_ram(&mut self, pattern: zax_nes::PowerOnRam) {
         if let Some(core) = self.zaxnes_mut() {

@@ -504,6 +504,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         .map(|id| self.settings.get(id).as_bool())
     }
 
+    /// `audio.console_profile` as the core takes it: 0 for none.
+    pub(super) fn console_audio_profile(&self) -> usize {
+        usize::try_from(self.settings.get(SettingId::AudioConsoleProfile).as_int()).unwrap_or(0)
+    }
+
     fn advance_launch(&mut self, job: &mut LoadJob) -> Step {
         let Some(game) = job.game.clone() else {
             return Step::Failed(INVALID_ROM_MESSAGE.to_owned());
@@ -546,6 +551,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let forced = self.forced_patch();
                 let cartridge_db = self.settings.get(SettingId::EmuCartridgeDb).as_bool();
                 let fidelity = self.fidelity_switches();
+                let console_profile = self.console_audio_profile();
                 let power_on_ram = match self.settings.get(SettingId::EmuPowerOnRam).as_int() {
                     1 => zax_nes::PowerOnRam::Pattern,
                     2 => zax_nes::PowerOnRam::Ff,
@@ -563,6 +569,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                     Some(session) => {
                         session.core_mut().set_cartridge_db(cartridge_db);
                         apply_fidelity_switches(session.core_mut(), fidelity);
+                        session.core_mut().set_console_audio_profile(console_profile);
                         session.core_mut().set_power_on_ram(power_on_ram);
                         session.core_mut().set_builtin_patches(builtin_patches);
                         session.core_mut().set_advanced_patches(advanced);

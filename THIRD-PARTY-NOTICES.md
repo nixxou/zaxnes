@@ -17,6 +17,37 @@ auteur sous GNU GPL v3. Les fichiers concernés portent l'en-tête :
 3DNes_Engine est distribué sous GNU GPL v3 ; c'est cette licence qui impose à Zaxnes d'être
 lui-même sous GPL v3. Le texte complet de la licence est dans `LICENSE`.
 
+### BeesNES — (c) 2020 Shawn (L. Spiro) Wilcoxen — licence MIT
+
+Les **profils audio de console** (`rust/crates/zax-nes/src/apu/console_profile.rs`, réglage
+`audio.console_profile`) reprennent les mesures de BeesNES (<https://github.com/L-Spiro/BeesNES>,
+`Src/Audio/LSNAudioOptions.cpp`) : fréquences de coupure des filtres, gains par voie, inversion et
+CPU « letterless » de chaque console mesurée, ainsi que la formule de ses filtres passe-haut. Les
+choix d'émulation documentés d'après BeesNES (position de démarrage du PPU, effacement de l'OAM,
+défaut OAMADDR) en citent le fichier et la ligne. BeesNES est distribué sous licence MIT :
+
+    MIT License
+
+    Copyright (c) 2020 Shawn (L. Spiro) Wilcoxen
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
 ### Mesen 2 — (c) Sour — GNU GPL v3
 
 Plusieurs expressions de cartes du cœur NES (`rust/crates/zax-nes/src/cartridges/mappers`) et de

@@ -74,6 +74,9 @@ pub(crate) struct BandLimitedResampler {
     high_pass_coefficient: f64,
     high_pass_previous: f64,
     high_pass_output: f64,
+    /// A console profile's filters, which replace the DC blocker when set
+    /// (`console_profile::ProfileFilter`). Not in the state: a load restarts them at rest.
+    profile_filter: Option<super::console_profile::ProfileFilter>,
 }
 
 impl BandLimitedResampler {
@@ -91,7 +94,18 @@ impl BandLimitedResampler {
             high_pass_coefficient: 0.9974,
             high_pass_previous: 0.0,
             high_pass_output: 0.0,
+            profile_filter: None,
         }
+    }
+
+    /// Sets, or clears, the filters of a console profile at `sample_rate` Hz.
+    pub fn set_profile(
+        &mut self,
+        profile: Option<&super::console_profile::ConsoleAudioProfile>,
+        sample_rate: i32,
+    ) {
+        self.profile_filter =
+            profile.map(|profile| super::console_profile::ProfileFilter::new(profile, sample_rate));
     }
 
     /// Sets the resampling ratio: output samples per source (CPU) cycle, and the output
@@ -179,6 +193,12 @@ impl BandLimitedResampler {
             self.signal += self.ring[slot];
             self.ring[slot] = 0.0;
             self.emitted += 1;
+
+            if let Some(filter) = self.profile_filter.as_mut() {
+                // A console profile's own high-passes block the DC instead.
+                sink(filter.process(self.signal).clamp(-1.0, 1.0) as f32);
+                continue;
+            }
 
             // One-pole DC blocker (REQ-CORE-073). The level the mixer produces is
             // non-negative, so without it every sample would sit on a large offset.

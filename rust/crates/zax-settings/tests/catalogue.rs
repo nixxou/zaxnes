@@ -93,6 +93,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "achievements.unofficial",
             "achievements.username",
             "audio.classic_output",
+            "audio.console_profile",
             "audio.latency_ms",
             "audio.mute",
             "emu.builtin_patches",

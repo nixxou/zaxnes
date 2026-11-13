@@ -214,6 +214,13 @@ impl NesCore {
         self.bus.ppu_mut().set_power_on_top(enabled);
     }
 
+    /// Imitates the analog audio path of one measured console: 0 for none (the output as it
+    /// always was), `n` for `apu::console_profile::CONSOLE_AUDIO_PROFILES[n - 1]`. Takes effect
+    /// at once, without a reset.
+    pub fn set_console_audio_profile(&mut self, index: usize) {
+        self.bus.apu_mut().set_console_profile(index);
+    }
+
     /// Whether OAM decays when the rendering stays off: a row nothing accessed for 8 NTSC frames
     /// loses its bytes (nesdev, "PPU OAM"; `BeesNES`). Off by default: the decay stamps are not in
     /// the savestate, so a run-ahead or a rewind, which load a state every frame, never let OAM

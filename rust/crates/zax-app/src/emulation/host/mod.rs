@@ -1609,6 +1609,13 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 self.publish_state();
             }
             SettingId::AudioLatencyMs => self.apply_audio_latency(),
+            // Lot FIDELITY step 3: the profile changes the sound at once, game running or not.
+            SettingId::AudioConsoleProfile => {
+                let profile = self.console_audio_profile();
+                if let Some(session) = self.session.as_mut().filter(|session| session.has_rom()) {
+                    session.core_mut().set_console_audio_profile(profile);
+                }
+            }
             // AUDIO-2: the choice of output takes effect when the device is (re)opened, and only
             // the application can reopen an SDL device, so the change is recorded here and
             // drained by the loop ([`Self::take_audio_reopen`]).

@@ -1987,6 +1987,7 @@ fn reimplementation_extras(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("Classic audio output (v0.4.2)"),
     );
+    console_audio_profile(out);
     out.push(
         SettingDescriptor::new(
             SettingId::UiShowFps,
@@ -2055,6 +2056,40 @@ fn reimplementation_extras(out: &mut Vec<SettingDescriptor>) {
             SettingTheme::Interface,
         )
         .with_label("ROM folder"),
+    );
+}
+
+/// `audio.console_profile` (lot FIDELITY plan step 3).
+fn console_audio_profile(out: &mut Vec<SettingDescriptor>) {
+    // Plan step 3 of lot FIDELITY: the analog audio path of one console BeesNES measured. None by
+    // default, which keeps the output bit for bit.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::AudioConsoleProfile,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Audio,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "None"),
+            opt(1, "NES Front-Loading N0260073"),
+            opt(2, "NES Front-Loading N1151667"),
+            opt(3, "NES Front-Loading N13721267"),
+            opt(4, "NES Front-Loading N20914398, Sunsoft 5B"),
+            opt(5, "NES Front-Loading N32670105"),
+            opt(6, "NES Front-Loading N34169630"),
+            opt(7, "NES Front-Loading N8869725, NESRGB"),
+            opt(8, "NES Front-Loading N8869725, NESRGB, stock RCA"),
+            opt(9, "NES Top-Loading NN101255729, NESRGB"),
+            opt(10, "Twin Famicom 441850, stock RCA"),
+            opt(11, "Twin Famicom 475711, NESRGB, stock RCA"),
+            opt(12, "Twin Famicom 475711, NESRGB, SCART"),
+            opt(13, "PAL NES NESE-001 (AUS) PM313006"),
+            opt(14, "PAL NES NESE-001 (GBR) PM608755"),
+        ]))
+        .with_label("Console audio profile"),
     );
 }
 
