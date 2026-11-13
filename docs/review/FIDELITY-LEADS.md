@@ -110,13 +110,14 @@ Each one is exact on every test we have, but is a modelling shortcut, not the me
 ### C2. `$2006` delayed load and hybrid address — done (option, same switch as C1)
 - Zaxnes `delay_address_load` (`ppu/mod.rs:1768`).
 - **Not done: the increment-collision glitch** — a `$2006` load landing on the dot-257 or on a
-  coarse-X increment dot ANDs the new value with the incremented one. Mesen
+  coarse-X increment dot ANDs the new value with the incremented one (nesdev "PPU registers": "at most one axis of scrolling will be set to the bitwise AND of the written value and the current value"). Mesen
   (`NesPpu.cpp:1463-1490`, option `EnablePpu2006ScrollGlitch`) and BeesNES
   (`LSNPpu2C0X.h:160-182`) both have it. Free (cold path). → plan step.
-- **Not done: `$2000` write at dot 257 updates `v` from the open bus** (BeesNES `GlitchyVUpdate`,
+- **Not done (documented, nesdev "PPU registers": "Only writes that start on dot 257 and continue through dot 258", "writes the value of open bus"): `$2000` write at dot 257 updates `v` from the open bus** (BeesNES `GlitchyVUpdate`,
   `LSNPpu2C0X.h:2003-2015`). Free.
 
 ### C3. `$2001` effects — done
+- nesdev "PPU registers": "Toggling rendering takes effect approximately 3-4 dots after the write"; PPUMASK writes are ignored "until the first pre-render scanline" (check Zaxnes).
 - Two-dot delay (`switch_rendering`), stale BG shifters with serial input 0/1, reload missed
   (`skip_background_reload`), sprite units (`sprite_hw.rs`). BeesNES: one-dot `CDelayedValue`
   (`LSNPpu2C0X.h:2040`); Mesen one dot.
@@ -134,7 +135,7 @@ Each one is exact on every test we have, but is a modelling shortcut, not the me
   some reads (NMI-MESEN.md). To settle against the doc.
 
 ### C6. Palette read on pre-G PPUs — open (revision option)
-- Hardware: before 2C02G, `$2007` reads at `$3F00-$3FFF` do not return palette RAM (BeesNES TODO,
+- Hardware (nesdev "PPU registers": palette read "supported by the 2C02G, 2C02H, and PAL PPUs"): before 2C02G, `$2007` reads at `$3F00-$3FFF` do not return palette RAM (BeesNES TODO,
   `LSNPpu2C0X.h:1242-1246`). Zaxnes always returns palette (`ppu/mod.rs:1617`). Free; needs a
   "PPU revision" setting (see G1).
 
@@ -155,12 +156,27 @@ Each one is exact on every test we have, but is a modelling shortcut, not the me
 - Zaxnes: none. Free if computed lazily (time since rendering went off, applied on the next OAM read
   or rendering start). Value of decayed bits to settle (BeesNES float decay per byte).
 
+- **Doc vs tests conflict on the duration**: nesdev "PPU OAM" says decay starts "quickly", lasting
+  "at least as long as an NTSC vertical blank interval (~1.3ms), but not much longer"; BeesNES keeps
+  8 frames because blargg tests verified on hardware keep OAM for ~123 ms. To settle before coding
+  (console-dependent; maybe a setting). nesdev also: the 2C07 (PAL) "forcibly refreshes OAM during
+  scanlines 265 through 310", so no decay on PAL while rendering stays enabled.
+
 ### D3. 2C02G/H OAMADDR bug at pre-render — open (free, revision option)
 - Hardware: at dot 1 of the pre-render line with rendering on, if OAMADDR >= 8 the 8 bytes at
   `OAMADDR & $F8` are copied over OAM 0-7 (2C02G/H; nesdev "PPU registers" OAMADDR).
 - BeesNES `PreRenderOamGlitches` (`LSNPpu2C0X.h:1990-2001`), README "Hardware bugs... OAMADDR bugs
   (writing fewer than 8 bytes on the 2C02G)".
 - Zaxnes: none. Free (pre-render line, once per frame).
+
+### D4. 2C02G: writes to OAMADDR corrupt OAM — open (revision option)
+- nesdev "PPU registers" OAMADDR: "On the 2C02G, writes to OAMADDR corrupt OAM"; on 2C03/2C04/2C05/
+  2C07 "OAMADDR works as intended"; the pre-render copy of D3 is "required for 2C02 compatibility" on
+  the Dendy. Zaxnes: none.
+
+### D5. Palette RAM corruption when rendering is turned off mid-screen — open
+- nesdev "PPU registers" PPUMASK: "Turning rendering off mid-screen can corrupt palette RAM."
+  Zaxnes: none; no emulator studied models it. Mechanism to research.
 
 ---
 
@@ -202,6 +218,9 @@ Each one is exact on every test we have, but is a modelling shortcut, not the me
 ## G. Hardware variants
 
 ### G1. PPU / CPU revisions — open
+- BeesNES exposes none of its hardware-bug behaviours as user settings (only video, audio profile,
+  region); OAM decay is a compile-time define (`LSN_INT_OAM_DECAY`, `LSNPpu2C0X.h:33`), OAM corruption
+  is always on, despite the README's "buggy and fixed states".
 - 2C02 letter revisions (pre-G palette read C6, G/H OAMADDR bug D3, OAM corruption differences),
   RP2A03 letter revisions (BeesNES flag `bRp2A02` in audio profiles), 2C07 PAL, 2C05 Vs.
 - Zaxnes: none selectable. A "console model" setting would group C6, D3, E1, E2.
