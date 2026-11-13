@@ -417,6 +417,13 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   16 px 22 %, holes 12 %, never empty; BeesNES/puNES/NesHawk/Zaxnes default: 8 or 16 px; Mesen: empty
   75 %. Same `$2006`/`$2007` timing in Mesen and Zaxnes (W 212, R 224, v=$0B02). Branch
   `study/smb3-split`.
+  Other versions (2026-11-13): the split IRQ code of the fixed bank is byte-identical in Japan and
+  USA (same addresses, `LDA $2007` at `$F824/$F902/$F9D9/$FA63/$FC09`; the `$F9C7` handler writes
+  `$2001` = `$10`, sprites on, before its `$2006`/`$2007`, so that read happens while fetching);
+  Europe has the same routines shifted. With `emu.ppu_bus_conflicts` on/off, frames 200-2500: USA
+  never differs; Europe differs on line 194 on some frames (200, 300, 350, 900, 1500). Why USA does
+  not move is not checked (IRQ landing dot). A PAL console capture of the European title screen is a
+  second source to compare with, PAL timing being less verified (I4).
 - I2. *The Legend of Zelda* sprite-overflow bit (C4).
 - I3. `$2002` open-bus bits and `$2007` reads during rendering vs Mesen (C5).
 - I4. Mega Man 2 widescreen not eyeballed; PAL/Dendy fidelity work unverified.
