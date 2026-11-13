@@ -566,10 +566,10 @@ fn run_one_zaxnes(
     // `ZAXNES_OAM_CORRUPTION=1` runs the campaign with the core's off-by-default OAM row
     // corruption (lot FIDELITY step 9), which `AccuracyCoin`'s `OAM Corruption` row needs.
     core.set_oam_corruption(std::env::var("ZAXNES_OAM_CORRUPTION").is_ok_and(|value| value != "0"));
-    // Likewise `ZAXNES_PPU_BUS_CONFLICTS=1` for the off-by-default `$2007`/`$2006` collisions
-    // (steps 15 and 16): `$2007 Stress Test`, `ALE + Read` and `Hybrid Addresses` need it.
+    // `ZAXNES_PPU_BUS_CONFLICTS=0` turns the on-by-default `$2007` read model off (steps 15 and
+    // 25): `$2007 Stress Test` and `ALE + Read` need it.
     core.set_bus_conflicts(
-        std::env::var("ZAXNES_PPU_BUS_CONFLICTS").is_ok_and(|value| value != "0"),
+        std::env::var("ZAXNES_PPU_BUS_CONFLICTS").map_or(true, |value| value != "0"),
     );
     // And `ZAXNES_OAM_DECAY=1` for the off-by-default decay of OAM with the rendering off (step
     // 20): blargg's `oam_stress` and `sprdma_and_dmc_dma` must still pass with it.

@@ -512,8 +512,8 @@ impl Host {
         let profile = startup.profile;
         let mut core = NesCore::new();
         core.set_advanced_patches(startup.advanced);
-        // `ZAXNES_PPU_BUS_CONFLICTS=1`: render with the off-by-default `$2007` read model.
-        core.set_bus_conflicts(std::env::var("ZAXNES_PPU_BUS_CONFLICTS").is_ok_and(|value| value != "0"));
+        // `ZAXNES_PPU_BUS_CONFLICTS=0`: render without the on-by-default `$2007` read model.
+        core.set_bus_conflicts(std::env::var("ZAXNES_PPU_BUS_CONFLICTS").map_or(true, |value| value != "0"));
         let load = core.load_rom(&fs::read(startup.rom)?, &file_name(startup.rom));
         if !load.success {
             return Err(HarnessError::Rom(format!(

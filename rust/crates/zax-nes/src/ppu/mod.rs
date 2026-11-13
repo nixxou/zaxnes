@@ -182,7 +182,8 @@ pub struct Ppu2C02 {
     /// Whether a `$2007` read and a `$2006` write made while the PPU is fetching meet the fetches
     /// as on the hardware: their effect a few dots later, and the fetch they collide with
     /// disturbed ([`Self::read_buffer_from_fetch`], [`Self::delay_address_load`]). A core setting,
-    /// off by default (owner, 2026-11-13), and not part of the state; off, both act at once as
+    /// on by default (a PAL console video of *Super Mario Bros. 3* shows the damage it predicts,
+    /// `docs/review/FIDELITY-LEADS.md` I1), and not part of the state; off, both act at once as
     /// before lot FIDELITY.
     bus_conflicts: bool,
     /// Whether the second `$2006` write loads `v` three dots later, with the hybrid address of the
@@ -508,7 +509,7 @@ impl Ppu2C02 {
             phase_offset: 0,
             oam_row_refresh: [0; 32],
             oam_render_off: 0,
-            bus_conflicts: false,
+            bus_conflicts: true,
             address_load_delay: true,
             glitch_2006: true,
             glitch_2000: true,

@@ -255,9 +255,9 @@ impl NesCore {
 
     /// Whether a `$2007` read or a `$2006` write that collides with a fetch of the PPU disturbs
     /// that fetch, as on the console (lot FIDELITY step 16; `Ppu2C02::read_buffer_from_fetch`,
-    /// `Ppu2C02::delay_address_load`). Off by default (owner, 2026-11-13: it moves the split line of
-    /// *Super Mario Bros. 3* (Japan), unlike Mesen); a setting because it is a defect of the
-    /// hardware, and a game that trips on it shows eight wrong pixels.
+    /// `Ppu2C02::delay_address_load`). On by default: a PAL console video of *Super Mario Bros. 3*
+    /// (Europe) shows the damage it predicts on its split line, same place and same rate
+    /// (`docs/review/FIDELITY-LEADS.md`, I1); a setting because it is a defect of the hardware.
     pub fn set_bus_conflicts(&mut self, enabled: bool) {
         self.bus.ppu_mut().set_bus_conflicts(enabled);
     }

@@ -1153,14 +1153,14 @@ fn emulation_cartridge(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("OAM corruption"),
     );
-    // Lot FIDELITY step 16: the fetch a `$2007` read or a `$2006` write collides with. Off by
-    // default (owner, 2026-11-13) until the split line of *Super Mario Bros. 3* (Japan) is
-    // settled against Mesen, register by register.
+    // Lot FIDELITY steps 16 and 25: the fetch a `$2007` read collides with, from the transistor
+    // netlists. On by default since a PAL console video of *Super Mario Bros. 3* (Europe) shows
+    // the damage it predicts, same place and same rate (docs/review/FIDELITY-LEADS.md, I1).
     out.push(
         SettingDescriptor::new(
             SettingId::EmuPpuBusConflicts,
             SettingKind::Bool,
-            SettingValue::Bool(false),
+            SettingValue::Bool(true),
             SettingScope::User,
             SettingEffect::NextRomLoad,
             SettingTheme::Emulation,

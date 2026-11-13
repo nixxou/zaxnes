@@ -1157,7 +1157,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.ppu_bus_conflicts",
-        "Expérimental. Un défaut de la vraie console : un jeu qui lit la mémoire vidéo pendant que l'image est dessinée entre en collision avec ce que la puce vidéo lit à cet instant, et la valeur obtenue, ou une tuile du décor, vient du mauvais endroit. Les jeux écrits pour la console l'évitent ; des programmes de test le vérifient. Ce modèle n'est pas encore exact (il dérange une ligne de Super Mario Bros. 3 autrement que la console), d'où sa désactivation. Le délai d'une nouvelle adresse vidéo a son propre réglage. Prend effet au prochain chargement. Par défaut : désactivé.",
+        "Un défaut de la vraie console : un jeu qui lit la mémoire vidéo pendant que l'image est dessinée entre en collision avec ce que la puce vidéo lit à cet instant, et la valeur obtenue, ou une tuile du décor, vient du mauvais endroit. La plupart des jeux l'évitent ; Super Mario Bros. 3 le montre sur la ligne au-dessus du sol de son écran titre, comme la console. Des programmes de test le vérifient. Le délai d'une nouvelle adresse vidéo a son propre réglage. Prend effet au prochain chargement. Par défaut : activé.",
     ),
     (
         "detail.emu.oamaddr_bug",

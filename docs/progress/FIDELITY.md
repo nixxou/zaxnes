@@ -34,19 +34,17 @@ Reference before the lot: test ROMs 212 pass / 7 fail / 1 unsupported / 111 manu
 | 23 | *(branch `feat/fidelity-poweron`)* **CPU bus activity checked against BeesNES's 2A03 table** (xlsx, MIT): generator `rust/tools/cpu_bus_reference.py`, test `cpu_bus_reference_tests.rs`; 244 opcodes x 2 scenarios, direction and address class of every access, all match. Test only, no runtime change | 143 (147) | same | same |
 | 24 | *(branch `study/access-phase`)* **PPU write timings measured on the transistor netlists** (VisualNes, owner-approved): `$2006` delay split out and on (`emu.ppu_2006_delay`), `$2006` collision AND glitch on (`emu.ppu_2006_glitch`, `t` damaged too), `$2000` dot-257 open-bus glitch on (`emu.ppu_2000_glitch`); golden unchanged on 98 games | **144** (147) | same | same |
 | 25 | *(branch `feat/ppu-2007-read`)* **`$2007` read during rendering from the transistor measurements**: buffer = PPU data bus at dot D+6 (alignment 4), byte of X-1 on an odd X, X+Y increment before the disturbed fetch. Option `emu.ppu_bus_conflicts` still off: SMB3 J line 193 does not match the console video yet | 144 (**146** with the option, 147 all) | same | same |
+| 26 | **`emu.ppu_bus_conflicts` on by default**: a PAL console video of *Super Mario Bros. 3* (Europe, French NES, composite) shows the damage the step-25 model predicts on its split line, line 194, x 0-7, on 34 % of the frames; Zaxnes Europe with the option: 34 %, same place; off: never (`docs/review/FIDELITY-LEADS.md`, I1). The Japanese line 193 video stays unexplained (origin unknown) | **146** (147 with OAM corruption) | same (212 pass) | 3 dumps, picture only: *Super Mario Bros. 3* (Japan, Rev 1, Rev 1 VC) |
 
 ## Rows still failing
 
-None with both settings on (`ZAXNES_OAM_CORRUPTION=1 ZAXNES_PPU_BUS_CONFLICTS=1` for the harness):
-**147 / 147**. The default build is at **143**: both settings are off by default (owner, 2026-11-13).
+None with `emu.oam_corruption` on (`ZAXNES_OAM_CORRUPTION=1` for the harness): **147 / 147**. The
+default build is at **146** (step 26): only `OAM Corruption` fails, its setting being off.
 
 * `emu.oam_corruption` (`OAM Corruption`): its model fails blargg's `sprite_overflow_tests/5.Emulator`.
-* `emu.ppu_bus_conflicts` (`$2007 Stress Test`, `ALE + Read`, `Hybrid Addresses`): it changes the
-  split line of *Super Mario Bros. 3* (Japan), line 193, right edge, and neither the old nor the
-  new picture matches MesenCE there (Mesen: mostly nothing, sometimes 8 pixels; before: 8 or 16;
-  after: nothing, 8, 16, and two shapes of the tile corruption). Forcing Mesen's power-on
-  alignment does not close it. Open study on branch `study/smb3-split`: trace `v` dot by dot on
-  line 193 in both emulators (Mesen: `$2006` at dots 200 and 212, `$2007` read at 224, `v` = `$0B02`).
+* `emu.ppu_bus_conflicts`: on by default since step 26 (history: it was off while the split
+  line of *Super Mario Bros. 3* (Japan) disagreed with a console video and with Mesen;
+  the PAL video settled it, see step 26).
 
 ## Performance
 
