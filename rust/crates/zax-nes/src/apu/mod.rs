@@ -431,6 +431,13 @@ impl Apu2A03 {
         self.dmc.cycles_until_fetch()
     }
 
+    /// The half of the APU cycle the next CPU cycle is: the parity the `$4017` reset delay and the
+    /// DMC's load delay read.
+    #[must_use]
+    pub const fn apu_cycle(&self) -> bool {
+        self.apu_cycle
+    }
+
     /// Hands the byte a DMC DMA fetched to the memory reader.
     pub fn supply_dmc_byte(&mut self, value: u8) {
         self.dmc.supply_byte(value);

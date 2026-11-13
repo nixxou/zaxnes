@@ -46,6 +46,19 @@ const DMA_OAM: u8 = 0x08;
 /// `cmpb` [`NesBus::read_cycle`] already made.
 const DMA_DMC_WAIT: u8 = 0x10;
 
+/// [`NesBus::dma`]: a `$4015` write has just switched the DMC off while its memory reader had, or
+/// was about to have, a fetch to make, and the switch-off has not reached the DMA unit yet.
+///
+/// "Disabling takes effect with a 1 APU cycle delay. If a DMA starts during this time, it gets
+/// cancelled, but this will still cause the CPU to be halted" (Mesen 2,
+/// `DeltaModulationChannel::SetEnabled`; `AccuracyCoin`, `Explicit DMA Abort`). The channel itself
+/// is switched off at once — nothing but the DMA unit can tell — and this flag holds the fetch the
+/// reader *would* have made, with the cycle its halt may land on in [`NesBus::dmc_ready_cycle`]
+/// and the cycle the switch-off arrives in [`NesBus::dmc_abort_cycle`]. It lives at most three
+/// cycles and costs the cycles of a game that never does this nothing: it is one more bit of the
+/// `dma` byte [`NesBus::read_cycle`] already tests against zero.
+const DMA_DMC_GHOST: u8 = 0x20;
+
 /// The CPU bus: memory map, open bus, OAM DMA and the master cycle clock (REQ-CORE-080 to
 /// REQ-CORE-082).
 ///
@@ -89,6 +102,9 @@ pub struct NesBus {
     /// Earliest cycle the halt of the DMC request held by [`DMA_DMC_WAIT`] may land on; only read
     /// while that bit is set.
     dmc_ready_cycle: i64,
+    /// The cycle a `$4015` switch-off reaches the DMA unit, while [`DMA_DMC_GHOST`] is set.
+    /// Transient like `dma`, and not in the savestate for the same reason.
+    dmc_abort_cycle: i64,
     oam_dma_count: i64,
     dmc_dma_count: i64,
     /// CPU cycles the PPU still owes: while `deferred_ppu` is on, the PPU runs in batches,
@@ -177,6 +193,7 @@ impl NesBus {
             dma: 0,
             dma_oam_page: 0,
             dmc_ready_cycle: 0,
+            dmc_abort_cycle: 0,
             oam_dma_count: 0,
             dmc_dma_count: 0,
             ppu_lag: 0,
@@ -405,6 +422,7 @@ impl NesBus {
         self.dma = 0;
         self.dma_oam_page = 0;
         self.dmc_ready_cycle = 0;
+        self.dmc_abort_cycle = 0;
         self.oam_dma_count = 0;
         self.dmc_dma_count = 0;
         self.ppu_lag = 0;
@@ -1271,8 +1289,18 @@ impl NesBus {
                 }
                 _ => {
                     self.sync_apu();
+                    let ghost = if address == 0x4015 {
+                        self.dmc_switch_off_window(value)
+                    } else {
+                        None
+                    };
                     let dmc_load_delay = self.apu.write(address, value);
                     self.after_apu_write(dmc_load_delay);
+                    if let Some((ready, abort)) = ghost {
+                        self.dmc_ready_cycle = ready;
+                        self.dmc_abort_cycle = abort;
+                        self.dma |= DMA_DMC_GHOST;
+                    }
                 }
             }
             return;
@@ -1313,6 +1341,87 @@ impl NesBus {
     ///
     /// A write that **starts** a sample does not raise the request either: its load fetch waits
     /// two or three cycles, which this turns into the one absolute cycle [`DMA_DMC_WAIT`] holds.
+    /// What a `$4015` write about to be made leaves the DMA unit to do when it switches a playing
+    /// DMC off: the cycle the fetch its memory reader has asked for — or will ask for before the
+    /// switch-off arrives — may halt on, and the cycle the switch-off arrives. `None` when the
+    /// write does not switch the channel off, when nothing is playing, or when no fetch can halt
+    /// before the switch-off (see [`DMA_DMC_GHOST`]). Called with the APU caught up.
+    ///
+    /// The switch-off arrives two cycles after a write on an even CPU cycle and three after one
+    /// on an odd cycle, the same parity and the same figures as a load's start delay
+    /// (`DmcChannel::set_enabled`).
+    // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
+    #[cold]
+    #[inline(never)]
+    fn dmc_switch_off_window(&mut self, value: u8) -> Option<(i64, i64)> {
+        // A write that switches the channel on, or leaves it on, ends any window still open.
+        self.dma &= !DMA_DMC_GHOST;
+        if (value & 0x10) != 0 {
+            return None;
+        }
+
+        let until_fetch = self.apu.cycles_until_dmc_fetch()?;
+        let abort = self.cycles + if self.apu.apu_cycle() { 2 } else { 3 };
+        let ready = if (self.dma & DMA_DMC_WAIT) != 0 {
+            self.dmc_ready_cycle
+        } else if (self.dma & DMA_DMC) != 0 || until_fetch == 0 {
+            self.cycles + 1
+        } else {
+            // The reader runs dry inside the tick of that cycle, and a request raised inside a
+            // tick can halt on the next cycle at the earliest (see `poll_dmc_dma`).
+            self.cycles + i64::from(until_fetch) + 1
+        };
+        (ready <= abort).then_some((ready, abort))
+    }
+
+    /// The cycles a DMC fetch caught by a `$4015` switch-off still takes from the CPU, `late`
+    /// being how many cycles after the halt the switch-off arrives (see [`DMA_DMC_GHOST`]). The
+    /// halt cycle has already run, as in [`NesBus::run_dma`].
+    ///
+    /// * on the halt cycle itself: the DMA is aborted after it, one cycle;
+    /// * on the dummy cycle: the cycle after it still runs — the fetch if it is a get cycle, the
+    ///   alignment cycle otherwise, after which the DMA is gone — three cycles;
+    /// * later: the DMA runs to its fetch, three or four cycles.
+    ///
+    /// The byte a fetch reads is dropped in every case: the channel has no bytes left to play.
+    // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
+    #[cold]
+    #[inline(never)]
+    fn ghost_dmc_dma(&mut self, read_address: u16, late: i64) {
+        let input_port = matches!(read_address, 0x4016 | 0x4017);
+        let internal = (read_address & 0xFFE0) == 0x4000;
+        if !(input_port && late == 0) {
+            self.dma_repeat_read::<false>(read_address);
+        }
+        if late == 0 {
+            return;
+        }
+
+        self.tick();
+        if !input_port {
+            self.dma_repeat_read::<false>(read_address);
+        }
+        let aligns = (self.cycles & 1) == 0;
+        if aligns && late >= 2 {
+            self.tick();
+            if !input_port {
+                self.dma_repeat_read::<false>(read_address);
+            }
+        }
+
+        self.tick();
+        if aligns && late == 1 {
+            if !input_port {
+                self.dma_repeat_read::<false>(read_address);
+            }
+            return;
+        }
+        self.dmc_dma_count += 1;
+        let address = self.apu.dmc_dma_address();
+        let mut decoded_before = read_address;
+        self.dmc_fetch_read(address, internal, &mut decoded_before);
+    }
+
     // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
     fn after_apu_write(&mut self, dmc_load_delay: u32) {
         if dmc_load_delay > 0 {
@@ -1417,6 +1526,23 @@ impl NesBus {
     // Q-119
     #[inline(never)]
     fn halted_read_cycle(&mut self, address: u16) -> u8 {
+        if (self.dma & DMA_DMC_GHOST) != 0 {
+            // A fetch a `$4015` switch-off caught. With an OAM transfer beside it the window is
+            // simply dropped: the transfer's cycles would have stood in for the fetch's.
+            let late = self.dmc_abort_cycle - self.cycles;
+            if late < 0 || self.dma != DMA_DMC_GHOST {
+                self.dma &= !DMA_DMC_GHOST;
+            } else if self.cycles >= self.dmc_ready_cycle {
+                self.dma = 0;
+                self.ghost_dmc_dma(address, late);
+                self.tick();
+                self.dma_gave_back = self.cycles;
+                return self.read_internal(address);
+            } else {
+                return self.read_internal(address);
+            }
+        }
+
         // The cycle that has just run is the one a halt would land on.
         self.promote_dmc_wait(self.cycles);
         if (self.dma & (DMA_DMC | DMA_OAM)) == 0 {
@@ -1489,6 +1615,8 @@ impl NesBus {
     /// address is never one of the 2A03's own registers.
     #[inline(never)]
     fn halted_zone_read_cycle(&mut self, address: u16) {
+        // The zone has no part in the switch-off window (see `halted_read_cycle`).
+        self.dma &= !DMA_DMC_GHOST;
         // The cycle that has just run is the one a halt would land on.
         self.promote_dmc_wait(self.cycles);
         if (self.dma & (DMA_DMC | DMA_OAM)) == 0 {

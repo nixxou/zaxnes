@@ -12,12 +12,13 @@ Reference before the lot: test ROMs 212 pass / 7 fail / 1 unsupported / 111 manu
 |---|---|---|---|---|
 | 1 | Secondary OAM not cleared on the pre-render line (nesdev, "PPU sprite evaluation") | 129 | same | same |
 | 2 | `$4015` bit 6 raised for two cycles even with the frame IRQ inhibited (`Frame Counter IRQ` I-M) | **130** | same | same |
+| 3 | A DMC fetch caught by a `$4015` switch-off still halts the CPU for 1, 3 or 4 cycles (`Explicit DMA Abort`; `DMA_DMC_GHOST` in `nes_bus.rs`) | **131** | same | same |
 
 ## Rows still failing (default build)
 
 `$2004 Stress Test` 2, `$2007 Stress Test` 2, `ALE + Read` 2, `APU Register Activation` 6,
 `Address $2004 behavior` 8 *, `Arbitrary Sprite zero` 2 *, `BG Serial In` 2, `DMC DMA Bus
-Conflicts` 2, `Explicit DMA Abort` 2, `Frozen OAM2 Increment` 2, `Hybrid Addresses` 2, `Implicit
+Conflicts` 2, `Frozen OAM2 Increment` 2, `Hybrid Addresses` 2, `Implicit
 DMA Abort` 2, `Misaligned OAM behavior` 1 *, `Misaligned OAM2 Address` 3, `OAM Corruption` 2,
 `Stale BG Shift Registers` 3, `Stale Sprite Shift Regs` 3.
 (* pass with `ppu-exact-sprite-eval`, out of `default` for its cost.)
