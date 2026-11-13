@@ -154,6 +154,12 @@ pub struct Ppu2C02 {
     /// The OAM rows a switch-off of the rendering marked, one bit a row, waiting for the rendering
     /// to come back on a line that renders. Transient: a state load drops it.
     oam_corrupt_rows: u32,
+    /// The line [`Self::note_fetch_pause`] is counting for (the clock of its dot 0), the steps of
+    /// the secondary OAM address it lost so far, and the dot the rendering went off on, −1 while
+    /// it is on. Transient, like the row corruption.
+    fetch_line: i64,
+    fetch_missed: i32,
+    fetch_off_dot: i32,
     /// Palette RAM **as the game wrote it**, six bits an entry: what a `$2007` read of
     /// `$3F00`-`$3F1F` gives back and what the state blob carries, because palette RAM sits
     /// before the chip's colour decoder and a read never sees that decoder.
@@ -433,6 +439,9 @@ impl Ppu2C02 {
             oam: [0; OAM_SIZE],
             oam_corruption: false,
             oam_corrupt_rows: 0,
+            fetch_line: -1,
+            fetch_missed: 0,
+            fetch_off_dot: -1,
             palette_raw: [0; PALETTE_SIZE],
             palette: [0; PALETTE_SIZE],
             palette_marked: marked_palette(&[0; PALETTE_SIZE]),
@@ -570,10 +579,13 @@ impl Ppu2C02 {
     #[cold]
     #[inline(never)]
     fn rendering_switched(&mut self, on: bool) {
+        let renders = self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline();
+        if renders {
+            self.note_fetch_pause(on);
+        }
         if !self.oam_corruption {
             return;
         }
-        let renders = self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline();
         if on {
             if renders {
                 self.corrupt_oam_rows();
@@ -596,6 +608,39 @@ impl Ppu2C02 {
             _ => 0,
         };
         self.oam_corrupt_rows |= 1 << row;
+    }
+
+    /// Keeps count of the steps the secondary OAM address misses when the rendering is off for part
+    /// of a line's sprite fetches.
+    ///
+    /// From dot 257 the address climbs four times in every eight dots — on the first three, which
+    /// read the sprite's Y, tile and attribute, and on the last — and it only climbs on a dot that
+    /// renders. A line whose fetches all ran leaves it at 32, which is 0 again; a line that lost
+    /// some leaves it short, and that is where a `$2004` read of dots 321 to 340 then looks
+    /// (`AccuracyCoin`, `Misaligned OAM2 Address` 4: off from dot 268 to dot 285, eight steps
+    /// lost, `$06` read from index `$18`). The write takes effect two dots on, as for the row
+    /// corruption above.
+    fn note_fetch_pause(&mut self, on: bool) {
+        let line = self.ppu_clock - i64::from(self.dot);
+        let dot = self.dot + 2;
+        if !on {
+            if self.fetch_line != line {
+                self.fetch_line = line;
+                self.fetch_missed = 0;
+            }
+            self.fetch_off_dot = dot;
+        } else if self.fetch_line == line && self.fetch_off_dot >= 0 {
+            let first = self.fetch_off_dot.max(257);
+            let last = (dot - 1).min(320);
+            let mut missed = 0;
+            for step in first..=last {
+                if matches!((step - 257) & 0x07, 0 | 1 | 2 | 7) {
+                    missed += 1;
+                }
+            }
+            self.fetch_missed += missed;
+            self.fetch_off_dot = -1;
+        }
     }
 
     /// The row [`Self::rendering_switched`] marks during the evaluation: the secondary OAM
@@ -1626,7 +1671,11 @@ impl Ppu2C02 {
             // Test` 2 and `Misaligned OAM2 Address` 2: "between dots 321 and 340 [a read]
             // should, under normal conditions, read from index 0 of OAM2").
             if self.dot > 320 {
-                return self.secondary_oam[0];
+                // Index 0, unless part of this line's fetches did not run (`note_fetch_pause`).
+                let line = self.ppu_clock - i64::from(self.dot);
+                let missed = if self.fetch_line == line { self.fetch_missed } else { 0 };
+                #[allow(clippy::cast_sign_loss)] // Masked to 0..32.
+                return self.secondary_oam[((32 - missed) & 0x1F) as usize];
             }
             let since = (self.dot - 257).clamp(0, 63);
             #[allow(clippy::cast_sign_loss)] // Clamped to 0..=63.
