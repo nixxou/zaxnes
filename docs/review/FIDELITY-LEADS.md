@@ -265,10 +265,21 @@ Each one is exact on every test we have, but is a modelling shortcut, not the me
 
 ## F. CPU
 
-### F1. Per-half-cycle bus activity reference — open (verification tool)
+### F1. Per-half-cycle bus activity reference — done as a test (step 23)
 - `Research/Instructions/Ricoh 2A03 Instructions NES.xlsx` (BeesNES, 15 069 rows): every opcode,
   every half-cycle, bus address and R/W, notes. Use: generate a table and compare with Zaxnes's
   dummy reads/writes per opcode in a test (cheap, no runtime cost).
+- **Done (branch `feat/fidelity-poweron`, step 23)**: `rust/tools/cpu_bus_reference.py` turns the
+  xlsx into `zax-nes/tests/data/cpu_bus_reference.txt`; `tests/cpu_bus_reference_tests.rs` runs
+  each of the 244 non-jam opcodes on a recording bus in two scenarios (no page crossed / branch not
+  taken; every indexed access across a page / branch taken across a page) and compares direction
+  and address class (PC, stack, vectors, data) of every access: **all 488 match**. Not checked
+  (would need the table's pseudo-code evaluated, i.e. a second CPU): exact addresses and values,
+  the SH* high-byte AND and RDY cases (covered by AccuracyCoin), interrupt polling points (the table
+  marks them, "Poll interrupts", per cycle: a lead for checking our NMI/IRQ latency per opcode),
+  and the jams' `$FFFE`/`$FFFF` read pattern. A stronger reference would be the SingleStepTests
+  `nes6502` suite (exact address/value per cycle, 10 000 cases per opcode, about a GB of JSON; not
+  downloaded).
 
 ### F2. Unofficial opcodes, SHA/SHS/SHX/SHY with DMA — done
 - Passed in AccuracyCoin (Zaxnes 147 with options). BeesNES "fully supported".
