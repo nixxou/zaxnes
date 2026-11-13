@@ -190,6 +190,20 @@ pub struct Ppu2C02 {
     /// off by default (owner, 2026-11-13), and not part of the state; off, both act at once as
     /// before lot FIDELITY.
     bus_conflicts: bool,
+    /// Whether the second `$2006` write loads `v` three dots later, with the hybrid address of the
+    /// fetch it meets ([`Self::delay_address_load`]). Measured on the transistor netlists
+    /// (`docs/review/FIDELITY-LEADS.md`, A3c): `v` loads in the middle of the third dot after
+    /// the dot a read of the same cycle samples. A core setting, on by default; not in the state.
+    address_load_delay: bool,
+    /// Whether a `$2006` load that lands on a coarse-X increment, or on dot 256, ANDs with the
+    /// incremented address ([`Self::address_load_collision`]). On by default.
+    glitch_2006: bool,
+    /// Whether a `$2000` write that starts on dot 257 lets the dot-257 copy take the nametable-X
+    /// bit from the CPU's open bus ([`Self::control_write_glitch`]). On by default.
+    glitch_2000: bool,
+    /// The CPU data bus before the write in progress: what the PPU's data pins see for the first
+    /// half master clocks of the write, before the CPU drives its value. Set by the bus.
+    cpu_open_bus: u8,
     /// Dots [`Self::switch_rendering`] ran ahead of the CPU, taken off the next catch-up. Never
     /// outstanding at a frame boundary (the switch only runs ahead on a line that renders), so
     /// not in the state.
@@ -502,6 +516,10 @@ impl Ppu2C02 {
             oam_row_refresh: [0; 32],
             oam_render_off: 0,
             bus_conflicts: false,
+            address_load_delay: true,
+            glitch_2006: true,
+            glitch_2000: true,
+            cpu_open_bus: 0,
             prepaid_dots: 0,
             serial_since: 0,
             serial_base: 0,
@@ -860,6 +878,27 @@ impl Ppu2C02 {
         self.bus_conflicts = enabled;
     }
 
+    /// See `address_load_delay`.
+    pub const fn set_address_load_delay(&mut self, enabled: bool) {
+        self.address_load_delay = enabled;
+    }
+
+    /// See `glitch_2006`.
+    pub const fn set_glitch_2006(&mut self, enabled: bool) {
+        self.glitch_2006 = enabled;
+    }
+
+    /// See `glitch_2000`.
+    pub const fn set_glitch_2000(&mut self, enabled: bool) {
+        self.glitch_2000 = enabled;
+    }
+
+    /// The CPU data bus as it stood before the write the bus is about to make (see
+    /// `cpu_open_bus`).
+    pub const fn note_cpu_open_bus(&mut self, value: u8) {
+        self.cpu_open_bus = value;
+    }
+
     /// What switching the rendering off or on inside a frame does to OAM, `on` being the new
     /// state.
     ///
@@ -1027,6 +1066,18 @@ impl Ppu2C02 {
     #[must_use]
     pub const fn dot(&self) -> i32 {
         self.dot
+    }
+
+    /// The current VRAM address `v` (host and test accessor, no side effect).
+    #[must_use]
+    pub const fn vram_v(&self) -> u16 {
+        self.v
+    }
+
+    /// The temporary VRAM address `t` (host and test accessor, no side effect).
+    #[must_use]
+    pub const fn vram_t(&self) -> u16 {
+        self.t
     }
 
     /// Current scanline; 0 to 239 are visible, the last one is the pre-render line.
@@ -1305,6 +1356,9 @@ impl Ppu2C02 {
     /// well; `#[inline]`, so the `$2000` arm is the body it always was.
     #[inline]
     fn write_control(&mut self, value: u8, cartridge: Option<&mut Cartridge>) {
+        if self.dot == 257 && self.glitch_2000 && self.fetching() {
+            self.control_write_glitch();
+        }
         self.control = value;
         self.t = (self.t & 0xF3FF) | (u16::from(value & 0x03) << 10);
         if let Some(cartridge) = cartridge {
@@ -2018,6 +2072,9 @@ impl Ppu2C02 {
         }
         self.run_dots(i64::from(3 - self.prepaid_dots), cart);
         self.prepaid_dots = 3;
+        if self.glitch_2006 {
+            self.address_load_collision();
+        }
         let next = self.dot + 1;
         if self.fetching() && matches!(next, 2..=256 | 322..=336) {
             let hybrid = |address: u16, old: u16| (address & 0xFF00) | (old & 0x00FF);
@@ -2039,6 +2096,51 @@ impl Ppu2C02 {
         }
         self.run_dots(1, cart);
         self.prepaid_dots = 4;
+    }
+
+    /// A `$2006` load that lands on a dot whose increment of `v` it collides with.
+    ///
+    /// nesdev ("PPU registers", PPUADDR): "at most one axis of scrolling will be set to the
+    /// bitwise AND of the written value and the current value". Measured on the transistor
+    /// netlists of the 2A03 and 2C02 (`docs/review/FIDELITY-LEADS.md`, A3c), and more than the
+    /// page says:
+    /// * on a coarse-X increment (dots 8 to 248 by eights, 328, 336) the coarse X of the address
+    ///   loaded is the written one AND the incremented one, every other field the written one;
+    /// * on dot 256, which increments X and Y, the whole address is the written one AND the
+    ///   incremented one;
+    /// * **`t` takes the same value**: the load drives the shared bus of both registers, so the
+    ///   copy of dot 257 and the next lines carry the damage until the game writes `t` again.
+    ///
+    /// Called with the three dots of the delayed load run, `self.dot` being the dot the load
+    /// lands in and `self.v` already incremented by it. This is the netlist's behaviour in three
+    /// of the four CPU/PPU alignments (in the fourth, the load lands a dot earlier), which are
+    /// also the alignments the rest of this core's timing matches.
+    #[cold]
+    #[inline(never)]
+    fn address_load_collision(&mut self) {
+        let dot = self.dot;
+        let increments = (dot % 8 == 0 && (8..=256).contains(&dot)) || dot == 328 || dot == 336;
+        if !increments || !self.fetching() {
+            return;
+        }
+        self.t = if dot == 256 {
+            self.t & self.v
+        } else {
+            (self.t & !0x001F) | (self.t & self.v & 0x001F)
+        };
+    }
+
+    /// A `$2000` write that starts on dot 257: for the first half master clocks of the write the
+    /// PPU's data pins still carry the CPU's open bus, "which will almost always be the upper
+    /// byte of the address" (nesdev, "PPU registers", PPUCTRL), and the copy of dot 257 takes
+    /// the nametable-X bit from it, so "only the next scanline [is] erroneously drawn from the
+    /// left nametable". Only "for specific CPU-PPU alignments": in the netlist measurement, one
+    /// of four, the one this core's timing matches (`docs/review/FIDELITY-LEADS.md`, A3c). `t`
+    /// gets the written value right after, so the damage is that one line.
+    #[cold]
+    #[inline(never)]
+    fn control_write_glitch(&mut self) {
+        self.v = (self.v & !0x0400) | (u16::from(self.cpu_open_bus & 0x01) << 10);
     }
 
     /// What the palette RAM drives onto the PPU's data bus: six bits, and only the two colour
@@ -2163,7 +2265,7 @@ impl Ppu2C02 {
             6 => {
                 if self.write_toggle {
                     self.t = (self.t & 0xFF00) | u16::from(value);
-                    if self.bus_conflicts && self.fetching() {
+                    if (self.address_load_delay || self.bus_conflicts) && self.fetching() {
                         self.delay_address_load(&mut cartridge);
                     }
                     self.v = self.t;

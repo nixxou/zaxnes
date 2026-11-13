@@ -1709,6 +1709,10 @@ impl CpuBus for NesBus {
 
     fn write(&mut self, address: u16, value: u8) {
         self.tick();
+        if (address & 0xE000) == 0x2000 {
+            // What the PPU's data pins see first (`Ppu2C02::control_write_glitch`).
+            self.ppu.note_cpu_open_bus(self.data_bus);
+        }
         self.data_bus = value;
         self.write_internal(address, value);
     }

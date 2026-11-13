@@ -522,6 +522,9 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.oamaddr_bug", "Défaut OAMADDR (2C02G)"),
     ("setting.emu.oam_decay", "Effacement de l'OAM"),
     ("setting.emu.power_on_top", "Allumage en haut de l'image"),
+    ("setting.emu.ppu_2006_delay", "Délai de chargement $2006"),
+    ("setting.emu.ppu_2006_glitch", "Glitch de défilement $2006"),
+    ("setting.emu.ppu_2000_glitch", "Glitch $2000 du point 257"),
     ("setting.emu.power_on_ram", "RAM à l'allumage"),
     ("option.Zeros", "Zéros"),
     ("option.FCEUX pattern", "Motif FCEUX"),
@@ -1167,6 +1170,18 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (
         "detail.emu.power_on_top",
         "L'endroit où la puce vidéo se trouve dans son image quand on allume la console. La vraie console commence en haut de l'image ; Zaxnes a toujours commencé à la fin, ce qui raccourcit d'une fraction d'image l'attente d'un jeu avant sa première image. Activé, les jeux démarrent comme sur la console, une fraction d'image plus tard qu'avant : les enregistrements, les sauvegardes d'état faites juste après l'allumage et certains réglages d'écran large faits à l'ancienne peuvent se décaler. Prend effet au prochain chargement. Par défaut : désactivé.",
+    ),
+    (
+        "detail.emu.ppu_2006_delay",
+        "Quand un jeu écrit une nouvelle adresse vidéo pendant l'image, la console ne la prend que trois points plus tard, au milieu d'une lecture, qui peut alors lire brièvement une tuile à une adresse mélangée. Mesuré sur le schéma de la console au niveau des transistors. Prend effet au prochain chargement. Par défaut : activé.",
+    ),
+    (
+        "detail.emu.ppu_2006_glitch",
+        "Un défaut de la puce vidéo : si cette nouvelle adresse arrive pile au point où la puce passe à la tuile suivante, les deux se mélangent et la position de défilement devient un mélange des deux, jusqu'à ce que le jeu la redonne. Les jeux écrits pour la console l'évitent. Prend effet au prochain chargement. Par défaut : activé.",
+    ),
+    (
+        "detail.emu.ppu_2000_glitch",
+        "Un défaut de la puce vidéo : une écriture dans son registre de contrôle qui commence sur un point précis d'une ligne peut faire dessiner la ligne suivante depuis la moitié gauche de l'écran. Cela n'arrive que sur certaines consoles, selon l'alignement des puces à l'allumage. Les jeux écrits pour la console l'évitent. Prend effet au prochain chargement. Par défaut : activé.",
     ),
     (
         "detail.emu.power_on_ram",

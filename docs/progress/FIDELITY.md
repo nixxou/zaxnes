@@ -32,6 +32,7 @@ Reference before the lot: test ROMs 212 pass / 7 fail / 1 unsupported / 111 manu
 | 21 | *(branch `feat/fidelity-poweron`)* **Power-on at the top of the picture** (nesdev "PPU power up state"; dot 11 as BeesNES): setting `emu.power_on_top`, **off by default**. With it on, blargg `5.Emulator` passes with `emu.oam_corruption` on; every game's timeline moves (golden-core: 98 games, 23 pictures at frame 1200) | 143 (147) | same | same |
 | 22 | *(branch `feat/fidelity-poweron`)* **Console audio profiles** (BeesNES, MIT): setting `audio.console_profile`, 14 measured NES/Famicom models, **none by default** (output bit-identical, golden unchanged). Channel gains in the mix, the console's low-pass and three high-passes once per output sample, letterless noise on N0260073. Approximations in FIDELITY-LEADS E1 | 143 (147) | same | same |
 | 23 | *(branch `feat/fidelity-poweron`)* **CPU bus activity checked against BeesNES's 2A03 table** (xlsx, MIT): generator `rust/tools/cpu_bus_reference.py`, test `cpu_bus_reference_tests.rs`; 244 opcodes x 2 scenarios, direction and address class of every access, all match. Test only, no runtime change | 143 (147) | same | same |
+| 24 | *(branch `study/access-phase`)* **PPU write timings measured on the transistor netlists** (VisualNes, owner-approved): `$2006` delay split out and on (`emu.ppu_2006_delay`), `$2006` collision AND glitch on (`emu.ppu_2006_glitch`, `t` damaged too), `$2000` dot-257 open-bus glitch on (`emu.ppu_2000_glitch`); golden unchanged on 98 games | **144** (147) | same | same |
 
 ## Rows still failing
 

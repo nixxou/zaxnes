@@ -202,6 +202,24 @@ impl NesCore {
     /// Whether the 2C02G/H's OAMADDR defect is emulated: with OAMADDR at 8 or more when rendering
     /// starts, eight bytes of OAM are copied over the first eight (nesdev, "PPU registers"). On by
     /// default; never on a PAL console, whose 2C07 does not have it.
+    /// Whether the second `$2006` write loads `v` three dots later with the hybrid address
+    /// (measured on the transistor netlists). On by default.
+    pub fn set_address_load_delay(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_address_load_delay(enabled);
+    }
+
+    /// Whether a `$2006` load colliding with an increment of `v` ANDs with it (nesdev; the
+    /// transistor netlists). On by default.
+    pub fn set_glitch_2006(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_glitch_2006(enabled);
+    }
+
+    /// Whether a `$2000` write starting on dot 257 takes the nametable-X bit of the dot-257 copy
+    /// from the CPU's open bus (nesdev; the transistor netlists). On by default.
+    pub fn set_glitch_2000(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_glitch_2000(enabled);
+    }
+
     pub fn set_oamaddr_bug(&mut self, enabled: bool) {
         self.bus.ppu_mut().set_oamaddr_bug(enabled);
     }

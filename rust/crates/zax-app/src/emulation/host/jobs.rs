@@ -14,9 +14,9 @@ use zax_settings::values::SettingValue;
 
 use super::games::{ConfirmationRequest, ConfirmedAction, NO_LABEL};
 use super::{EmulationHost, GameView};
-use crate::emulation::engine_handle::EngineHandle;
 use crate::emulation::commands::{Command, CommandArgs};
 use crate::emulation::emulation_state::EmulationState;
+use crate::emulation::engine_handle::EngineHandle;
 use crate::emulation::fceux_validated;
 use crate::emulation::game_catalog::{GameCatalog, ResolvedGame};
 use crate::emulation::rom_file::{self, RomData, INVALID_ROM_MESSAGE};
@@ -107,8 +107,12 @@ enum Step {
 }
 
 /// Hands the switches of `EmulationHost::fidelity_switches` to the core, in their order.
-fn apply_fidelity_switches(core: &mut EngineHandle, switches: [bool; 5]) {
-    let [oam_corruption, bus_conflicts, oamaddr_bug, oam_decay, power_on_top] = switches;
+fn apply_fidelity_switches(core: &mut EngineHandle, switches: [bool; 8]) {
+    let [oam_corruption, bus_conflicts, oamaddr_bug, oam_decay, power_on_top, delay_2006, glitch_2006, glitch_2000] =
+        switches;
+    core.set_address_load_delay(delay_2006);
+    core.set_glitch_2006(glitch_2006);
+    core.set_glitch_2000(glitch_2000);
     core.set_oam_corruption(oam_corruption);
     core.set_bus_conflicts(bus_conflicts);
     core.set_oamaddr_bug(oamaddr_bug);
@@ -492,14 +496,18 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
 
     /// The hardware-fidelity switches of the emulation tab (lot FIDELITY), in the order
     /// `advance_launch` hands them to the core: OAM corruption, PPU bus conflicts, OAMADDR
-    /// defect, OAM decay, power-on at the top of the picture.
-    fn fidelity_switches(&self) -> [bool; 5] {
+    /// defect, OAM decay, power-on at the top of the picture, `$2006` delay, `$2006` and `$2000`
+    /// glitches.
+    fn fidelity_switches(&self) -> [bool; 8] {
         [
             SettingId::EmuOamCorruption,
             SettingId::EmuPpuBusConflicts,
             SettingId::EmuOamaddrBug,
             SettingId::EmuOamDecay,
             SettingId::EmuPowerOnTop,
+            SettingId::EmuPpu2006Delay,
+            SettingId::EmuPpu2006Glitch,
+            SettingId::EmuPpu2000Glitch,
         ]
         .map(|id| self.settings.get(id).as_bool())
     }
@@ -569,7 +577,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                     Some(session) => {
                         session.core_mut().set_cartridge_db(cartridge_db);
                         apply_fidelity_switches(session.core_mut(), fidelity);
-                        session.core_mut().set_console_audio_profile(console_profile);
+                        session
+                            .core_mut()
+                            .set_console_audio_profile(console_profile);
                         session.core_mut().set_power_on_ram(power_on_ram);
                         session.core_mut().set_builtin_patches(builtin_patches);
                         session.core_mut().set_advanced_patches(advanced);

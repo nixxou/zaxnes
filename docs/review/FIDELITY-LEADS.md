@@ -116,6 +116,26 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   the "hybrid address" of AccuracyCoin (low byte already latched by ALE with the old `v`, high
   lines driven from the new `v`). Zaxnes's `delay_address_load` (+3, hybrid check, +1) equals the
   majority alignment exactly.
+- **`$2000` dot-257 glitch, measured** (program sliding `STA $2000` #$01 over every dot, rendering
+  on): the copy of dot 257 takes nametable X from the open bus (`$20`) **only in alignment 4**
+  (M2 rising at sub-phase 6, /CS falling in the last half-step of dot 257) and only for D = 257;
+  the three other alignments never show it. Exactly nesdev's "for specific CPU-PPU alignments",
+  "starts on dot 257". Implemented on by default (`emu.ppu_2000_glitch`), as alignment 4.
+- **`$2006` collision, measured** (alternating targets `$2108`/`$2AD7`): when the load lands on a
+  coarse-X increment (dots 8..248 by eights, 328, 336) coarse X = written AND incremented, every
+  other field written; on dot 256 (X and Y increments) the whole address = written AND
+  incremented. **`t` gets the same value** (not in nesdev): the copy of dot 257 and later lines
+  keep the damage. Write at D%8 = 5 in alignments 0/4/6, D%8 = 6 in alignment 2. Implemented on by
+  default (`emu.ppu_2006_glitch`, `Ppu2C02::address_load_collision`).
+- **`$2006` load delay split from `emu.ppu_bus_conflicts`** into `emu.ppu_2006_delay`, on by
+  default: AccuracyCoin 143 -> **144** (`Hybrid Addresses`), campaign unchanged, **golden-core
+  unchanged on all 98 games including SMB3 Japan**: the SMB3 line-193 damage of the old option came
+  from the `$2007` read model (C1), not from the `$2006` delay. C1 stays off and wrong in detail.
+- **Also seen, not implemented**: the first `$2006` write and `$2005`/`$2000` writes put the open
+  bus into `t` for the first half-steps of the write (`t` = `$2008` before `$2A08`); harmless unless
+  a copy (dot 257, pre-render 280-304) falls in that window — the same mechanism as the `$2000`
+  glitch, for `$2005`/`$2006`. Lead for Fidelity+. Alignment 2 loads `$2006` one dot earlier in
+  general; an alignment option (A4) would carry it.
 - **Next**: a per-dot differential harness (same program in Zaxnes and VisualNes, alignment matched
   through the `$2002` race, compare PPU address bus and `v` per dot) to settle `$2001` per
   alignment, `$2007` reads, and the `$2000`/`$2006` glitches of plan 1.4/1.5 before enabling them.

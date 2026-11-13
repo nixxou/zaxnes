@@ -862,3 +862,75 @@ fn fidelity_power_on_top_starts_the_ppu_at_line_0_dot_11() {
     // Dot 11 when the CPU's reset starts; its seven cycles (21 NTSC dots) have run since.
     assert_eq!((0, 11 + 21), (ppu.scanline(), ppu.dot()));
 }
+
+/// Parks the PPU, rendering on, with `dot` the last dot run, on a visible line past 10.
+fn park_on_dot(fixture: &mut TileFixture, dot: i32) {
+    let bus = fixture.core.bus_mut();
+    let mut guard = 0;
+    loop {
+        bus.tick();
+        bus.sync_ppu();
+        let ppu = bus.ppu();
+        if (10..200).contains(&ppu.scanline()) && ppu.dot() == dot {
+            return;
+        }
+        guard += 1;
+        assert!(guard < 2_000_000, "never reached dot {dot}");
+    }
+}
+
+fn increment_x(v: u16) -> u16 {
+    if (v & 0x1F) == 0x1F {
+        (v & !0x1F) ^ 0x400
+    } else {
+        v + 1
+    }
+}
+
+/// study/access-phase: a second `$2006` write whose delayed load lands on the coarse-X increment
+/// of dot 136 (the write at dot 133) loads the written coarse X AND the incremented one, every
+/// other field written, into `v` and `t` alike — as measured on the transistor netlists
+/// (`$2AD7` over `$210C` gives `$2AC5`). Off, or on another dot, the written address loads.
+#[test]
+fn fidelity_2006_load_on_a_coarse_x_increment_ands_coarse_x() {
+    fn load_at(dot: i32, glitch: bool) -> (u16, u16, u16) {
+        let mut fixture = TileFixture::new();
+        fixture.core.set_glitch_2006(glitch);
+        fixture.set_mask(0x0A);
+        park_on_scanline(&mut fixture, 5);
+        fixture.core.bus_mut().ppu_mut().write(6, 0x2A, None);
+        park_on_dot(&mut fixture, dot);
+        let before = fixture.core.bus().ppu().vram_v();
+        fixture.core.bus_mut().ppu_mut().write(6, 0xD7, None);
+        let ppu = fixture.core.bus().ppu();
+        (before, ppu.vram_v(), ppu.vram_t())
+    }
+
+    let (before, v, t) = load_at(133, true);
+    let expected = (0x2AD7 & !0x1F) | (0x2AD7 & increment_x(before) & 0x1F);
+    assert_eq!((expected, expected), (v, t), "collision at dot 136, v was {before:04X}");
+    assert_eq!((0x2AD7, 0x2AD7), (load_at(133, false).1, load_at(133, false).2), "setting off");
+    assert_eq!(0x2AD7, load_at(134, true).2, "no collision on dot 137");
+}
+
+/// study/access-phase: a `$2000` write that starts on dot 257 lets the copy of that dot take the
+/// nametable-X bit from the CPU's open bus (`$20` for `STA $2000`): that line's v has nametable
+/// X 0 although `t` says 1 (nesdev, "PPU registers"; the transistor netlists).
+#[test]
+fn fidelity_2000_write_on_dot_257_takes_nametable_x_from_open_bus() {
+    fn nametable_x_after(dot: i32, glitch: bool) -> u16 {
+        let mut fixture = TileFixture::new();
+        fixture.core.set_glitch_2000(glitch);
+        fixture.set_mask(0x0A);
+        fixture.core.bus_mut().ppu_mut().write(0, 0x01, None);
+        park_on_dot(&mut fixture, dot);
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        ppu.note_cpu_open_bus(0x20);
+        ppu.write(0, 0x01, None);
+        (ppu.vram_v() >> 10) & 1
+    }
+
+    assert_eq!(0, nametable_x_after(257, true), "glitch");
+    assert_eq!(1, nametable_x_after(257, false), "setting off");
+    assert_eq!(1, nametable_x_after(258, true), "a dot later is safe");
+}

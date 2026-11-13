@@ -1212,6 +1212,7 @@ fn emulation_cartridge(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("Power on at the top of the picture"),
     );
+    ppu_write_timings(out);
 }
 
 /// The emulation settings of the Rust port alone, in their place in the catalogue.
@@ -2090,6 +2091,48 @@ fn console_audio_profile(out: &mut Vec<SettingDescriptor>) {
             opt(14, "PAL NES NESE-001 (GBR) PM608755"),
         ]))
         .with_label("Console audio profile"),
+    );
+}
+
+/// The PPU write timings measured on the transistor netlists (study/access-phase).
+fn ppu_write_timings(out: &mut Vec<SettingDescriptor>) {
+    // study/access-phase: the three PPU write timings measured on the transistor netlists of the
+    // 2A03 and 2C02 (docs/review/FIDELITY-LEADS.md, A3c). On by default.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuPpu2006Delay,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("$2006 load delay"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuPpu2006Glitch,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("$2006 scroll glitch"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuPpu2000Glitch,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("$2000 dot-257 glitch"),
     );
 }
 

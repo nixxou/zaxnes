@@ -510,6 +510,9 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.oamaddr_bug", "OAMADDR defect (2C02G)"),
     ("setting.emu.oam_decay", "OAM decay"),
     ("setting.emu.power_on_top", "Power on at the top of the picture"),
+    ("setting.emu.ppu_2006_delay", "$2006 load delay"),
+    ("setting.emu.ppu_2006_glitch", "$2006 scroll glitch"),
+    ("setting.emu.ppu_2000_glitch", "$2000 dot-257 glitch"),
     ("setting.emu.power_on_ram", "Work RAM at power-on"),
     ("option.Zeros", "Zeros"),
     ("option.FCEUX pattern", "FCEUX pattern"),
@@ -1193,6 +1196,18 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         "detail.emu.power_on_top",
         "Where the video chip is in its picture when the console is switched on. The real console starts at the top of the picture; Zaxnes has always started at the end of it, which shortens the wait of a game for its first frame by a fraction of a frame. On, games start as on the console, a fraction of a frame later than before, so recordings, saved states made right after switching on and some widescreen adjustments made the old way can drift. Takes effect at the next load. Default: off.",
+    ),
+    (
+        "detail.emu.ppu_2006_delay",
+        "When a game writes a new video address during the picture, the console only takes it three dots later, in the middle of a fetch, which can briefly read a tile from a mixed address. Measured on the console's transistor-level design. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.ppu_2006_glitch",
+        "A defect of the video chip: if that new address arrives on the very dot the chip moves to the next tile, the two collide and the scroll position becomes a mix of both, until the game sets it again. Games written for the console avoid it. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.ppu_2000_glitch",
+        "A defect of the video chip: a write to its control register that starts on one precise dot of a line can make the next line drawn from the left screen half. It happens only on some consoles, depending on how the chips lined up when switched on. Games written for the console avoid it. Takes effect at the next load. Default: on.",
     ),
     (
         "detail.emu.power_on_ram",

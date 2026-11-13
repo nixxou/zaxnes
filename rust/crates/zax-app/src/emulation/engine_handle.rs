@@ -830,6 +830,27 @@ impl EngineHandle {
         }
     }
 
+    /// `emu.ppu_2006_delay` (study access-phase); Zaxnes only.
+    pub fn set_address_load_delay(&mut self, enabled: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_address_load_delay(enabled);
+        }
+    }
+
+    /// `emu.ppu_2006_glitch` (study access-phase); Zaxnes only.
+    pub fn set_glitch_2006(&mut self, enabled: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_glitch_2006(enabled);
+        }
+    }
+
+    /// `emu.ppu_2000_glitch` (study access-phase); Zaxnes only.
+    pub fn set_glitch_2000(&mut self, enabled: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_glitch_2000(enabled);
+        }
+    }
+
     /// Whether a power-on puts the PPU at the top of the picture (lot FIDELITY); likewise.
     pub fn set_power_on_top(&mut self, enabled: bool) {
         if let Some(core) = self.zaxnes_mut() {

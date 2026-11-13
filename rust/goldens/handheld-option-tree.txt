@@ -103,6 +103,9 @@ options
       emu.oamaddr_bug
       emu.oam_decay
       emu.power_on_top
+      emu.ppu_2006_delay
+      emu.ppu_2006_glitch
+      emu.ppu_2000_glitch
       emu.run_ahead
       emu.smooth_scroll_ahead
       emu.game_speed
