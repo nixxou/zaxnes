@@ -136,6 +136,22 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   a copy (dot 257, pre-render 280-304) falls in that window — the same mechanism as the `$2000`
   glitch, for `$2005`/`$2006`. Lead for Fidelity+. Alignment 2 loads `$2006` one dot earlier in
   general; an alignment option (A4) would carry it.
+- **`$2007` read during rendering, measured** (step 25; `LDA $2007` sliding over every dot, distinct
+  VRAM contents): the buffer latches at the start of dot X = D + 5 (alignments 0, 2, 6) or D + 6
+  (alignment 4) and takes the PPU data bus: on an even X the byte the fetch of X reads, on an odd
+  X the byte of the fetch of X - 1. `v` takes an X+Y increment in the middle of X. On an odd X,
+  ALE and /RD are active together, so the next fetch reads with that byte as its low address byte
+  (`ALE + Read`). The old model buffered the *disturbed* fetch's byte in the odd case and
+  incremented `v` after it; fixed (`read_buffer_from_fetch`, X = D + 6 as alignment 4).
+  AccuracyCoin with `emu.ppu_bus_conflicts`: **146** (`$2007 Stress Test` and `ALE + Read` pass;
+  only `OAM Corruption`, which has its own switch). Default unchanged (144), golden unchanged.
+- **SMB3 Japan line 193 still does not match the console video** with the option on, at X = D + 6
+  or D + 5 (empty frames 11-19 %, never on the video; 16 px 0-7 %, 22 % on the video). The read
+  model now follows the netlist, so the gap is elsewhere: the video's origin is unconfirmed, or
+  another approximation on that line (sprites, the refetch only modelled for the background, the
+  alignment). Decisive next test: rebuild that line's register sequence (`$2006` at dots 200/212,
+  `$2007` read at 224, `v` = `$0B02`) and its nametable/pattern bytes in a VisualNes NROM program
+  and compare the pixels with Zaxnes. Until then `emu.ppu_bus_conflicts` stays off by default.
 - **Next**: a per-dot differential harness (same program in Zaxnes and VisualNes, alignment matched
   through the `$2002` race, compare PPU address bus and `v` per dot) to settle `$2001` per
   alignment, `$2007` reads, and the `$2000`/`$2006` glitches of plan 1.4/1.5 before enabling them.

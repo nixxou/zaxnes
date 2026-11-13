@@ -1919,8 +1919,9 @@ impl Ppu2C02 {
                 self.read_vram_inner(address, PpuBusAccess::Cpu, ChrFetch::Background, cart);
         }
 
-        if self.bus_conflicts && self.fetching() {
-            self.read_buffer_from_fetch(cart);
+        if self.bus_conflicts && self.fetching() && self.read_buffer_from_fetch(cart) {
+            // The increment was made inside, where the hardware makes it.
+            return value;
         }
         self.increment_vram_address(cart);
         value
@@ -1939,41 +1940,56 @@ impl Ppu2C02 {
     /// dot of a line and checks the half the analogue behaviour leaves stable).
     ///
     /// The dots up to that read are run here and owed back ([`Self::prepaid_dots`]), so nothing is
-    /// tested per dot; the increment of `v` the access owes comes after them, as on the hardware.
+    /// tested per dot.
+    ///
+    /// **Measured on the transistor netlists of the 2A03 and 2C02** (`docs/review/FIDELITY-LEADS.md`,
+    /// A3c, step 25): the buffer latches at the very start of dot X — `D + 6` in the CPU/PPU
+    /// alignment the rest of this core's timing follows (`D + 5` in the three others), `D` being
+    /// the dot a read of the same cycle samples — and takes **what the PPU data bus holds then**:
+    /// on an even X the byte the fetch of X reads, on an odd X the byte the fetch of X - 1 read.
+    /// `v` takes the rendering increment (X and Y) in the middle of X. On an odd X, the address
+    /// latch is open while that bus is read, so the fetch whose address X sets up reads with the
+    /// buffered byte as its low byte, its high lines already from the incremented `v` (`AccuracyCoin`,
+    /// `ALE + Read`: a low plane read from `$0FFF` instead of `$0F03`).
+    ///
+    /// Returns whether the increment of `v` was made here (the odd case, where it comes before
+    /// the disturbed fetch); otherwise the caller makes it, after X, which is the same thing for
+    /// every fetch.
     #[cold]
     #[inline(never)]
-    fn read_buffer_from_fetch(&mut self, cart: Cart<'_, '_>) {
+    fn read_buffer_from_fetch(&mut self, cart: Cart<'_, '_>) -> bool {
+        /// X - D, for the alignment this core follows.
+        const LATCH_DOTS: i32 = 6;
         if self.prepaid_dots != 0 {
-            return;
+            return false;
         }
-        // Five dots on: the state machine's four, and the one by which a register access of this
-        // core leads the hardware's (the same dot `skip_background_reload` accounts for).
-        self.run_dots(4, cart);
-        self.prepaid_dots = 4;
-        if (self.dot & 1) != 0 || !self.fetching() {
-            // The read lands on a dot the fetches read on as well: theirs is the byte.
+        self.run_dots(i64::from(LATCH_DOTS - 1), cart);
+        self.prepaid_dots = LATCH_DOTS - 1;
+        let latch_dot = self.dot + 1;
+        if !self.fetching() {
             self.run_dots(1, cart);
-            self.prepaid_dots = 5;
-            if self.fetching() {
-                self.read_buffer = self.fetch_bus_value(cart.as_deref());
-            }
-            return;
+            self.prepaid_dots = LATCH_DOTS;
+            return false;
+        }
+        if (latch_dot & 1) == 0 {
+            // An even dot: its own fetch is the byte.
+            self.run_dots(1, cart);
+            self.prepaid_dots = LATCH_DOTS;
+            self.read_buffer = self.fetch_bus_value(cart.as_deref());
+            return false;
         }
 
-        // It lands on a dot that sets an address up, and that one is not harmless: with the
-        // address latch open while the bus is being read, the latch keeps what the bus held,
-        // the byte of the fetch before, and **the next fetch reads there**. `ALE + Read` sets it
-        // up so that the low plane of a tile of an empty nametable is read from `$0FFF` instead
-        // of `$0F03`, and looks for the eight pixels with a sprite zero. What the buffer takes
-        // then is analogue; the fetch it disturbed is as good an answer as any.
+        // An odd dot: the bus still holds the byte the fetch of X - 1 read.
         let residue = self.fetch_bus_value(cart.as_deref());
-        self.run_dots(2, cart);
-        self.prepaid_dots = 6;
-        if !self.fetching() {
-            return;
+        self.read_buffer = residue;
+        self.run_dots(1, cart);
+        self.increment_vram_address(cart);
+        self.run_dots(1, cart);
+        self.prepaid_dots = LATCH_DOTS + 1;
+        if self.fetching() {
+            self.refetch_with_low_byte(residue, cart.as_deref());
         }
-        self.refetch_with_low_byte(residue, cart.as_deref());
-        self.read_buffer = self.fetch_bus_value(cart.as_deref());
+        true
     }
 
     /// The byte the fetch of the dot just run (an even one, where the fetches read) put on the
