@@ -289,7 +289,16 @@ impl DmcChannel {
     /// Hands the byte the DMA read over to the memory reader. Advances the address, which
     /// wraps from $FFFF back to $8000, and ends or loops the sample when the last byte has
     /// been consumed (nesdev).
-    pub fn supply_byte(&mut self, value: u8) {
+    ///
+    /// Returns `Some(cycles)` in the one case the hardware asks for **another** fetch it then takes
+    /// back: a one-byte sample that does not loop, whose byte lands on the APU cycle before the
+    /// output unit's bit counter starts over. "If this happens right before the bit counter
+    /// resets, a DMA is triggered and aborted 1 cycle later (causing one halted CPU cycle)"
+    /// (Mesen 2, `DeltaModulationChannel::SetDmcReadBuffer`; `AccuracyCoin`, `Implicit DMA
+    /// Abort`). The count is the cycles until that counter starts over; the bus owns the DMA
+    /// cycles and does the rest (`NesBus::arm_implicit_dmc_abort`).
+    // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
+    pub fn supply_byte(&mut self, value: u8) -> Option<u32> {
         self.sample_buffer = value;
         self.buffer_empty = false;
         self.current_address = if self.current_address == 0xFFFF {
@@ -300,14 +309,20 @@ impl DmcChannel {
 
         self.bytes_remaining -= 1;
         if self.bytes_remaining > 0 {
-            return;
+            return None;
         }
 
         if self.looping {
             self.restart();
-        } else if self.irq_enabled {
+            return None;
+        }
+        if self.irq_enabled {
             self.irq_flag = true;
         }
+        if self.sample_length == 1 && self.bits_remaining == 1 && (0..2).contains(&self.timer) {
+            return Some(self.timer.unsigned_abs() + 1);
+        }
+        None
     }
 
     fn restart(&mut self) {

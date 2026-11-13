@@ -439,8 +439,11 @@ impl Apu2A03 {
     }
 
     /// Hands the byte a DMC DMA fetched to the memory reader.
-    pub fn supply_dmc_byte(&mut self, value: u8) {
-        self.dmc.supply_byte(value);
+    ///
+    /// `Some` when the hardware would ask for one more fetch and take it back (see
+    /// `DmcChannel::supply_byte`).
+    pub fn supply_dmc_byte(&mut self, value: u8) -> Option<u32> {
+        self.dmc.supply_byte(value)
     }
 
     /// Mono samples waiting to be read.

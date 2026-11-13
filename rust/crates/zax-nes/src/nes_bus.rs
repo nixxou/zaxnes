@@ -768,10 +768,13 @@ impl NesBus {
                 let address = self.apu.dmc_dma_address();
                 let value = self.dmc_fetch_read(address, internal, &mut decoded_before);
                 self.sync_apu();
-                self.apu.supply_dmc_byte(value);
+                let taken_back = self.apu.supply_dmc_byte(value);
                 // Cleared last: the `sync_apu` above polls the request, which is still raised
                 // until the byte lands.
                 self.dma &= !DMA_DMC;
+                if let Some(until_reset) = taken_back {
+                    self.arm_implicit_dmc_abort(until_reset);
+                }
             } else if get_cycle && (self.dma & DMA_OAM) != 0 {
                 self.dma_cycle();
                 let address = (u16::from(self.dma_oam_page) << 8) | u16::from(oam_index);
@@ -899,10 +902,25 @@ impl NesBus {
         let mut decoded_before = read_address;
         let value = self.dmc_fetch_read(address, false, &mut decoded_before);
         self.sync_apu();
-        self.apu.supply_dmc_byte(value);
+        let taken_back = self.apu.supply_dmc_byte(value);
         // Cleared last: the `sync_apu` above polls the request, which is still raised until the
         // byte lands.
         self.dma &= !DMA_DMC;
+        if let Some(until_reset) = taken_back {
+            self.arm_implicit_dmc_abort(until_reset);
+        }
+    }
+
+    /// The fetch a one-byte sample asks for and loses (`DmcChannel::supply_byte`): it is raised
+    /// when the bit counter starts over, `until_reset` cycles from this one, and taken back three
+    /// cycles after the byte landed — the window [`DMA_DMC_GHOST`] already describes, so a halt
+    /// that lands exactly then costs the CPU one cycle and a write cycle there costs nothing.
+    #[cold]
+    #[inline(never)]
+    fn arm_implicit_dmc_abort(&mut self, until_reset: u32) {
+        self.dmc_ready_cycle = self.cycles + i64::from(until_reset) + 1;
+        self.dmc_abort_cycle = self.cycles + 3;
+        self.dma |= DMA_DMC_GHOST;
     }
 
     /// How many of the `wanted` byte pairs an OAM transfer still owes may run in
