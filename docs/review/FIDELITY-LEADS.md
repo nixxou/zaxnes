@@ -88,6 +88,38 @@ Each one is exact on every test we have, but is a modelling shortcut, not the me
   0-3 extra master clocks) would give, for the first time, the exact dot each register write and
   read takes effect on — the basis for removing every calibrated constant of A3 and for A4.
 
+### A3c. Transistor-level measurements (VisualNes, owner-approved build, 2026-11-13)
+Bench: `G:/3DSen/ext-tools/visualnes-bench` (outside the repo: VisualNes publishes no licence, so no
+derived code enters Zaxnes; only the measured facts below). 2A03 + 2C02 netlists on one master
+clock; 1 half-step = 1/2 master clock; 1 dot = 8 half-steps; 1 CPU cycle = 24 half-steps; M2 high
+15 half-steps (2A03G 15/24 duty). Four CPU/PPU alignments measured (reset held 0, 2, 4, 6 extra
+half-steps: M2 rises at sub-phase 2, 0, 6, 4 of a dot). `hpos` = nesdev dot (vblank flag rises at
+the start of hpos 1 of line 241; fetch pairs start on odd hpos).
+- **PPU chip select**: VisualNes approximates /CS (11 half-steps from phi0). Replaced by the
+  74LS139 decode from the 2A03's M2 pin, /CS falling one half-step after M2 rises (the 139's
+  propagation ~ one half master clock) and rising one half-step before M2 falls. That last
+  choice is forced: the zero-delay netlist drops R/W and the data bus on the very half-step M2
+  falls, so the CPU's hold time cannot be simulated; on a console /CS rises ~1 half-step *after*
+  M2 falls. **Every "store" time below may therefore be 1-2 half-steps early** (up to a quarter
+  dot), which decides the dot only when a store lands right before a pclk edge.
+- **Reads** (`$2002`): the flag is sampled, and cleared, when /CS falls (M2 rise + 1).
+- **Writes**: the register stores when /CS rises (M2 rise + 14 here, ~+16 on a console). In one
+  CPU cycle a write therefore acts **~1.7 dots after a read samples**. Zaxnes applies both at the
+  same instant and is calibrated on reads (blargg vblank suite), which is the mechanism behind
+  the "+1 dot" register-write lead of A3.
+- **`$2001`**: `bkg_enable_out` and `/rendering_disabled` change on the store itself, any
+  alignment, no internal delay; fetches (ALE) start at the next odd dot (0-2 dots) or stop at once.
+  nesdev's "3-4 dots after the write" counts from the start of the CPU cycle (store at ~2.9 dots).
+- **`$2006` second write**: `v` loads on the pclk1 edge following the first pclk0 edge after the
+  store, i.e. in the *middle* of a dot: dot D+3 in alignments 0/4/6, D+2 in alignment 2 (D = the
+  dot where a read in the same cycle samples, which is Zaxnes's access dot). The mid-dot load is
+  the "hybrid address" of AccuracyCoin (low byte already latched by ALE with the old `v`, high
+  lines driven from the new `v`). Zaxnes's `delay_address_load` (+3, hybrid check, +1) equals the
+  majority alignment exactly.
+- **Next**: a per-dot differential harness (same program in Zaxnes and VisualNes, alignment matched
+  through the `$2002` race, compare PPU address bus and `v` per dot) to settle `$2001` per
+  alignment, `$2007` reads, and the `$2000`/`$2006` glitches of plan 1.4/1.5 before enabling them.
+
 ### A4. CPU/PPU alignment variants — open, Fidélité+
 - Hardware: four CPU/PPU clock alignments chosen at power-on; several tests (AccuracyCoin
   `BG Serial In`, `ALE + Read`, `Hybrid Addresses`, `OAM Corruption`) say results depend on it.
