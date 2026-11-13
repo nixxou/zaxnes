@@ -148,6 +148,12 @@ pub struct Ppu2C02 {
     vram_written: Vec<u32>,
     vram_clock: u32,
     oam: [u8; OAM_SIZE],
+    /// Whether the OAM row corruption of [`Self::rendering_switched`] is emulated. A core setting,
+    /// off by default, and not part of the state: it describes the machine, not the game.
+    oam_corruption: bool,
+    /// The OAM rows a switch-off of the rendering marked, one bit a row, waiting for the rendering
+    /// to come back on a line that renders. Transient: a state load drops it.
+    oam_corrupt_rows: u32,
     /// Palette RAM **as the game wrote it**, six bits an entry: what a `$2007` read of
     /// `$3F00`-`$3F1F` gives back and what the state blob carries, because palette RAM sits
     /// before the chip's colour decoder and a read never sees that decoder.
@@ -425,6 +431,8 @@ impl Ppu2C02 {
             vram_written: vec![0; VRAM_SIZE],
             vram_clock: 0,
             oam: [0; OAM_SIZE],
+            oam_corruption: false,
+            oam_corrupt_rows: 0,
             palette_raw: [0; PALETTE_SIZE],
             palette: [0; PALETTE_SIZE],
             palette_marked: marked_palette(&[0; PALETTE_SIZE]),
@@ -535,6 +543,91 @@ impl Ppu2C02 {
     }
 
     /// Whether the picture shows more than eight sprites on a line; from the next line.
+    /// Turns the emulation of the OAM row corruption on or off (see
+    /// [`Self::rendering_switched`]).
+    pub fn set_oam_corruption(&mut self, enabled: bool) {
+        self.oam_corruption = enabled;
+        if !enabled {
+            self.oam_corrupt_rows = 0;
+        }
+    }
+
+    /// What switching the rendering off or on inside a frame does to OAM, `on` being the new
+    /// state.
+    ///
+    /// "If rendering is disabled during a visible scanline, OAM is going to be corrupted on the
+    /// next visible pixel. 8 bytes of OAM get replaced with the first 8 bytes of OAM. The 8 bytes
+    /// that get replaced correlate to the secondary OAM address at the moment rendering was
+    /// disabled" (`AccuracyCoin`, `OAM Corruption`), two or three dots after the write depending
+    /// on the CPU/PPU alignment — two here. The row is that address: dot / 2 during the clear,
+    /// the secondary OAM address rounded up to a sprite during the evaluation, and the byte the
+    /// fetch stands on from dot 257 (Mesen 2, `NesPpu::SetOamCorruptionFlags`, whose note says the
+    /// model "still [is] pending more research" — which is why this is a setting, and off by
+    /// default). Row 0 copied over itself changes nothing.
+    ///
+    /// Reached from a `$2001` write that changes the rendering bits and from nowhere else, so it
+    /// costs the dots nothing.
+    // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
+    #[cold]
+    #[inline(never)]
+    fn rendering_switched(&mut self, on: bool) {
+        if !self.oam_corruption {
+            return;
+        }
+        let renders = self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline();
+        if on {
+            if renders {
+                self.corrupt_oam_rows();
+            }
+            return;
+        }
+        if !renders {
+            return;
+        }
+
+        let dot = self.dot + 2;
+        #[allow(clippy::cast_sign_loss)] // Each arm is 0..32 by its range.
+        let row = match dot {
+            1..=64 => (dot >> 1) as u32 & 0x1F,
+            65..=256 => self.evaluation_row(),
+            257..=320 => {
+                let since = dot - 256;
+                (((since >> 3) * 4) + (since & 0x07).min(3)) as u32 & 0x1F
+            }
+            _ => 0,
+        };
+        self.oam_corrupt_rows |= 1 << row;
+    }
+
+    /// The row [`Self::rendering_switched`] marks during the evaluation: the secondary OAM
+    /// address "ceilinged to the nearest multiple of 4", and 0 once the secondary OAM is full.
+    #[cfg(feature = "ppu-exact-sprite-eval")]
+    #[allow(clippy::cast_sign_loss)] // 0..=32 before the mask.
+    const fn evaluation_row(&self) -> u32 {
+        ((self.secondary_oam_addr + 3) & !3) as u32 & 0x1F
+    }
+
+    /// Without the exact evaluation there is no secondary OAM address to read; row 0 is the one
+    /// that does nothing.
+    #[cfg(not(feature = "ppu-exact-sprite-eval"))]
+    const fn evaluation_row(&self) -> u32 {
+        0
+    }
+
+    /// Copies OAM row 0 over every row [`Self::rendering_switched`] marked, and the first byte of
+    /// the secondary OAM over the byte of the same index.
+    #[cold]
+    #[inline(never)]
+    fn corrupt_oam_rows(&mut self) {
+        let rows = std::mem::take(&mut self.oam_corrupt_rows);
+        for row in 1..32usize {
+            if (rows >> row) & 1 != 0 {
+                self.oam.copy_within(0..8, row * 8);
+                self.secondary_oam[row] = self.secondary_oam[0];
+            }
+        }
+    }
+
     pub fn set_sprite_limit(&mut self, limit: SpriteLimit) {
         self.sprite_limit = limit;
     }
@@ -1143,6 +1236,11 @@ impl Ppu2C02 {
 
                 self.suppress_vblank = false;
             } else if self.scanline == self.pre_render_scanline() {
+                if self.oam_corrupt_rows != 0 && self.rendering_enabled() {
+                    // The rendering came back during vblank: the rows marked are corrupted on the
+                    // first dot of the first line that renders.
+                    self.corrupt_oam_rows();
+                }
                 self.vblank_flag = false;
                 self.sprite_zero_hit = false;
                 self.sprite_overflow = false;
@@ -1400,7 +1498,11 @@ impl Ppu2C02 {
                 if self.swaps_control_and_mask() {
                     self.write_control(value, cartridge.as_deref_mut());
                 } else {
+                    let was_rendering = self.rendering_enabled();
                     self.mask = value;
+                    if was_rendering != self.rendering_enabled() {
+                        self.rendering_switched(!was_rendering);
+                    }
                 }
             }
 

@@ -190,6 +190,15 @@ impl NesCore {
         self.power_on_ram = pattern;
     }
 
+    /// Whether the PPU corrupts a row of OAM when the rendering is switched off inside a line and
+    /// comes back (lot FIDELITY step 9; `Ppu2C02::rendering_switched`). Off by default: the
+    /// hardware does it, `AccuracyCoin`'s `OAM Corruption` checks it, but the known model is
+    /// incomplete — with it on, blargg's `sprite_overflow_tests/5.Emulator` fails its third test,
+    /// which the console passes.
+    pub fn set_oam_corruption(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_oam_corruption(enabled);
+    }
+
     /// Whether the built-in patches and the advanced ones are on for the next load, as
     /// [`NesCore::set_builtin_patches`] and [`NesCore::set_advanced_patches`] left them.
     #[must_use]

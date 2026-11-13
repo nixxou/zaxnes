@@ -563,6 +563,9 @@ fn run_one_zaxnes(
     };
 
     let mut core = NesCore::new();
+    // `ZAXNES_OAM_CORRUPTION=1` runs the campaign with the core's off-by-default OAM row
+    // corruption (lot FIDELITY step 9), which `AccuracyCoin`'s `OAM Corruption` row needs.
+    core.set_oam_corruption(std::env::var_os("ZAXNES_OAM_CORRUPTION").is_some());
     // The built-in widescreen patches rewrite game code; a test ROM must run as it is.
     core.set_builtin_patches(false);
     core.set_advanced_patches(false);
