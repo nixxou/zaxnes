@@ -62,6 +62,7 @@ fn every_setting_of_the_tables_is_present_with_its_kind_default_scope_and_effect
 /// REQ-PERS-001: the enumeration returns at least the keys of §4.1. Anything beyond them is a
 /// setting of this reimplementation, which must carry a new key.
 #[test]
+#[allow(clippy::too_many_lines)] // One line a key of the catalogue.
 fn the_enumeration_covers_the_tables_and_names_its_additions() {
     let specified: HashSet<String> = rows().into_iter().map(|row| row.key).collect();
     let model: HashSet<String> = catalogue::descriptors()
@@ -110,6 +111,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "emu.pause_3d_in_2d",
             "emu.pipeline",
             "emu.power_on_ram",
+            "emu.power_on_top",
             "emu.ppu_bus_conflicts",
             "emu.smooth_scroll_ahead",
             "emu.smooth_scroll_view",

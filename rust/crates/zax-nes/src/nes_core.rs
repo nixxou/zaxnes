@@ -206,6 +206,14 @@ impl NesCore {
         self.bus.ppu_mut().set_oamaddr_bug(enabled);
     }
 
+    /// Whether a power-on puts the PPU at the top of the picture, as nesdev documents ("PPU power
+    /// up state"), instead of the start of vblank. Off by default: it moves the timeline of every
+    /// game against the frames (recordings, recipes, saved states made at power-on). Takes
+    /// effect at the next power-on.
+    pub fn set_power_on_top(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_power_on_top(enabled);
+    }
+
     /// Whether OAM decays when the rendering stays off: a row nothing accessed for 8 NTSC frames
     /// loses its bytes (nesdev, "PPU OAM"; `BeesNES`). Off by default: the decay stamps are not in
     /// the savestate, so a run-ahead or a rewind, which load a state every frame, never let OAM

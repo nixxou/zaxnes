@@ -1197,6 +1197,21 @@ fn emulation_cartridge(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("OAM decay"),
     );
+    // Plan step 2 of lot FIDELITY: the PPU powers on at the top of the picture (nesdev, "PPU power
+    // up state"), dot 11 as BeesNES. Off by default: it moves every game's timeline against the
+    // frames (golden-core, recordings, recipes); the owner decides.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuPowerOnTop,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Power on at the top of the picture"),
+    );
 }
 
 /// The emulation settings of the Rust port alone, in their place in the catalogue.

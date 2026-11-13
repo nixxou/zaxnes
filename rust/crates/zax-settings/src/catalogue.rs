@@ -148,6 +148,7 @@ setting_ids! {
     EmuOamCorruption => "emu.oam_corruption",
     EmuOamaddrBug => "emu.oamaddr_bug",
     EmuOamDecay => "emu.oam_decay",
+    EmuPowerOnTop => "emu.power_on_top",
     EmuPpuBusConflicts => "emu.ppu_bus_conflicts",
     EmuCatchUp => "emu.catch_up",
     // AMD-041 REQ-LOOP-064, exposed as `RunAheadFrames` (AMD-040 REQ-LUA-114).

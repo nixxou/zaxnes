@@ -521,6 +521,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.ppu_bus_conflicts", "Conflits de bus PPU"),
     ("setting.emu.oamaddr_bug", "Défaut OAMADDR (2C02G)"),
     ("setting.emu.oam_decay", "Effacement de l'OAM"),
+    ("setting.emu.power_on_top", "Allumage en haut de l'image"),
     ("setting.emu.power_on_ram", "RAM à l'allumage"),
     ("option.Zeros", "Zéros"),
     ("option.FCEUX pattern", "Motif FCEUX"),
@@ -1143,6 +1144,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (
         "detail.emu.oam_decay",
         "La console garde ses sprites dans une mémoire qui s'efface quand l'image n'est pas dessinée : si un jeu laisse l'écran éteint assez longtemps (environ 8 images ici, cela varie d'une console à l'autre) puis affiche des sprites sans les renvoyer, ils reviennent brouillés. Les jeux écrits pour la console renvoient leurs sprites à chaque image et ne le montrent jamais. Le run-ahead et le retour en arrière relancent ce délai à chaque image : avec eux, l'effacement n'arrive jamais. Prend effet au prochain chargement. Par défaut : désactivé.",
+    ),
+    (
+        "detail.emu.power_on_top",
+        "L'endroit où la puce vidéo se trouve dans son image quand on allume la console. La vraie console commence en haut de l'image ; Zaxnes a toujours commencé à la fin, ce qui raccourcit d'une fraction d'image l'attente d'un jeu avant sa première image. Activé, les jeux démarrent comme sur la console, une fraction d'image plus tard qu'avant : les enregistrements, les sauvegardes d'état faites juste après l'allumage et certains réglages d'écran large faits à l'ancienne peuvent se décaler. Prend effet au prochain chargement. Par défaut : désactivé.",
     ),
     (
         "detail.emu.power_on_ram",

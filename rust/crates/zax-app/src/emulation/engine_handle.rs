@@ -830,6 +830,13 @@ impl EngineHandle {
         }
     }
 
+    /// Whether a power-on puts the PPU at the top of the picture (lot FIDELITY); likewise.
+    pub fn set_power_on_top(&mut self, enabled: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_power_on_top(enabled);
+        }
+    }
+
     /// What the work RAM holds at the next power-on (lot CARTDB); likewise.
     pub fn set_power_on_ram(&mut self, pattern: zax_nes::PowerOnRam) {
         if let Some(core) = self.zaxnes_mut() {

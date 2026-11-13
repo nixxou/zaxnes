@@ -76,6 +76,16 @@ Each one is exact on every test we have, but is a modelling shortcut, not the me
 - Gain: follows the doc; would let `emu.oam_corruption` go on by default (see D1).
 - Cost: zero perf; changes golden-core of every game, TAS sync (bk2), widescreen recipes, savestate
   compatibility of power-on states. Needs a full campaign and the owner's eye.
+- **Done as an option on branch `feat/fidelity-poweron`** (`emu.power_on_top`, off; harness
+  `ZAXNES_POWER_ON_TOP=1`): `Ppu2C02::reset` puts the PPU at line 0 dot 11 before the CPU's 7 reset
+  cycles (so dot 32 at the first opcode). Measured: test ROMs unchanged (212/7); **with it,
+  `emu.oam_corruption` no longer breaks blargg `sprite_overflow_tests/5.Emulator`** (213/6 and
+  AccuracyCoin 147 with all options), so both could go on by default together. golden-core: all 98
+  games move (`cycles`, first frame 27 392 cycles instead of 29 782; audio of 64), 23 dumps of 7
+  families show a different picture at frame 1200 (Excitebike, Mega Man 4, Rockman 4/5, Metal
+  Force, SMB3 Japan, Zelda II Europe): a phase shift, to check by eye. Still open: reset length
+  7 vs 8 (B2) on top of it, and whether the hardware ignores `$2000`/`$2001`/`$2005`/`$2006` writes
+  for ~29 658 cycles after power-on (not modelled, Q-078).
 
 ### B2. Reset length 7 vs 8 cycles — open
 - Zaxnes 7 cycles (`cpu/cpu6502.rs:173-178`); Mesen 8. Sets the DMA get/put parity. nesdev gives no

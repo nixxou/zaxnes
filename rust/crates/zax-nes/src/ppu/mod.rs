@@ -166,6 +166,9 @@ pub struct Ppu2C02 {
     /// Whether OAM decays while the rendering is off ([`Self::refresh_oam_row`]). A core
     /// setting, off by default; not part of the state.
     oam_decay: bool,
+    /// Whether a power-on puts the PPU at the top of the picture (line 0, dot 11) rather than at
+    /// the start of vblank ([`Self::reset`]). A core setting, off by default; read at the reset.
+    power_on_top: bool,
     /// The clock of the last refresh of each 8-byte OAM row by an access: `$2004`, OAM DMA, or the
     /// rendering coming back. Transient, like `oam_render_off`: a state load stamps them all with
     /// the clock it restores, so a row never decays right after a load.
@@ -484,6 +487,7 @@ impl Ppu2C02 {
             oam_corrupt_rows: 0,
             oamaddr_bug: true,
             oam_decay: false,
+            power_on_top: false,
             oam_row_refresh: [0; 32],
             oam_render_off: 0,
             bus_conflicts: false,
@@ -1384,10 +1388,26 @@ impl Ppu2C02 {
         self.wide.reset();
         self.reset_tile_state();
 
+        if self.power_on_top {
+            // nesdev, "PPU power up state": the PPU starts at the top of the picture, not in
+            // vblank, so the first `$2002` poll waits most of a frame. Dot 11 is BeesNES's choice
+            // (`CPpu2C0X::ResetToKnown`, `LSNPpu2C0X.h:247-256`, MIT): the phase is arbitrary on
+            // the hardware, and that one puts blargg's `test_apu_2` polls on the phase its `$4017`
+            // writes expect and the OAM corruption of `sprite_overflow_tests/5.Emulator` on a
+            // harmless row.
+            self.scanline = 0;
+            self.dot = 11;
+            return;
+        }
         // Just after a load or a reset the first frame starts at the beginning of vblank,
         // so the reset lands there (REQ-CORE-020, notes).
         self.scanline = self.timing.vblank_scanline;
         self.dot = 1;
+    }
+
+    /// Chooses where a power-on puts the PPU (see [`Self::reset`]); takes effect at the next one.
+    pub const fn set_power_on_top(&mut self, enabled: bool) {
+        self.power_on_top = enabled;
     }
 
     /// The documented *after reset* state of the PPU (AMD-044 REQ-CORE-122): PPUCTRL and

@@ -846,3 +846,19 @@ fn fidelity_oam_decays_after_8_frames_with_the_rendering_off() {
     assert_eq!(row_0_decayed, touched[0..8], "row 0 untouched");
     assert_eq!(kept[8..16], touched[8..16], "row 1 read every 4 frames");
 }
+
+/// Plan step 2: with `set_power_on_top`, a power-on puts the PPU at the top of the picture (nesdev,
+/// "PPU power up state"; dot 11 as `BeesNES`), and without it at the start of vblank as before.
+#[test]
+fn fidelity_power_on_top_starts_the_ppu_at_line_0_dot_11() {
+    let mut fixture = TileFixture::new();
+    fixture.core.reset();
+    let ppu = fixture.core.bus().ppu();
+    assert_ne!(0, ppu.scanline(), "default: vblank");
+
+    fixture.core.set_power_on_top(true);
+    fixture.core.reset();
+    let ppu = fixture.core.bus().ppu();
+    // Dot 11 when the CPU's reset starts; its seven cycles (21 NTSC dots) have run since.
+    assert_eq!((0, 11 + 21), (ppu.scanline(), ppu.dot()));
+}

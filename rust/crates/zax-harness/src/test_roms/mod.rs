@@ -574,6 +574,8 @@ fn run_one_zaxnes(
     // And `ZAXNES_OAM_DECAY=1` for the off-by-default decay of OAM with the rendering off (step
     // 20): blargg's `oam_stress` and `sprdma_and_dmc_dma` must still pass with it.
     core.set_oam_decay(std::env::var("ZAXNES_OAM_DECAY").is_ok_and(|value| value != "0"));
+    // `ZAXNES_POWER_ON_TOP=1`: the PPU starts at the top of the picture (plan step 2).
+    core.set_power_on_top(std::env::var("ZAXNES_POWER_ON_TOP").is_ok_and(|value| value != "0"));
     // The built-in widescreen patches rewrite game code; a test ROM must run as it is.
     core.set_builtin_patches(false);
     core.set_advanced_patches(false);

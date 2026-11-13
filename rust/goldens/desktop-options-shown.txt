@@ -34,6 +34,7 @@ emu.oam_corruption
 emu.ppu_bus_conflicts
 emu.oamaddr_bug
 emu.oam_decay
+emu.power_on_top
 emu.pause_3d_in_2d
 emu.pipeline
 emu.power_on_ram

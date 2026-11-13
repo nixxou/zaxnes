@@ -14,6 +14,7 @@ use zax_settings::values::SettingValue;
 
 use super::games::{ConfirmationRequest, ConfirmedAction, NO_LABEL};
 use super::{EmulationHost, GameView};
+use crate::emulation::engine_handle::EngineHandle;
 use crate::emulation::commands::{Command, CommandArgs};
 use crate::emulation::emulation_state::EmulationState;
 use crate::emulation::fceux_validated;
@@ -103,6 +104,16 @@ enum Step {
     Finished,
     /// The job failed, with the notification to show.
     Failed(String),
+}
+
+/// Hands the switches of `EmulationHost::fidelity_switches` to the core, in their order.
+fn apply_fidelity_switches(core: &mut EngineHandle, switches: [bool; 5]) {
+    let [oam_corruption, bus_conflicts, oamaddr_bug, oam_decay, power_on_top] = switches;
+    core.set_oam_corruption(oam_corruption);
+    core.set_bus_conflicts(bus_conflicts);
+    core.set_oamaddr_bug(oamaddr_bug);
+    core.set_oam_decay(oam_decay);
+    core.set_power_on_top(power_on_top);
 }
 
 impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
@@ -479,6 +490,20 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.games.resolve(&game.id).unwrap_or_else(|| game.clone())
     }
 
+    /// The hardware-fidelity switches of the emulation tab (lot FIDELITY), in the order
+    /// `advance_launch` hands them to the core: OAM corruption, PPU bus conflicts, OAMADDR
+    /// defect, OAM decay, power-on at the top of the picture.
+    fn fidelity_switches(&self) -> [bool; 5] {
+        [
+            SettingId::EmuOamCorruption,
+            SettingId::EmuPpuBusConflicts,
+            SettingId::EmuOamaddrBug,
+            SettingId::EmuOamDecay,
+            SettingId::EmuPowerOnTop,
+        ]
+        .map(|id| self.settings.get(id).as_bool())
+    }
+
     fn advance_launch(&mut self, job: &mut LoadJob) -> Step {
         let Some(game) = job.game.clone() else {
             return Step::Failed(INVALID_ROM_MESSAGE.to_owned());
@@ -520,10 +545,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let advanced = self.advanced_patches_wanted();
                 let forced = self.forced_patch();
                 let cartridge_db = self.settings.get(SettingId::EmuCartridgeDb).as_bool();
-                let oam_corruption = self.settings.get(SettingId::EmuOamCorruption).as_bool();
-                let bus_conflicts = self.settings.get(SettingId::EmuPpuBusConflicts).as_bool();
-                let oamaddr_bug = self.settings.get(SettingId::EmuOamaddrBug).as_bool();
-                let oam_decay = self.settings.get(SettingId::EmuOamDecay).as_bool();
+                let fidelity = self.fidelity_switches();
                 let power_on_ram = match self.settings.get(SettingId::EmuPowerOnRam).as_int() {
                     1 => zax_nes::PowerOnRam::Pattern,
                     2 => zax_nes::PowerOnRam::Ff,
@@ -540,10 +562,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let result = match self.session.as_mut() {
                     Some(session) => {
                         session.core_mut().set_cartridge_db(cartridge_db);
-                        session.core_mut().set_oam_corruption(oam_corruption);
-                        session.core_mut().set_bus_conflicts(bus_conflicts);
-                        session.core_mut().set_oamaddr_bug(oamaddr_bug);
-                        session.core_mut().set_oam_decay(oam_decay);
+                        apply_fidelity_switches(session.core_mut(), fidelity);
                         session.core_mut().set_power_on_ram(power_on_ram);
                         session.core_mut().set_builtin_patches(builtin_patches);
                         session.core_mut().set_advanced_patches(advanced);

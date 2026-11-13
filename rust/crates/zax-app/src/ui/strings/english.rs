@@ -509,6 +509,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.ppu_bus_conflicts", "PPU bus conflicts"),
     ("setting.emu.oamaddr_bug", "OAMADDR defect (2C02G)"),
     ("setting.emu.oam_decay", "OAM decay"),
+    ("setting.emu.power_on_top", "Power on at the top of the picture"),
     ("setting.emu.power_on_ram", "Work RAM at power-on"),
     ("option.Zeros", "Zeros"),
     ("option.FCEUX pattern", "FCEUX pattern"),
@@ -1169,6 +1170,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         "detail.emu.oam_decay",
         "The console keeps its sprites in a memory that fades unless the picture is being drawn: if a game leaves the screen blank for long enough (about 8 frames here, it varies from one console to another) and then shows sprites without sending them again, they come back scrambled. Games written for the console send their sprites every frame and never show it. Run-ahead and rewind restart the delay at every frame, so with them on it never happens. Takes effect at the next load. Default: off.",
+    ),
+    (
+        "detail.emu.power_on_top",
+        "Where the video chip is in its picture when the console is switched on. The real console starts at the top of the picture; Zaxnes has always started at the end of it, which shortens the wait of a game for its first frame by a fraction of a frame. On, games start as on the console, a fraction of a frame later than before, so recordings, saved states made right after switching on and some widescreen adjustments made the old way can drift. Takes effect at the next load. Default: off.",
     ),
     (
         "detail.emu.power_on_ram",
