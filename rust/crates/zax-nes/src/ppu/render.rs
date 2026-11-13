@@ -399,8 +399,12 @@ impl Ppu2C02 {
     }
 
     fn shift_background(&mut self) {
+        // "The lowest bit (the new value shifted in on the right) is a 0 for the low bit plane,
+        // and a 1 for the high bit plane" (`AccuracyCoin`, `BG Serial In`). The reload every eight
+        // dots overwrites the low byte, so a line that renders normally never shows that 1; a
+        // line whose reloads were skipped does.
         self.pattern_shift_low <<= 1;
-        self.pattern_shift_high <<= 1;
+        self.pattern_shift_high = (self.pattern_shift_high << 1) | 1;
         self.attribute_shift_low <<= 1;
         self.attribute_shift_high <<= 1;
     }

@@ -596,7 +596,46 @@ impl Ppu2C02 {
             self.prepaid_dots = 2;
         }
         self.mask = value;
-        self.rendering_switched((value & 0x18) != 0);
+        let on = (value & 0x18) != 0;
+        self.rendering_switched(on);
+        if on && renders && self.prepaid_dots == 2 {
+            self.skip_background_reload(cart);
+        }
+    }
+
+    /// The reload of the background shift registers that a rendering just switched back on comes
+    /// too late for.
+    ///
+    /// The registers are reloaded every eight dots, and that reload reads the rendering one dot
+    /// later than the rest: switched on for the very dot of a reload, the PPU fetches again but
+    /// the registers only shift. `AccuracyCoin`'s `BG Serial In` rests on it — rendering off "just
+    /// before the data would be loaded" and on "just after", on an empty nametable, and the 1s the
+    /// high plane shifts in must still be there under a sprite zero at X = $92, which they are
+    /// only if the reload of dot 137 is lost with those of dots 121 and 129.
+    ///
+    /// That dot is run here with the two of [`Self::switch_rendering`] and the registers put back
+    /// to what the shift alone leaves: nothing is tested per dot.
+    #[cold]
+    #[inline(never)]
+    fn skip_background_reload(&mut self, cart: Cart<'_, '_>) {
+        let next = self.dot + 1;
+        if (next & 0x07) != 1 || !matches!(next, 9..=257 | 329 | 337) {
+            return;
+        }
+        let shifted = [
+            self.pattern_shift_low << 1,
+            (self.pattern_shift_high << 1) | 1,
+            self.attribute_shift_low << 1,
+            self.attribute_shift_high << 1,
+        ];
+        self.run_dots(1, cart);
+        self.prepaid_dots += 1;
+        [
+            self.pattern_shift_low,
+            self.pattern_shift_high,
+            self.attribute_shift_low,
+            self.attribute_shift_high,
+        ] = shifted;
     }
 
     /// What switching the rendering off or on inside a frame does to OAM, `on` being the new
