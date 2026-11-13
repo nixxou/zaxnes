@@ -57,6 +57,37 @@ Each one is exact on every test we have, but is a modelling shortcut, not the me
   AccuracyCoin; a real counter/shifter per sprite on every line is the hardware.
 - **Batched PPU spans** (`run_visible_span`, `ppu/render.rs`), idle-dot skipping.
 
+### A3b. Where a CPU access lands inside the CPU cycle — study `study/access-phase` (2026-11-13)
+- **Zaxnes**: every CPU cycle runs its 3 PPU dots first, then the access (`NesBus::read`/`write`:
+  `tick()` then the access); reads and writes land at the same instant; the "+1 dot" of A3 is
+  added by hand where tests demanded it.
+- **Mesen 2** (`Core/NES/NesCpu.cpp:294-321`): the PPU is run to +5 master clocks before a read
+  and +7 before a write (`_startClockCount` 6 -/+ 1), minus `_ppuOffset` (1 by default, 0-3 when
+  `RandomizeCpuPpuAlignment`). Worked out by hand: with offsets 0 and 1 a write sees the same dot
+  as a read; with 2 and 3 it sees one more.
+- **BeesNES**: the bus access is on the CPU's PHI2 slot, +6 master clocks (`LSNSystem.h:1002-1018`),
+  reads and writes alike, one alignment.
+- **Hardware**: undocumented. Forum (nesdev t=8216, ReaperSMS): the PPU likely latches read data
+  at M2's rising edge and write data at M2's falling edge; M2 is high 15/24 of the cycle on the
+  2A03E/G/H. Nobody has measured it; Visual2C02's `/WR` phase lasts ~7.5 master clocks.
+- **Measured in Zaxnes** (harness knobs on the study branch, `ZAXNES_PHASE`, `ZAXNES_WRITE_LEAD`):
+  (1) moving the CPU/PPU alignment by 1 or 2 dots at power-on changes **no** test ROM result in
+  the default build (the ROMs sync themselves to the dot); with all options on, blargg
+  `5.Emulator` then passes (it fails only on alignment 0). (2) Making every `$2000`/`$2001`/
+  `$2005`/`$2006`/`$2007` write one dot later changes **no** result either, AccuracyCoin included
+  (147 kept). **Conclusion: our test ROMs cannot tell where a write lands within one dot; the
+  "+1" constants are not proved by them beyond the three cases that needed it.**
+- **Ground truth available**: VisualNes (Sour, `github.com/SourMesen/VisualNes`, archived; cloned
+  in `ext-tools/visualnes-src`) runs the transistor netlists of the 2A03 and the 2C02 together on
+  one master clock. Its PPU chip select is approximated (`/CS` low 11 half-steps from phi0,
+  `Core/macros.cpp` `halfStep`); the 2A03 netlist has the real M2 pin (`phi2`, node 10743), so the
+  74LS139 decode `/CS = !(A13 & !A14 & !A15 & M2)` can be wired exactly. A headless bench
+  (`scratchpad/vn/bench.cpp`, logging `/w200x`, `/r2002`, `bkg_enable`, `vbl_flag`, `v`, `t`,
+  `hpos`, `pclk0/1`, M2 and `/CS` per half master clock) is written but **not run: building and
+  running downloaded code needs the owner's permission**. Measuring it per alignment (reset held
+  0-3 extra master clocks) would give, for the first time, the exact dot each register write and
+  read takes effect on — the basis for removing every calibrated constant of A3 and for A4.
+
 ### A4. CPU/PPU alignment variants — open, Fidélité+
 - Hardware: four CPU/PPU clock alignments chosen at power-on; several tests (AccuracyCoin
   `BG Serial In`, `ALE + Read`, `Hybrid Addresses`, `OAM Corruption`) say results depend on it.

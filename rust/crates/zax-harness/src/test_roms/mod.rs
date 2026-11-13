@@ -576,6 +576,11 @@ fn run_one_zaxnes(
     core.set_oam_decay(std::env::var("ZAXNES_OAM_DECAY").is_ok_and(|value| value != "0"));
     // `ZAXNES_POWER_ON_TOP=1`: the PPU starts at the top of the picture (plan step 2).
     core.set_power_on_top(std::env::var("ZAXNES_POWER_ON_TOP").is_ok_and(|value| value != "0"));
+    // Study `study/access-phase`: `ZAXNES_PHASE=0..2` moves the CPU/PPU alignment.
+    core.set_phase_offset(
+        std::env::var("ZAXNES_PHASE").ok().and_then(|value| value.parse().ok()).unwrap_or(0),
+    );
+    core.set_write_lead(std::env::var("ZAXNES_WRITE_LEAD").is_ok_and(|value| value != "0"));
     // The built-in widescreen patches rewrite game code; a test ROM must run as it is.
     core.set_builtin_patches(false);
     core.set_advanced_patches(false);
