@@ -518,6 +518,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.engine", "Moteur d'émulation (ce jeu)"),
     ("setting.emu.cartridge_db", "Base de cartouches"),
     ("setting.emu.oam_corruption", "Corruption OAM"),
+    ("setting.emu.ppu_bus_conflicts", "Conflits de bus PPU"),
     ("setting.emu.power_on_ram", "RAM à l'allumage"),
     ("option.Zeros", "Zéros"),
     ("option.FCEUX pattern", "Motif FCEUX"),
@@ -1128,6 +1129,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (
         "detail.emu.oam_corruption",
         "Un défaut de la vraie console : couper l'image au milieu d'une ligne abîme une rangée de la mémoire des sprites quand l'image revient, et quelques sprites peuvent manquer pendant une image. Les jeux écrits pour la console l'évitent ou s'en accommodent. Le modèle connu est incomplet : avec ce réglage activé, un jeu peut montrer des sprites qui clignotent à tort. Prend effet au prochain chargement. Par défaut : désactivé.",
+    ),
+    (
+        "detail.emu.ppu_bus_conflicts",
+        "Un défaut de la vraie console : un jeu qui lit ou déplace l'adresse vidéo pendant que l'image est dessinée entre en collision avec ce que la puce vidéo lit à cet instant, et une tuile du décor est lue au mauvais endroit, ce qui donne huit pixels faux sur une ligne. Les jeux écrits pour la console l'évitent. Désactivez ce réglage si un jeu montre ce défaut et que vous préférez ne pas le voir. Prend effet au prochain chargement. Par défaut : activé.",
     ),
     (
         "detail.emu.power_on_ram",

@@ -31,6 +31,7 @@ emu.lua_experimental
 emu.lua_optimized
 emu.lua_smooth_gc
 emu.oam_corruption
+emu.ppu_bus_conflicts
 emu.pause_3d_in_2d
 emu.pipeline
 emu.power_on_ram

@@ -22,12 +22,15 @@ Reference before the lot: test ROMs 212 pass / 7 fail / 1 unsupported / 111 manu
 | 11 | The secondary OAM address loses the steps of the fetch dots the rendering was off for, and `$2004` at dots 321-340 reads there (`Misaligned OAM2 Address`) | **139** (140 with the setting) | same | same |
 | 12 | **A `$2001` write that switches the rendering takes effect two dots later** (`Ppu2C02::switch_rendering`: the two dots run at once under the old mask and are owed back to the next catch-up, nothing per dot); the odd-frame skip is decided on dot 340 instead of 338 to match; the secondary OAM's overflowed flag across a switch (`Frozen OAM2 Increment`) | **140** (141 with the setting) | same (`ppu_vbl_nmi` 10 needed the 340) | same |
 | 13 | The high plane of the background shifters shifts in a 1; a rendering switched back on for the very dot of a shifter reload comes one dot too late for it (`Ppu2C02::skip_background_reload`, cold path) (`BG Serial In`) | **141** (142 with the setting) | same | same |
+| 14 | **The sprite output units as the hardware has them, for the lines a switched rendering disturbs** (`ppu/sprite_hw.rs`: a counter and a shifter per sprite; the counter runs rendering or not, the shifter only while the PPU renders, dot 339 sets them counting). Followed from a switch-off on a line that renders until a clean fetch window, brought up to date only at a `$2001` switch and at a sprite-line rebuild (`Stale Sprite Shift Regs`, `Stale BG Shift Registers`) | **143** (144 with the OAM setting) | same | same |
+| 15 | A `$2007` read made while the PPU fetches fills the read buffer with **the byte the fetch of five dots later reads** (four of the state machine, one of this core's lead), and its increment of `v` comes after (`Ppu2C02::read_buffer_from_fetch`, prepaid dots) (`$2007 Stress Test`) | **144** (145) | same | **3 dumps move, picture only**: *Super Mario Bros. 3* (Japan, three dumps) reads `$2007` at dots 223-233 of line 193, its split line |
+| 16 | The fetch a `$2007` read collides with is made at the address latch's stale low byte (`ALE + Read`); the second `$2006` write loads `v` four dots later, and at a hybrid address when it lands inside a nametable or attribute fetch (`Hybrid Addresses`). Steps 15 and 16 are behind **one core setting, `emu.ppu_bus_conflicts`, on by default**; off, both accesses act at once as before the lot | **146** (**147 / 147** with the OAM setting) | same | the same 3 *Super Mario Bros. 3* (Japan) dumps, picture only; nothing else moves |
 
-## Rows still failing (5, with the OAM corruption setting on)
+## Rows still failing
 
-`$2007 Stress Test` 2, `ALE + Read` 2,
-`Hybrid Addresses` 2, `Stale BG Shift Registers` 3, `Stale Sprite Shift Regs` 3. All five are PPU rows about what the pipeline does when
-rendering is switched on and off inside a line, or about the exact dot of a `$2004`/`$2007` access.
+None with `emu.oam_corruption` on (`ZAXNES_OAM_CORRUPTION=1` for the harness): **147 / 147**. In the
+default build `OAM Corruption` 2 is the one row left, because that setting is off by default
+(owner, 2026-11-13) until its model stops failing blargg's `sprite_overflow_tests/5.Emulator`.
 
 ## Still to do outside AccuracyCoin
 

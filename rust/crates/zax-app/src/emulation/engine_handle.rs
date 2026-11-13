@@ -807,6 +807,14 @@ impl EngineHandle {
         }
     }
 
+    /// Whether a `$2007` read or a `$2006` write that collides with a fetch of the PPU disturbs
+    /// it (lot FIDELITY); likewise.
+    pub fn set_bus_conflicts(&mut self, enabled: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_bus_conflicts(enabled);
+        }
+    }
+
     /// What the work RAM holds at the next power-on (lot CARTDB); likewise.
     pub fn set_power_on_ram(&mut self, pattern: zax_nes::PowerOnRam) {
         if let Some(core) = self.zaxnes_mut() {

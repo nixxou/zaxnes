@@ -505,7 +505,7 @@ fn ro_3_every_console_setting_is_a_row_the_console_can_step() {
     // shaders' share of the window), and `emu.engine` (owner request, 2026-11-12): a setting may
     // move in the tree, never leave the console. Lot CARTDB adds `emu.cartridge_db` and
     // `emu.power_on_ram`.
-    assert_eq!(63, advanced::ROW_SETTINGS.len());
+    assert_eq!(64, advanced::ROW_SETTINGS.len());
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::EmuEngine));
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::AudioClassicOutput));
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::EmuSmoothScrollAhead));

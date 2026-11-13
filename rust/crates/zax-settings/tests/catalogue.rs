@@ -108,6 +108,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "emu.pause_3d_in_2d",
             "emu.pipeline",
             "emu.power_on_ram",
+            "emu.ppu_bus_conflicts",
             "emu.smooth_scroll_ahead",
             "emu.smooth_scroll_view",
             "input.touch_extra",

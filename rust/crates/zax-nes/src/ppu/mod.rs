@@ -20,6 +20,7 @@
 
 mod ppu_bus_access;
 mod render;
+mod sprite_hw;
 mod state;
 mod tile_buffer;
 mod tiles;
@@ -159,10 +160,18 @@ pub struct Ppu2C02 {
     /// The OAM rows a switch-off of the rendering marked, one bit a row, waiting for the rendering
     /// to come back on a line that renders. Transient: a state load drops it.
     oam_corrupt_rows: u32,
+    /// Whether a `$2007` read and a `$2006` write made while the PPU is fetching meet the fetches
+    /// as on the hardware: their effect a few dots later, and the fetch they collide with
+    /// disturbed ([`Self::read_buffer_from_fetch`], [`Self::delay_address_load`]). A core setting,
+    /// on by default, and not part of the state; off, both act at once as before lot FIDELITY.
+    bus_conflicts: bool,
     /// Dots [`Self::switch_rendering`] ran ahead of the CPU, taken off the next catch-up. Never
     /// outstanding at a frame boundary (the switch only runs ahead on a line that renders), so
     /// not in the state.
     prepaid_dots: i32,
+    /// The sprite output units while a switched rendering has them off their usual course (see
+    /// [`sprite_hw`]). Transient, like the rest of what a switch leaves.
+    sprite_units: sprite_hw::SpriteUnits,
     /// The line [`Self::note_fetch_pause`] is counting for (the clock of its dot 0), the steps of
     /// the secondary OAM address it lost so far, and the dot the rendering went off on, −1 while
     /// it is on. Transient, like the row corruption.
@@ -451,7 +460,9 @@ impl Ppu2C02 {
             oam: [0; OAM_SIZE],
             oam_corruption: false,
             oam_corrupt_rows: 0,
+            bus_conflicts: true,
             prepaid_dots: 0,
+            sprite_units: sprite_hw::SpriteUnits::default(),
             fetch_line: -1,
             fetch_missed: 0,
             fetch_off_dot: -1,
@@ -590,7 +601,8 @@ impl Ppu2C02 {
     #[cold]
     #[inline(never)]
     fn switch_rendering(&mut self, value: u8, cart: Cart<'_, '_>) {
-        let renders = self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline();
+        let renders =
+            self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline();
         if renders && self.prepaid_dots == 0 {
             self.run_dots(2, cart);
             self.prepaid_dots = 2;
@@ -638,6 +650,12 @@ impl Ppu2C02 {
         ] = shifted;
     }
 
+    /// Turns the fetches disturbed by a colliding `$2007` read or `$2006` write on or off (see
+    /// [`Self::read_buffer_from_fetch`] and [`Self::delay_address_load`]).
+    pub const fn set_bus_conflicts(&mut self, enabled: bool) {
+        self.bus_conflicts = enabled;
+    }
+
     /// What switching the rendering off or on inside a frame does to OAM, `on` being the new
     /// state.
     ///
@@ -656,11 +674,13 @@ impl Ppu2C02 {
     #[cold]
     #[inline(never)]
     fn rendering_switched(&mut self, on: bool) {
-        let renders = self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline();
+        let renders =
+            self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline();
         if renders {
             self.note_fetch_pause(on);
             self.note_oam2_overflow(on);
         }
+        self.note_sprite_switch(on, renders);
         if !self.oam_corruption {
             return;
         }
@@ -1609,8 +1629,168 @@ impl Ppu2C02 {
                 self.read_vram_inner(address, PpuBusAccess::Cpu, ChrFetch::Background, cart);
         }
 
+        if self.bus_conflicts && self.fetching() {
+            self.read_buffer_from_fetch(cart);
+        }
         self.increment_vram_address(cart);
         value
+    }
+
+    /// The read buffer of a `$2007` read made while the PPU is fetching: **what the PPU was
+    /// reading anyway**.
+    ///
+    /// The read of `$2007` does not fill the buffer itself; it starts a small state machine that
+    /// raises the PPU's read line four dots after the CPU's read ends, and the buffer
+    /// takes whatever is on the bus then. In a blanking that is the byte at `v`. With the PPU
+    /// fetching, the bus is busy with the fetch of that dot — every dot of a line that renders is
+    /// either setting an address up (odd dots) or reading (even dots) — so "if the background
+    /// nametable fetch reads $02 on the same cycle the PPU read buffer is supposed to be updated,
+    /// then $02 goes into the buffer" (`AccuracyCoin`, `$2007 Stress Test`, which reads on every
+    /// dot of a line and checks the half the analogue behaviour leaves stable).
+    ///
+    /// The dots up to that read are run here and owed back ([`Self::prepaid_dots`]), so nothing is
+    /// tested per dot; the increment of `v` the access owes comes after them, as on the hardware.
+    #[cold]
+    #[inline(never)]
+    fn read_buffer_from_fetch(&mut self, cart: Cart<'_, '_>) {
+        if self.prepaid_dots != 0 {
+            return;
+        }
+        // Five dots on: the state machine's four, and the one by which a register access of this
+        // core leads the hardware's (the same dot `skip_background_reload` accounts for).
+        self.run_dots(4, cart);
+        self.prepaid_dots = 4;
+        if (self.dot & 1) != 0 || !self.fetching() {
+            // The read lands on a dot the fetches read on as well: theirs is the byte.
+            self.run_dots(1, cart);
+            self.prepaid_dots = 5;
+            if self.fetching() {
+                self.read_buffer = self.fetch_bus_value(cart.as_deref());
+            }
+            return;
+        }
+
+        // It lands on a dot that sets an address up, and that one is not harmless: with the
+        // address latch open while the bus is being read, the latch keeps what the bus held,
+        // the byte of the fetch before, and **the next fetch reads there**. `ALE + Read` sets it
+        // up so that the low plane of a tile of an empty nametable is read from `$0FFF` instead
+        // of `$0F03`, and looks for the eight pixels with a sprite zero. What the buffer takes
+        // then is analogue; the fetch it disturbed is as good an answer as any.
+        let residue = self.fetch_bus_value(cart.as_deref());
+        self.run_dots(2, cart);
+        self.prepaid_dots = 6;
+        if !self.fetching() {
+            return;
+        }
+        self.refetch_with_low_byte(residue, cart.as_deref());
+        self.read_buffer = self.fetch_bus_value(cart.as_deref());
+    }
+
+    /// The byte the fetch of the dot just run (an even one, where the fetches read) put on the
+    /// PPU bus.
+    fn fetch_bus_value(&self, cartridge: Option<&Cartridge>) -> u8 {
+        let dot = self.dot;
+        match dot {
+            1..=256 | 321..=336 => match (dot - 1) & 0x07 {
+                1 => self.nametable_latch,
+                3 => self.peek_vram(self.attribute_address(), ChrFetch::Background, cartridge),
+                5 => self.pattern_low_latch,
+                _ => self.pattern_high_latch,
+            },
+            // The sprite fetches read the nametable twice where the background reads it and the
+            // attributes; the first of them, at dot 258, is the read dot 257 set up, before the
+            // horizontal bits of `v` were reloaded.
+            258 => self.nametable_latch,
+            257..=320 => {
+                #[allow(clippy::cast_sign_loss)] // 0..8 by the range.
+                let slot = ((dot - 257) >> 3) as usize;
+                match (dot - 257) & 0x07 {
+                    5 => self.sprite_pattern_low[slot],
+                    7 => self.sprite_pattern_high[slot],
+                    _ => {
+                        self.peek_vram(0x2000 | (self.v & 0x0FFF), ChrFetch::Background, cartridge)
+                    }
+                }
+            }
+            _ => self.nametable_latch,
+        }
+    }
+
+    const fn attribute_address(&self) -> u16 {
+        0x23C0 | (self.v & 0x0C00) | ((self.v >> 4) & 0x38) | ((self.v >> 2) & 0x07)
+    }
+
+    /// Redoes the background fetch of the dot just run with `low` as the low byte of its address
+    /// (see [`Self::read_buffer_from_fetch`]). The sprite fetches are left alone.
+    fn refetch_with_low_byte(&mut self, low: u8, cartridge: Option<&Cartridge>) {
+        let dot = self.dot;
+        if !matches!(dot, 1..=256 | 321..=336) {
+            return;
+        }
+        let with_low = |address: u16| (address & 0xFF00) | u16::from(low);
+        match (dot - 1) & 0x07 {
+            1 => {
+                let address = with_low(0x2000 | (self.v & 0x0FFF));
+                self.nametable_latch = self.peek_vram(address, ChrFetch::Background, cartridge);
+            }
+            3 => {
+                let address = with_low(self.attribute_address());
+                let shift = ((self.v >> 4) & 0x04) | (self.v & 0x02);
+                self.attribute_latch =
+                    (self.peek_vram(address, ChrFetch::Background, cartridge) >> shift) & 0x03;
+            }
+            5 => {
+                let address = with_low(self.pattern_address(0));
+                self.pattern_low_latch = self.peek_vram(address, ChrFetch::Background, cartridge);
+            }
+            _ => {
+                let address = with_low(self.pattern_address(8));
+                self.pattern_high_latch = self.peek_vram(address, ChrFetch::Background, cartridge);
+            }
+        }
+    }
+
+    /// The second `$2006` write while the PPU is fetching: `v` takes the new address **four dots
+    /// later**, three on the hardware (Mesen 2 has the same delay) and the one by which a
+    /// register access of this core leads it.
+    ///
+    /// And when those four dots end between the two dots of a nametable or attribute fetch (the
+    /// address set up with the old `v`, the read still to come) that read is made at a **hybrid
+    /// address**: "the high byte will be determined by new value of the v register, and the low
+    /// byte will be determined by the octal latch set on the previous cycle" (`AccuracyCoin`,
+    /// `Hybrid Addresses`: `$2F00` written while the bus holds `$2C19` reads the tile of
+    /// `$2F19`).
+    ///
+    /// The dots are run here and owed back ([`Self::prepaid_dots`]); `write` sets `v` on return.
+    #[cold]
+    #[inline(never)]
+    fn delay_address_load(&mut self, cart: Cart<'_, '_>) {
+        if self.prepaid_dots != 0 {
+            return;
+        }
+        self.run_dots(3, cart);
+        self.prepaid_dots = 3;
+        let next = self.dot + 1;
+        if self.fetching() && matches!(next, 2..=256 | 322..=336) {
+            let hybrid = |address: u16, old: u16| (address & 0xFF00) | (old & 0x00FF);
+            match (next - 1) & 0x07 {
+                1 => {
+                    let address = hybrid(0x2000 | (self.t & 0x0FFF), self.v);
+                    self.nametable_latch =
+                        self.peek_vram(address, ChrFetch::Background, cart.as_deref());
+                }
+                3 => {
+                    let address = hybrid(0x23C0 | (self.t & 0x0C00), self.attribute_address());
+                    let shift = ((self.v >> 4) & 0x04) | (self.v & 0x02);
+                    self.attribute_latch =
+                        (self.peek_vram(address, ChrFetch::Background, cart.as_deref()) >> shift)
+                            & 0x03;
+                }
+                _ => {}
+            }
+        }
+        self.run_dots(1, cart);
+        self.prepaid_dots = 4;
     }
 
     /// What the palette RAM drives onto the PPU's data bus: six bits, and only the two colour
@@ -1727,6 +1907,9 @@ impl Ppu2C02 {
             6 => {
                 if self.write_toggle {
                     self.t = (self.t & 0xFF00) | u16::from(value);
+                    if self.bus_conflicts && self.fetching() {
+                        self.delay_address_load(&mut cartridge);
+                    }
                     self.v = self.t;
 
                     // A CPU write reaches the row of the line it is made in (R2-005).
@@ -1815,7 +1998,11 @@ impl Ppu2C02 {
             if self.dot > 320 {
                 // Index 0, unless part of this line's fetches did not run (`note_fetch_pause`).
                 let line = self.ppu_clock - i64::from(self.dot);
-                let missed = if self.fetch_line == line { self.fetch_missed } else { 0 };
+                let missed = if self.fetch_line == line {
+                    self.fetch_missed
+                } else {
+                    0
+                };
                 #[allow(clippy::cast_sign_loss)] // Masked to 0..32.
                 return self.secondary_oam[((32 - missed) & 0x1F) as usize];
             }

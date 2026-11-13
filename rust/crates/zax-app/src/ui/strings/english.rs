@@ -506,6 +506,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.engine", "Emulation engine (this game)"),
     ("setting.emu.cartridge_db", "Cartridge database"),
     ("setting.emu.oam_corruption", "OAM corruption"),
+    ("setting.emu.ppu_bus_conflicts", "PPU bus conflicts"),
     ("setting.emu.power_on_ram", "Work RAM at power-on"),
     ("option.Zeros", "Zeros"),
     ("option.FCEUX pattern", "FCEUX pattern"),
@@ -1154,6 +1155,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         "detail.emu.oam_corruption",
         "A defect of the real console: switching the picture off in the middle of a line damages one row of the sprite memory when the picture comes back, so a few sprites can go missing for a frame. Games written for the console avoid it or live with it. The known model is incomplete, so a game may show sprites flickering that it should not with this on. Takes effect at the next load. Default: off.",
+    ),
+    (
+        "detail.emu.ppu_bus_conflicts",
+        "A defect of the real console: a game that reads or moves the video address while the picture is being drawn collides with what the video chip is reading at that instant, and one background tile is read from the wrong place, which shows as eight wrong pixels on one line. Games written for the console avoid it. Turn this off if a game shows such a glitch and you would rather not see it. Takes effect at the next load. Default: on.",
     ),
     (
         "detail.emu.power_on_ram",

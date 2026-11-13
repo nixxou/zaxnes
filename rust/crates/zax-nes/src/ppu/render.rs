@@ -372,7 +372,7 @@ impl Ppu2C02 {
         )
     }
 
-    fn pattern_address(&self, plane: u16) -> u16 {
+    pub(super) fn pattern_address(&self, plane: u16) -> u16 {
         let table: u16 = if (self.control & 0x10) != 0 {
             0x1000
         } else {
@@ -974,6 +974,9 @@ impl Ppu2C02 {
     /// the same whichever pixel of 1 to 256 asks for it. The sprites past the eighth, when the
     /// limit is removed, come after them.
     fn rebuild_sprite_line(&mut self) {
+        if self.rebuild_disturbed_sprite_line() {
+            return;
+        }
         self.sprite_line_stale = false;
         self.sprite_line.fill(0);
 
@@ -1120,6 +1123,18 @@ const SPRITE_OPAQUE: u8 = 0x40;
 const SPRITE_BEHIND: u8 = 0x20;
 const SPRITE_ZERO: u8 = 0x10;
 
+/// The bits of a [`Ppu2C02::sprite_line`] cell that do not depend on the pixel.
+pub(super) const fn sprite_flags(attribute: u8, zero: bool) -> u8 {
+    SPRITE_OPAQUE
+        | ((attribute & 0x03) << 2)
+        | if (attribute & 0x20) != 0 {
+            SPRITE_BEHIND
+        } else {
+            0
+        }
+        | if zero { SPRITE_ZERO } else { 0 }
+}
+
 /// Paints a sprite's row into `line`, at `x`, under the sprites painted before it (the first
 /// opaque pixel of a column wins, as the hardware's priority multiplexer picks it).
 fn paint_sprite(
@@ -1129,14 +1144,7 @@ fn paint_sprite(
     (low, high): (u8, u8),
     zero: bool,
 ) {
-    let flags = SPRITE_OPAQUE
-        | ((attribute & 0x03) << 2)
-        | if (attribute & 0x20) != 0 {
-            SPRITE_BEHIND
-        } else {
-            0
-        }
-        | if zero { SPRITE_ZERO } else { 0 };
+    let flags = sprite_flags(attribute, zero);
     for (column, cell) in line.iter_mut().skip(usize::from(x)).take(8).enumerate() {
         if *cell != 0 {
             continue;

@@ -199,6 +199,14 @@ impl NesCore {
         self.bus.ppu_mut().set_oam_corruption(enabled);
     }
 
+    /// Whether a `$2007` read or a `$2006` write that collides with a fetch of the PPU disturbs
+    /// that fetch, as on the console (lot FIDELITY step 16; `Ppu2C02::read_buffer_from_fetch`,
+    /// `Ppu2C02::delay_address_load`). On by default; a setting because it is a defect of the
+    /// hardware, and a game that trips on it shows eight wrong pixels.
+    pub fn set_bus_conflicts(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_bus_conflicts(enabled);
+    }
+
     /// Whether the built-in patches and the advanced ones are on for the next load, as
     /// [`NesCore::set_builtin_patches`] and [`NesCore::set_advanced_patches`] left them.
     #[must_use]

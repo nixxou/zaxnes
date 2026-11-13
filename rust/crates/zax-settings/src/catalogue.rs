@@ -146,6 +146,7 @@ setting_ids! {
     EmuCartridgeDb => "emu.cartridge_db",
     EmuPowerOnRam => "emu.power_on_ram",
     EmuOamCorruption => "emu.oam_corruption",
+    EmuPpuBusConflicts => "emu.ppu_bus_conflicts",
     EmuCatchUp => "emu.catch_up",
     // AMD-041 REQ-LOOP-064, exposed as `RunAheadFrames` (AMD-040 REQ-LUA-114).
     EmuRunAhead => "emu.run_ahead",

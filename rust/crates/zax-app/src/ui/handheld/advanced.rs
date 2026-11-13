@@ -32,7 +32,7 @@ use crate::ui::text;
 ///
 /// Adding a setting to the desktop window therefore does not add a console row: a console row is
 /// an owner decision, written down here and placed by a page table.
-pub const ROW_SETTINGS: [SettingId; 63] = [
+pub const ROW_SETTINGS: [SettingId; 64] = [
     SettingId::VideoVSync,
     SettingId::VideoFrameRate,
     SettingId::VideoSkipFrame,
@@ -88,6 +88,7 @@ pub const ROW_SETTINGS: [SettingId; 63] = [
     SettingId::EmuCartridgeDb,
     SettingId::EmuPowerOnRam,
     SettingId::EmuOamCorruption,
+    SettingId::EmuPpuBusConflicts,
     SettingId::EmuRunAhead,
     // KIRBY-MERGE: the experimental smooth scrolling from the run-ahead. A console row because
     // RO-3's trees are one tree — `ro_3_every_setting_a_game_can_set_has_a_global_value_to_point_at`

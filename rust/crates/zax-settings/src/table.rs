@@ -1153,6 +1153,21 @@ fn emulation_cartridge(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("OAM corruption"),
     );
+    // Lot FIDELITY step 16: the fetch a `$2007` read or a `$2006` write collides with. On by
+    // default (faithful to the console first), and a switch to turn it off, like every defect of
+    // the hardware the core reproduces.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuPpuBusConflicts,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("PPU bus conflicts"),
+    );
 }
 
 /// The emulation settings of the Rust port alone, in their place in the catalogue.
