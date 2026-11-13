@@ -105,6 +105,9 @@ pub struct NesBus {
     /// The cycle a `$4015` switch-off reaches the DMA unit, while [`DMA_DMC_GHOST`] is set.
     /// Transient like `dma`, and not in the savestate for the same reason.
     dmc_abort_cycle: i64,
+    /// The byte a DMA read left on the pins when its value came from `$4015` instead (see
+    /// `dmc_fetch_read`). Read back on the same call only.
+    dma_pins: u8,
     oam_dma_count: i64,
     dmc_dma_count: i64,
     /// CPU cycles the PPU still owes: while `deferred_ppu` is on, the PPU runs in batches,
@@ -194,6 +197,7 @@ impl NesBus {
             dma_oam_page: 0,
             dmc_ready_cycle: 0,
             dmc_abort_cycle: 0,
+            dma_pins: 0,
             oam_dma_count: 0,
             dmc_dma_count: 0,
             ppu_lag: 0,
@@ -1032,7 +1036,9 @@ impl NesBus {
             0x4015 => {
                 let value = self.read_internal(decoded);
                 if !same {
-                    self.read_internal(address);
+                    // `$4015` answers on the internal bus only, so the pins carry what the
+                    // address itself holds (see `dmc_fetch_read`).
+                    self.dma_pins = self.read_internal(address);
                 }
                 value
             }
@@ -1045,17 +1051,16 @@ impl NesBus {
                 if same {
                     value
                 } else {
-                    // Two drivers on the data bus at once: the byte is the AND of both. The
-                    // register's answer is on the bus when the other address is read, so an
-                    // address nothing drives gives it back unchanged (`AccuracyCoin`, `APU
-                    // Register Activation` 6: `$41` from `$5016`, not `$40`).
-                    //
-                    // Only the pins the port drives conflict: bits 5 to 7 of a controller port
-                    // are open bus, so there the other driver is alone (test 7 of the same
-                    // row: `$E1` and `$E0` from a page of `$FF`).
+                    // Two drivers on the data bus at once, and each wins its own pins: bits 5
+                    // to 7 of a controller port are open bus, so they are the other address's,
+                    // "while the rest of the bits are a standard controller read"
+                    // (`AccuracyCoin`, `DMC DMA Bus Conflicts` 2: `$01` under a sample byte of
+                    // `$00`, `$E1` under `$FF`). The register's answer is on the bus when the
+                    // other address is read, so an address nothing drives gives it back
+                    // unchanged (`APU Register Activation` 6: `$41` from `$5016`).
                     self.data_bus = value;
                     let external = self.read_internal(address);
-                    (external & 0xE0) | (external & value & 0x1F)
+                    (external & 0xE0) | (value & 0x1F)
                 }
             }
             _ => self.read_internal(address),
@@ -1074,7 +1079,15 @@ impl NesBus {
     fn dmc_fetch_read(&mut self, address: u16, internal: bool, decoded_before: &mut u16) -> u8 {
         let internal_bus = self.data_bus;
         let value = self.dma_read(address, internal, decoded_before);
-        self.drive_external_bus(value);
+        // A fetch that also reached `$4015` leaves the address's own byte on the pins, not the
+        // status: "reading from $4015 does not update the data bus" (`AccuracyCoin`, `DMC DMA Bus
+        // Conflicts` 2, the `$00` and `$FF` of offset `$15`).
+        let pins = if internal && (address & 0x1F) == 0x15 && address != 0x4015 {
+            self.dma_pins
+        } else {
+            value
+        };
+        self.drive_external_bus(pins);
         self.data_bus = internal_bus;
         value
     }
