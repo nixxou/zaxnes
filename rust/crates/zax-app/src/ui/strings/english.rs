@@ -1153,7 +1153,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.oam_corruption",
-        "A defect of the real console: switching the picture off in the middle of a line damages one row of the sprite memory when the picture comes back, so a few sprites can go missing for a frame. Games written for the console avoid it or live with it. The known model is incomplete, so turn this off if a game shows sprites flickering that it should not. Takes effect at the next load. Default: on.",
+        "A defect of the real console: switching the picture off in the middle of a line damages one row of the sprite memory when the picture comes back, so a few sprites can go missing for a frame. Games written for the console avoid it or live with it. The known model is incomplete, so a game may show sprites flickering that it should not with this on. Takes effect at the next load. Default: off.",
     ),
     (
         "detail.emu.power_on_ram",

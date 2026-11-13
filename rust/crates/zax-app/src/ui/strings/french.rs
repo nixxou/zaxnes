@@ -1127,7 +1127,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.oam_corruption",
-        "Un défaut de la vraie console : couper l'image au milieu d'une ligne abîme une rangée de la mémoire des sprites quand l'image revient, et quelques sprites peuvent manquer pendant une image. Les jeux écrits pour la console l'évitent ou s'en accommodent. Le modèle connu est incomplet : désactivez ce réglage si un jeu montre des sprites qui clignotent à tort. Prend effet au prochain chargement. Par défaut : activé.",
+        "Un défaut de la vraie console : couper l'image au milieu d'une ligne abîme une rangée de la mémoire des sprites quand l'image revient, et quelques sprites peuvent manquer pendant une image. Les jeux écrits pour la console l'évitent ou s'en accommodent. Le modèle connu est incomplet : avec ce réglage activé, un jeu peut montrer des sprites qui clignotent à tort. Prend effet au prochain chargement. Par défaut : désactivé.",
     ),
     (
         "detail.emu.power_on_ram",

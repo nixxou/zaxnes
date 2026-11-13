@@ -1139,13 +1139,13 @@ fn emulation_cartridge(out: &mut Vec<SettingDescriptor>) {
         ]))
         .with_label("Power-on RAM"),
     );
-    // Lot FIDELITY step 9: the OAM row corruption of a rendering switched off inside a line. On
-    // by default (owner, 2026-11-13: faithful to the console first, and a switch to turn it off).
+    // Lot FIDELITY step 9: the OAM row corruption of a rendering switched off inside a line. Off
+    // by default (owner, 2026-11-13) until the model stops failing blargg's `5.Emulator`.
     out.push(
         SettingDescriptor::new(
             SettingId::EmuOamCorruption,
             SettingKind::Bool,
-            SettingValue::Bool(true),
+            SettingValue::Bool(false),
             SettingScope::User,
             SettingEffect::NextRomLoad,
             SettingTheme::Emulation,

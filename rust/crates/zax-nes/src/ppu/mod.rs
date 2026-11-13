@@ -149,7 +149,7 @@ pub struct Ppu2C02 {
     vram_clock: u32,
     oam: [u8; OAM_SIZE],
     /// Whether the OAM row corruption of [`Self::rendering_switched`] is emulated. A core setting,
-    /// on by default (owner, 2026-11-13), and not part of the state: it describes the machine, not the game.
+    /// off by default (owner, 2026-11-13, until the model is complete), and not part of the state: it describes the machine, not the game.
     oam_corruption: bool,
     /// The OAM rows a switch-off of the rendering marked, one bit a row, waiting for the rendering
     /// to come back on a line that renders. Transient: a state load drops it.
@@ -431,7 +431,7 @@ impl Ppu2C02 {
             vram_written: vec![0; VRAM_SIZE],
             vram_clock: 0,
             oam: [0; OAM_SIZE],
-            oam_corruption: true,
+            oam_corruption: false,
             oam_corrupt_rows: 0,
             palette_raw: [0; PALETTE_SIZE],
             palette: [0; PALETTE_SIZE],
