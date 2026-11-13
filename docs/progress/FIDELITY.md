@@ -29,6 +29,7 @@ Reference before the lot: test ROMs 212 pass / 7 fail / 1 unsupported / 111 manu
 | 18b | The reloads record nothing for the serial count either: the last reload is found back from the switch-off, on the cold path, so the span loop keeps `ppu_clock` in a register (the first version of step 18 cost +84 M on *Mega Man 2*) | 143 (147) | same | same |
 | 19 | **2C02G/H OAMADDR defect** (nesdev "PPU registers"): with OAMADDR >= 8 when rendering starts, the row at `OAMADDR & $F8` is copied over OAM 0-7; not on PAL. Setting `emu.oamaddr_bug`, **on by default**; test fixtures now leave OAMADDR at 0 as a game does | 143 (147) | same | same |
 | 20 | **OAM decay** (nesdev "PPU OAM"; BeesNES `RefreshOamRow`): with the rendering off, an 8-byte row nothing accessed for 8 NTSC frames (~133 ms) decays, each byte reading as its own index. Checked lazily on `$2004`, OAM DMA and the rendering's return; nothing per dot. Setting `emu.oam_decay`, **off by default**: its clock stamps are not in the savestate, so run-ahead and rewind would never let it happen. blargg `oam_stress` and `sprdma_and_dmc_dma` still pass with it on | 143 (147) | same | same |
+| 21 | *(branch `feat/fidelity-poweron`)* **Power-on at the top of the picture** (nesdev "PPU power up state"; dot 11 as BeesNES): setting `emu.power_on_top`, **off by default**. With it on, blargg `5.Emulator` passes with `emu.oam_corruption` on; every game's timeline moves (golden-core: 98 games, 23 pictures at frame 1200) | 143 (147) | same | same |
 
 ## Rows still failing
 
