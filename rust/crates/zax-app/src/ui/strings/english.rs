@@ -1183,7 +1183,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.ppu_bus_conflicts",
-        "A defect of the real console: a game that reads or moves the video address while the picture is being drawn collides with what the video chip is reading at that instant, and one background tile is read from the wrong place, which shows as eight wrong pixels on one line. Games written for the console avoid it. Turn this off if a game shows such a glitch and you would rather not see it. Takes effect at the next load. Default: off.",
+        "Experimental. A defect of the real console: a game that reads video memory while the picture is being drawn collides with what the video chip is reading at that instant, and the value it gets, or a background tile, comes from the wrong place. Games written for the console avoid it; test programs check it. This model is not yet exact (it disturbs one line of Super Mario Bros. 3 in a way the console does not), hence off. The delay of a new video address has its own setting. Takes effect at the next load. Default: off.",
     ),
     (
         "detail.emu.oamaddr_bug",
