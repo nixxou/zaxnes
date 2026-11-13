@@ -622,10 +622,13 @@ impl Ppu2C02 {
         if self.eval_finished {
             // The copy is over, but the sprite half of the counter keeps turning, and a write to
             // a full secondary OAM is a read from it.
+            //
+            // Full or not: once the copy is over the secondary OAM is no longer written, and the
+            // even dots show the byte its address stands on — the Y of the last sprite looked at
+            // when fewer than eight were found (`AccuracyCoin`, `$2004 Stress Test` 2: `$03` on
+            // every even dot from the overflow of the OAM address to dot 256).
             self.eval_sprite = (self.eval_sprite + 1) & 0x3F;
-            if self.secondary_oam_addr >= 4 * SPRITES_PER_LINE_I32 {
-                self.read_back_secondary_oam();
-            }
+            self.read_back_secondary_oam();
 
             return;
         }

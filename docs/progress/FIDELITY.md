@@ -17,12 +17,13 @@ Reference before the lot: test ROMs 212 pass / 7 fail / 1 unsupported / 111 manu
 | 5 | A DMA read that also reaches `$4016`/`$4017`: the register's answer is on the bus for the other read, and only the driven pins conflict (`APU Register Activation` 6 and 7) | **133** | same | same |
 | 6 | A DMC fetch that also reaches `$4015` leaves the address's own byte on the pins; a controller port keeps its own low bits in a conflict (`DMC DMA Bus Conflicts`) | **134** | same | same |
 | 7 | `ppu-exact-sprite-eval` in `default` (measured +0.04 % to +0.13 % at MF-4e, inside the per-release budget; to re-measure) | **137** | same | same |
+| 8 | `$2004` during rendering: the secondary OAM is read back on even dots once the copy is over, full or not, and dots 321-340 answer from its index 0 (`$2004 Stress Test`) | **138** | same | same |
 
-## Rows still failing (default build, 10)
+## Rows still failing (default build, 9)
 
-`$2004 Stress Test` 2, `$2007 Stress Test` 2, `OAM Corruption` 2, `ALE + Read` 2, `BG Serial In` 2,
+`$2007 Stress Test` 2, `OAM Corruption` 2, `ALE + Read` 2, `BG Serial In` 2,
 `Hybrid Addresses` 2, `Stale BG Shift Registers` 3, `Stale Sprite Shift Regs` 3, `Frozen OAM2
-Increment` 2, `Misaligned OAM2 Address` 3. All ten are PPU rows about what the pipeline does when
+Increment` 2, `Misaligned OAM2 Address` 4. All nine are PPU rows about what the pipeline does when
 rendering is switched on and off inside a line, or about the exact dot of a `$2004`/`$2007` access.
 
 ## Still to do outside AccuracyCoin

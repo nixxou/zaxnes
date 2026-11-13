@@ -1520,8 +1520,13 @@ impl Ppu2C02 {
                 return self.oam_eval_latch;
             }
 
-            // Dot 0 belongs to the previous line's last fetch, so it clamps to the same byte as
-            // dot 320 rather than wrapping to a negative step.
+            // After the last fetch the secondary OAM address is back at 0, where it stays until
+            // the clear: dots 321 to 340, and dot 0 after them (`AccuracyCoin`, `$2004 Stress
+            // Test` 2 and `Misaligned OAM2 Address` 2: "between dots 321 and 340 [a read]
+            // should, under normal conditions, read from index 0 of OAM2").
+            if self.dot > 320 {
+                return self.secondary_oam[0];
+            }
             let since = (self.dot - 257).clamp(0, 63);
             #[allow(clippy::cast_sign_loss)] // Clamped to 0..=63.
             let index = (((since / 8) * 4) + (since % 8).min(3)) as usize;
