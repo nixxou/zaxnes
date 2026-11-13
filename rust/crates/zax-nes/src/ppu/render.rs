@@ -266,10 +266,18 @@ impl Ppu2C02 {
         match dot {
             1..=256 => {
                 if dot == 1 {
-                    // Dots 1 to 64 clear the secondary OAM to $FF; the unused slots then make
-                    // the hardware fetch pattern $FF, which boards watching A12 can see.
-                    self.secondary_oam.fill(0xFF);
-                    if !VISIBLE {
+                    if VISIBLE {
+                        // Dots 1 to 64 clear the secondary OAM to $FF; the unused slots then
+                        // make the hardware fetch pattern $FF, which boards watching A12 can
+                        // see.
+                        self.secondary_oam.fill(0xFF);
+                    } else {
+                        // **Not on the pre-render line**: "secondary OAM clear and sprite
+                        // evaluation do not occur on the pre-render line" (nesdev, "PPU sprite
+                        // evaluation"), so its sprite fetches read what line 239's evaluation
+                        // left. With 8x16 sprites that decides whether A12 rises on this line,
+                        // and so whether an MMC3 counts it (lot FIDELITY step 1: *Super Mario
+                        // Bros. 3*'s first IRQ after power-on, one line early with the clear).
                         // Sprite evaluation does not run on the pre-render line, so no
                         // sprite is shown on line 0 (nesdev, "PPU sprite evaluation").
                         self.eval_found = 0;
