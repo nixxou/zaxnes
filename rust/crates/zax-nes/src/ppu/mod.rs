@@ -1645,10 +1645,10 @@ impl Ppu2C02 {
                     self.write_control(value, cartridge.as_deref_mut());
                 } else {
                     let was_rendering = self.rendering_enabled();
-                    if was_rendering != ((value & 0x18) != 0) {
-                        self.switch_rendering(value, &mut cartridge);
-                    } else {
+                    if was_rendering == ((value & 0x18) != 0) {
                         self.mask = value;
+                    } else {
+                        self.switch_rendering(value, &mut cartridge);
                     }
                 }
             }
