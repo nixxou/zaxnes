@@ -115,6 +115,14 @@ Each one is exact on every test we have, but is a modelling shortcut, not the me
   (`LSNPpu2C0X.h:160-182`) both have it. Free (cold path). → plan step.
 - **Not done (documented, nesdev "PPU registers": "Only writes that start on dot 257 and continue through dot 258", "writes the value of open bus"): `$2000` write at dot 257 updates `v` from the open bus** (BeesNES `GlitchyVUpdate`,
   `LSNPpu2C0X.h:2003-2015`). Free.
+- **Both deferred to the Fidelity+ core (decision of plan step 1.4/1.5, 2026-11-13)**: no test ROM
+  checks either (AccuracyCoin has none), Mesen has both off by default
+  (`EnablePpu2000ScrollGlitch`, `EnablePpu2006ScrollGlitch`, `SettingTypes.h:651-652`), and
+  *Super Mario Bros. 3* writes `$2000`/`$2006` around dots 254-258 of its split line — with the
+  one-dot lead of our register accesses (A3) the glitch would fire on the wrong side of dot 257
+  and break a game that works today. To do together with the alignment variants (A4) and the
+  half-phase clock (A1), which decide on which dot a write lands; then calibrate on the SMB3
+  console video (95 frames, `study/smb3-split`).
 
 ### C3. `$2001` effects — done
 - nesdev "PPU registers": "Toggling rendering takes effect approximately 3-4 dots after the write"; PPUMASK writes are ignored "until the first pre-render scanline" (check Zaxnes).
@@ -148,7 +156,21 @@ Each one is exact on every test we have, but is a modelling shortcut, not the me
 - Off because blargg `5.Emulator` test 3 fails with it; BeesNES has the same model
   (`OamCorruptionSeed`, `LSNPpu2C0X.h:1955-1971`) **always on** and passes thanks to B1.
 
-### D2. OAM decay when rendering is off — open (free, option)
+### D2. OAM decay when rendering is off — done as an option (`emu.oam_decay`, off, step 20)
+- Zaxnes (step 20): `Ppu2C02::refresh_oam_row` / `refresh_oam_rows_on` (`ppu/mod.rs`), one clock
+  stamp per 8-byte row, checked only on a `$2004` access, an OAM DMA byte and the rendering coming
+  back; the clock of the last switch-off stands for the rendering's own refresh. 8 NTSC frames
+  (714 736 dots; 708 214 on PAL/Dendy for the same 133 ms). Decayed bytes as BeesNES: each byte
+  its own index, attribute bytes `& $E3`. Zero cost per dot.
+- **Approximations left**: (1) the stamps are not in the savestate (format unchanged), so a load
+  restarts every row's delay — run-ahead and rewind, which load a state every frame, never let OAM
+  decay; this is why the option is off by default. Fidelity+: put the 33 stamps in the state
+  (format bump). (2) Rendering switched on only during vblank (never on a visible line) counts as
+  a refresh at its switch-off although no evaluation ran. (3) Real decay is per bit, towards a
+  console-dependent value, gradual (BeesNES has a commented float model); ours is all at once.
+  (4) PAL's forced refresh on lines 265-310 is not modelled separately (covered when rendering is
+  on). (5) The rendering's refresh on the pre-render line and the dots 1-64 clear are not
+  distinguished.
 - Hardware: OAM is DRAM refreshed by rendering; with rendering off it decays. blargg `oam_stress` and
   `sprdma_and_dmc_dma` (verified on hardware) keep it for ~123 ms and ~37 ms.
 - BeesNES: decay after 8 NTSC frames (`OamDecayRate`, `LSNPpu2C0X.h:1774-1792`; `DecayOam` called
@@ -161,6 +183,18 @@ Each one is exact on every test we have, but is a modelling shortcut, not the me
   8 frames because blargg tests verified on hardware keep OAM for ~123 ms. To settle before coding
   (console-dependent; maybe a setting). nesdev also: the 2C07 (PAL) "forcibly refreshes OAM during
   scanlines 265 through 310", so no decay on PAL while rendering stays enabled.
+
+### D2b. Performance lead found on the way (lot FIDELITY, not fidelity)
+- Callgrind `f4185fa8` vs `27e2c3e2`: the APU stage costs +0.8 to +0.9 % on every game (+17 to
+  +21 M instructions per 600 frames) while the PPU stage gains 0.24 %; totals are -0.03 to
+  -0.14 %. The APU changes of the lot are frame-counter (`Frame Counter IRQ` I-M) and DMC
+  implicit-abort code that runs a few times a frame, so the cost is likely codegen around
+  `Apu2A03::run_cpu_cycles` / `step_cpu_cycle` (match arms `3 =>` / `_ =>`, `frame_irq_clear_at`).
+  Line by line (smb3, joined on source text): `self.cycles += 1;` in `step_cpu_cycle`
+  (`apu/mod.rs:690`) +13.6 M and `if self.frame_irq_status` in `compose_status` (`:1001`) +6.8 M,
+  the rest flat: register allocation of the per-CPU-cycle path, not the new code itself. Leads:
+  bit 6 branchless (`u8::from(..) << 6`); compose `readable_status` only when a `$4015` read is
+  coming instead of every cycle (bigger change).
 
 ### D3. 2C02G/H OAMADDR bug at pre-render — done (option `emu.oamaddr_bug`, on, step 19)
 - Hardware: at dot 1 of the pre-render line with rendering on, if OAMADDR >= 8 the 8 bytes at

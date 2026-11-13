@@ -33,6 +33,7 @@ emu.lua_smooth_gc
 emu.oam_corruption
 emu.ppu_bus_conflicts
 emu.oamaddr_bug
+emu.oam_decay
 emu.pause_3d_in_2d
 emu.pipeline
 emu.power_on_ram

@@ -1182,6 +1182,21 @@ fn emulation_cartridge(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("OAMADDR defect (2C02G)"),
     );
+    // Lot FIDELITY step 20: OAM decays with the rendering off for 8 NTSC frames (nesdev, "PPU
+    // OAM"; BeesNES). Off by default: the decay stamps are not in the savestate, so run-ahead and
+    // rewind, which load a state every frame, would never let it happen.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuOamDecay,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("OAM decay"),
+    );
 }
 
 /// The emulation settings of the Rust port alone, in their place in the catalogue.

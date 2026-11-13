@@ -163,6 +163,16 @@ pub struct Ppu2C02 {
     /// Whether the 2C02's OAMADDR copy at the start of rendering is emulated
     /// ([`Self::oamaddr_row_copy`]). A core setting, on by default; not part of the state.
     oamaddr_bug: bool,
+    /// Whether OAM decays while the rendering is off ([`Self::refresh_oam_row`]). A core
+    /// setting, off by default; not part of the state.
+    oam_decay: bool,
+    /// The clock of the last refresh of each 8-byte OAM row by an access: `$2004`, OAM DMA, or the
+    /// rendering coming back. Transient, like `oam_render_off`: a state load stamps them all with
+    /// the clock it restores, so a row never decays right after a load.
+    oam_row_refresh: [i64; 32],
+    /// The clock at which the rendering last went off; while it is on, it refreshes every row on
+    /// every line it evaluates the sprites of.
+    oam_render_off: i64,
     /// Whether a `$2007` read and a `$2006` write made while the PPU is fetching meet the fetches
     /// as on the hardware: their effect a few dots later, and the fetch they collide with
     /// disturbed ([`Self::read_buffer_from_fetch`], [`Self::delay_address_load`]). A core setting,
@@ -473,6 +483,9 @@ impl Ppu2C02 {
             oam_corruption: false,
             oam_corrupt_rows: 0,
             oamaddr_bug: true,
+            oam_decay: false,
+            oam_row_refresh: [0; 32],
+            oam_render_off: 0,
             bus_conflicts: false,
             prepaid_dots: 0,
             serial_since: 0,
@@ -611,6 +624,85 @@ impl Ppu2C02 {
     fn oamaddr_row_copy(&mut self) {
         let row = usize::from(self.oam_address & 0xF8);
         self.oam.copy_within(row..row + 8, 0);
+    }
+
+    /// Turns the decay of OAM with the rendering off on or off (see [`Self::refresh_oam_row`]).
+    pub fn set_oam_decay(&mut self, enabled: bool) {
+        self.oam_decay = enabled;
+        self.oam_row_refresh = [self.ppu_clock; 32];
+        self.oam_render_off = self.ppu_clock;
+    }
+
+    /// Stamps every OAM row as refreshed now: after a state load, whose clock the stamps did not
+    /// travel with.
+    pub(super) fn restamp_oam_rows(&mut self) {
+        self.oam_row_refresh = [self.ppu_clock; 32];
+        self.oam_render_off = self.ppu_clock;
+    }
+
+    /// The dots an OAM row holds its bytes without a refresh: 8 NTSC frames (~133 ms), `BeesNES`'s
+    /// figure (`CPpu2C0X::OamDecayRate`, `LSNPpu2C0X.h:1774-1790`, MIT). blargg's `oam_stress`
+    /// and `sprdma_and_dmc_dma`, verified on hardware, leave OAM untouched with the rendering off
+    /// for ~123 ms and ~37 ms, so it lasts at least that long; nesdev ("PPU OAM") only says it
+    /// lasts "at least as long as an NTSC vertical blank interval (~1.3ms), but not much longer",
+    /// which those tests contradict. Retention varies by console and temperature.
+    const fn oam_decay_dots(&self) -> i64 {
+        match self.timing.region {
+            // 8 frames of 341 x 262 dots.
+            NesRegion::Ntsc | NesRegion::Multi => 714_736,
+            // The same 133 ms at the PAL and Dendy dot rate (341 x 312 dots at 50.007 Hz).
+            _ => 708_214,
+        }
+    }
+
+    /// OAM is dynamic memory that the sprite evaluation refreshes, eight bytes a row, on every line
+    /// the rendering is on; with the rendering off, a row that nothing accessed for
+    /// [`Self::oam_decay_dots`] loses its bytes (nesdev, "PPU OAM": "OAM is a dynamic memory ...
+    /// if rendering is off, it will decay"). Called on every CPU access to a row and, for all rows,
+    /// when the rendering comes back; the dots themselves do nothing. A decayed row reads each byte
+    /// as its own OAM address, attribute bytes masked, as `BeesNES` does (`CPpu2C0X::RefreshOamRow`,
+    /// `LSNPpu2C0X.h:1801-1817`, MIT): real decay is console-dependent, and this spreads the
+    /// sprites down the screen rather than piling them on one line.
+    #[cold]
+    #[inline(never)]
+    fn refresh_oam_row(&mut self, row: usize) {
+        let now = self.ppu_clock;
+        if !self.rendering_enabled() {
+            let last = self.oam_row_refresh[row].max(self.oam_render_off);
+            if now - last > self.oam_decay_dots() {
+                self.decay_oam_row(row);
+            }
+        }
+        self.oam_row_refresh[row] = now;
+    }
+
+    /// A decayed row, as `BeesNES` leaves it: each byte its own OAM address, attribute bytes masked.
+    fn decay_oam_row(&mut self, row: usize) {
+        for index in row * 8..row * 8 + 8 {
+            #[allow(clippy::cast_possible_truncation)] // 0..256.
+            let byte = index as u8;
+            self.oam[index] = if (index & 0x03) == 0x02 {
+                byte & 0xE3
+            } else {
+                byte
+            };
+        }
+    }
+
+    /// The rendering comes back: every row is evaluated from here on, so whatever decayed while it
+    /// was off is settled now, before the first evaluation reads it.
+    #[cold]
+    #[inline(never)]
+    fn refresh_oam_rows_on(&mut self) {
+        let now = self.ppu_clock;
+        let limit = self.oam_decay_dots();
+        for row in 0..32 {
+            let last = self.oam_row_refresh[row].max(self.oam_render_off);
+            if now - last > limit {
+                self.decay_oam_row(row);
+            }
+            self.oam_row_refresh[row] = now;
+        }
     }
 
     pub fn set_oam_corruption(&mut self, enabled: bool) {
@@ -779,6 +871,13 @@ impl Ppu2C02 {
         }
         self.serial_ones(on);
         self.note_sprite_switch(on, renders);
+        if self.oam_decay {
+            if on {
+                self.refresh_oam_rows_on();
+            } else {
+                self.oam_render_off = self.ppu_clock;
+            }
+        }
         if !self.oam_corruption {
             return;
         }
@@ -1653,6 +1752,9 @@ impl Ppu2C02 {
             }
 
             4 => {
+                if self.oam_decay {
+                    self.refresh_oam_row(usize::from(self.oam_address >> 3));
+                }
                 let value = self.read_oam();
                 self.refresh_decay(value, 0xFF);
                 value
@@ -2144,6 +2246,9 @@ impl Ppu2C02 {
     /// The three unimplemented bits of a sprite's byte 2 are dropped, so they read back as 0
     /// (nesdev, "PPU OAM"; `oam_read` and `ppu_open_bus` test 10).
     fn write_oam(&mut self, value: u8) {
+        if self.oam_decay {
+            self.refresh_oam_row(usize::from(self.oam_address >> 3));
+        }
         self.oam[usize::from(self.oam_address)] = if (self.oam_address & 0x03) == 0x02 {
             value & 0xE3
         } else {

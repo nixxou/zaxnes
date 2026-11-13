@@ -206,6 +206,14 @@ impl NesCore {
         self.bus.ppu_mut().set_oamaddr_bug(enabled);
     }
 
+    /// Whether OAM decays when the rendering stays off: a row nothing accessed for 8 NTSC frames
+    /// loses its bytes (nesdev, "PPU OAM"; `BeesNES`). Off by default: the decay stamps are not in
+    /// the savestate, so a run-ahead or a rewind, which load a state every frame, never let OAM
+    /// decay.
+    pub fn set_oam_decay(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_oam_decay(enabled);
+    }
+
     /// Whether a `$2007` read or a `$2006` write that collides with a fetch of the PPU disturbs
     /// that fetch, as on the console (lot FIDELITY step 16; `Ppu2C02::read_buffer_from_fetch`,
     /// `Ppu2C02::delay_address_load`). Off by default (owner, 2026-11-13: it moves the split line of

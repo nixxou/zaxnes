@@ -800,3 +800,49 @@ fn fidelity_oamaddr_at_8_or_more_copies_its_row_over_oam_0_when_rendering_starts
         "the 2C07 does not have it"
     );
 }
+
+/// Lot FIDELITY step 20: with the rendering off for more than 8 NTSC frames, an OAM row nothing
+/// accessed decays (each byte reads as its own address, as `BeesNES` leaves it); a row the CPU
+/// touched in the meantime, or the rendering on all along, keeps its bytes.
+#[test]
+fn fidelity_oam_decays_after_8_frames_with_the_rendering_off() {
+    fn oam_after_blank(frames: usize, decay: bool, touch_row_1: bool) -> Vec<u8> {
+        let mut fixture = TileFixture::new();
+        for sprite in 0..4u8 {
+            fixture.set_sprite(sprite, 0x40, 0x11, 0x01, 0x22);
+        }
+        fixture.core.set_oam_decay(decay);
+        fixture.set_mask(0x18);
+        park_on_scanline(&mut fixture, 10);
+        fixture.set_mask(0x00);
+        for frame in 0..frames {
+            park_on_scanline(&mut fixture, 100);
+            park_on_scanline(&mut fixture, 0);
+            if touch_row_1 && frame % 4 == 0 {
+                let ppu = fixture.core.bus_mut().ppu_mut();
+                ppu.write(3, 0x08, None);
+                ppu.read(4, None);
+            }
+        }
+        fixture.set_mask(0x18);
+        fixture.core.bus().ppu().oam()[0..16].to_vec()
+    }
+
+    let kept = vec![
+        0x40, 0x11, 0x01, 0x22, 0x40, 0x11, 0x01, 0x22, 0x40, 0x11, 0x01, 0x22, 0x40, 0x11, 0x01,
+        0x22,
+    ];
+    let row_0_decayed = [0, 1, 2, 3, 4, 5, 0x02, 7];
+    assert_eq!(kept, oam_after_blank(12, false, false), "setting off");
+    assert_eq!(kept, oam_after_blank(6, true, false), "6 frames: kept");
+    let both = oam_after_blank(12, true, false);
+    assert_eq!(row_0_decayed, both[0..8], "12 frames: row 0 decayed");
+    assert_eq!(
+        [8, 9, 0x02, 11, 12, 13, 0x02, 15],
+        both[8..16],
+        "12 frames: row 1 decayed"
+    );
+    let touched = oam_after_blank(12, true, true);
+    assert_eq!(row_0_decayed, touched[0..8], "row 0 untouched");
+    assert_eq!(kept[8..16], touched[8..16], "row 1 read every 4 frames");
+}

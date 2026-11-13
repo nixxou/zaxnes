@@ -119,6 +119,9 @@ impl Ppu2C02 {
         for stamp in &mut self.decay_stamp {
             *stamp = reader.read_i64()?;
         }
+        // Not in the format: the OAM decay stamps (`refresh_oam_row`) restart from the clock
+        // restored, so a row cannot decay before 8 frames after a load.
+        self.restamp_oam_rows();
 
         self.vblank_just_started = reader.read_bool()?;
         self.nmi_line_sample = reader.read_bool()?;

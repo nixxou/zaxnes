@@ -28,6 +28,7 @@ Reference before the lot: test ROMs 212 pass / 7 fail / 1 unsupported / 111 manu
 | 18 | **Performance**: the high plane's serial 1s leave the hot path. `shift_background` shifts the four registers plainly again (one vector shift); the 1s are counted when the rendering goes off and set when it comes back (`Ppu2C02::serial_ones`, cold). The `| 1` cost +170 M instructions on a 600-frame *Super Mario Bros. 3* run (~+0.7 %) | 143 (147 with both settings) | same | same |
 | 18b | The reloads record nothing for the serial count either: the last reload is found back from the switch-off, on the cold path, so the span loop keeps `ppu_clock` in a register (the first version of step 18 cost +84 M on *Mega Man 2*) | 143 (147) | same | same |
 | 19 | **2C02G/H OAMADDR defect** (nesdev "PPU registers"): with OAMADDR >= 8 when rendering starts, the row at `OAMADDR & $F8` is copied over OAM 0-7; not on PAL. Setting `emu.oamaddr_bug`, **on by default**; test fixtures now leave OAMADDR at 0 as a game does | 143 (147) | same | same |
+| 20 | **OAM decay** (nesdev "PPU OAM"; BeesNES `RefreshOamRow`): with the rendering off, an 8-byte row nothing accessed for 8 NTSC frames (~133 ms) decays, each byte reading as its own index. Checked lazily on `$2004`, OAM DMA and the rendering's return; nothing per dot. Setting `emu.oam_decay`, **off by default**: its clock stamps are not in the savestate, so run-ahead and rewind would never let it happen. blargg `oam_stress` and `sprdma_and_dmc_dma` still pass with it on | 143 (147) | same | same |
 
 ## Rows still failing
 
@@ -46,7 +47,13 @@ None with both settings on (`ZAXNES_OAM_CORRUPTION=1 ZAXNES_PPU_BUS_CONFLICTS=1`
 
 Callgrind, clean builds from `git archive`, dev `27e2c3e2` against `56bba39c` (both settings as
 then: bus conflicts on): total +0.42 % (mm2), +0.52 % (zelda2), +0.53 % (metroid), +0.55 % (smb1),
-+0.71 % (smb3); PPU stage +1.0 % to +1.7 %; PR-1 set +0.48 % to +0.95 %. Not yet broken down by step.
++0.71 % (smb3); PPU stage +1.0 % to +1.7 %; PR-1 set +0.48 % to +0.95 %.
+
+After steps 18 and 18b (`f4185fa8` against `27e2c3e2`, bus conflicts off as shipped): total
+**-0.14 % (metroid), -0.08 % (smb1), -0.06 % (zelda2), -0.03 % (smb3, mm2)**; PPU stage -0.18 to
+-0.24 %; APU stage +0.8 to +0.9 % (register allocation of `step_cpu_cycle`, see
+`docs/review/FIDELITY-LEADS.md` D2b); PR-1 set -0.13 % to +0.48 % (`oamstr` and `vblnmi` the
+highest). Steps 19 and 20 run once a frame or on an OAM access only.
 
 ## Still to do outside AccuracyCoin
 
@@ -55,4 +62,4 @@ then: bus conflicts on): total +0.42 % (mm2), +0.52 % (zelda2), +0.53 % (metroid
 * The sprite-overflow bit of `$2002` in *The Legend of Zelda* (set in Mesen, clear here).
 * `$2002` open-bus bits and `$2007` reads during rendering: differ from Mesen, both follow test
   ROMs; to be settled against the documentation.
-* Performance: find which step costs (see above) and bring it down before any merge.
+* Performance: done for the lot (games net negative); the APU lead is recorded (D2b).

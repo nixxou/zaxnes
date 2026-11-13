@@ -523,6 +523,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let oam_corruption = self.settings.get(SettingId::EmuOamCorruption).as_bool();
                 let bus_conflicts = self.settings.get(SettingId::EmuPpuBusConflicts).as_bool();
                 let oamaddr_bug = self.settings.get(SettingId::EmuOamaddrBug).as_bool();
+                let oam_decay = self.settings.get(SettingId::EmuOamDecay).as_bool();
                 let power_on_ram = match self.settings.get(SettingId::EmuPowerOnRam).as_int() {
                     1 => zax_nes::PowerOnRam::Pattern,
                     2 => zax_nes::PowerOnRam::Ff,
@@ -542,6 +543,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                         session.core_mut().set_oam_corruption(oam_corruption);
                         session.core_mut().set_bus_conflicts(bus_conflicts);
                         session.core_mut().set_oamaddr_bug(oamaddr_bug);
+                        session.core_mut().set_oam_decay(oam_decay);
                         session.core_mut().set_power_on_ram(power_on_ram);
                         session.core_mut().set_builtin_patches(builtin_patches);
                         session.core_mut().set_advanced_patches(advanced);

@@ -308,6 +308,7 @@ const EMULATION: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::EmuOamCorruption),
     LayoutEntry::Row(SettingId::EmuPpuBusConflicts),
     LayoutEntry::Row(SettingId::EmuOamaddrBug),
+    LayoutEntry::Row(SettingId::EmuOamDecay),
 ];
 
 /// The rows of the **Interface** tab, from the most common to the most advanced.

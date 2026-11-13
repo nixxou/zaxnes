@@ -508,6 +508,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.oam_corruption", "OAM corruption"),
     ("setting.emu.ppu_bus_conflicts", "PPU bus conflicts"),
     ("setting.emu.oamaddr_bug", "OAMADDR defect (2C02G)"),
+    ("setting.emu.oam_decay", "OAM decay"),
     ("setting.emu.power_on_ram", "Work RAM at power-on"),
     ("option.Zeros", "Zeros"),
     ("option.FCEUX pattern", "FCEUX pattern"),
@@ -1164,6 +1165,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         "detail.emu.oamaddr_bug",
         "A defect of the NES and Famicom video chip (2C02G and later): if a game leaves the sprite memory address at 8 or more when the picture starts, eight bytes of sprite memory are copied over the first eight, so a couple of sprites can take the place of others for a frame. Games written for the console reset that address and never show it. A PAL console does not have this defect, so it never applies there. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.oam_decay",
+        "The console keeps its sprites in a memory that fades unless the picture is being drawn: if a game leaves the screen blank for long enough (about 8 frames here, it varies from one console to another) and then shows sprites without sending them again, they come back scrambled. Games written for the console send their sprites every frame and never show it. Run-ahead and rewind restart the delay at every frame, so with them on it never happens. Takes effect at the next load. Default: off.",
     ),
     (
         "detail.emu.power_on_ram",

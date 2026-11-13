@@ -571,6 +571,9 @@ fn run_one_zaxnes(
     core.set_bus_conflicts(
         std::env::var("ZAXNES_PPU_BUS_CONFLICTS").is_ok_and(|value| value != "0"),
     );
+    // And `ZAXNES_OAM_DECAY=1` for the off-by-default decay of OAM with the rendering off (step
+    // 20): blargg's `oam_stress` and `sprdma_and_dmc_dma` must still pass with it.
+    core.set_oam_decay(std::env::var("ZAXNES_OAM_DECAY").is_ok_and(|value| value != "0"));
     // The built-in widescreen patches rewrite game code; a test ROM must run as it is.
     core.set_builtin_patches(false);
     core.set_advanced_patches(false);
