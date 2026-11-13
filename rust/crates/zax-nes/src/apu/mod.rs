@@ -662,7 +662,9 @@ impl Apu2A03 {
         // 08.irq_timing).
         if self.frame_irq_pending {
             self.frame_irq_pending = false;
-            self.frame_irq_flag = true;
+            // With the interrupt inhibited the flag still shows in `$4015` (see
+            // `set_frame_irq`); only the line stays up.
+            self.frame_irq_flag = !self.irq_inhibited;
             // The flag being raised again overrides a clear a `$4015` read had armed and whose
             // get cycle has not come: two stores in a branch three cycles of a frame take, and
             // nothing outside it.
@@ -832,7 +834,20 @@ impl Apu2A03 {
                     self.clock_half_frame();
                     self.set_frame_irq();
                 }
-                _ => self.set_frame_irq(),
+                3 => self.set_frame_irq(),
+                _ => {
+                    if self.irq_inhibited {
+                        // The third cycle sets bit 6 "according to the Suppress Frame Counter
+                        // Interrupts flag": inhibited, the bit the two cycles before raised goes
+                        // back down, seen from the next cycle like everything the sequencer does
+                        // (`AccuracyCoin`, `Frame Counter IRQ` L).
+                        if self.frame_irq_status {
+                            self.frame_irq_clear_at = self.cycles + 1;
+                        }
+                    } else {
+                        self.set_frame_irq();
+                    }
+                }
             }
         }
 
@@ -857,10 +872,16 @@ impl Apu2A03 {
         }
     }
 
+    /// Raises bit 6 of `$4015` for the next cycle, and the IRQ line with it unless the interrupt
+    /// is inhibited.
+    ///
+    /// **Inhibited, the bit is still raised**, on the first two of the sequence's last three
+    /// cycles: "29828 cycles after frame counter reset: $4015.6 is set to 1. 29829: $4015.6 is
+    /// set to 1 (the IRQ level detector is only pulled low if the Suppress Frame Counter
+    /// Interrupts flag is false). 29830: $4015.6 is set according to the flag" (`AccuracyCoin`,
+    /// `Frame Counter IRQ` I to M). `step_cpu_cycle` keeps the line up when it applies this.
     fn set_frame_irq(&mut self) {
-        if !self.irq_inhibited {
-            self.frame_irq_pending = true;
-        }
+        self.frame_irq_pending = true;
     }
 
     fn clock_quarter_frame(&mut self) {
