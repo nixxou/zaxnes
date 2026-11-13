@@ -18,13 +18,13 @@ Reference before the lot: test ROMs 212 pass / 7 fail / 1 unsupported / 111 manu
 | 6 | A DMC fetch that also reaches `$4015` leaves the address's own byte on the pins; a controller port keeps its own low bits in a conflict (`DMC DMA Bus Conflicts`) | **134** | same | same |
 | 7 | `ppu-exact-sprite-eval` in `default` (measured +0.04 % to +0.13 % at MF-4e, inside the per-release budget; to re-measure) | **137** | same | same |
 | 8 | `$2004` during rendering: the secondary OAM is read back on even dots once the copy is over, full or not, and dots 321-340 answer from its index 0 (`$2004 Stress Test`) | **138** | same | same |
-| 9 | OAM row corruption when the rendering is switched off inside a line (`OAM Corruption`), as a core setting **off by default**: `NesCore::set_oam_corruption`, `ZAXNES_OAM_CORRUPTION=1` for the campaign. On, it gives **139** and golden-core is unchanged, but blargg's `sprite_overflow_tests/5.Emulator` fails its test 3 (rendering switched off at line 126 dot 8, row 5 marked) — the model is incomplete, as Mesen's own note says | 138 | same | same |
+| 9 | OAM row corruption when the rendering is switched off inside a line (`OAM Corruption`), as a setting: `NesCore::set_oam_corruption`, `emu.oam_corruption` in the desktop window and the console menu, **on by default** (owner, 2026-11-13: faithful to the console first, with a switch). `ZAXNES_OAM_CORRUPTION=0` runs the campaign without it. Known cost: blargg's `sprite_overflow_tests/5.Emulator` fails its test 3 with it on (rendering switched off at line 126 dot 8, row 5 marked) — the model is incomplete, as Mesen's own note says | **139** | 211 pass, 8 fail (that one) | same |
 
-## Rows still failing (default build, 9)
+## Rows still failing (default build, 8)
 
-`$2007 Stress Test` 2, `OAM Corruption` 2, `ALE + Read` 2, `BG Serial In` 2,
+`$2007 Stress Test` 2, `ALE + Read` 2, `BG Serial In` 2,
 `Hybrid Addresses` 2, `Stale BG Shift Registers` 3, `Stale Sprite Shift Regs` 3, `Frozen OAM2
-Increment` 2, `Misaligned OAM2 Address` 4. All nine are PPU rows about what the pipeline does when
+Increment` 2, `Misaligned OAM2 Address` 4. All eight are PPU rows about what the pipeline does when
 rendering is switched on and off inside a line, or about the exact dot of a `$2004`/`$2007` access.
 
 ## Still to do outside AccuracyCoin

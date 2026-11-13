@@ -517,6 +517,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.core", "Cœur d'émulation"),
     ("setting.emu.engine", "Moteur d'émulation (ce jeu)"),
     ("setting.emu.cartridge_db", "Base de cartouches"),
+    ("setting.emu.oam_corruption", "Corruption OAM"),
     ("setting.emu.power_on_ram", "RAM à l'allumage"),
     ("option.Zeros", "Zéros"),
     ("option.FCEUX pattern", "Motif FCEUX"),
@@ -1123,6 +1124,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (
         "detail.emu.cartridge_db",
         "Complète ce qu'un ancien en-tête iNES ne peut pas dire d'une cartouche, d'après une base d'environ 10 000 dumps : la révision de la puce (une MMC3A ou une MMC1A, par exemple), le sous-mappeur, la vraie RAM de sauvegarde, la pile, la région. Elle ne change jamais le numéro de mappeur et ne touche jamais un en-tête NES 2.0. Prend effet au prochain chargement. Par défaut : activée.",
+    ),
+    (
+        "detail.emu.oam_corruption",
+        "Un défaut de la vraie console : couper l'image au milieu d'une ligne abîme une rangée de la mémoire des sprites quand l'image revient, et quelques sprites peuvent manquer pendant une image. Les jeux écrits pour la console l'évitent ou s'en accommodent. Le modèle connu est incomplet : désactivez ce réglage si un jeu montre des sprites qui clignotent à tort. Prend effet au prochain chargement. Par défaut : activé.",
     ),
     (
         "detail.emu.power_on_ram",

@@ -505,6 +505,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.core", "Emulation core"),
     ("setting.emu.engine", "Emulation engine (this game)"),
     ("setting.emu.cartridge_db", "Cartridge database"),
+    ("setting.emu.oam_corruption", "OAM corruption"),
     ("setting.emu.power_on_ram", "Work RAM at power-on"),
     ("option.Zeros", "Zeros"),
     ("option.FCEUX pattern", "FCEUX pattern"),
@@ -1149,6 +1150,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         "detail.emu.cartridge_db",
         "Completes what an old iNES header cannot say about a cartridge, from a database of about 10 000 dumps: the chip revision (an MMC3A or an MMC1A, say), the submapper, the real save RAM, the battery, the region. It never changes the mapper number and never touches a NES 2.0 header. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.oam_corruption",
+        "A defect of the real console: switching the picture off in the middle of a line damages one row of the sprite memory when the picture comes back, so a few sprites can go missing for a frame. Games written for the console avoid it or live with it. The known model is incomplete, so turn this off if a game shows sprites flickering that it should not. Takes effect at the next load. Default: on.",
     ),
     (
         "detail.emu.power_on_ram",

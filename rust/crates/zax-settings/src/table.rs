@@ -1139,6 +1139,20 @@ fn emulation_cartridge(out: &mut Vec<SettingDescriptor>) {
         ]))
         .with_label("Power-on RAM"),
     );
+    // Lot FIDELITY step 9: the OAM row corruption of a rendering switched off inside a line. On
+    // by default (owner, 2026-11-13: faithful to the console first, and a switch to turn it off).
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuOamCorruption,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("OAM corruption"),
+    );
 }
 
 /// The emulation settings of the Rust port alone, in their place in the catalogue.

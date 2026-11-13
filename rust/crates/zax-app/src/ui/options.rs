@@ -305,6 +305,7 @@ const EMULATION: &[LayoutEntry] = &[
     // Lot CARTDB: the cartridge database and the power-on RAM.
     LayoutEntry::Row(SettingId::EmuCartridgeDb),
     LayoutEntry::Row(SettingId::EmuPowerOnRam),
+    LayoutEntry::Row(SettingId::EmuOamCorruption),
 ];
 
 /// The rows of the **Interface** tab, from the most common to the most advanced.

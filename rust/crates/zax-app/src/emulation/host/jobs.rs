@@ -520,6 +520,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let advanced = self.advanced_patches_wanted();
                 let forced = self.forced_patch();
                 let cartridge_db = self.settings.get(SettingId::EmuCartridgeDb).as_bool();
+                let oam_corruption = self.settings.get(SettingId::EmuOamCorruption).as_bool();
                 let power_on_ram = match self.settings.get(SettingId::EmuPowerOnRam).as_int() {
                     1 => zax_nes::PowerOnRam::Pattern,
                     2 => zax_nes::PowerOnRam::Ff,
@@ -536,6 +537,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let result = match self.session.as_mut() {
                     Some(session) => {
                         session.core_mut().set_cartridge_db(cartridge_db);
+                        session.core_mut().set_oam_corruption(oam_corruption);
                         session.core_mut().set_power_on_ram(power_on_ram);
                         session.core_mut().set_builtin_patches(builtin_patches);
                         session.core_mut().set_advanced_patches(advanced);

@@ -191,8 +191,8 @@ impl NesCore {
     }
 
     /// Whether the PPU corrupts a row of OAM when the rendering is switched off inside a line and
-    /// comes back (lot FIDELITY step 9; `Ppu2C02::rendering_switched`). Off by default: the
-    /// hardware does it, `AccuracyCoin`'s `OAM Corruption` checks it, but the known model is
+    /// comes back (lot FIDELITY step 9; `Ppu2C02::rendering_switched`). On by default (owner, 2026-11-13); a setting because the
+    /// hardware does it and `AccuracyCoin`'s `OAM Corruption` checks it, but the known model is
     /// incomplete — with it on, blargg's `sprite_overflow_tests/5.Emulator` fails its third test,
     /// which the console passes.
     pub fn set_oam_corruption(&mut self, enabled: bool) {

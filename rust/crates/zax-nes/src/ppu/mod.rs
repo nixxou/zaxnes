@@ -149,7 +149,7 @@ pub struct Ppu2C02 {
     vram_clock: u32,
     oam: [u8; OAM_SIZE],
     /// Whether the OAM row corruption of [`Self::rendering_switched`] is emulated. A core setting,
-    /// off by default, and not part of the state: it describes the machine, not the game.
+    /// on by default (owner, 2026-11-13), and not part of the state: it describes the machine, not the game.
     oam_corruption: bool,
     /// The OAM rows a switch-off of the rendering marked, one bit a row, waiting for the rendering
     /// to come back on a line that renders. Transient: a state load drops it.
@@ -431,7 +431,7 @@ impl Ppu2C02 {
             vram_written: vec![0; VRAM_SIZE],
             vram_clock: 0,
             oam: [0; OAM_SIZE],
-            oam_corruption: false,
+            oam_corruption: true,
             oam_corrupt_rows: 0,
             palette_raw: [0; PALETTE_SIZE],
             palette: [0; PALETTE_SIZE],
@@ -562,8 +562,7 @@ impl Ppu2C02 {
     /// on the CPU/PPU alignment — two here. The row is that address: dot / 2 during the clear,
     /// the secondary OAM address rounded up to a sprite during the evaluation, and the byte the
     /// fetch stands on from dot 257 (Mesen 2, `NesPpu::SetOamCorruptionFlags`, whose note says the
-    /// model "still [is] pending more research" — which is why this is a setting, and off by
-    /// default). Row 0 copied over itself changes nothing.
+    /// model "still [is] pending more research" — which is why this is a setting). Row 0 copied over itself changes nothing.
     ///
     /// Reached from a `$2001` write that changes the rendering bits and from nowhere else, so it
     /// costs the dots nothing.
