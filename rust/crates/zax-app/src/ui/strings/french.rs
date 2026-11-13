@@ -519,6 +519,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.cartridge_db", "Base de cartouches"),
     ("setting.emu.oam_corruption", "Corruption OAM"),
     ("setting.emu.ppu_bus_conflicts", "Conflits de bus PPU"),
+    ("setting.emu.oamaddr_bug", "Défaut OAMADDR (2C02G)"),
     ("setting.emu.power_on_ram", "RAM à l'allumage"),
     ("option.Zeros", "Zéros"),
     ("option.FCEUX pattern", "Motif FCEUX"),
@@ -1133,6 +1134,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (
         "detail.emu.ppu_bus_conflicts",
         "Un défaut de la vraie console : un jeu qui lit ou déplace l'adresse vidéo pendant que l'image est dessinée entre en collision avec ce que la puce vidéo lit à cet instant, et une tuile du décor est lue au mauvais endroit, ce qui donne huit pixels faux sur une ligne. Les jeux écrits pour la console l'évitent. Désactivez ce réglage si un jeu montre ce défaut et que vous préférez ne pas le voir. Prend effet au prochain chargement. Par défaut : désactivé.",
+    ),
+    (
+        "detail.emu.oamaddr_bug",
+        "Un défaut de la puce vidéo de la NES et de la Famicom (2C02G et suivantes) : si un jeu laisse l'adresse de la mémoire des sprites à 8 ou plus quand l'image commence, huit octets de cette mémoire sont recopiés sur les huit premiers, et un ou deux sprites peuvent en remplacer d'autres pendant une image. Les jeux écrits pour la console remettent cette adresse à zéro et ne le montrent jamais. Une console PAL n'a pas ce défaut : il ne s'y applique jamais. Prend effet au prochain chargement. Par défaut : activé.",
     ),
     (
         "detail.emu.power_on_ram",

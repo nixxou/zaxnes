@@ -507,6 +507,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.cartridge_db", "Cartridge database"),
     ("setting.emu.oam_corruption", "OAM corruption"),
     ("setting.emu.ppu_bus_conflicts", "PPU bus conflicts"),
+    ("setting.emu.oamaddr_bug", "OAMADDR defect (2C02G)"),
     ("setting.emu.power_on_ram", "Work RAM at power-on"),
     ("option.Zeros", "Zeros"),
     ("option.FCEUX pattern", "FCEUX pattern"),
@@ -1159,6 +1160,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         "detail.emu.ppu_bus_conflicts",
         "A defect of the real console: a game that reads or moves the video address while the picture is being drawn collides with what the video chip is reading at that instant, and one background tile is read from the wrong place, which shows as eight wrong pixels on one line. Games written for the console avoid it. Turn this off if a game shows such a glitch and you would rather not see it. Takes effect at the next load. Default: off.",
+    ),
+    (
+        "detail.emu.oamaddr_bug",
+        "A defect of the NES and Famicom video chip (2C02G and later): if a game leaves the sprite memory address at 8 or more when the picture starts, eight bytes of sprite memory are copied over the first eight, so a couple of sprites can take the place of others for a frame. Games written for the console reset that address and never show it. A PAL console does not have this defect, so it never applies there. Takes effect at the next load. Default: on.",
     ),
     (
         "detail.emu.power_on_ram",

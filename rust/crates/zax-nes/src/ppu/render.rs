@@ -413,9 +413,6 @@ impl Ppu2C02 {
     }
 
     fn load_background_shifters(&mut self) {
-        // The serial 1s of the high plane count from here (see `shift_background`).
-        self.serial_since = self.ppu_clock;
-        self.serial_base = 0;
         self.pattern_shift_low =
             (self.pattern_shift_low & 0xFF00) | u16::from(self.pattern_low_latch);
         self.pattern_shift_high =

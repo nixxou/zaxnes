@@ -30,7 +30,7 @@ pub use tile_buffer::TileBuffer;
 
 use crate::cartridges::{Cartridge, ChrFetch};
 use crate::wide::WideExtension;
-use crate::{NametableMirroring, RegionTiming, TileRecord};
+use crate::{NametableMirroring, NesRegion, RegionTiming, TileRecord};
 
 /// The cartridge as the internal PPU paths pass it around.
 type Cart<'a, 'c> = &'a mut Option<&'c mut Cartridge>;
@@ -160,6 +160,9 @@ pub struct Ppu2C02 {
     /// The OAM rows a switch-off of the rendering marked, one bit a row, waiting for the rendering
     /// to come back on a line that renders. Transient: a state load drops it.
     oam_corrupt_rows: u32,
+    /// Whether the 2C02's OAMADDR copy at the start of rendering is emulated
+    /// ([`Self::oamaddr_row_copy`]). A core setting, on by default; not part of the state.
+    oamaddr_bug: bool,
     /// Whether a `$2007` read and a `$2006` write made while the PPU is fetching meet the fetches
     /// as on the hardware: their effect a few dots later, and the fetch they collide with
     /// disturbed ([`Self::read_buffer_from_fetch`], [`Self::delay_address_load`]). A core setting,
@@ -171,9 +174,11 @@ pub struct Ppu2C02 {
     /// not in the state.
     prepaid_dots: i32,
     /// The high plane's serial input, kept off the hot path (see `shift_background`): the 1s it
-    /// has shifted in, counted up to `serial_since` (the clock of the last reload, or of the last
-    /// switch of the rendering), at most 16. Transient, like the rest of what a switch leaves: a
-    /// state load drops it, which only matters if it lands between a switch-off and a switch-on.
+    /// had shifted in at the clock `serial_since` (the last switch of the rendering), at most 16.
+    /// A reload after that clock starts the count again; the reloads themselves record nothing,
+    /// so that the fetch loop keeps its registers (`Self::serial_ones`). Transient, like the rest
+    /// of what a switch leaves: a state load drops it, which only matters if it lands between a
+    /// switch-off and a switch-on.
     serial_since: i64,
     serial_base: u32,
     /// The sprite output units while a switched rendering has them off their usual course (see
@@ -467,6 +472,7 @@ impl Ppu2C02 {
             oam: [0; OAM_SIZE],
             oam_corruption: false,
             oam_corrupt_rows: 0,
+            oamaddr_bug: true,
             bus_conflicts: false,
             prepaid_dots: 0,
             serial_since: 0,
@@ -588,6 +594,25 @@ impl Ppu2C02 {
     /// Whether the picture shows more than eight sprites on a line; from the next line.
     /// Turns the emulation of the OAM row corruption on or off (see
     /// [`Self::rendering_switched`]).
+    /// Turns the 2C02's OAMADDR copy at the start of rendering on or off (see
+    /// [`Self::oamaddr_row_copy`]).
+    pub const fn set_oamaddr_bug(&mut self, enabled: bool) {
+        self.oamaddr_bug = enabled;
+    }
+
+    /// The 2C02G/H's OAMADDR defect: "if OAMADDR is not less than eight when rendering starts,
+    /// the eight bytes starting at OAMADDR & 0xF8 are copied to the first eight bytes of OAM"
+    /// (nesdev, "PPU registers", OAMADDR). On the 2C03, 2C04, 2C05 and 2C07 "OAMADDR works as
+    /// intended", so a PAL console does not do it; the Dendy does, "required for 2C02
+    /// compatibility". Rendering starts at dot 1 of the pre-render line, once a frame: this costs
+    /// the dots nothing. `BeesNES` does the same (`CPpu2C0X::PreRenderOamGlitches`, MIT).
+    #[cold]
+    #[inline(never)]
+    fn oamaddr_row_copy(&mut self) {
+        let row = usize::from(self.oam_address & 0xF8);
+        self.oam.copy_within(row..row + 8, 0);
+    }
+
     pub fn set_oam_corruption(&mut self, enabled: bool) {
         self.oam_corruption = enabled;
         if !enabled {
@@ -687,23 +712,30 @@ impl Ppu2C02 {
             self.serial_since = self.ppu_clock;
             return;
         }
-        let shifted = self.shift_dots_since(self.serial_since, 16 - self.serial_base.min(16));
-        self.serial_base = (self.serial_base + shifted).min(16);
+        let (shifted, reloaded) = self.shift_dots_since(self.serial_since);
+        let base = if reloaded { 0 } else { self.serial_base };
+        self.serial_base = (base + shifted).min(16);
         self.serial_since = self.ppu_clock;
     }
 
-    /// The dots, at most `limit`, that shifted the background registers between the clock `since`
-    /// (excluded) and now (included), the rendering having been on all along: dots 2 to 257 and
-    /// 321 to 337 of a line that renders. Walked back from the current dot; a cold-path helper.
-    fn shift_dots_since(&self, since: i64, limit: u32) -> u32 {
+    /// The dots that shifted the background registers after the clock `since` and up to now, the
+    /// rendering having been on all along (dots 2 to 257 and 321 to 337 of a line that renders),
+    /// counted back from the current dot to the last reload (dots 9 to 257 by eights, 321, 329
+    /// and 337, whose shift comes before the load) and at most 16; `true` with the count when such
+    /// a reload came after `since`. A cold-path helper: the reloads record nothing themselves.
+    fn shift_dots_since(&self, since: i64) -> (u32, bool) {
         let mut steps = self.ppu_clock - since;
         let (mut line, mut dot) = (self.scanline, self.dot);
         let last_line = self.pre_render_scanline();
         let mut count = 0;
-        while steps > 0 && count < limit {
-            let renders = line < VISIBLE_SCANLINES || line == last_line;
-            if renders && matches!(dot, 2..=257 | 321..=337) {
-                count += 1;
+        while steps > 0 {
+            if line < VISIBLE_SCANLINES || line == last_line {
+                if matches!(dot, 9..=257 | 321 | 329 | 337) && (dot - 1).trailing_zeros() >= 3 {
+                    return (count, true);
+                }
+                if matches!(dot, 2..=257 | 321..=337) {
+                    count = (count + 1).min(16);
+                }
             }
             steps -= 1;
             dot -= 1;
@@ -712,7 +744,7 @@ impl Ppu2C02 {
                 line = if line == 0 { last_line } else { line - 1 };
             }
         }
-        count
+        (count, false)
     }
 
     /// Turns the fetches disturbed by a colliding `$2007` read or `$2006` write on or off (see
@@ -1511,6 +1543,13 @@ impl Ppu2C02 {
                     // The rendering came back during vblank: the rows marked are corrupted on the
                     // first dot of the first line that renders.
                     self.corrupt_oam_rows();
+                }
+                if self.oam_address >= 8
+                    && self.oamaddr_bug
+                    && self.rendering_enabled()
+                    && self.timing.region != NesRegion::Pal
+                {
+                    self.oamaddr_row_copy();
                 }
                 self.vblank_flag = false;
                 self.sprite_zero_hit = false;

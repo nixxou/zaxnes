@@ -199,6 +199,13 @@ impl NesCore {
         self.bus.ppu_mut().set_oam_corruption(enabled);
     }
 
+    /// Whether the 2C02G/H's OAMADDR defect is emulated: with OAMADDR at 8 or more when rendering
+    /// starts, eight bytes of OAM are copied over the first eight (nesdev, "PPU registers"). On by
+    /// default; never on a PAL console, whose 2C07 does not have it.
+    pub fn set_oamaddr_bug(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_oamaddr_bug(enabled);
+    }
+
     /// Whether a `$2007` read or a `$2006` write that collides with a fetch of the PPU disturbs
     /// that fetch, as on the console (lot FIDELITY step 16; `Ppu2C02::read_buffer_from_fetch`,
     /// `Ppu2C02::delay_address_load`). Off by default (owner, 2026-11-13: it moves the split line of

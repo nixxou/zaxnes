@@ -1168,6 +1168,20 @@ fn emulation_cartridge(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("PPU bus conflicts"),
     );
+    // Lot FIDELITY step 19: the 2C02G/H's OAMADDR copy when rendering starts (nesdev, "PPU
+    // registers"). On by default: documented hardware, and never on a PAL console.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuOamaddrBug,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("OAMADDR defect (2C02G)"),
+    );
 }
 
 /// The emulation settings of the Rust port alone, in their place in the catalogue.

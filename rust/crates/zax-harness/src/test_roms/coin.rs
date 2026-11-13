@@ -1401,6 +1401,14 @@ fn drive<M: TestMachine>(core: &mut M, budget: u32, retired: &[Test]) -> Run {
     let mut done_at = None;
     let mut counted = run_count(core);
     let mut moved_at = script.frames();
+    let dump_at: Option<u16> = std::env::var("ZAX_COIN_DUMP")
+        .ok()
+        .and_then(|v| u16::from_str_radix(&v, 16).ok());
+    let mut dumped = false;
+    let dump_from: u16 = std::env::var("ZAX_COIN_FROM")
+        .ok()
+        .and_then(|v| u16::from_str_radix(&v, 16).ok())
+        .unwrap_or(0x50);
     let mut running_zero_since = None;
     for frame in 1..=budget {
         core.run_frame(script.input(frame));
@@ -1416,6 +1424,25 @@ fn drive<M: TestMachine>(core: &mut M, budget: u32, retired: &[Test]) -> Run {
             running_zero_since = None;
         }
 
+        if let Some(address) = dump_at {
+            if !dumped && core.read_memory(address) != 0 {
+                dumped = true;
+                let bytes: Vec<String> = (dump_from
+                    ..dump_from.saturating_add(
+                        std::env::var("ZAX_COIN_LEN")
+                            .ok()
+                            .and_then(|v| u16::from_str_radix(&v, 16).ok())
+                            .unwrap_or(0x60),
+                    ))
+                    .map(|a| format!("{:02X}", core.read_memory(a)))
+                    .collect();
+                eprintln!(
+                    "COIN DUMP ${address:04X}={:02X} frame {frame}: $50.. {}",
+                    core.read_memory(address),
+                    bytes.join(" ")
+                );
+            }
+        }
         let now = run_count(core);
         if now != counted {
             counted = now;

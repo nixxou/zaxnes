@@ -754,3 +754,49 @@ fn req_core_047_a_palette_read_under_greyscale_returns_the_value_anded_with_30()
         );
     }
 }
+
+/// The 2C02G/H's OAMADDR defect (lot FIDELITY step 19): "if OAMADDR is not less than eight when
+/// rendering starts, the eight bytes starting at OAMADDR & 0xF8 are copied to the first eight
+/// bytes of OAM" (nesdev, "PPU registers"). Not on a PAL 2C07, and not with the setting off.
+#[test]
+fn fidelity_oamaddr_at_8_or_more_copies_its_row_over_oam_0_when_rendering_starts() {
+    fn oam_head_after_start(oamaddr: u8, region: Option<zax_nes::NesRegion>, bug: bool) -> Vec<u8> {
+        let mut fixture = TileFixture::new();
+        for sprite in 0..8u8 {
+            fixture.set_sprite(sprite, 0xF0, sprite, 0, sprite * 16);
+        }
+        if let Some(region) = region {
+            let timing = zax_nes::RegionTiming::for_region(region);
+            fixture.core.bus_mut().ppu_mut().set_timing(timing);
+        }
+        fixture.core.set_oamaddr_bug(bug);
+        fixture.set_mask(0x18);
+        park_on_scanline(&mut fixture, 250);
+        fixture.core.bus_mut().ppu_mut().write(3, oamaddr, None);
+        park_on_scanline(&mut fixture, 0);
+        fixture.core.bus().ppu().oam()[0..8].to_vec()
+    }
+
+    let untouched = vec![0xF0, 0, 0, 0, 0xF0, 1, 0, 16];
+    let row_2 = vec![0xF0, 4, 0, 64, 0xF0, 5, 0, 80];
+    assert_eq!(
+        untouched,
+        oam_head_after_start(0x07, None, true),
+        "below 8: nothing"
+    );
+    assert_eq!(
+        row_2,
+        oam_head_after_start(0x13, None, true),
+        "OAMADDR & $F8 = $10"
+    );
+    assert_eq!(
+        untouched,
+        oam_head_after_start(0x13, None, false),
+        "setting off"
+    );
+    assert_eq!(
+        untouched,
+        oam_head_after_start(0x13, Some(zax_nes::NesRegion::Pal), true),
+        "the 2C07 does not have it"
+    );
+}

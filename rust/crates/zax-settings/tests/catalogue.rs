@@ -105,6 +105,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "emu.lua_optimized",
             "emu.lua_smooth_gc",
             "emu.oam_corruption",
+            "emu.oamaddr_bug",
             "emu.pause_3d_in_2d",
             "emu.pipeline",
             "emu.power_on_ram",

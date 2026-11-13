@@ -162,12 +162,12 @@ Each one is exact on every test we have, but is a modelling shortcut, not the me
   (console-dependent; maybe a setting). nesdev also: the 2C07 (PAL) "forcibly refreshes OAM during
   scanlines 265 through 310", so no decay on PAL while rendering stays enabled.
 
-### D3. 2C02G/H OAMADDR bug at pre-render — open (free, revision option)
+### D3. 2C02G/H OAMADDR bug at pre-render — done (option `emu.oamaddr_bug`, on, step 19)
 - Hardware: at dot 1 of the pre-render line with rendering on, if OAMADDR >= 8 the 8 bytes at
   `OAMADDR & $F8` are copied over OAM 0-7 (2C02G/H; nesdev "PPU registers" OAMADDR).
 - BeesNES `PreRenderOamGlitches` (`LSNPpu2C0X.h:1990-2001`), README "Hardware bugs... OAMADDR bugs
   (writing fewer than 8 bytes on the 2C02G)".
-- Zaxnes: none. Free (pre-render line, once per frame).
+- Zaxnes: `Ppu2C02::oamaddr_row_copy` (`ppu/mod.rs`), skipped on PAL. Free (pre-render line, once per frame).
 
 ### D4. 2C02G: writes to OAMADDR corrupt OAM — open (revision option)
 - nesdev "PPU registers" OAMADDR: "On the 2C02G, writes to OAMADDR corrupt OAM"; on 2C03/2C04/2C05/

@@ -320,6 +320,9 @@ impl TileFixture {
         for value in [y, tile, attribute, x] {
             self.core.write_memory(0x2004, value);
         }
+        // OAMADDR back to 0, as a game leaves it: rendering that starts with it at 8 or more
+        // copies a row of OAM over the first (the 2C02G/H defect, `set_oamaddr_bug`).
+        self.core.write_memory(0x2003, 0);
     }
 
     pub fn write_vram(&mut self, address: u16, values: &[u8]) {

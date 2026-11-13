@@ -815,6 +815,14 @@ impl EngineHandle {
         }
     }
 
+    /// Whether the 2C02G/H's OAMADDR copy when rendering starts is emulated (lot FIDELITY);
+    /// likewise.
+    pub fn set_oamaddr_bug(&mut self, enabled: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_oamaddr_bug(enabled);
+        }
+    }
+
     /// What the work RAM holds at the next power-on (lot CARTDB); likewise.
     pub fn set_power_on_ram(&mut self, pattern: zax_nes::PowerOnRam) {
         if let Some(core) = self.zaxnes_mut() {
