@@ -1179,7 +1179,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.oam_corruption",
-        "A defect of the real console: switching the picture off in the middle of a line damages one row of the sprite memory when the picture comes back, so a few sprites can go missing for a frame. Games written for the console avoid it or live with it. The known model is incomplete, so a game may show sprites flickering that it should not with this on. Takes effect at the next load. Default: off.",
+        "A defect of the real console: switching the picture off in the middle of a line damages one row of the sprite memory when the picture comes back, so a few sprites can go missing for a frame. Games written for the console avoid it or live with it. The model follows measurements made on a console (AccuracyCoin); with the power-on at the top of the picture it passes every test program known. Takes effect at the next load. Default: on.",
     ),
     (
         "detail.emu.ppu_bus_conflicts",
@@ -1195,7 +1195,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.power_on_top",
-        "Where the video chip is in its picture when the console is switched on. The real console starts at the top of the picture; Zaxnes has always started at the end of it, which shortens the wait of a game for its first frame by a fraction of a frame. On, games start as on the console, a fraction of a frame later than before, so recordings, saved states made right after switching on and some widescreen adjustments made the old way can drift. Takes effect at the next load. Default: off.",
+        "Where the video chip is in its picture when the console is switched on. The real console starts at the top of the picture; Zaxnes has always started at the end of it, which shortens the wait of a game for its first frame by a fraction of a frame. On, games start as on the console, a fraction of a frame later than older versions of Zaxnes, so recordings and saved states made right after switching on with an older version can drift. Takes effect at the next load. Default: on.",
     ),
     (
         "detail.emu.ppu_2006_delay",

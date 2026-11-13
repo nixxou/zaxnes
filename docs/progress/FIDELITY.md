@@ -35,13 +35,14 @@ Reference before the lot: test ROMs 212 pass / 7 fail / 1 unsupported / 111 manu
 | 24 | *(branch `study/access-phase`)* **PPU write timings measured on the transistor netlists** (VisualNes, owner-approved): `$2006` delay split out and on (`emu.ppu_2006_delay`), `$2006` collision AND glitch on (`emu.ppu_2006_glitch`, `t` damaged too), `$2000` dot-257 open-bus glitch on (`emu.ppu_2000_glitch`); golden unchanged on 98 games | **144** (147) | same | same |
 | 25 | *(branch `feat/ppu-2007-read`)* **`$2007` read during rendering from the transistor measurements**: buffer = PPU data bus at dot D+6 (alignment 4), byte of X-1 on an odd X, X+Y increment before the disturbed fetch. Option `emu.ppu_bus_conflicts` still off: SMB3 J line 193 does not match the console video yet | 144 (**146** with the option, 147 all) | same | same |
 | 26 | **`emu.ppu_bus_conflicts` on by default**: a PAL console video of *Super Mario Bros. 3* (Europe, French NES, composite) shows the damage the step-25 model predicts on its split line, line 194, x 0-7, on 34 % of the frames; Zaxnes Europe with the option: 34 %, same place; off: never (`docs/review/FIDELITY-LEADS.md`, I1). The Japanese line 193 video stays unexplained (origin unknown) | **146** (147 with OAM corruption) | same (212 pass) | 3 dumps, picture only: *Super Mario Bros. 3* (Japan, Rev 1, Rev 1 VC) |
+| 27 | *(branch `feat/fidelity-align`)* **`emu.power_on_top` and `emu.oam_corruption` on by default, together**: the PPU powers on at the top of the picture (nesdev), which puts blargg's `5.Emulator` OAM corruption on a harmless row, so the corruption model (AccuracyCoin's console measurements) can be on. OAM corruption measured on the transistor netlists first: the netlist reproduces the secondary OAM address per dot but not the copy itself (only 2 alignments of 4, opposite direction in the sprite-fetch phase), so AccuracyCoin's rule stays (`docs/review/FIDELITY-LEADS.md`, D1). `ppu_golden_tests` keeps the vblank power-on its goldens were taken with | **147** | **213 pass / 6 fail** (`sprite_overflow_tests/5.Emulator` passes) | all 98 games: `cycles` and audio (first frame 27 392 cycles); 17 pictures at frame 1200, a phase shift only (Excitebike, Metal Force, Rockman 4/5, Zelda II Europe, SMB3 Japan), checked by eye |
 
 ## Rows still failing
 
-None with `emu.oam_corruption` on (`ZAXNES_OAM_CORRUPTION=1` for the harness): **147 / 147**. The
-default build is at **146** (step 26): only `OAM Corruption` fails, its setting being off.
+None: **147 / 147 in the default build** since step 27.
 
-* `emu.oam_corruption` (`OAM Corruption`): its model fails blargg's `sprite_overflow_tests/5.Emulator`.
+* `emu.oam_corruption`: on by default since step 27, with `emu.power_on_top` (before, it failed
+  blargg's `sprite_overflow_tests/5.Emulator`, whose corruption landed on a row that mattered).
 * `emu.ppu_bus_conflicts`: on by default since step 26 (history: it was off while the split
   line of *Super Mario Bros. 3* (Japan) disagreed with a console video and with Mesen;
   the PAL video settled it, see step 26).

@@ -1139,13 +1139,14 @@ fn emulation_cartridge(out: &mut Vec<SettingDescriptor>) {
         ]))
         .with_label("Power-on RAM"),
     );
-    // Lot FIDELITY step 9: the OAM row corruption of a rendering switched off inside a line. Off
-    // by default (owner, 2026-11-13) until the model stops failing blargg's `5.Emulator`.
+    // Lot FIDELITY step 9: the OAM row corruption of a rendering switched off inside a line. On by
+    // default since step 27, together with `emu.power_on_top`, with which blargg's `5.Emulator`
+    // passes (docs/progress/FIDELITY.md).
     out.push(
         SettingDescriptor::new(
             SettingId::EmuOamCorruption,
             SettingKind::Bool,
-            SettingValue::Bool(false),
+            SettingValue::Bool(true),
             SettingScope::User,
             SettingEffect::NextRomLoad,
             SettingTheme::Emulation,
@@ -1198,13 +1199,13 @@ fn emulation_cartridge(out: &mut Vec<SettingDescriptor>) {
         .with_label("OAM decay"),
     );
     // Plan step 2 of lot FIDELITY: the PPU powers on at the top of the picture (nesdev, "PPU power
-    // up state"), dot 11 as BeesNES. Off by default: it moves every game's timeline against the
-    // frames (golden-core, recordings, recipes); the owner decides.
+    // up state"), dot 11 as BeesNES. On by default since step 27 (it moves every game's timeline
+    // by a fraction of a frame: golden-core, recordings, recipes).
     out.push(
         SettingDescriptor::new(
             SettingId::EmuPowerOnTop,
             SettingKind::Bool,
-            SettingValue::Bool(false),
+            SettingValue::Bool(true),
             SettingScope::User,
             SettingEffect::NextRomLoad,
             SettingTheme::Emulation,

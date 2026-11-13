@@ -60,6 +60,10 @@ fn check_row(row: &CoreGolden, image: &[u8], last_frame: u32) -> Result<(), Stri
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
     let mut machine = NesCore::new();
+    // The goldens were taken with the PPU powering on in vblank; `emu.power_on_top` (on by
+    // default since lot FIDELITY step 27) starts it at the top of the picture, which only moves
+    // the first frame's cycle count (27 392 instead of 29 783) and everything after it in time.
+    machine.set_power_on_top(false);
     let load = machine.load_rom(image, &name);
     if load.success != row.load_ok {
         return Err(format!(

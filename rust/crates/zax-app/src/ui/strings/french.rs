@@ -1153,7 +1153,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.oam_corruption",
-        "Un défaut de la vraie console : couper l'image au milieu d'une ligne abîme une rangée de la mémoire des sprites quand l'image revient, et quelques sprites peuvent manquer pendant une image. Les jeux écrits pour la console l'évitent ou s'en accommodent. Le modèle connu est incomplet : avec ce réglage activé, un jeu peut montrer des sprites qui clignotent à tort. Prend effet au prochain chargement. Par défaut : désactivé.",
+        "Un défaut de la vraie console : couper l'image au milieu d'une ligne abîme une rangée de la mémoire des sprites quand l'image revient, et quelques sprites peuvent manquer pendant une image. Les jeux écrits pour la console l'évitent ou s'en accommodent. Le modèle suit des mesures faites sur une console (AccuracyCoin) ; avec le démarrage en haut de l'image, il passe tous les programmes de test connus. Prend effet au prochain chargement. Par défaut : activé.",
     ),
     (
         "detail.emu.ppu_bus_conflicts",
@@ -1169,7 +1169,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.power_on_top",
-        "L'endroit où la puce vidéo se trouve dans son image quand on allume la console. La vraie console commence en haut de l'image ; Zaxnes a toujours commencé à la fin, ce qui raccourcit d'une fraction d'image l'attente d'un jeu avant sa première image. Activé, les jeux démarrent comme sur la console, une fraction d'image plus tard qu'avant : les enregistrements, les sauvegardes d'état faites juste après l'allumage et certains réglages d'écran large faits à l'ancienne peuvent se décaler. Prend effet au prochain chargement. Par défaut : désactivé.",
+        "L'endroit où la puce vidéo se trouve dans son image quand on allume la console. La vraie console commence en haut de l'image ; Zaxnes a toujours commencé à la fin, ce qui raccourcit d'une fraction d'image l'attente d'un jeu avant sa première image. Activé, les jeux démarrent comme sur la console, une fraction d'image plus tard qu'avec les anciennes versions de Zaxnes : les enregistrements et les sauvegardes d'état faites juste après l'allumage avec une ancienne version peuvent se décaler. Prend effet au prochain chargement. Par défaut : activé.",
     ),
     (
         "detail.emu.ppu_2006_delay",
