@@ -463,6 +463,13 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   (26 % fully dark, 8 % `###.###.`), never elsewhere; option off: never damaged. Same place, same
   rate: first hardware support for the transistor `$2007` read model. Limits: one video, every other
   frame, composite blur, x calibration within ~1-2 px, shapes of the partial cases not compared.
+  **Floor position, same video (2026-11-14)**: lot FIDELITY moved the title floor of SMB3 (USA and
+  Europe, white line + checkerboard) from line 195 up to line 194, with every fidelity setting off
+  (a non-optional timing change, not singled out; found by `widescreen_zone_tests`). Zaxnes
+  frames put through the video's pipeline (x2 line doubling, bicubic to 295 rows, grey), falling
+  edges only: ratio (hill bottom -> white line bottom) / (white line bottom -> first checker
+  block bottom) = 0.603 for line 195, 0.510 for line 194, **0.496 on the console** (median of 400
+  frames). Line 194 is right; the test's golden was updated.
 - I2. *The Legend of Zelda* sprite-overflow bit (C4).
 - I3. `$2002` open-bus bits and `$2007` reads during rendering vs Mesen (C5).
 - I4. Mega Man 2 widescreen not eyeballed; PAL/Dendy fidelity work unverified.
