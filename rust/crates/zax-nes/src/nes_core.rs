@@ -240,10 +240,6 @@ impl NesCore {
         self.bus.ppu_mut().set_phase_offset(dots);
     }
 
-    /// Study `study/access-phase`: every PPU register write one dot later.
-    pub fn set_write_lead(&mut self, enabled: bool) {
-        self.bus.ppu_mut().set_write_lead(enabled);
-    }
 
     pub fn set_console_audio_profile(&mut self, index: usize) {
         self.bus.apu_mut().set_console_profile(index);

@@ -172,11 +172,6 @@ pub struct Ppu2C02 {
     /// Study `study/access-phase`: dots added to the power-on position, which moves the CPU/PPU
     /// alignment (0 to 2).
     phase_offset: i32,
-    /// Study `study/access-phase`: whether every write to `$2000`, `$2001`, `$2005`, `$2006` and
-    /// `$2007` takes effect one dot later (the lead as a general rule), and whether the write in
-    /// progress took that dot.
-    write_lead: bool,
-    lead_now: bool,
     /// The clock of the last refresh of each 8-byte OAM row by an access: `$2004`, OAM DMA, or the
     /// rendering coming back. Transient, like `oam_render_off`: a state load stamps them all with
     /// the clock it restores, so a row never decays right after a load.
@@ -511,8 +506,6 @@ impl Ppu2C02 {
             oam_decay: false,
             power_on_top: false,
             phase_offset: 0,
-            write_lead: false,
-            lead_now: false,
             oam_row_refresh: [0; 32],
             oam_render_off: 0,
             bus_conflicts: false,
@@ -762,8 +755,8 @@ impl Ppu2C02 {
     fn switch_rendering(&mut self, value: u8, cart: Cart<'_, '_>) {
         let renders =
             self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline();
-        if renders && (self.prepaid_dots == 0 || self.lead_now) {
-            self.run_dots(i64::from(2 - self.prepaid_dots), cart);
+        if renders && self.prepaid_dots == 0 {
+            self.run_dots(2, cart);
             self.prepaid_dots = 2;
         }
         self.mask = value;
@@ -1470,11 +1463,6 @@ impl Ppu2C02 {
         self.dot = 1 + self.phase_offset;
     }
 
-    /// Study `study/access-phase`: see `write_lead`.
-    pub const fn set_write_lead(&mut self, enabled: bool) {
-        self.write_lead = enabled;
-    }
-
     /// Study `study/access-phase`: see `phase_offset`.
     pub const fn set_phase_offset(&mut self, dots: i32) {
         self.phase_offset = dots;
@@ -2067,10 +2055,10 @@ impl Ppu2C02 {
     #[cold]
     #[inline(never)]
     fn delay_address_load(&mut self, cart: Cart<'_, '_>) {
-        if self.prepaid_dots != 0 && !self.lead_now {
+        if self.prepaid_dots != 0 {
             return;
         }
-        self.run_dots(i64::from(3 - self.prepaid_dots), cart);
+        self.run_dots(3, cart);
         self.prepaid_dots = 3;
         if self.glitch_2006 {
             self.address_load_collision();
@@ -2195,14 +2183,6 @@ impl Ppu2C02 {
         // A write to any PPU register, $2002 included, loads the whole bus latch
         // (ppu_open_bus test 2).
         self.refresh_decay(value, 0xFF);
-
-        self.lead_now = false;
-        if self.write_lead && self.prepaid_dots == 0 && matches!(register & 0x07, 0 | 1 | 5 | 6 | 7)
-        {
-            self.run_dots(1, &mut cartridge);
-            self.prepaid_dots = 1;
-            self.lead_now = true;
-        }
 
         match register & 0x07 {
             // **The RC2C05 swaps the meanings of `$2000` and `$2001`** (nesdev, "Vs. System"),
