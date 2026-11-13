@@ -1148,11 +1148,11 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.cartridge_db",
-        "Completes what an old iNES header cannot say about a cartridge, from a database of          about 10 000 dumps: the chip revision (an MMC3A or an MMC1A, say), the submapper, the          real save RAM, the battery, the region. It never changes the mapper number and never          touches a NES 2.0 header. Takes effect at the next load. Default: on.",
+        "Completes what an old iNES header cannot say about a cartridge, from a database of about 10 000 dumps: the chip revision (an MMC3A or an MMC1A, say), the submapper, the real save RAM, the battery, the region. It never changes the mapper number and never touches a NES 2.0 header. Takes effect at the next load. Default: on.",
     ),
     (
         "detail.emu.power_on_ram",
-        "What the console's 2 KiB of work RAM hold when it is switched on. A real NES starts with          whatever its memory settled to; most games clear it first, a few read it before. Zeros          is Zaxnes's default; the FCEUX pattern (00 00 00 00 FF FF FF FF) is what FCEUX and          BizHawk use, and what a few games need; Random changes at every power-on. Takes effect          at the next load. Default: Zeros.",
+        "What the console's 2 KiB of work RAM hold when it is switched on. A real NES starts with whatever its memory settled to; most games clear it first, a few read it before. The FCEUX pattern (00 00 00 00 FF FF FF FF), the default, is what FCEUX and BizHawk use and what a few games need; Zeros is what Mesen uses; Random changes at every power-on. Takes effect at the next load. Default: FCEUX pattern.",
     ),
     (
         "detail.emu.engine",

@@ -1122,11 +1122,11 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.cartridge_db",
-        "Complète ce qu'un ancien en-tête iNES ne peut pas dire d'une cartouche, d'après une base          d'environ 10 000 dumps : la révision de la puce (une MMC3A ou une MMC1A, par exemple), le          sous-mappeur, la vraie RAM de sauvegarde, la pile, la région. Elle ne change jamais le          numéro de mappeur et ne touche jamais un en-tête NES 2.0. Prend effet au prochain          chargement. Par défaut : activée.",
+        "Complète ce qu'un ancien en-tête iNES ne peut pas dire d'une cartouche, d'après une base d'environ 10 000 dumps : la révision de la puce (une MMC3A ou une MMC1A, par exemple), le sous-mappeur, la vraie RAM de sauvegarde, la pile, la région. Elle ne change jamais le numéro de mappeur et ne touche jamais un en-tête NES 2.0. Prend effet au prochain chargement. Par défaut : activée.",
     ),
     (
         "detail.emu.power_on_ram",
-        "Le contenu des 2 Kio de RAM de travail de la console à l'allumage. Une vraie NES démarre          avec ce que sa mémoire contient au hasard ; la plupart des jeux l'effacent d'abord,          quelques-uns la lisent avant. Zéros est le choix par défaut de Zaxnes ; le motif FCEUX          (00 00 00 00 FF FF FF FF) est celui de FCEUX et de BizHawk, dont quelques jeux ont          besoin ; Aléatoire change à chaque allumage. Prend effet au prochain chargement. Par          défaut : Zéros.",
+        "Le contenu des 2 Kio de RAM de travail de la console à l'allumage. Une vraie NES démarre avec ce que sa mémoire contient au hasard ; la plupart des jeux l'effacent d'abord, quelques-uns la lisent avant. Le motif FCEUX (00 00 00 00 FF FF FF FF), par défaut, est celui de FCEUX et de BizHawk, dont quelques jeux ont besoin ; Zéros est celui de Mesen ; Aléatoire change à chaque allumage. Prend effet au prochain chargement. Par défaut : motif FCEUX.",
     ),
     (
         "detail.emu.engine",

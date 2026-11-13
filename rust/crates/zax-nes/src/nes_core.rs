@@ -44,8 +44,8 @@ pub struct NesCore {
     builtin_patches_enabled: bool,
     /// Whether the cartridge database corrects iNES 1.0 headers at load (lot CARTDB).
     cartridge_db: bool,
-    /// What the 2 KiB of work RAM hold at power-on (lot CARTDB step 2); zeros by default, as
-    /// REQ-CORE-004 has it.
+    /// What the 2 KiB of work RAM hold at power-on (lot CARTDB step 2); FCEUX's and NesHawk's
+    /// `00 00 00 00 FF FF FF FF` by default since the owner's decision of 2026-11-13.
     power_on_ram: crate::PowerOnRam,
     advanced_patches_enabled: bool,
     /// The built-in patch applied to a ROM none is made for (Rust-only, owner request: forced).
@@ -138,7 +138,7 @@ impl NesCore {
             builtin_patch: None,
             builtin_patches_enabled: true,
             cartridge_db: true,
-            power_on_ram: crate::PowerOnRam::Zero,
+            power_on_ram: crate::PowerOnRam::Pattern,
             advanced_patches_enabled: false,
             forced_patch: None,
             rom_crc: None,
@@ -184,7 +184,8 @@ impl NesCore {
     /// What the work RAM holds at the next power-on (lot CARTDB step 2). A real console's RAM
     /// starts with whatever its cells settled to; a few games read it before writing it, and
     /// FCEUX and NesHawk fill it with `00 00 00 00 FF FF FF FF` for that reason (NesHawk's
-    /// `NES.Core.cs` names *Cybernoid*, *Minna no Taabou* and *Huang Di*). Zeros by default.
+    /// `NES.Core.cs` names *Cybernoid*, *Minna no Taabou* and *Huang Di*). That pattern is the
+    /// default (owner, 2026-11-13); REQ-CORE-004's zeros are one choice among four.
     pub fn set_power_on_ram(&mut self, pattern: crate::PowerOnRam) {
         self.power_on_ram = pattern;
     }

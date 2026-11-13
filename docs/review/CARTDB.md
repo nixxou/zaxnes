@@ -39,12 +39,23 @@ in the first 1 200 frames of those games.
 
 `zax_nes::PowerOnRam` (`Zero`, `Pattern` = `00 00 00 00 FF FF FF FF` as FCEUX and NesHawk,
 `Ff`, `Random(seed)`), `NesCore::set_power_on_ram`, applied in `power_on` after the bus zeroed the
-RAM. Setting `emu.power_on_ram`, **zeros by default** (REQ-CORE-004), desktop and console rows;
-`Random` is seeded from the clock at each load.
+RAM. Setting `emu.power_on_ram`, desktop and console rows; `Random` is seeded from the clock at
+each load.
+
+**Default: FCEUX's pattern** (owner, 2026-11-13). Real hardware starts with semi-random contents;
+FCEUX and NesHawk use the pattern, Mesen zeros (checked on MesenCE: its interface defaults to
+`AllZeros` although its core's own default is `Random`). AccuracyCoin is unchanged (129/147) and so
+is the test-ROM campaign (212 pass / 7 fail / 1 unsupported / 111 manual of 331): no test ROM reads
+power-on RAM. golden-core moves on **19 of the 98** — the three games of the collection that read
+their RAM before writing it, all as a different starting point of something they seed from it:
+*Final Fantasy* (7 dumps, audio only), *Mega Man 2* / *Rockman 2* (8, the title's timing — picture,
+cycles, audio) and *Metroid* (4, the title's colour cycle starts on another colour). New digest
+`bc8497d3f3161dbfa5ce4da9f06a72071c54b61132f4550702e06bf0e7879531`. REQ-CORE-003's test now checks
+the default pattern and the zeros on request.
 
 ## Checks
 
 clippy `-D warnings` on `zax-nes`, `zax-harness`, `zax-settings`, `zax-app`; tests green
 (`zax-nes` + `zax-harness` + `zax-settings`, `zax-app` with `bundled`, and `--ignored` with the ROM
-directories); golden-core identical. Goldens updated for the two new rows
+directories); golden-core identical with the database (the pattern default changes it, above). Goldens updated for the two new rows
 (`desktop-options-shown.txt`, `handheld-option-tree.txt`).

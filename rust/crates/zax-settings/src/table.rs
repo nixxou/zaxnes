@@ -1107,8 +1107,8 @@ fn emulation_engine(out: &mut Vec<SettingDescriptor>) {
 
 /// Lot CARTDB (Rust-only): the cartridge database and the power-on RAM, both read at the next
 /// ROM load. The database is on by default — it only completes iNES 1.0 headers it knows, never
-/// changes a mapper number and never touches a NES 2.0 header; the RAM keeps REQ-CORE-004's zeros
-/// by default.
+/// changes a mapper number and never touches a NES 2.0 header; the RAM takes FCEUX's and NesHawk's
+/// pattern by default (owner, 2026-11-13).
 fn emulation_cartridge(out: &mut Vec<SettingDescriptor>) {
     out.push(
         SettingDescriptor::new(
@@ -1126,7 +1126,7 @@ fn emulation_cartridge(out: &mut Vec<SettingDescriptor>) {
         SettingDescriptor::new(
             SettingId::EmuPowerOnRam,
             SettingKind::Enum,
-            SettingValue::Enum(0),
+            SettingValue::Enum(1),
             SettingScope::User,
             SettingEffect::NextRomLoad,
             SettingTheme::Emulation,

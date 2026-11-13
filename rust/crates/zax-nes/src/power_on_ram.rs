@@ -3,16 +3,17 @@
 //! A real console's RAM starts with whatever its cells settled to. Most games clear it first; a
 //! few read it before writing it, which is why FCEUX and NesHawk fill it with
 //! `00 00 00 00 FF FF FF FF` (NesHawk's `NES.Core.cs` names *Cybernoid*, *Minna no Taabou no
-//! Nakayoshi Daisakusen* and *Huang Di*) and why Mesen lets the player choose. Zaxnes keeps zeros
-//! by default, as REQ-CORE-004 has it.
+//! Nakayoshi Daisakusen* and *Huang Di*) and why Mesen lets the player choose (zeros by default
+//! there). Zaxnes takes FCEUX's pattern by default since the owner's decision of 2026-11-13;
+//! REQ-CORE-004's zeros stay a choice.
 
 /// The power-on contents of the work RAM.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PowerOnRam {
-    /// All `$00` (REQ-CORE-004, the default).
-    #[default]
+    /// All `$00` (REQ-CORE-004).
     Zero,
-    /// `00 00 00 00 FF FF FF FF` repeating: FCEUX's default and NesHawk's.
+    /// `00 00 00 00 FF FF FF FF` repeating: FCEUX's default and NesHawk's, and Zaxnes's.
+    #[default]
     Pattern,
     /// All `$FF`.
     Ff,
