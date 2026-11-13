@@ -1045,8 +1045,17 @@ impl NesBus {
                 if same {
                     value
                 } else {
-                    // Two drivers on the data bus at once: the byte is the AND of both.
-                    self.read_internal(address) & value
+                    // Two drivers on the data bus at once: the byte is the AND of both. The
+                    // register's answer is on the bus when the other address is read, so an
+                    // address nothing drives gives it back unchanged (`AccuracyCoin`, `APU
+                    // Register Activation` 6: `$41` from `$5016`, not `$40`).
+                    //
+                    // Only the pins the port drives conflict: bits 5 to 7 of a controller port
+                    // are open bus, so there the other driver is alone (test 7 of the same
+                    // row: `$E1` and `$E0` from a page of `$FF`).
+                    self.data_bus = value;
+                    let external = self.read_internal(address);
+                    (external & 0xE0) | (external & value & 0x1F)
                 }
             }
             _ => self.read_internal(address),
