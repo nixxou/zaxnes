@@ -1132,7 +1132,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.ppu_bus_conflicts",
-        "Un défaut de la vraie console : un jeu qui lit ou déplace l'adresse vidéo pendant que l'image est dessinée entre en collision avec ce que la puce vidéo lit à cet instant, et une tuile du décor est lue au mauvais endroit, ce qui donne huit pixels faux sur une ligne. Les jeux écrits pour la console l'évitent. Désactivez ce réglage si un jeu montre ce défaut et que vous préférez ne pas le voir. Prend effet au prochain chargement. Par défaut : activé.",
+        "Un défaut de la vraie console : un jeu qui lit ou déplace l'adresse vidéo pendant que l'image est dessinée entre en collision avec ce que la puce vidéo lit à cet instant, et une tuile du décor est lue au mauvais endroit, ce qui donne huit pixels faux sur une ligne. Les jeux écrits pour la console l'évitent. Désactivez ce réglage si un jeu montre ce défaut et que vous préférez ne pas le voir. Prend effet au prochain chargement. Par défaut : désactivé.",
     ),
     (
         "detail.emu.power_on_ram",

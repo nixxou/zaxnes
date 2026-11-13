@@ -1153,14 +1153,14 @@ fn emulation_cartridge(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("OAM corruption"),
     );
-    // Lot FIDELITY step 16: the fetch a `$2007` read or a `$2006` write collides with. On by
-    // default (faithful to the console first), and a switch to turn it off, like every defect of
-    // the hardware the core reproduces.
+    // Lot FIDELITY step 16: the fetch a `$2007` read or a `$2006` write collides with. Off by
+    // default (owner, 2026-11-13) until the split line of *Super Mario Bros. 3* (Japan) is
+    // settled against Mesen, register by register.
     out.push(
         SettingDescriptor::new(
             SettingId::EmuPpuBusConflicts,
             SettingKind::Bool,
-            SettingValue::Bool(true),
+            SettingValue::Bool(false),
             SettingScope::User,
             SettingEffect::NextRomLoad,
             SettingTheme::Emulation,

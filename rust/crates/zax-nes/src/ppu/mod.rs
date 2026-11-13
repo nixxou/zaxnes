@@ -163,7 +163,8 @@ pub struct Ppu2C02 {
     /// Whether a `$2007` read and a `$2006` write made while the PPU is fetching meet the fetches
     /// as on the hardware: their effect a few dots later, and the fetch they collide with
     /// disturbed ([`Self::read_buffer_from_fetch`], [`Self::delay_address_load`]). A core setting,
-    /// on by default, and not part of the state; off, both act at once as before lot FIDELITY.
+    /// off by default (owner, 2026-11-13), and not part of the state; off, both act at once as
+    /// before lot FIDELITY.
     bus_conflicts: bool,
     /// Dots [`Self::switch_rendering`] ran ahead of the CPU, taken off the next catch-up. Never
     /// outstanding at a frame boundary (the switch only runs ahead on a line that renders), so
@@ -460,7 +461,7 @@ impl Ppu2C02 {
             oam: [0; OAM_SIZE],
             oam_corruption: false,
             oam_corrupt_rows: 0,
-            bus_conflicts: true,
+            bus_conflicts: false,
             prepaid_dots: 0,
             sprite_units: sprite_hw::SpriteUnits::default(),
             fetch_line: -1,

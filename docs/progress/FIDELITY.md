@@ -28,9 +28,22 @@ Reference before the lot: test ROMs 212 pass / 7 fail / 1 unsupported / 111 manu
 
 ## Rows still failing
 
-None with `emu.oam_corruption` on (`ZAXNES_OAM_CORRUPTION=1` for the harness): **147 / 147**. In the
-default build `OAM Corruption` 2 is the one row left, because that setting is off by default
-(owner, 2026-11-13) until its model stops failing blargg's `sprite_overflow_tests/5.Emulator`.
+None with both settings on (`ZAXNES_OAM_CORRUPTION=1 ZAXNES_PPU_BUS_CONFLICTS=1` for the harness):
+**147 / 147**. The default build is at **143**: both settings are off by default (owner, 2026-11-13).
+
+* `emu.oam_corruption` (`OAM Corruption`): its model fails blargg's `sprite_overflow_tests/5.Emulator`.
+* `emu.ppu_bus_conflicts` (`$2007 Stress Test`, `ALE + Read`, `Hybrid Addresses`): it changes the
+  split line of *Super Mario Bros. 3* (Japan), line 193, right edge, and neither the old nor the
+  new picture matches MesenCE there (Mesen: mostly nothing, sometimes 8 pixels; before: 8 or 16;
+  after: nothing, 8, 16, and two shapes of the tile corruption). Forcing Mesen's power-on
+  alignment does not close it. Open study on branch `study/smb3-split`: trace `v` dot by dot on
+  line 193 in both emulators (Mesen: `$2006` at dots 200 and 212, `$2007` read at 224, `v` = `$0B02`).
+
+## Performance
+
+Callgrind, clean builds from `git archive`, dev `27e2c3e2` against `56bba39c` (both settings as
+then: bus conflicts on): total +0.42 % (mm2), +0.52 % (zelda2), +0.53 % (metroid), +0.55 % (smb1),
++0.71 % (smb3); PPU stage +1.0 % to +1.7 %; PR-1 set +0.48 % to +0.95 %. Not yet broken down by step.
 
 ## Still to do outside AccuracyCoin
 
@@ -39,4 +52,4 @@ default build `OAM Corruption` 2 is the one row left, because that setting is of
 * The sprite-overflow bit of `$2002` in *The Legend of Zelda* (set in Mesen, clear here).
 * `$2002` open-bus bits and `$2007` reads during rendering: differ from Mesen, both follow test
   ROMs; to be settled against the documentation.
-* Performance: every step measured before it stays in `default`.
+* Performance: find which step costs (see above) and bring it down before any merge.

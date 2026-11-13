@@ -566,6 +566,11 @@ fn run_one_zaxnes(
     // `ZAXNES_OAM_CORRUPTION=1` runs the campaign with the core's off-by-default OAM row
     // corruption (lot FIDELITY step 9), which `AccuracyCoin`'s `OAM Corruption` row needs.
     core.set_oam_corruption(std::env::var("ZAXNES_OAM_CORRUPTION").is_ok_and(|value| value != "0"));
+    // Likewise `ZAXNES_PPU_BUS_CONFLICTS=1` for the off-by-default `$2007`/`$2006` collisions
+    // (steps 15 and 16): `$2007 Stress Test`, `ALE + Read` and `Hybrid Addresses` need it.
+    core.set_bus_conflicts(
+        std::env::var("ZAXNES_PPU_BUS_CONFLICTS").is_ok_and(|value| value != "0"),
+    );
     // The built-in widescreen patches rewrite game code; a test ROM must run as it is.
     core.set_builtin_patches(false);
     core.set_advanced_patches(false);

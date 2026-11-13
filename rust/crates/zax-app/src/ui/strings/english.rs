@@ -1158,7 +1158,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.ppu_bus_conflicts",
-        "A defect of the real console: a game that reads or moves the video address while the picture is being drawn collides with what the video chip is reading at that instant, and one background tile is read from the wrong place, which shows as eight wrong pixels on one line. Games written for the console avoid it. Turn this off if a game shows such a glitch and you would rather not see it. Takes effect at the next load. Default: on.",
+        "A defect of the real console: a game that reads or moves the video address while the picture is being drawn collides with what the video chip is reading at that instant, and one background tile is read from the wrong place, which shows as eight wrong pixels on one line. Games written for the console avoid it. Turn this off if a game shows such a glitch and you would rather not see it. Takes effect at the next load. Default: off.",
     ),
     (
         "detail.emu.power_on_ram",
