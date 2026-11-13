@@ -22,6 +22,9 @@ workspace = true
 default = [
     # Q-139 closed 2026-11-12: the owner validated SMB3 and Zelda II by eye (lot ACCURACY-1).
     "ppu-2007-render-read",
+    # In `default` since lot FIDELITY (2026-11-13): the owner put fidelity to the console first, and
+    # its +0.04 % to +0.13 % is inside the per-release budget of 2026-11-09.
+    "ppu-exact-sprite-eval",
     "board-94",
     "board-105",
     "board-116",
