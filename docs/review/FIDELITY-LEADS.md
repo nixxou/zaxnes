@@ -424,6 +424,13 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   never differs; Europe differs on line 194 on some frames (200, 300, 350, 900, 1500). Why USA does
   not move is not checked (IRQ landing dot). A PAL console capture of the European title screen is a
   second source to compare with, PAL timing being less verified (I4).
+  **PAL console video** (French PAL NES, composite AV mod, RetroTINK 2X, Elgato HD60 S, 25 fps,
+  492x360, title screen 400 frames): the white separator line (line 194) is damaged **only on its
+  first ~8 pixels**, on 34 % of the frames (17 % fully dark, 17 % partial), normal elsewhere. Zaxnes
+  Europe with `emu.ppu_bus_conflicts` (step 25), frames 200-359: 34 % damaged at x 0-7 of line 194
+  (26 % fully dark, 8 % `###.###.`), never elsewhere; option off: never damaged. Same place, same
+  rate: first hardware support for the transistor `$2007` read model. Limits: one video, every other
+  frame, composite blur, x calibration within ~1-2 px, shapes of the partial cases not compared.
 - I2. *The Legend of Zelda* sprite-overflow bit (C4).
 - I3. `$2002` open-bus bits and `$2007` reads during rendering vs Mesen (C5).
 - I4. Mega Man 2 widescreen not eyeballed; PAL/Dendy fidelity work unverified.
