@@ -283,8 +283,19 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
     netlist's phases is the mark of the zero-delay simulation (DRAM bit lines and precharge have
     no analogue behaviour there). Zaxnes keeps AccuracyCoin's model (row = secondary OAM address
     at the switch, copied from row 0 at the next rendered dot), which passes `OAM Corruption`.
-  - Lead: re-run with the re-enable outside the clear phase (on at dot >= 65 of the next line) to
-    separate the two switches, if the model ever needs the even-dot case.
+  - Re-run with the re-enable ~96 dots after the switch (`oam2.bin`): identical results, so the
+    copies come from the switch off, not from the re-enable.
+  - Dots 257-320 (sprite fetches): the netlist overwrites **row 0 with row k** (k = secondary OAM
+    address, frozen on dots 3-7 of each 8-dot group, as AccuracyCoin describes), plus row k+1 with
+    row k on the dots where the address climbs. **AccuracyCoin measures the opposite direction on a
+    console** (row k gets row 0) in that very phase, and Zaxnes passes that test. Evaluation phase
+    (65-256): mixed, sprite-dependent copies in both directions.
+  - **Conclusion**: the netlist's secondary OAM address per dot matches AccuracyCoin's notes
+    exactly, but the copy itself (whether it happens, its direction, the extra row) is decided by
+    charge on the OAM bit lines, which a zero-delay switch-level simulation does not model. The
+    copy rule therefore stays AccuracyCoin's console measurement. What is still unknown on
+    hardware: the even dots of the clear phase (the netlist's extra copies), and the evaluation
+    phase beyond "rounded up to a multiple of 4". Settling them needs a console, not the netlist.
 
 ### D2. OAM decay when rendering is off — done as an option (`emu.oam_decay`, off, step 20)
 - Zaxnes (step 20): `Ppu2C02::refresh_oam_row` / `refresh_oam_rows_on` (`ppu/mod.rs`), one clock
