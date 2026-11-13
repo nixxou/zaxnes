@@ -265,6 +265,27 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 - Off because blargg `5.Emulator` test 3 fails with it; BeesNES has the same model
   (`OamCorruptionSeed`, `LSNPpu2C0X.h:1955-1971`) **always on** and passes thanks to B1.
 
+- **Transistor measurements (VisualNes, step 7, 2026-11-14).** Bench `benchoam.cpp` (outside the
+  repo): OAM filled with byte = address, program switching rendering off then on 18 dots later every
+  4 lines, sliding one dot per try (`STA $2001` #$00 / #$1E, 455-cycle loop), OAM read back two
+  lines after and restored; 4 alignments, ~650 tries each.
+  - `/rendering_disabled` changes 2 dots after the dot where a read of the same cycle samples (D+2)
+    in alignments 0, 4, 6 and D+1 in alignment 2; inside the dot it changes at half-step 0, 6, 4, 2
+    (alignments 0, 2, 4, 6).
+  - **The netlist corrupts OAM only when the switch lands in the second half of a dot**
+    (alignments 2 and 4: 588 and 528 tries changed OAM); alignments 0 and 6 (switch in the first
+    half): 3 and 2 changes in ~650 tries. In the clear phase (dots 1-64), a switch on odd dot
+    2k+1 overwrites row k with row 0, as AccuracyCoin's notes say; on even dots the netlist also
+    copies row k over row 0 and row k+1, and the re-enable 18 dots later (also in the clear phase)
+    adds its own copy, so the pairs are entangled.
+  - **Not taken as the reference**: AccuracyCoin's author measured the corruption on all four
+    alignments of a console (delay 2 or 3 dots); a corruption that exists in only half of the
+    netlist's phases is the mark of the zero-delay simulation (DRAM bit lines and precharge have
+    no analogue behaviour there). Zaxnes keeps AccuracyCoin's model (row = secondary OAM address
+    at the switch, copied from row 0 at the next rendered dot), which passes `OAM Corruption`.
+  - Lead: re-run with the re-enable outside the clear phase (on at dot >= 65 of the next line) to
+    separate the two switches, if the model ever needs the even-dot case.
+
 ### D2. OAM decay when rendering is off — done as an option (`emu.oam_decay`, off, step 20)
 - Zaxnes (step 20): `Ppu2C02::refresh_oam_row` / `refresh_oam_rows_on` (`ppu/mod.rs`), one clock
   stamp per 8-byte row, checked only on a `$2004` access, an OAM DMA byte and the rendering coming
