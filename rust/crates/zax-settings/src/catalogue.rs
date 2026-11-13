@@ -152,6 +152,7 @@ setting_ids! {
     EmuPpu2006Delay => "emu.ppu_2006_delay",
     EmuPpu2006Glitch => "emu.ppu_2006_glitch",
     EmuPpu2000Glitch => "emu.ppu_2000_glitch",
+    EmuCpuPpuAlignment => "emu.cpu_ppu_alignment",
     EmuPpuBusConflicts => "emu.ppu_bus_conflicts",
     EmuCatchUp => "emu.catch_up",
     // AMD-041 REQ-LOOP-064, exposed as `RunAheadFrames` (AMD-040 REQ-LUA-114).

@@ -220,6 +220,13 @@ impl NesCore {
         self.bus.ppu_mut().set_glitch_2000(enabled);
     }
 
+    /// Which of the four CPU/PPU clock alignments (0 to 3) the PPU's read-side timings follow:
+    /// the dot a `$2007` read made while rendering latches on, and whether the `$2000` dot-257
+    /// glitch can happen (`docs/review/FIDELITY-LEADS.md`, A4). 2 by default.
+    pub fn set_cpu_ppu_alignment(&mut self, alignment: u8) {
+        self.bus.ppu_mut().set_cpu_ppu_alignment(alignment);
+    }
+
     pub fn set_oamaddr_bug(&mut self, enabled: bool) {
         self.bus.ppu_mut().set_oamaddr_bug(enabled);
     }
@@ -239,7 +246,6 @@ impl NesCore {
     pub fn set_phase_offset(&mut self, dots: i32) {
         self.bus.ppu_mut().set_phase_offset(dots);
     }
-
 
     pub fn set_console_audio_profile(&mut self, index: usize) {
         self.bus.apu_mut().set_console_profile(index);

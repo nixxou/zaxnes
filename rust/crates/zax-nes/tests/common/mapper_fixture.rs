@@ -180,6 +180,8 @@ impl MapperRom {
     /// Loads the image and checks the mapper number.
     pub fn load(&self) -> NesCore {
         let mut core = NesCore::new();
+        // Power-on in vblank, as these tests count lines from (see `machine_with`).
+        core.set_power_on_top(false);
         let load = core.load_rom(&self.image(), &format!("Mapper{}.nes", self.mapper));
         assert!(load.success, "{:?}", load.error);
         assert_eq!(

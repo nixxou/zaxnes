@@ -2135,6 +2135,26 @@ fn ppu_write_timings(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("$2000 dot-257 glitch"),
     );
+    // Lot FIDELITY step 28: which of the four CPU/PPU clock alignments the read-side timings
+    // follow (docs/review/FIDELITY-LEADS.md, A4). Value 2 ("Alignment 3") is the one the core has
+    // always followed.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuCpuPpuAlignment,
+            SettingKind::Enum,
+            SettingValue::Enum(2),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Alignment 1"),
+            opt(1, "Alignment 2"),
+            opt(2, "Alignment 3"),
+            opt(3, "Alignment 4"),
+        ]))
+        .with_label("CPU/PPU alignment"),
+    );
 }
 
 fn video_rust_only(out: &mut Vec<SettingDescriptor>) {

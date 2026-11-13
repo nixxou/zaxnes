@@ -512,6 +512,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         .map(|id| self.settings.get(id).as_bool())
     }
 
+    /// `emu.cpu_ppu_alignment` as the core takes it, 0 to 3 (lot FIDELITY step 28).
+    fn cpu_ppu_alignment(&self) -> u8 {
+        u8::try_from(self.settings.get(SettingId::EmuCpuPpuAlignment).as_int() & 3).unwrap_or(2)
+    }
+
     /// `audio.console_profile` as the core takes it: 0 for none.
     pub(super) fn console_audio_profile(&self) -> usize {
         usize::try_from(self.settings.get(SettingId::AudioConsoleProfile).as_int()).unwrap_or(0)
@@ -560,6 +565,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let cartridge_db = self.settings.get(SettingId::EmuCartridgeDb).as_bool();
                 let fidelity = self.fidelity_switches();
                 let console_profile = self.console_audio_profile();
+                let alignment = self.cpu_ppu_alignment();
                 let power_on_ram = match self.settings.get(SettingId::EmuPowerOnRam).as_int() {
                     1 => zax_nes::PowerOnRam::Pattern,
                     2 => zax_nes::PowerOnRam::Ff,
@@ -577,6 +583,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                     Some(session) => {
                         session.core_mut().set_cartridge_db(cartridge_db);
                         apply_fidelity_switches(session.core_mut(), fidelity);
+                        session.core_mut().set_cpu_ppu_alignment(alignment);
                         session
                             .core_mut()
                             .set_console_audio_profile(console_profile);

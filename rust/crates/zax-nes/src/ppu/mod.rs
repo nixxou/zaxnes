@@ -197,6 +197,16 @@ pub struct Ppu2C02 {
     /// Whether a `$2000` write that starts on dot 257 lets the dot-257 copy take the nametable-X
     /// bit from the CPU's open bus ([`Self::control_write_glitch`]). On by default.
     glitch_2000: bool,
+    /// Which CPU/PPU clock alignment the read-side timings follow, 0 to 3: the four alignments of
+    /// the transistor measurements, M2 rising at sub-phase 2, 0, 6 and 4 of a dot
+    /// (`docs/review/FIDELITY-LEADS.md`, A3c and A4). It moves the dot a `$2007` read latches its
+    /// buffer on ([`Self::read_buffer_from_fetch`], 6 dots after the access in alignment 2, 5 in
+    /// the others) and decides whether the `$2000` dot-257 glitch can happen (alignment 2 only).
+    /// The write timings (`$2001`, `$2006`) do not depend on it: the netlist cannot place a store
+    /// to better than a quarter dot, and with the console's hold time all four land on the same
+    /// dot. A core setting, not part of the state; 2 by default, the alignment this core always
+    /// followed.
+    alignment: u8,
     /// The CPU data bus before the write in progress: what the PPU's data pins see for the first
     /// half master clocks of the write, before the CPU drives its value. Set by the bus.
     cpu_open_bus: u8,
@@ -513,6 +523,7 @@ impl Ppu2C02 {
             address_load_delay: true,
             glitch_2006: true,
             glitch_2000: true,
+            alignment: 2,
             cpu_open_bus: 0,
             prepaid_dots: 0,
             serial_since: 0,
@@ -880,6 +891,11 @@ impl Ppu2C02 {
     /// See `glitch_2006`.
     pub const fn set_glitch_2006(&mut self, enabled: bool) {
         self.glitch_2006 = enabled;
+    }
+
+    /// See `alignment`; values above 3 are taken modulo 4.
+    pub const fn set_cpu_ppu_alignment(&mut self, alignment: u8) {
+        self.alignment = alignment & 3;
     }
 
     /// See `glitch_2000`.
@@ -1350,7 +1366,7 @@ impl Ppu2C02 {
     /// well; `#[inline]`, so the `$2000` arm is the body it always was.
     #[inline]
     fn write_control(&mut self, value: u8, cartridge: Option<&mut Cartridge>) {
-        if self.dot == 257 && self.glitch_2000 && self.fetching() {
+        if self.dot == 257 && self.glitch_2000 && self.alignment == 2 && self.fetching() {
             self.control_write_glitch();
         }
         self.control = value;
@@ -1959,23 +1975,23 @@ impl Ppu2C02 {
     #[cold]
     #[inline(never)]
     fn read_buffer_from_fetch(&mut self, cart: Cart<'_, '_>) -> bool {
-        /// X - D, for the alignment this core follows.
-        const LATCH_DOTS: i32 = 6;
+        // X - D: 6 in alignment 2, 5 in the three others.
+        let latch_dots: i32 = if self.alignment == 2 { 6 } else { 5 };
         if self.prepaid_dots != 0 {
             return false;
         }
-        self.run_dots(i64::from(LATCH_DOTS - 1), cart);
-        self.prepaid_dots = LATCH_DOTS - 1;
+        self.run_dots(i64::from(latch_dots - 1), cart);
+        self.prepaid_dots = latch_dots - 1;
         let latch_dot = self.dot + 1;
         if !self.fetching() {
             self.run_dots(1, cart);
-            self.prepaid_dots = LATCH_DOTS;
+            self.prepaid_dots = latch_dots;
             return false;
         }
         if (latch_dot & 1) == 0 {
             // An even dot: its own fetch is the byte.
             self.run_dots(1, cart);
-            self.prepaid_dots = LATCH_DOTS;
+            self.prepaid_dots = latch_dots;
             self.read_buffer = self.fetch_bus_value(cart.as_deref());
             return false;
         }
@@ -1986,7 +2002,7 @@ impl Ppu2C02 {
         self.run_dots(1, cart);
         self.increment_vram_address(cart);
         self.run_dots(1, cart);
-        self.prepaid_dots = LATCH_DOTS + 1;
+        self.prepaid_dots = latch_dots + 1;
         if self.fetching() {
             self.refetch_with_low_byte(residue, cart.as_deref());
         }

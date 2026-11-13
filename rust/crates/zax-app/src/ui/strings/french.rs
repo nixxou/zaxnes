@@ -525,6 +525,11 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.ppu_2006_delay", "Délai de chargement $2006"),
     ("setting.emu.ppu_2006_glitch", "Glitch de défilement $2006"),
     ("setting.emu.ppu_2000_glitch", "Glitch $2000 du point 257"),
+    ("setting.emu.cpu_ppu_alignment", "Alignement CPU/PPU"),
+    ("option.Alignment 1", "Alignement 1"),
+    ("option.Alignment 2", "Alignement 2"),
+    ("option.Alignment 3", "Alignement 3"),
+    ("option.Alignment 4", "Alignement 4"),
     ("setting.emu.power_on_ram", "RAM à l'allumage"),
     ("option.Zeros", "Zéros"),
     ("option.FCEUX pattern", "Motif FCEUX"),
@@ -1178,6 +1183,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (
         "detail.emu.ppu_2006_glitch",
         "Un défaut de la puce vidéo : si cette nouvelle adresse arrive pile au point où la puce passe à la tuile suivante, les deux se mélangent et la position de défilement devient un mélange des deux, jusqu'à ce que le jeu la redonne. Les jeux écrits pour la console l'évitent. Prend effet au prochain chargement. Par défaut : activé.",
+    ),
+    (
+        "detail.emu.cpu_ppu_alignment",
+        "À l'allumage, le processeur et la puce vidéo de la console calent leurs horloges de l'une de quatre façons, qui change d'un allumage à l'autre. Quelques défauts n'apparaissent que dans certaines : ce qu'un jeu lit dans la mémoire vidéo pendant que l'image est dessinée arrive un point plus tard en alignement 3 que dans les autres, et le glitch $2000 du point 257 n'existe qu'en alignement 3. Les jeux écrits pour la console fonctionnent dans les quatre. L'alignement 3 est celui que Zaxnes a toujours suivi. Prend effet au prochain chargement. Par défaut : Alignement 3.",
     ),
     (
         "detail.emu.ppu_2000_glitch",

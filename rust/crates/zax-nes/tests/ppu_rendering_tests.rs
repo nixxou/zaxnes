@@ -812,6 +812,9 @@ fn fidelity_oam_decays_after_8_frames_with_the_rendering_off() {
             fixture.set_sprite(sprite, 0x40, 0x11, 0x01, 0x22);
         }
         fixture.core.set_oam_decay(decay);
+        // The rendering goes off mid-picture here; the row corruption that brings (on by default
+        // since step 27) is another test's subject.
+        fixture.core.set_oam_corruption(false);
         fixture.set_mask(0x18);
         park_on_scanline(&mut fixture, 10);
         fixture.set_mask(0x00);
@@ -852,10 +855,13 @@ fn fidelity_oam_decays_after_8_frames_with_the_rendering_off() {
 #[test]
 fn fidelity_power_on_top_starts_the_ppu_at_line_0_dot_11() {
     let mut fixture = TileFixture::new();
+    fixture.core.set_power_on_top(false);
     fixture.core.reset();
     let ppu = fixture.core.bus().ppu();
-    assert_ne!(0, ppu.scanline(), "default: vblank");
+    assert_ne!(0, ppu.scanline(), "off: vblank");
 
+    // On (the default since step 27; the fixture asks for vblank, see `machine_with`).
+    let mut fixture = TileFixture::new();
     fixture.core.set_power_on_top(true);
     fixture.core.reset();
     let ppu = fixture.core.bus().ppu();
@@ -908,8 +914,16 @@ fn fidelity_2006_load_on_a_coarse_x_increment_ands_coarse_x() {
 
     let (before, v, t) = load_at(133, true);
     let expected = (0x2AD7 & !0x1F) | (0x2AD7 & increment_x(before) & 0x1F);
-    assert_eq!((expected, expected), (v, t), "collision at dot 136, v was {before:04X}");
-    assert_eq!((0x2AD7, 0x2AD7), (load_at(133, false).1, load_at(133, false).2), "setting off");
+    assert_eq!(
+        (expected, expected),
+        (v, t),
+        "collision at dot 136, v was {before:04X}"
+    );
+    assert_eq!(
+        (0x2AD7, 0x2AD7),
+        (load_at(133, false).1, load_at(133, false).2),
+        "setting off"
+    );
     assert_eq!(0x2AD7, load_at(134, true).2, "no collision on dot 137");
 }
 
@@ -919,7 +933,11 @@ fn fidelity_2006_load_on_a_coarse_x_increment_ands_coarse_x() {
 #[test]
 fn fidelity_2000_write_on_dot_257_takes_nametable_x_from_open_bus() {
     fn nametable_x_after(dot: i32, glitch: bool) -> u16 {
+        nametable_x_in(2, dot, glitch)
+    }
+    fn nametable_x_in(alignment: u8, dot: i32, glitch: bool) -> u16 {
         let mut fixture = TileFixture::new();
+        fixture.core.set_cpu_ppu_alignment(alignment);
         fixture.core.set_glitch_2000(glitch);
         fixture.set_mask(0x0A);
         fixture.core.bus_mut().ppu_mut().write(0, 0x01, None);
@@ -933,4 +951,41 @@ fn fidelity_2000_write_on_dot_257_takes_nametable_x_from_open_bus() {
     assert_eq!(0, nametable_x_after(257, true), "glitch");
     assert_eq!(1, nametable_x_after(257, false), "setting off");
     assert_eq!(1, nametable_x_after(258, true), "a dot later is safe");
+    // Only alignment 2 (the third) of the netlist measurement has the glitch.
+    for alignment in [0, 1, 3] {
+        assert_eq!(
+            1,
+            nametable_x_in(alignment, 257, true),
+            "alignment {alignment}"
+        );
+    }
+}
+
+/// Lot FIDELITY step 28: a `$2007` read made while rendering latches its buffer six dots after the
+/// access in alignment 2 (the default) and five in the three others, so a read one dot later in
+/// alignment 0 buffers exactly what a read one dot earlier does in alignment 2.
+#[test]
+fn fidelity_2007_latch_dot_follows_the_cpu_ppu_alignment() {
+    fn buffered(alignment: u8, dot: i32) -> u8 {
+        let mut fixture = TileFixture::new();
+        fixture.core.set_cpu_ppu_alignment(alignment);
+        fixture.core.set_bus_conflicts(true);
+        // A nametable of distinct bytes, so the fetches the buffer can take differ.
+        let bytes: Vec<u8> = (0..0x3C0u16)
+            .map(|index| (index.wrapping_mul(7) + 3).to_le_bytes()[0])
+            .collect();
+        fixture.write_vram(0x2000, &bytes);
+        fixture.set_mask(0x1E);
+        park_on_dot(&mut fixture, dot);
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        ppu.read(7, None);
+        ppu.read(7, None)
+    }
+
+    let mut differs = false;
+    for dot in (20..240).step_by(3) {
+        assert_eq!(buffered(2, dot - 1), buffered(0, dot), "dot {dot}");
+        differs |= buffered(2, dot) != buffered(0, dot);
+    }
+    assert!(differs, "the two alignments never latched different bytes");
 }

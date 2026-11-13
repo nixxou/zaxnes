@@ -565,7 +565,9 @@ fn run_one_zaxnes(
     let mut core = NesCore::new();
     // `ZAXNES_OAM_CORRUPTION=0` runs the campaign without the core's on-by-default OAM row
     // corruption (lot FIDELITY step 9), which `AccuracyCoin`'s `OAM Corruption` row needs.
-    core.set_oam_corruption(std::env::var("ZAXNES_OAM_CORRUPTION").map_or(true, |value| value != "0"));
+    core.set_oam_corruption(
+        std::env::var("ZAXNES_OAM_CORRUPTION").map_or(true, |value| value != "0"),
+    );
     // `ZAXNES_PPU_BUS_CONFLICTS=0` turns the on-by-default `$2007` read model off (steps 15 and
     // 25): `$2007 Stress Test` and `ALE + Read` need it.
     core.set_bus_conflicts(
@@ -574,11 +576,22 @@ fn run_one_zaxnes(
     // And `ZAXNES_OAM_DECAY=1` for the off-by-default decay of OAM with the rendering off (step
     // 20): blargg's `oam_stress` and `sprdma_and_dmc_dma` must still pass with it.
     core.set_oam_decay(std::env::var("ZAXNES_OAM_DECAY").is_ok_and(|value| value != "0"));
+    // `ZAXNES_ALIGNMENT=0..3`: the CPU/PPU alignment of the read-side timings (step 28, 2 by
+    // default).
+    core.set_cpu_ppu_alignment(
+        std::env::var("ZAXNES_ALIGNMENT")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(2),
+    );
     // `ZAXNES_POWER_ON_TOP=0`: the PPU starts in vblank as before step 27.
     core.set_power_on_top(std::env::var("ZAXNES_POWER_ON_TOP").map_or(true, |value| value != "0"));
     // Study `study/access-phase`: `ZAXNES_PHASE=0..2` moves the CPU/PPU alignment.
     core.set_phase_offset(
-        std::env::var("ZAXNES_PHASE").ok().and_then(|value| value.parse().ok()).unwrap_or(0),
+        std::env::var("ZAXNES_PHASE")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0),
     );
     // `ZAXNES_PPU_GLITCHES=0` turns the three on-by-default netlist timings off together.
     let glitches = std::env::var("ZAXNES_PPU_GLITCHES").map_or(true, |value| value != "0");

@@ -232,6 +232,10 @@ pub fn bus_with(image: &[u8], name: &str) -> NesBus {
 /// A machine with `image` loaded.
 pub fn machine_with(image: &[u8], name: &str) -> NesCore {
     let mut machine = NesCore::new();
+    // The tests built on these fixtures count from the power-on in vblank they were written
+    // against; the power-on at the top of the picture (on by default since lot FIDELITY step 27)
+    // has its own tests.
+    machine.set_power_on_top(false);
     let load = machine.load_rom(image, name);
     assert!(load.success, "{:?}", load.error);
     machine

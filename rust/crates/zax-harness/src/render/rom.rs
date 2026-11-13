@@ -512,8 +512,17 @@ impl Host {
         let profile = startup.profile;
         let mut core = NesCore::new();
         core.set_advanced_patches(startup.advanced);
+        // `ZAXNES_ALIGNMENT=0..3`: render in another CPU/PPU alignment (step 28).
+        core.set_cpu_ppu_alignment(
+            std::env::var("ZAXNES_ALIGNMENT")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(2),
+        );
         // `ZAXNES_PPU_BUS_CONFLICTS=0`: render without the on-by-default `$2007` read model.
-        core.set_bus_conflicts(std::env::var("ZAXNES_PPU_BUS_CONFLICTS").map_or(true, |value| value != "0"));
+        core.set_bus_conflicts(
+            std::env::var("ZAXNES_PPU_BUS_CONFLICTS").map_or(true, |value| value != "0"),
+        );
         let load = core.load_rom(&fs::read(startup.rom)?, &file_name(startup.rom));
         if !load.success {
             return Err(HarnessError::Rom(format!(

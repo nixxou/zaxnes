@@ -513,6 +513,11 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.ppu_2006_delay", "$2006 load delay"),
     ("setting.emu.ppu_2006_glitch", "$2006 scroll glitch"),
     ("setting.emu.ppu_2000_glitch", "$2000 dot-257 glitch"),
+    ("setting.emu.cpu_ppu_alignment", "CPU/PPU alignment"),
+    ("option.Alignment 1", "Alignment 1"),
+    ("option.Alignment 2", "Alignment 2"),
+    ("option.Alignment 3", "Alignment 3"),
+    ("option.Alignment 4", "Alignment 4"),
     ("setting.emu.power_on_ram", "Work RAM at power-on"),
     ("option.Zeros", "Zeros"),
     ("option.FCEUX pattern", "FCEUX pattern"),
@@ -1204,6 +1209,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         "detail.emu.ppu_2006_glitch",
         "A defect of the video chip: if that new address arrives on the very dot the chip moves to the next tile, the two collide and the scroll position becomes a mix of both, until the game sets it again. Games written for the console avoid it. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.cpu_ppu_alignment",
+        "When it is switched on, the console's processor and video chip settle into one of four ways their clocks line up, a different one from one power-on to the next. A few defects show only in some of them: what a game reads from video memory while the picture is drawn lands a dot later in alignment 3 than in the others, and the $2000 dot-257 glitch only exists in alignment 3. Games written for the console work in all four. Alignment 3 is the one Zaxnes has always followed. Takes effect at the next load. Default: Alignment 3.",
     ),
     (
         "detail.emu.ppu_2000_glitch",

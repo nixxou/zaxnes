@@ -313,6 +313,7 @@ const EMULATION: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::EmuPpu2006Delay),
     LayoutEntry::Row(SettingId::EmuPpu2006Glitch),
     LayoutEntry::Row(SettingId::EmuPpu2000Glitch),
+    LayoutEntry::Row(SettingId::EmuCpuPpuAlignment),
 ];
 
 /// The rows of the **Interface** tab, from the most common to the most advanced.

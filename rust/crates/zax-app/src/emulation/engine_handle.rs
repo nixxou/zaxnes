@@ -851,6 +851,13 @@ impl EngineHandle {
         }
     }
 
+    /// `emu.cpu_ppu_alignment` (lot FIDELITY step 28); Zaxnes only.
+    pub fn set_cpu_ppu_alignment(&mut self, alignment: u8) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_cpu_ppu_alignment(alignment);
+        }
+    }
+
     /// Whether a power-on puts the PPU at the top of the picture (lot FIDELITY); likewise.
     pub fn set_power_on_top(&mut self, enabled: bool) {
         if let Some(core) = self.zaxnes_mut() {

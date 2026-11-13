@@ -112,8 +112,10 @@ pub fn golden_row(rel: &str, image: &[u8], frames: u32) -> Result<Value, Harness
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_default();
     let mut core = NesCore::new();
-    // `ZAXNES_POWER_ON_TOP=0`: measure the old power-on in vblank (on by default since step 27).
-    core.set_power_on_top(std::env::var("ZAXNES_POWER_ON_TOP").map_or(true, |value| value != "0"));
+    // The golden rows (`rust/goldens/core-goldens.jsonl`) were taken with the PPU powering on in
+    // vblank, so this command keeps that power-on; `ZAXNES_POWER_ON_TOP=1` measures the one the
+    // app uses by default since lot FIDELITY step 27.
+    core.set_power_on_top(std::env::var("ZAXNES_POWER_ON_TOP").is_ok_and(|value| value != "0"));
     let load = core.load_rom(image, &name);
     row.insert("load_ok".into(), json!(load.success));
     if !load.success {
