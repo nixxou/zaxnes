@@ -170,6 +170,12 @@ pub struct Ppu2C02 {
     /// outstanding at a frame boundary (the switch only runs ahead on a line that renders), so
     /// not in the state.
     prepaid_dots: i32,
+    /// The high plane's serial input, kept off the hot path (see `shift_background`): the 1s it
+    /// has shifted in, counted up to `serial_since` (the clock of the last reload, or of the last
+    /// switch of the rendering), at most 16. Transient, like the rest of what a switch leaves: a
+    /// state load drops it, which only matters if it lands between a switch-off and a switch-on.
+    serial_since: i64,
+    serial_base: u32,
     /// The sprite output units while a switched rendering has them off their usual course (see
     /// [`sprite_hw`]). Transient, like the rest of what a switch leaves.
     sprite_units: sprite_hw::SpriteUnits,
@@ -463,6 +469,8 @@ impl Ppu2C02 {
             oam_corrupt_rows: 0,
             bus_conflicts: false,
             prepaid_dots: 0,
+            serial_since: 0,
+            serial_base: 0,
             sprite_units: sprite_hw::SpriteUnits::default(),
             fetch_line: -1,
             fetch_missed: 0,
@@ -641,6 +649,7 @@ impl Ppu2C02 {
             self.attribute_shift_low << 1,
             self.attribute_shift_high << 1,
         ];
+        let base = self.serial_base;
         self.run_dots(1, cart);
         self.prepaid_dots += 1;
         [
@@ -649,6 +658,61 @@ impl Ppu2C02 {
             self.attribute_shift_low,
             self.attribute_shift_high,
         ] = shifted;
+        // The reload that dot made is taken back; the serial count goes on from before it.
+        self.serial_base = (base + 1).min(16);
+        self.serial_since = self.ppu_clock;
+    }
+
+    /// The 1s the high background plane has shifted in since its last reload, which
+    /// `shift_background` leaves out: brought into the register when the rendering comes back.
+    ///
+    /// The lowest *k* bits of the high plane are always the *k* bits shifted in since the reload,
+    /// and the reload every eight dots keeps *k* under eight — out of sight of the pixel, which
+    /// reads bits 8 to 15 — on any line that renders without a break. Only a reload that does not
+    /// happen lets *k* pass eight, and a reload only fails to happen with the rendering off (or
+    /// switched on for its very dot, `skip_background_reload`). So the count is taken when the
+    /// rendering goes off and the bits are set when it comes back; nothing is done per dot.
+    #[cold]
+    #[inline(never)]
+    fn serial_ones(&mut self, on: bool) {
+        if on {
+            let base = self.serial_base;
+            if base != 0 {
+                self.pattern_shift_high |= if base >= 16 {
+                    0xFFFF
+                } else {
+                    (1u16 << base) - 1
+                };
+            }
+            self.serial_since = self.ppu_clock;
+            return;
+        }
+        let shifted = self.shift_dots_since(self.serial_since, 16 - self.serial_base.min(16));
+        self.serial_base = (self.serial_base + shifted).min(16);
+        self.serial_since = self.ppu_clock;
+    }
+
+    /// The dots, at most `limit`, that shifted the background registers between the clock `since`
+    /// (excluded) and now (included), the rendering having been on all along: dots 2 to 257 and
+    /// 321 to 337 of a line that renders. Walked back from the current dot; a cold-path helper.
+    fn shift_dots_since(&self, since: i64, limit: u32) -> u32 {
+        let mut steps = self.ppu_clock - since;
+        let (mut line, mut dot) = (self.scanline, self.dot);
+        let last_line = self.pre_render_scanline();
+        let mut count = 0;
+        while steps > 0 && count < limit {
+            let renders = line < VISIBLE_SCANLINES || line == last_line;
+            if renders && matches!(dot, 2..=257 | 321..=337) {
+                count += 1;
+            }
+            steps -= 1;
+            dot -= 1;
+            if dot < 0 {
+                dot = 340;
+                line = if line == 0 { last_line } else { line - 1 };
+            }
+        }
+        count
     }
 
     /// Turns the fetches disturbed by a colliding `$2007` read or `$2006` write on or off (see
@@ -681,6 +745,7 @@ impl Ppu2C02 {
             self.note_fetch_pause(on);
             self.note_oam2_overflow(on);
         }
+        self.serial_ones(on);
         self.note_sprite_switch(on, renders);
         if !self.oam_corruption {
             return;

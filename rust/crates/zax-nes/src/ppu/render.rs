@@ -399,17 +399,23 @@ impl Ppu2C02 {
     }
 
     fn shift_background(&mut self) {
-        // "The lowest bit (the new value shifted in on the right) is a 0 for the low bit plane,
-        // and a 1 for the high bit plane" (`AccuracyCoin`, `BG Serial In`). The reload every eight
-        // dots overwrites the low byte, so a line that renders normally never shows that 1; a
-        // line whose reloads were skipped does.
+        // The hardware shifts a 1 into the high plane (`AccuracyCoin`, `BG Serial In`: "a 0 for
+        // the low bit plane, and a 1 for the high bit plane"). Those 1s sit in the low byte, which
+        // the reload every eight dots overwrites before any of them reaches the bits a pixel reads,
+        // so on a line that renders normally they never show. They are added where they can show
+        // — when the rendering comes back after a reload it missed (`Ppu2C02::serial_ones`) — and
+        // the four shifts stay plain: one vector shift on this, the hottest path of the PPU
+        // (lot FIDELITY step 18; the `| 1` here cost +0.6 % of a whole *Super Mario Bros. 3* run).
         self.pattern_shift_low <<= 1;
-        self.pattern_shift_high = (self.pattern_shift_high << 1) | 1;
+        self.pattern_shift_high <<= 1;
         self.attribute_shift_low <<= 1;
         self.attribute_shift_high <<= 1;
     }
 
     fn load_background_shifters(&mut self) {
+        // The serial 1s of the high plane count from here (see `shift_background`).
+        self.serial_since = self.ppu_clock;
+        self.serial_base = 0;
         self.pattern_shift_low =
             (self.pattern_shift_low & 0xFF00) | u16::from(self.pattern_low_latch);
         self.pattern_shift_high =
