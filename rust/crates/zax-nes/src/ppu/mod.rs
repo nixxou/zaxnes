@@ -112,7 +112,12 @@ const READ_BUFFER_READY_DOTS: i64 = 5;
 /// the dot at which the decision is latched. `ppu_vbl_nmi` test 10 measures it to one PPU
 /// clock by enabling and disabling background rendering around it, and it only passes with
 /// the mask read two dots before the end of the pre-render line.
-const SKIP_DECISION_DOT: i32 = 338;
+///
+/// That was 338 while a `$2001` write took effect at once. Since lot FIDELITY the switch of the
+/// rendering arrives two dots after its write (`Ppu2C02::switch_rendering`), so the same writes
+/// are seen by the last dot of the line — which is also where Mesen 2 reads it, one dot earlier
+/// with its own one-dot delay.
+const SKIP_DECISION_DOT: i32 = 340;
 
 const VISIBLE_SCANLINES: i32 = RegionTiming::VISIBLE_SCANLINES;
 const SCREEN_WIDTH_I32: i32 = 256;
@@ -154,12 +159,19 @@ pub struct Ppu2C02 {
     /// The OAM rows a switch-off of the rendering marked, one bit a row, waiting for the rendering
     /// to come back on a line that renders. Transient: a state load drops it.
     oam_corrupt_rows: u32,
+    /// Dots [`Self::switch_rendering`] ran ahead of the CPU, taken off the next catch-up. Never
+    /// outstanding at a frame boundary (the switch only runs ahead on a line that renders), so
+    /// not in the state.
+    prepaid_dots: i32,
     /// The line [`Self::note_fetch_pause`] is counting for (the clock of its dot 0), the steps of
     /// the secondary OAM address it lost so far, and the dot the rendering went off on, −1 while
     /// it is on. Transient, like the row corruption.
     fetch_line: i64,
     fetch_missed: i32,
     fetch_off_dot: i32,
+    /// The secondary OAM's "overflowed" flag as [`Self::note_oam2_overflow`] left it when the
+    /// rendering went off. Transient.
+    oam2_overflowed: bool,
     /// Palette RAM **as the game wrote it**, six bits an entry: what a `$2007` read of
     /// `$3F00`-`$3F1F` gives back and what the state blob carries, because palette RAM sits
     /// before the chip's colour decoder and a read never sees that decoder.
@@ -439,9 +451,11 @@ impl Ppu2C02 {
             oam: [0; OAM_SIZE],
             oam_corruption: false,
             oam_corrupt_rows: 0,
+            prepaid_dots: 0,
             fetch_line: -1,
             fetch_missed: 0,
             fetch_off_dot: -1,
+            oam2_overflowed: false,
             palette_raw: [0; PALETTE_SIZE],
             palette: [0; PALETTE_SIZE],
             palette_marked: marked_palette(&[0; PALETTE_SIZE]),
@@ -561,6 +575,30 @@ impl Ppu2C02 {
         }
     }
 
+    /// A `$2001` write that turns the rendering on or off.
+    ///
+    /// **The switch takes effect two dots after the write.** `AccuracyCoin` measures it from
+    /// several sides — `OAM Corruption` 2 ("if rendering is disabled on dot 9 (2 cycle delay) row 4
+    /// will become corrupt"; three dots on two of the four CPU/PPU alignments), `Misaligned OAM2
+    /// Address` 4 and `Frozen OAM2 Increment` 2, which turns the rendering back on "on dot 256"
+    /// so that the vertical increment of that dot does **not** happen — and Mesen 2 has the same
+    /// delay ("rendering enabled flag is apparently set with a 1 cycle delay").
+    ///
+    /// The two dots are run here, at once, under the old mask, and owed back to the next catch-up
+    /// ([`Self::prepaid_dots`]): nothing is tested per dot. Only on a line that renders; elsewhere
+    /// the switch has nothing to be late for.
+    #[cold]
+    #[inline(never)]
+    fn switch_rendering(&mut self, value: u8, cart: Cart<'_, '_>) {
+        let renders = self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline();
+        if renders && self.prepaid_dots == 0 {
+            self.run_dots(2, cart);
+            self.prepaid_dots = 2;
+        }
+        self.mask = value;
+        self.rendering_switched((value & 0x18) != 0);
+    }
+
     /// What switching the rendering off or on inside a frame does to OAM, `on` being the new
     /// state.
     ///
@@ -582,6 +620,7 @@ impl Ppu2C02 {
         let renders = self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline();
         if renders {
             self.note_fetch_pause(on);
+            self.note_oam2_overflow(on);
         }
         if !self.oam_corruption {
             return;
@@ -596,7 +635,7 @@ impl Ppu2C02 {
             return;
         }
 
-        let dot = self.dot + 2;
+        let dot = self.dot;
         #[allow(clippy::cast_sign_loss)] // Each arm is 0..32 by its range.
         let row = match dot {
             1..=64 => (dot >> 1) as u32 & 0x1F,
@@ -622,7 +661,7 @@ impl Ppu2C02 {
     /// corruption above.
     fn note_fetch_pause(&mut self, on: bool) {
         let line = self.ppu_clock - i64::from(self.dot);
-        let dot = self.dot + 2;
+        let dot = self.dot;
         if !on {
             if self.fetch_line != line {
                 self.fetch_line = line;
@@ -641,6 +680,43 @@ impl Ppu2C02 {
             self.fetch_missed += missed;
             self.fetch_off_dot = -1;
         }
+    }
+
+    /// The secondary OAM's "overflowed" flag across a rendering switched off and on.
+    ///
+    /// The flag is raised whenever the secondary OAM address overflows — the evaluation filling
+    /// it, and every line's last fetch at dot 321 — and "is cleared if rendering is enabled during
+    /// dots 63, 255, and 339"; while it is up the address cannot move. With the rendering on all
+    /// along it is always down again before it could matter, so it is only worked out here, at the
+    /// two moments that can leave it up: it is read when the rendering goes off, and if the
+    /// rendering comes back after dot 255 with it still up, "the sprite fetch stage will
+    /// continuously read from index 0 of OAM2 for every object" (`AccuracyCoin`, `Frozen OAM2
+    /// Increment` 2 to 4) — which is the secondary OAM holding that one byte everywhere, for the
+    /// fetches of this line; the next line's clear rebuilds it.
+    fn note_oam2_overflow(&mut self, on: bool) {
+        let dot = self.dot;
+        if !on {
+            self.oam2_overflowed = match dot {
+                321..=338 => true,
+                64..=254 => self.secondary_oam_full(),
+                _ => false,
+            };
+        } else if std::mem::take(&mut self.oam2_overflowed) && (256..=320).contains(&dot) {
+            let first = self.secondary_oam[0];
+            self.secondary_oam.fill(first);
+        }
+    }
+
+    /// Whether the evaluation has filled the secondary OAM.
+    #[cfg(feature = "ppu-exact-sprite-eval")]
+    const fn secondary_oam_full(&self) -> bool {
+        self.secondary_oam_addr >= 32
+    }
+
+    /// Without the exact evaluation, eight sprites found is the same statement.
+    #[cfg(not(feature = "ppu-exact-sprite-eval"))]
+    const fn secondary_oam_full(&self) -> bool {
+        self.eval_found >= 8
     }
 
     /// The row [`Self::rendering_switched`] marks during the evaluation: the secondary OAM
@@ -1096,13 +1172,29 @@ impl Ppu2C02 {
         self.dot_accumulator = accumulator;
 
         let sample_after = (dots - NMI_SAMPLE_LEAD).max(0);
-        for dot in 0..dots {
+        let mut first = 0;
+        if self.prepaid_dots != 0 {
+            first = self.take_prepaid(dots);
+            if first > sample_after {
+                self.nmi_line_sample = self.nmi_asserted();
+            }
+        }
+        for dot in first..dots {
             if dot == sample_after {
                 self.nmi_line_sample = self.nmi_asserted();
             }
 
             self.step_dot(&mut cartridge);
         }
+    }
+
+    /// The dots of the coming `dots` that [`Self::switch_rendering`] already ran.
+    #[cold]
+    #[inline(never)]
+    fn take_prepaid(&mut self, dots: i32) -> i32 {
+        let taken = self.prepaid_dots.min(dots);
+        self.prepaid_dots -= taken;
+        taken
     }
 
     /// Advances the PPU by the dots of `cycles` CPU cycles, exactly as that many calls of
@@ -1126,9 +1218,19 @@ impl Ppu2C02 {
         self.dot_accumulator = accumulator;
 
         let sample_after = (dots_last - i64::from(NMI_SAMPLE_LEAD)).max(0);
-        self.run_dots(dots_before + sample_after, &mut cartridge);
+        let mut before_sample = dots_before + sample_after;
+        let mut after_sample = dots_last - sample_after;
+        if self.prepaid_dots != 0 {
+            #[allow(clippy::cast_possible_truncation)] // At most the two prepaid dots matter.
+            let total = (before_sample + after_sample).min(i64::from(i32::MAX)) as i32;
+            let taken = i64::from(self.take_prepaid(total));
+            let from_before = taken.min(before_sample);
+            before_sample -= from_before;
+            after_sample -= taken - from_before;
+        }
+        self.run_dots(before_sample, &mut cartridge);
         self.nmi_line_sample = self.nmi_asserted();
-        self.run_dots(dots_last - sample_after, &mut cartridge);
+        self.run_dots(after_sample, &mut cartridge);
     }
 
     /// Runs `count` dots, skipping in one go the stretches where a dot does nothing but
@@ -1543,9 +1645,10 @@ impl Ppu2C02 {
                     self.write_control(value, cartridge.as_deref_mut());
                 } else {
                     let was_rendering = self.rendering_enabled();
-                    self.mask = value;
-                    if was_rendering != self.rendering_enabled() {
-                        self.rendering_switched(!was_rendering);
+                    if was_rendering != ((value & 0x18) != 0) {
+                        self.switch_rendering(value, &mut cartridge);
+                    } else {
+                        self.mask = value;
                     }
                 }
             }

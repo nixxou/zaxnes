@@ -20,12 +20,12 @@ Reference before the lot: test ROMs 212 pass / 7 fail / 1 unsupported / 111 manu
 | 8 | `$2004` during rendering: the secondary OAM is read back on even dots once the copy is over, full or not, and dots 321-340 answer from its index 0 (`$2004 Stress Test`) | **138** | same | same |
 | 9 | OAM row corruption when the rendering is switched off inside a line (`OAM Corruption`), as a setting: `NesCore::set_oam_corruption`, `emu.oam_corruption` in the desktop window and the console menu, **off by default** (owner, 2026-11-13, as in Mesen 2 whose `EnablePpuOamRowCorruption` is false). `ZAXNES_OAM_CORRUPTION=1` runs the campaign with it: **139**, golden-core unchanged, but blargg's `sprite_overflow_tests/5.Emulator` fails its test 3 (rendering switched off at line 126 dot 8, row 5 marked) — the model is incomplete, as Mesen's own note says | 138 (139 with the setting) | same | same |
 | 11 | The secondary OAM address loses the steps of the fetch dots the rendering was off for, and `$2004` at dots 321-340 reads there (`Misaligned OAM2 Address`) | **139** (140 with the setting) | same | same |
+| 12 | **A `$2001` write that switches the rendering takes effect two dots later** (`Ppu2C02::switch_rendering`: the two dots run at once under the old mask and are owed back to the next catch-up, nothing per dot); the odd-frame skip is decided on dot 340 instead of 338 to match; the secondary OAM's overflowed flag across a switch (`Frozen OAM2 Increment`) | **140** (141 with the setting) | same (`ppu_vbl_nmi` 10 needed the 340) | same |
 
-## Rows still failing (7, with the OAM corruption setting on)
+## Rows still failing (6, with the OAM corruption setting on)
 
 `$2007 Stress Test` 2, `ALE + Read` 2, `BG Serial In` 2,
-`Hybrid Addresses` 2, `Stale BG Shift Registers` 3, `Stale Sprite Shift Regs` 3, `Frozen OAM2
-Increment` 2. All seven are PPU rows about what the pipeline does when
+`Hybrid Addresses` 2, `Stale BG Shift Registers` 3, `Stale Sprite Shift Regs` 3. All six are PPU rows about what the pipeline does when
 rendering is switched on and off inside a line, or about the exact dot of a `$2004`/`$2007` access.
 
 ## Still to do outside AccuracyCoin
