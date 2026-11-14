@@ -281,7 +281,7 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   documented 9-12), `blargg_apu_2005.07.30/09.reset_timing`, `cpu_reset/registers` and
   AccuracyCoin. So the cycle stays folded into the power-on phase of B1; no change.
 
-### B5. The PPU's reset line — done as an option (`emu.ppu_reset_line`, on, step 34)
+### B5. The PPU's reset line — done as an option (`emu.ppu_reset_line`, off since step 40, step 34)
 - nesdev ("PPU power up state"): writes to PPUCTRL, PPUMASK, PPUSCROLL and PPUADDR are ignored
   ~29 658 CPU cycles after reset. TriCNES models it (`PPU_RESET`, ignored writes to `$2000`,
   `$2001`, `$2005`, `$2006`, cleared on dot 1 of the pre-render line) but sets it off: its author is
@@ -300,6 +300,13 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   AccuracyCoin 147.
 - Unit-test machines that poke the PPU right after power-on now switch the line off
   (`tests/common`), as they already switch `power_on_top` off.
+- **Step 40: off by default.** The closing perf run showed the homebrew `Duelito`
+  (`nes-test-roms/other`, not in the campaign's verdicts: it has no pass/fail) half as costly per
+  frame: with the line on it writes PPUCTRL/PPUMASK before the pre-render line and stays on a grey
+  screen; off, it plays as before. It is right for a front-loading NES only if that program fails
+  there too, which is not known; the top-loader and the Famicom run it. TriCNES and NesHawk leave
+  the behaviour out, so the option stays for whoever wants the front-loader, off by default.
+  Harness: `ZAXNES_PPU_RESET_LINE=1`.
 
 ### B3. Random power-on state — done as options (step 36)
 - Zaxnes: `emu.power_on_ram` (zeros / FCEUX pattern / random) for work RAM (lot CARTDB).

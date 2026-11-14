@@ -568,7 +568,7 @@ impl Ppu2C02 {
             oamaddr_bug: true,
             oam_decay: false,
             power_on_top: true,
-            reset_line: true,
+            reset_line: false,
             ale_low: 0,
             pre_g_revision: false,
             oamaddr_write_corruption: false,
@@ -1921,7 +1921,7 @@ impl Ppu2C02 {
     /// Nothing else moves: PPUSTATUS, OAMADDR, the current address `v`, the nametable RAM, the
     /// OAM, the palette RAM and the CHR RAM are all unchanged. `v_row_start` and `v_row_next`
     /// follow `v`, not `t`, so they stay as they are too. With the reset line
-    /// ([`Self::reset_line`], on by default: the front-loading NES) the PPU also goes back to its
+    /// ([`Self::reset_line`], off by default; on, the front-loading NES) the PPU also goes back to its
     /// power-on position and ignores writes to PPUCTRL, PPUMASK, PPUSCROLL and PPUADDR until the
     /// pre-render line (the ~29 658-cycle window of Q-078, lot FIDELITY step 34); without it it
     /// keeps clocking from where it was, as on the top-loading NES and the Famicom.

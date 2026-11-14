@@ -231,7 +231,9 @@ impl NesCore {
 
     /// Whether resets reach the PPU's /RST pin, as on the front-loading NES: until the
     /// pre-render line after a reset the PPU ignores `$2000`, `$2001`, `$2005` and `$2006`, and
-    /// the Reset button sends it back to its power-on position. On by default.
+    /// the Reset button sends it back to its power-on position. Off by default: homebrew that
+    /// writes those registers at once does not start with it (`Duelito`), and `TriCNES` leaves it
+    /// off too, its author "not even 100% certain" of it.
     pub fn set_ppu_reset_line(&mut self, enabled: bool) {
         self.bus.ppu_mut().set_reset_line(enabled);
     }

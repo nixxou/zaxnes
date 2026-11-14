@@ -2201,12 +2201,13 @@ fn ppu_write_timings(out: &mut Vec<SettingDescriptor>) {
         .with_label("Palette corruption"),
     );
     // Lot FIDELITY step 34 (docs/review/FIDELITY-LEADS.md B5): the PPU's /RST pin on the reset
-    // line, as on the front-loading NES (NES-001).
+    // line, as on the front-loading NES (NES-001). Off: homebrew that does not wait for it breaks
+    // (`Duelito` in the test ROMs), and TriCNES and NesHawk leave it out.
     out.push(
         SettingDescriptor::new(
             SettingId::EmuPpuResetLine,
             SettingKind::Bool,
-            SettingValue::Bool(true),
+            SettingValue::Bool(false),
             SettingScope::User,
             SettingEffect::NextRomLoad,
             SettingTheme::Emulation,

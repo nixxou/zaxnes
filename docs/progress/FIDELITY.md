@@ -47,6 +47,7 @@ Reference before the lot: test ROMs 212 pass / 7 fail / 1 unsupported / 111 manu
 | 37 | **PPU revision**: `emu.ppu_revision` (2C02G default / before G: palette reads buffered like the rest of the memory, C6) and `emu.oamaddr_write_corruption` (D4, off: switched on it fails five console-checked OAM tests; the netlist shows the copy in either direction depending on the phase) | **147** | 213 pass / 6 fail | same as step 36 |
 | 38 | **Per-console clock (E2) rejected with its reason**: the pacing follows the display at the nominal 60 frames a second, already 1 640 ppm from the NTSC clock; measured console clocks differ by tens of ppm, so no effect; belongs with a real-clock pacing (Fidelity+, A2) | — | — | — |
 | 39 | **Fetch on the dot the rendering comes back** (D5, netlist): a mid-line switch on landing on an odd dot does that dot's fetch, with the low byte of the last ALE in alignments 2 and 3 (the read missed its own ALE); the last ALE is kept in the savestate in spare bits | **147** | 213 pass / 6 fail | same as step 37 |
+| 40 | **Closing**: `emu.ppu_reset_line` off by default (homebrew `Duelito` stays on a grey screen with it; TriCNES and NesHawk leave it out); cumulative perf of steps 34-39 against step 33 | **147** | 213 pass / 6 fail | same as step 39 |
 
 ## Rows still failing
 

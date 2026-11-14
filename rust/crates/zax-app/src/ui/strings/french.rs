@@ -1202,7 +1202,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.ppu_reset_line",
-        "Sur la NES de salon, la ligne de reset arrive aussi à la puce vidéo : pendant environ une demi-image après l'allumage ou un appui sur Reset, la puce ignore les écritures du jeu dans ses registres de contrôle, de masque, de défilement et d'adresse, et le bouton Reset ramène l'image à sa première ligne. Désactivé : la NES « top-loader » et la Famicom, dont la puce vidéo ne voit pas le bouton. Les jeux écrits pour la console l'attendent. Prend effet au prochain chargement. Par défaut : activé.",
+        "Sur la NES de salon, la ligne de reset arrive aussi à la puce vidéo : pendant environ une demi-image après l'allumage ou un appui sur Reset, la puce ignore les écritures du jeu dans ses registres de contrôle, de masque, de défilement et d'adresse, et le bouton Reset ramène l'image à sa première ligne. Désactivé : la NES « top-loader » et la Famicom, dont la puce vidéo ne voit pas le bouton. Les jeux écrits pour la console l'attendent, mais certains homebrews non, et restent alors sur un écran vide. Prend effet au prochain chargement. Par défaut : désactivé.",
     ),
     (
         "detail.emu.palette_corruption",

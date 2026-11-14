@@ -576,6 +576,9 @@ fn run_one_zaxnes(
     // And `ZAXNES_OAM_DECAY=1` for the off-by-default decay of OAM with the rendering off (step
     // 20): blargg's `oam_stress` and `sprdma_and_dmc_dma` must still pass with it.
     core.set_oam_decay(std::env::var("ZAXNES_OAM_DECAY").is_ok_and(|value| value != "0"));
+    // `ZAXNES_PPU_RESET_LINE=1`: the PPU ignores register writes until the pre-render line after a
+    // reset (step 34, off by default).
+    core.set_ppu_reset_line(std::env::var("ZAXNES_PPU_RESET_LINE").is_ok_and(|value| value != "0"));
     // `ZAXNES_ALIGNMENT=0..3`: the CPU/PPU alignment of the read-side timings (step 28, 3 by
     // default).
     core.set_cpu_ppu_alignment(

@@ -1228,7 +1228,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.ppu_reset_line",
-        "On the front-loading NES the reset line also reaches the video chip: for about half a frame after the console is switched on or the Reset button is pressed, the chip ignores the game's writes to its control, mask, scroll and address registers, and the Reset button sends the picture back to its first line. Off: the top-loading NES and the Famicom, whose video chip does not see the button. Games written for the console wait for it. Takes effect at the next load. Default: on.",
+        "On the front-loading NES the reset line also reaches the video chip: for about half a frame after the console is switched on or the Reset button is pressed, the chip ignores the game's writes to its control, mask, scroll and address registers, and the Reset button sends the picture back to its first line. Off: the top-loading NES and the Famicom, whose video chip does not see the button. Games written for the console wait for it, but some homebrew does not and stays on a blank screen with it. Takes effect at the next load. Default: off.",
     ),
     (
         "detail.emu.palette_corruption",
