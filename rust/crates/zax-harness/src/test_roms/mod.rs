@@ -576,13 +576,13 @@ fn run_one_zaxnes(
     // And `ZAXNES_OAM_DECAY=1` for the off-by-default decay of OAM with the rendering off (step
     // 20): blargg's `oam_stress` and `sprdma_and_dmc_dma` must still pass with it.
     core.set_oam_decay(std::env::var("ZAXNES_OAM_DECAY").is_ok_and(|value| value != "0"));
-    // `ZAXNES_ALIGNMENT=0..3`: the CPU/PPU alignment of the read-side timings (step 28, 2 by
+    // `ZAXNES_ALIGNMENT=0..3`: the CPU/PPU alignment of the read-side timings (step 28, 3 by
     // default).
     core.set_cpu_ppu_alignment(
         std::env::var("ZAXNES_ALIGNMENT")
             .ok()
             .and_then(|value| value.parse().ok())
-            .unwrap_or(2),
+            .unwrap_or(3),
     );
     // `ZAXNES_POWER_ON_TOP=0`: the PPU starts in vblank as before step 27.
     core.set_power_on_top(std::env::var("ZAXNES_POWER_ON_TOP").map_or(true, |value| value != "0"));

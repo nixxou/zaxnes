@@ -220,9 +220,9 @@ impl NesCore {
         self.bus.ppu_mut().set_glitch_2000(enabled);
     }
 
-    /// Which of the four CPU/PPU clock alignments (0 to 3) the PPU's read-side timings follow:
-    /// the dot a `$2007` read made while rendering latches on, and whether the `$2000` dot-257
-    /// glitch can happen (`docs/review/FIDELITY-LEADS.md`, A4). 2 by default.
+    /// Which of the four CPU/PPU clock alignments (0 to 3, `AccuracyCoin`'s numbering) the PPU
+    /// follows: `$2007` read latch, `$2000` glitch, `$2001`/`$2006` delays and the OAM row
+    /// corruption (`docs/review/FIDELITY-LEADS.md`, A4 and D1). 3 by default.
     pub fn set_cpu_ppu_alignment(&mut self, alignment: u8) {
         self.bus.ppu_mut().set_cpu_ppu_alignment(alignment);
     }

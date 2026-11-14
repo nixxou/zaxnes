@@ -517,7 +517,7 @@ impl Host {
             std::env::var("ZAXNES_ALIGNMENT")
                 .ok()
                 .and_then(|value| value.parse().ok())
-                .unwrap_or(2),
+                .unwrap_or(3),
         );
         // `ZAXNES_PPU_BUS_CONFLICTS=0`: render without the on-by-default `$2007` read model.
         core.set_bus_conflicts(

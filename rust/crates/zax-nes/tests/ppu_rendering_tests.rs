@@ -933,7 +933,7 @@ fn fidelity_2006_load_on_a_coarse_x_increment_ands_coarse_x() {
 #[test]
 fn fidelity_2000_write_on_dot_257_takes_nametable_x_from_open_bus() {
     fn nametable_x_after(dot: i32, glitch: bool) -> u16 {
-        nametable_x_in(2, dot, glitch)
+        nametable_x_in(3, dot, glitch)
     }
     fn nametable_x_in(alignment: u8, dot: i32, glitch: bool) -> u16 {
         let mut fixture = TileFixture::new();
@@ -951,19 +951,23 @@ fn fidelity_2000_write_on_dot_257_takes_nametable_x_from_open_bus() {
     assert_eq!(0, nametable_x_after(257, true), "glitch");
     assert_eq!(1, nametable_x_after(257, false), "setting off");
     assert_eq!(1, nametable_x_after(258, true), "a dot later is safe");
-    // Only alignment 2 (the third) of the netlist measurement has the glitch.
-    for alignment in [0, 1, 3] {
-        assert_eq!(
-            1,
-            nametable_x_in(alignment, 257, true),
-            "alignment {alignment}"
-        );
+    // Alignments 3 (write on dot 257) and 0 (dot 258) have the glitch, 1 and 2 never (TriCNES).
+    assert_eq!(0, nametable_x_in(0, 258, true), "alignment 0, dot 258");
+    assert_eq!(1, nametable_x_in(0, 257, true), "alignment 0, dot 257");
+    for alignment in [1, 2] {
+        for dot in [257, 258] {
+            assert_eq!(
+                1,
+                nametable_x_in(alignment, dot, true),
+                "alignment {alignment}"
+            );
+        }
     }
 }
 
-/// Lot FIDELITY step 28: a `$2007` read made while rendering latches its buffer six dots after the
-/// access in alignment 2 (the default) and five in the three others, so a read one dot later in
-/// alignment 0 buffers exactly what a read one dot earlier does in alignment 2.
+/// Lot FIDELITY steps 28-29: a `$2007` read made while rendering latches its buffer six dots after
+/// the access in alignments 2 and 3 (3 is the default) and five in 0 and 1, so a read one dot
+/// later in alignment 0 buffers exactly what a read one dot earlier does in alignment 3.
 #[test]
 fn fidelity_2007_latch_dot_follows_the_cpu_ppu_alignment() {
     fn buffered(alignment: u8, dot: i32) -> u8 {
@@ -984,8 +988,10 @@ fn fidelity_2007_latch_dot_follows_the_cpu_ppu_alignment() {
 
     let mut differs = false;
     for dot in (20..240).step_by(3) {
-        assert_eq!(buffered(2, dot - 1), buffered(0, dot), "dot {dot}");
-        differs |= buffered(2, dot) != buffered(0, dot);
+        assert_eq!(buffered(3, dot - 1), buffered(0, dot), "dot {dot}");
+        assert_eq!(buffered(2, dot), buffered(3, dot), "dot {dot}");
+        assert_eq!(buffered(1, dot), buffered(0, dot), "dot {dot}");
+        differs |= buffered(3, dot) != buffered(0, dot);
     }
     assert!(differs, "the two alignments never latched different bytes");
 }

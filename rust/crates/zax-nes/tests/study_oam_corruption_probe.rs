@@ -26,7 +26,7 @@ fn study_oam_corruption_probe() {
     let alignment = std::env::var("ZAXNES_ALIGNMENT")
         .ok()
         .and_then(|value| value.parse().ok())
-        .unwrap_or(2);
+        .unwrap_or(3);
     let mut core = NesCore::new();
     core.set_cpu_ppu_alignment(alignment);
     assert!(core.load_rom(&std::fs::read(rom).unwrap(), "probe").success);

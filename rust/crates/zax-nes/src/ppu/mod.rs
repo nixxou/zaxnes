@@ -197,15 +197,15 @@ pub struct Ppu2C02 {
     /// Whether a `$2000` write that starts on dot 257 lets the dot-257 copy take the nametable-X
     /// bit from the CPU's open bus ([`Self::control_write_glitch`]). On by default.
     glitch_2000: bool,
-    /// Which CPU/PPU clock alignment the read-side timings follow, 0 to 3: the four alignments of
-    /// the transistor measurements, M2 rising at sub-phase 2, 0, 6 and 4 of a dot
-    /// (`docs/review/FIDELITY-LEADS.md`, A3c and A4). It moves the dot a `$2007` read latches its
-    /// buffer on ([`Self::read_buffer_from_fetch`], 6 dots after the access in alignment 2, 5 in
-    /// the others) and decides whether the `$2000` dot-257 glitch can happen (alignment 2 only).
-    /// The write timings (`$2001`, `$2006`) do not depend on it: the netlist cannot place a store
-    /// to better than a quarter dot, and with the console's hold time all four land on the same
-    /// dot. A core setting, not part of the state; 2 by default, the alignment this core always
-    /// followed.
+    /// Which of the four CPU/PPU clock alignments this PPU follows, 0 to 3, numbered as
+    /// `AccuracyCoin` and `TriCNES` number them (`docs/review/FIDELITY-LEADS.md`, A4 and D1). The
+    /// table is `TriCNES`'s (MIT, Chris Siebert, `AccuracyCoin`'s author, calibrated on his
+    /// consoles), checked against the transistor measurements: a `$2007` read latches its buffer 6
+    /// dots after the access in alignments 2 and 3, 5 in 0 and 1 ([`Self::read_buffer_from_fetch`]);
+    /// the `$2000` dot-257 glitch happens in alignment 3 (write on dot 257) and 0 (dot 258);
+    /// alignment 2 takes `$2001` and the second `$2006` write one dot later; the OAM row corruption
+    /// is seeded one dot later in alignments 1 and 2. A core setting, not part of the state; 3 by
+    /// default, the alignment this core always followed.
     alignment: u8,
     /// The CPU data bus before the write in progress: what the PPU's data pins see for the first
     /// half master clocks of the write, before the CPU drives its value. Set by the bus.
@@ -523,7 +523,7 @@ impl Ppu2C02 {
             address_load_delay: true,
             glitch_2006: true,
             glitch_2000: true,
-            alignment: 2,
+            alignment: 3,
             cpu_open_bus: 0,
             prepaid_dots: 0,
             serial_since: 0,
@@ -767,14 +767,16 @@ impl Ppu2C02 {
     fn switch_rendering(&mut self, value: u8, cart: Cart<'_, '_>) {
         let renders =
             self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline();
+        // One dot more in alignment 2 (TriCNES; see `alignment`).
+        let delay = if self.alignment == 2 { 3 } else { 2 };
         if renders && self.prepaid_dots == 0 {
-            self.run_dots(2, cart);
-            self.prepaid_dots = 2;
+            self.run_dots(i64::from(delay), cart);
+            self.prepaid_dots = delay;
         }
         self.mask = value;
         let on = (value & 0x18) != 0;
         self.rendering_switched(on);
-        if on && renders && self.prepaid_dots == 2 {
+        if on && renders && self.prepaid_dots == delay {
             self.skip_background_reload(cart);
         }
     }
@@ -955,7 +957,9 @@ impl Ppu2C02 {
             return;
         }
 
-        let dot = self.dot;
+        // The seed is taken one dot later in alignment 1 than the switch itself (TriCNES: 3 dots
+        // after the write, the rendering 2); in alignment 2 both are already a dot later.
+        let dot = self.dot + i32::from(self.alignment == 1);
         #[allow(clippy::cast_sign_loss)] // Each arm is 0..32 by its range.
         let row = match dot {
             1..=64 => (dot >> 1) as u32 & 0x1F,
@@ -1373,7 +1377,12 @@ impl Ppu2C02 {
     /// well; `#[inline]`, so the `$2000` arm is the body it always was.
     #[inline]
     fn write_control(&mut self, value: u8, cartridge: Option<&mut Cartridge>) {
-        if self.dot == 257 && self.glitch_2000 && self.alignment == 2 && self.fetching() {
+        let glitch_dot = match self.alignment {
+            3 => 257,
+            0 => 258,
+            _ => -1,
+        };
+        if self.dot == glitch_dot && self.glitch_2000 && self.fetching() {
             self.control_write_glitch();
         }
         self.control = value;
@@ -1982,8 +1991,8 @@ impl Ppu2C02 {
     #[cold]
     #[inline(never)]
     fn read_buffer_from_fetch(&mut self, cart: Cart<'_, '_>) -> bool {
-        // X - D: 6 in alignment 2, 5 in the three others.
-        let latch_dots: i32 = if self.alignment == 2 { 6 } else { 5 };
+        // X - D: 6 in alignments 2 and 3, 5 in 0 and 1.
+        let latch_dots: i32 = if self.alignment >= 2 { 6 } else { 5 };
         if self.prepaid_dots != 0 {
             return false;
         }
@@ -2098,8 +2107,10 @@ impl Ppu2C02 {
         if self.prepaid_dots != 0 {
             return;
         }
-        self.run_dots(3, cart);
-        self.prepaid_dots = 3;
+        // One dot more in alignment 2 (TriCNES; see `alignment`).
+        let delay = if self.alignment == 2 { 4 } else { 3 };
+        self.run_dots(i64::from(delay), cart);
+        self.prepaid_dots = delay;
         if self.glitch_2006 {
             self.address_load_collision();
         }
@@ -2123,7 +2134,7 @@ impl Ppu2C02 {
             }
         }
         self.run_dots(1, cart);
-        self.prepaid_dots = 4;
+        self.prepaid_dots = delay + 1;
     }
 
     /// A `$2006` load that lands on a dot whose increment of `v` it collides with.

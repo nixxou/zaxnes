@@ -514,7 +514,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
 
     /// `emu.cpu_ppu_alignment` as the core takes it, 0 to 3 (lot FIDELITY step 28).
     fn cpu_ppu_alignment(&self) -> u8 {
-        u8::try_from(self.settings.get(SettingId::EmuCpuPpuAlignment).as_int() & 3).unwrap_or(2)
+        u8::try_from(self.settings.get(SettingId::EmuCpuPpuAlignment).as_int() & 3).unwrap_or(3)
     }
 
     /// `audio.console_profile` as the core takes it: 0 for none.
