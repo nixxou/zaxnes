@@ -1,5 +1,6 @@
 use crate::apu::{Apu2A03, AudioError, AudioReader};
-use crate::cartridges::Cartridge;
+use crate::cartridges::{with_board_kind, AnyBoard, BoardKind, Cartridge};
+use crate::nes_bus::KindBus;
 use crate::cpu::{Cpu6502, CpuBus};
 use crate::input::{ControllerPortType, InputPorts, InvalidPort, ZapperPosition};
 use crate::ppu::{Ppu2C02, MAX_TILE_RECORD_STATE_SIZE, OAM_SIZE, PALETTE_SIZE, VRAM_SIZE};
@@ -991,16 +992,14 @@ impl NesCore {
 
         self.bus.ppu_mut().clear_frame_boundary();
         self.bus.defer_ppu();
-        loop {
-            self.cpu.step(&mut self.bus);
-            if let Some((first, last)) = idle_loop {
-                if (first..=last).contains(&self.cpu.pc) && self.bus.ppu().wide().stalling() {
-                    self.bus.ppu_mut().wide_mut().end_stall();
-                }
+        // The frame's path (lot CORE-2, `docs/design/CORE-TIERS.md`): the board is looked at once
+        // here, and the frame runs through the code compiled for it, or for every board when it
+        // is not in the table. `run_frame` checked that a cartridge is loaded.
+        match self.bus.cartridge() {
+            Some(cartridge) => {
+                with_board_kind!(cartridge.board(), K => self.run_frame_steps::<K>(idle_loop));
             }
-            if self.bus.ppu().vblank_just_started() {
-                break;
-            }
+            None => self.run_frame_steps::<AnyBoard>(idle_loop),
         }
         self.bus.end_deferred_ppu();
         if let Some(decoder) = decoder {
@@ -1027,6 +1026,22 @@ impl NesCore {
         }
 
         self.bus.cycle_count() - start_cycle
+    }
+
+    /// The instructions of one frame, on the board kind `K` (lot CORE-2): the bus is lent to the
+    /// CPU as a [`KindBus`] so that every cartridge call of the frame reaches `K`'s board.
+    fn run_frame_steps<K: BoardKind>(&mut self, idle_loop: Option<(u16, u16)>) {
+        loop {
+            self.cpu.step(&mut KindBus::<K>::new(&mut self.bus));
+            if let Some((first, last)) = idle_loop {
+                if (first..=last).contains(&self.cpu.pc) && self.bus.ppu().wide().stalling() {
+                    self.bus.ppu_mut().wide_mut().end_stall();
+                }
+            }
+            if self.bus.ppu().vblank_just_started() {
+                break;
+            }
+        }
     }
 
     // ----------------------------------------------------------------- run-ahead

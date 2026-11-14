@@ -743,6 +743,36 @@ macro_rules! board_kind {
     };
 }
 
+/// **The table of specialised boards** (lot CORE-2): the one place that says which boards get a
+/// path of their own. The board is looked at first (its borrow ends there), then `$run` is
+/// expanded once per entry with `$kind` naming that board's kind, and once more with
+/// [`AnyBoard`] for every other board. A board joins the table only when its own measurement
+/// shows a gain (`docs/design/CORE-TIERS.md`).
+macro_rules! with_board_kind {
+    ($board:expr, $kind:ident => $run:expr) => {{
+        let entry: u8 = match $board {
+            $crate::cartridges::Board::Nrom(_) => 1,
+            $crate::cartridges::Board::Mmc3(_) => 2,
+            _ => 0,
+        };
+        match entry {
+            1 => {
+                type $kind = $crate::cartridges::NromKind;
+                $run
+            }
+            2 => {
+                type $kind = $crate::cartridges::Mmc3Kind;
+                $run
+            }
+            _ => {
+                type $kind = $crate::cartridges::AnyBoard;
+                $run
+            }
+        }
+    }};
+}
+pub(crate) use with_board_kind;
+
 board_kind!(
     /// Mapper 0.
     NromKind,

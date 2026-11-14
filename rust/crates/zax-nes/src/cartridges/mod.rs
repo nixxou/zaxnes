@@ -30,6 +30,7 @@ use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
 use mappers::Mapper;
 pub use board::{AnyBoard, BoardKind, Mmc3Kind, NromKind};
+pub(crate) use board::with_board_kind;
 
 /// `offset % len`, without the division when `offset` is already below `len`: bank offsets
 /// almost always fall inside the memory, and this runs on every PRG and CHR access.
@@ -938,7 +939,6 @@ impl Cartridge {
     pub const fn mapper_number(&self) -> i32 {
         self.mapper_number
     }
-
     /// Current nametable layout (SPEC-02 §2, "current mirroring").
     #[must_use]
     pub const fn mirroring(&self) -> NametableMirroring {
