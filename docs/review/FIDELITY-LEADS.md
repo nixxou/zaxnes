@@ -152,6 +152,44 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   alignment). Decisive next test: rebuild that line's register sequence (`$2006` at dots 200/212,
   `$2007` read at 224, `v` = `$0B02`) and its nametable/pattern bytes in a VisualNes NROM program
   and compare the pixels with Zaxnes. Until then `emu.ppu_bus_conflicts` stays off by default.
+- **Step 33: the CPU's hold time on the bench, and the alignments mapped.** The netlist joins
+  the CPU's and the PPU's data, A0-A2 and R/W pins into one node each and the bench raised /CS one
+  half-step *before* M2 falls, so every write was stored 1-2 half-steps early (above). A bench
+  variant (`mkhold.py`, `benchhold.exe`; still outside the repo) splits those pins: the PPU sees
+  the CPU's values held RISE+1 half-steps after M2 falls, /CS falls at M2 rise + 1 and rises at
+  M2 fall + RISE (the 74LS139 decode, ~1 half master clock late). **Calibration on a console
+  measurement**: the `$2007` read latch comes out at D+5/5/6/6 (phases a2/a0/a6/a4) with RISE = 1
+  or 2, exactly TriCNES's table that AccuracyCoin checks; RISE = 0 gives the old 5/5/5/6.
+  **Mapping**: TriCNES's alignment is `PPUClock & 3` at the CPU's access, so 1, 2, 3, 0 are one
+  master clock apart in that order; M2 rises at half-steps 0, 2, 4, 6 of the dot in a2, a0, a6,
+  a4; with 3 = a4 (the `$2000` glitch and the `$2007` latch), **0 = a2, 1 = a0, 2 = a6,
+  3 = a4**. AccuracyCoin's `$2002 Flag Timing` (sprite flag seen in alignments 2 and 3, "measured
+  on consoles") agrees: those are the two latest reads in the dot.
+  Measured with RISE = 1 (and 2 where it matters), alignments 0/1/2/3:
+  - `$2001`, fetches and `v` increments: stop and restart on the third dot after the write in all
+    four (the increment of D+2 happens, D+3 does not). TriCNES's extra dot in alignment 2 is not
+    there; AccuracyCoin 147 without it. **Done**: two dots everywhere.
+  - `$2001`, picture: switch off shows the backdrop from pixel D+1/1/2/2, switch on the tiles from
+    D+3 in all four. `$3E01` gives the same edges (C3's one-dot wrong value does not move them).
+    **Done** (`switch_pixel_edge`: pixel D+1 redrawn at once in alignments 0 and 1, pixel D+2 of a
+    switch on set at the end of its line, no dot run ahead).
+  - `$2006` second write, rendering on: `v` loads on D+3 in all four, the collision with the
+    coarse-X increment at D%8 = 5 in all four (coarse X = target AND incremented old). TriCNES's
+    fourth dot in alignment 2 is not there. **Done**: three dots everywhere.
+  - `$2006` with rendering off into palette RAM: pixel D+2 in all four (as step 32).
+  - `$2000` dot-257 glitch: a4 only, D = 257. TriCNES's alignment 0 on dot 258 is not there.
+    **Done**: alignment 3 only (AccuracyCoin 147 in alignment 0).
+  - `$2005` copy of dot 257: bus in a4 only; fine X pixel D-1 old in all four, pixel D the bus in
+    a4 and the new value elsewhere: step 32's rules confirmed (the step-32 mix in a0/a2 was the
+    analysis mixing frames; `pxana2.py`/`bdana2.py` take each write's own frame).
+  - OAM corruption: the netlist produces it only when the write is stored in the second half of
+    the dot (a6 and a4 with the hold time; a2 and a4 on the old bench). AccuracyCoin's author
+    (console) has it in all four alignments, with rows differing between {0, 3} and {1, 2} from
+    dot 257: a race the zero-delay netlist cannot reproduce. TriCNES's model kept; its seed in
+    alignment 2 kept on its dot (one later than the switch, as alignment 1): the differential
+    probe against the step-29 model differs on 1 try in about 16 000 (a vblank re-enable).
+  - Seen, not ported: in a0/a2 a switch on sometimes clears low bits of `v` (`500C` -> `5004`),
+    present or not depending on RISE: a race, not trusted.
 - **Next**: a per-dot differential harness (same program in Zaxnes and VisualNes, alignment matched
   through the `$2002` race, compare PPU address bus and `v` per dot) to settle `$2001` per
   alignment, `$2007` reads, and the `$2000`/`$2006` glitches of plan 1.4/1.5 before enabling them.
@@ -197,9 +235,10 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   - Done: `scroll_write_on_copy` and `fine_x_write_mid_line` now apply the open bus in
     alignment 3 (under `emu.ppu_2000_glitch`), the written value in 0, 1 and 2; the a0 pixel rule
     is gone. The dot-304 vertical copy follows by the same mechanism, not measured.
-- Still open: random alignment at power-on; the mapping of netlist a0, a2, a6 onto alignments
-  0, 1, 2 (TriCNES has two D+6 `$2007` alignments where the netlist has one, so the two
-  numberings cannot be matched one to one).
+- Mapping done in step 33 (A3c): 0 = a2, 1 = a0, 2 = a6, 3 = a4, with the CPU's hold time on the
+  bench (the "one D+6 alignment" of the old bench was its early /CS); `$2001`, `$2006` and the
+  `$2000` glitch now follow the netlist in all four alignments.
+- Still open: random alignment at power-on.
 
 ---
 
@@ -279,7 +318,10 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   (`LSNPpu2C0X.h:2040`); Mesen one dot.
 - Not modelled: the **left-column red/green show delay** BeesNES has commented out
   (`m_dvLeftShowRedGreenDelay`, `LSNPpu2C0X.h:139`); the "wrong value for one dot when writing
-  `$2001` directly" that AccuracyCoin avoids with `$3E01` (asm 16384) — open, cost free.
+  `$2001` directly" that AccuracyCoin avoids with `$3E01` (asm 16384) — open, cost free. Step 33
+  netlist (hold-time bench): `$2001` and `$3E01` give the same switch-off/on pixel edges in all four
+  alignments, so the wrong value does not reach the rendering switch there; its effect on
+  greyscale/emphasis for one dot is not measured.
 
 ### C4. Sprite evaluation — done (`ppu-exact-sprite-eval` in default)
 - Hardware-exact evaluation state machine; misaligned OAM2 address, frozen increment, overflow bug.
@@ -482,10 +524,9 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   AMD-050 already names the case, opacity bit 0). `backdrop_entry` in the renderer.
 - **Edges measured on the netlist (step 32, `g2001px.bin`, `g2006px.bin`, `bdana.py`)**: in the
   default alignment (a4) a `$2001` switch off made on D shows the backdrop from pixel D + 2 (as
-  this core already drew it), a switch on shows tiles from pixel D + 3 (this core: D + 2; **open**:
-  drawing that pixel again with a dot run ahead moved AccuracyCoin's `$2007 Stress Test` code 2,
-  so it was taken out — to redo without running a dot ahead, e.g. the pixel fixed at the end of
-  the line), a `$2006` load with rendering off shows its palette
+  this core already drew it), a switch on shows tiles from pixel D + 3 (done in step 33 without a
+  dot run ahead: the pixel is set at the end of its line; per alignment in A3c), a `$2006` load
+  with rendering off shows its palette
   background from pixel D + 2 (this core loaded at once: `delay_backdrop_address` runs two dots,
   every alignment; TriCNES's 2/3/4/3 dropped). Other netlist alignments: switch off D + 1 (a6,
   a0 and a2 mostly), switch on D + 3 (a2 mostly D + 2), `$2006` D + 2 (a2 D + 1 or 2) — left as

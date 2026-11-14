@@ -1017,7 +1017,7 @@ impl Ppu2C02 {
     /// "The palette RAM address is simply wherever the v register is"). AMD-050 already names
     /// the case; its opacity bit stays 0, as for any pixel drawn with rendering off.
     #[inline]
-    const fn backdrop_entry(&self) -> usize {
+    pub(super) const fn backdrop_entry(&self) -> usize {
         if (self.v & 0x3F00) == 0x3F00 {
             let entry = (self.v & 0x1F) as usize;
             if entry.trailing_zeros() >= 2 {

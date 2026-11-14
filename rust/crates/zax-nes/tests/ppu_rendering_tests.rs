@@ -976,10 +976,9 @@ fn fidelity_2000_write_on_dot_257_takes_nametable_x_from_open_bus() {
     assert_eq!(0, nametable_x_after(257, true), "glitch");
     assert_eq!(1, nametable_x_after(257, false), "setting off");
     assert_eq!(1, nametable_x_after(258, true), "a dot later is safe");
-    // Alignments 3 (write on dot 257) and 0 (dot 258) have the glitch, 1 and 2 never (TriCNES).
-    assert_eq!(0, nametable_x_in(0, 258, true), "alignment 0, dot 258");
-    assert_eq!(1, nametable_x_in(0, 257, true), "alignment 0, dot 257");
-    for alignment in [1, 2] {
+    // Alignment 3 only: the netlist with the CPU's hold time shows it in its phase a4 alone
+    // (step 33); TriCNES's alignment 0 on dot 258 does not appear there.
+    for alignment in [0, 1, 2] {
         for dot in [257, 258] {
             assert_eq!(
                 1,
@@ -1142,16 +1141,26 @@ fn fidelity_2005_fine_x_reaches_the_pixel_of_its_dot_per_alignment() {
     );
 }
 
-/// Lot FIDELITY step 32 (transistor netlist, `VisualNes`, alignment 3 = the default): written on dot
-/// `D` of a visible line, a `$2001` switch off shows the backdrop from pixel `D + 2` and with
-/// rendering off a `$2006` load into palette RAM shows its palette background from pixel `D + 2`.
+/// Lot FIDELITY steps 32-33 (transistor netlist, `VisualNes`, with the CPU's hold time; alignments
+/// 0 to 3 are its phases a2, a0, a6 and a4): written on dot `D` of a visible line, a `$2001` switch
+/// off shows the backdrop from pixel `D + 1` in alignments 0 and 1 and `D + 2` in 2 and 3, a switch
+/// on shows the tiles from pixel `D + 3` in all four, and with rendering off a `$2006` load into
+/// palette RAM shows its palette background from pixel `D + 2` in all four.
 #[test]
 fn fidelity_switch_and_load_pixel_edges_follow_the_netlist() {
     const PALETTE: [u8; 8] = [0x0F, 0x16, 0x2A, 0x12, 0x05, 0x38, 0x21, 0x1C];
     /// The first pixel from `D - 2` on that `changed` accepts, written `value` to `register`
     /// on dot `D`.
-    fn first_changed(mask: u8, register: u16, value: u8, dot: i32, changed: fn(u8) -> bool) -> i32 {
+    fn first_changed(
+        alignment: u8,
+        mask: u8,
+        register: u16,
+        value: u8,
+        dot: i32,
+        changed: fn(u8) -> bool,
+    ) -> i32 {
         let mut fixture = TileFixture::new();
+        fixture.core.set_cpu_ppu_alignment(alignment);
         fixture.fill_vram(0x2000, 960, 0x35);
         fixture.fill_vram(0x23C0, 64, 0x00);
         fixture.write_vram(0x3F00, &PALETTE);
@@ -1190,25 +1199,25 @@ fn fidelity_switch_and_load_pixel_edges_follow_the_netlist() {
             .unwrap()
             - dot
     }
-    let dot = 100;
-    assert_eq!(
-        2,
-        first_changed(0x0A, 1, 0x00, dot, |c| c == 0x0F),
-        "switch off"
-    );
-    // The netlist shows the tiles from pixel D + 3; this core from D + 2: drawing that pixel
-    // again needed a dot run ahead, which moved AccuracyCoin's `$2007 Stress Test` (FIDELITY-LEADS
-    // D5, open).
-    assert_eq!(
-        2,
-        first_changed(0x00, 1, 0x0A, dot, |c| c != 0x0F),
-        "switch on"
-    );
-    assert_eq!(
-        2,
-        first_changed(0x00, 6, 0x05, dot, |c| c == 0x38),
-        "$2006 into palette RAM"
-    );
+    for (alignment, off) in [(0, 1), (1, 1), (2, 2), (3, 2)] {
+        for dot in [100, 101] {
+            assert_eq!(
+                off,
+                first_changed(alignment, 0x0A, 1, 0x00, dot, |c| c == 0x0F),
+                "switch off, alignment {alignment}, dot {dot}"
+            );
+            assert_eq!(
+                3,
+                first_changed(alignment, 0x00, 1, 0x0A, dot, |c| c != 0x0F),
+                "switch on, alignment {alignment}, dot {dot}"
+            );
+            assert_eq!(
+                2,
+                first_changed(alignment, 0x00, 6, 0x05, dot, |c| c == 0x38),
+                "$2006 into palette RAM, alignment {alignment}, dot {dot}"
+            );
+        }
+    }
 }
 
 /// Lot FIDELITY steps 28-29: a `$2007` read made while rendering latches its buffer six dots after

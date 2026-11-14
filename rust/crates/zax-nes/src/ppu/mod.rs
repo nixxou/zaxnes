@@ -211,16 +211,18 @@ pub struct Ppu2C02 {
     /// model, D5). On by default; a core setting, not in the state.
     palette_corruption: bool,
     /// Which of the four CPU/PPU clock alignments this PPU follows, 0 to 3, numbered as
-    /// `AccuracyCoin` and `TriCNES` number them (`docs/review/FIDELITY-LEADS.md`, A4 and D1). The
-    /// table is `TriCNES`'s (MIT, Chris Siebert, `AccuracyCoin`'s author, calibrated on his
-    /// consoles), checked against the transistor measurements: a `$2007` read latches its buffer 6
-    /// dots after the access in alignments 2 and 3, 5 in 0 and 1 ([`Self::read_buffer_from_fetch`]);
-    /// the `$2000` dot-257 glitch happens in alignment 3 (write on dot 257) and 0 (dot 258);
-    /// alignment 2 takes `$2001` and the second `$2006` write one dot later; the OAM row corruption
-    /// is seeded one dot later in alignments 1 and 2; a `$2005` write still reaches the copy of
-    /// `t` made on the dot it lands on, which in alignment 3 takes the open bus instead
-    /// ([`Self::scroll_write_on_copy`]). A core setting, not part of the state; 3 by
-    /// default, the alignment this core always followed.
+    /// `AccuracyCoin` and `TriCNES` number them: the CPU's access one master clock later in the dot
+    /// from 1 to 2, 3 and 0 (`docs/review/FIDELITY-LEADS.md`, A4 and D1). The transistor netlist
+    /// with the CPU's hold time (step 33; its phases a2, a0, a6, a4 are alignments 0 to 3) sets the
+    /// timings, `TriCNES` (MIT, Chris Siebert, `AccuracyCoin`'s author, calibrated on his consoles)
+    /// what the netlist cannot show: a `$2007` read latches its buffer 6 dots after the access in
+    /// alignments 2 and 3, 5 in 0 and 1 ([`Self::read_buffer_from_fetch`], both agree); the
+    /// `$2000` dot-257 glitch and the `$2005` open bus happen in alignment 3 only
+    /// ([`Self::scroll_write_on_copy`]); `$2001` acts two dots after the write and `$2006` loads
+    /// three in all four, with the picture's edges of [`Self::switch_pixel_edge`]; the OAM row
+    /// corruption (`TriCNES`: the netlist only shows it at some phases) is seeded one dot later in
+    /// alignments 1 and 2. A core setting, not part of the state; 3 by default, the alignment this
+    /// core always followed.
     alignment: u8,
     /// The CPU data bus before the write in progress: what the PPU's data pins see for the first
     /// half master clocks of the write, before the CPU drives its value. Set by the bus.
@@ -229,6 +231,10 @@ pub struct Ppu2C02 {
     /// outstanding at a frame boundary (the switch only runs ahead on a line that renders), so
     /// not in the state.
     prepaid_dots: i32,
+    /// A pixel a `$2001` switch on leaves at the backdrop, written when its line is over
+    /// ([`Self::switch_pixel_edge`]): index in the picture and colour. Never pending at a frame
+    /// boundary, so not in the state.
+    pending_backdrop_pixel: Option<(usize, u8)>,
     /// The high plane's serial input, kept off the hot path (see `shift_background`): the 1s it
     /// had shifted in at the clock `serial_since` (the last switch of the rendering), at most 16.
     /// A reload after that clock starts the count again; the reloads themselves record nothing,
@@ -548,6 +554,7 @@ impl Ppu2C02 {
             alignment: 3,
             cpu_open_bus: 0,
             prepaid_dots: 0,
+            pending_backdrop_pixel: None,
             serial_since: 0,
             serial_base: 0,
             sprite_units: sprite_hw::SpriteUnits::default(),
@@ -791,8 +798,10 @@ impl Ppu2C02 {
     fn switch_rendering(&mut self, value: u8, cart: Cart<'_, '_>) {
         let renders =
             self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline();
-        // One dot more in alignment 2 (TriCNES; see `alignment`).
-        let delay = if self.alignment == 2 { 3 } else { 2 };
+        // Two dots in every alignment: the netlist with the CPU's hold time (step 33) stops and
+        // starts the fetches and `v`'s increments on the third dot after the write in all four;
+        // TriCNES's third dot in alignment 2 does not appear there.
+        let delay = 2;
         let corrupts = (value & 0x18) == 0 && self.switch_off_corrupts_palettes();
         if renders && self.prepaid_dots == 0 {
             if corrupts {
@@ -807,11 +816,49 @@ impl Ppu2C02 {
             // drawn with rendering off, colour index 0.
             self.corrupt_palettes(0);
         }
+        let ran_ahead = renders && self.prepaid_dots == delay;
+        let write_dot = self.dot - if ran_ahead { delay } else { 0 };
         self.mask = value;
         let on = (value & 0x18) != 0;
         self.rendering_switched(on);
-        if on && renders && self.prepaid_dots == delay {
+        if ran_ahead {
+            self.switch_pixel_edge(on, write_dot);
+        }
+        if on && ran_ahead {
             self.skip_background_reload(cart);
+        }
+    }
+
+    /// The pixel the netlist draws differently from the dot the switch acts on (step 33).
+    ///
+    /// The fetches and `v` follow the switch from the third dot after the write `D` in every
+    /// alignment, which this core draws from pixel `D + 2`. The picture does not quite follow:
+    /// a switch on still shows the backdrop on pixel `D + 2`, every alignment, the tiles from
+    /// `D + 3`; a switch off shows the backdrop from pixel `D + 1` in alignments 0 and 1, whose
+    /// write the PPU stores in the first half of its dot. The pixel is set to what rendering off
+    /// draws: pixel `D + 1` at once, it is drawn already; pixel `D + 2` when its line is over
+    /// ([`Self::process_dot`]), as it is drawn later. Only the colour: the sprite 0 hit and
+    /// everything else stay with the dot.
+    #[cold]
+    #[inline(never)]
+    fn switch_pixel_edge(&mut self, on: bool, write_dot: i32) {
+        if self.scanline >= VISIBLE_SCANLINES || (!on && self.alignment >= 2) {
+            return;
+        }
+        let x = write_dot + if on { 2 } else { 1 };
+        if !(0..SCREEN_WIDTH_I32).contains(&x) {
+            return;
+        }
+        let mut color = self.palette[self.backdrop_entry()];
+        if (self.mask & 0x01) != 0 {
+            color &= 0x30;
+        }
+        #[allow(clippy::cast_sign_loss)] // Visible line, 0..256.
+        let index = self.scanline as usize * SCREEN_WIDTH + x as usize;
+        if on {
+            self.pending_backdrop_pixel = Some((index, color));
+        } else if let Some(pixel) = self.pixels.get_mut(index) {
+            *pixel = color;
         }
     }
 
@@ -1002,9 +1049,10 @@ impl Ppu2C02 {
             return;
         }
 
-        // The seed is taken one dot later in alignment 1 than the switch itself (TriCNES: 3 dots
-        // after the write, the rendering 2); in alignment 2 both are already a dot later.
-        let dot = self.dot + i32::from(self.alignment == 1);
+        // The seed is taken one dot later in alignments 1 and 2 than the switch itself (TriCNES:
+        // 3 dots after the write, the rendering 2; AccuracyCoin's `OAM Corruption`, measured on
+        // consoles: "three dots on two of the four alignments").
+        let dot = self.dot + i32::from(matches!(self.alignment, 1 | 2));
         // TriCNES (`docs/review/FIDELITY-LEADS.md`, D1), measured against it dot by dot: during
         // the clear, a switch whose seed lands on an even dot (on every dot in alignment 2) also
         // corrupts the row before — the seed taken at once while the rendering still counts as
@@ -1043,13 +1091,21 @@ impl Ppu2C02 {
             }
             66..=255 => {
                 // Alignment 1, which seeds a dot late, always reads the address as it stands.
-                let behind = (even && self.alignment != 1) || self.alignment == 2;
+                // Alignment 2 seeds a dot late too, but TriCNES takes its seed after that dot
+                // has run with the rendering on: the copy of the dot it seeds on is foreseen
+                // (the evaluation copies on every even dot of a sprite it copies).
+                let foreseen = self.alignment == 2 && even && self.copied_within(dot - 2, 1);
+                let behind = if self.alignment == 2 {
+                    !foreseen
+                } else {
+                    even && self.alignment != 1
+                };
                 let row = self.evaluation_row(behind);
                 match self.alignment {
                     2 => {
                         rows |= 1 << row;
                         seed = Some(row);
-                        if even && self.copied_within(self.dot, 2) {
+                        if foreseen {
                             (row + 1) & 0x1F
                         } else {
                             0
@@ -1520,12 +1576,9 @@ impl Ppu2C02 {
     /// well; `#[inline]`, so the `$2000` arm is the body it always was.
     #[inline]
     fn write_control(&mut self, value: u8, cartridge: Option<&mut Cartridge>) {
-        let glitch_dot = match self.alignment {
-            3 => 257,
-            0 => 258,
-            _ => -1,
-        };
-        if self.dot == glitch_dot && self.glitch_2000 && self.fetching() {
+        // Alignment 3 only, on dot 257: the netlist with the CPU's hold time shows it there and
+        // nowhere else (step 33); TriCNES's second case, alignment 0 on dot 258, does not appear.
+        if self.alignment == 3 && self.dot == 257 && self.glitch_2000 && self.fetching() {
             self.control_write_glitch();
         }
         self.control = value;
@@ -1939,6 +1992,11 @@ impl Ppu2C02 {
         // end-of-line reloads of the hardware are kept out of it by v_row_next, which only
         // becomes the row start of the line that follows.
         if self.dot == DOTS_PER_SCANLINE - 1 {
+            if let Some((index, color)) = self.pending_backdrop_pixel.take() {
+                if let Some(pixel) = self.pixels.get_mut(index) {
+                    *pixel = color;
+                }
+            }
             if self.scanline < VISIBLE_SCANLINES {
                 self.end_capture_line(self.scanline, cart);
             }
@@ -2250,8 +2308,9 @@ impl Ppu2C02 {
         if self.prepaid_dots != 0 {
             return;
         }
-        // One dot more in alignment 2 (TriCNES; see `alignment`).
-        let delay = if self.alignment == 2 { 4 } else { 3 };
+        // Three dots in every alignment (transistor netlist with the CPU's hold time, step 33;
+        // TriCNES's fourth dot in alignment 2 does not appear there).
+        let delay = 3;
         self.run_dots(i64::from(delay), cart);
         self.prepaid_dots = delay;
         if self.glitch_2006 {
