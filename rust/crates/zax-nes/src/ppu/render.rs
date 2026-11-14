@@ -1030,7 +1030,7 @@ impl Ppu2C02 {
         }
     }
 
-    fn render_pixel(&mut self, x: usize) {
+    pub(super) fn render_pixel(&mut self, x: usize) {
         let mask = self.mask;
         let x = x & 0xFF;
 

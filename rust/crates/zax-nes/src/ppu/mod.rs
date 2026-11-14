@@ -2316,6 +2316,40 @@ impl Ppu2C02 {
     /// a first write sliding a dot per frame across dot 257 (`docs/review/FIDELITY-LEADS.md`,
     /// A4): one write position differed, this one. The bus value is the `$2000` glitch's switch;
     /// off, alignment 2 takes the written value as the others do.
+    /// A first `$2005` write on a visible line with rendering on, in alignments 0 and 2: the
+    /// pixel of the dot it lands on.
+    ///
+    /// This core draws pixel `x` on dot `x + 1`, and a write made on dot `D` changes fine X from
+    /// pixel `D` on, which is what `TriCNES` (MIT, Chris Siebert) shows in alignments 1 and 3.
+    /// In alignment 0 it already shows the written fine X on pixel `D - 1`, drawn here with the
+    /// old one: that pixel is drawn again, the shift registers still standing where its dot
+    /// left them. In alignment 2 pixel `D` takes fine X from the CPU's open bus (the two-dot
+    /// delay of [`Self::scroll_write_on_copy`]): its dot is run here with that fine X and owed
+    /// back ([`Self::prepaid_dots`]), under the `$2000` glitch's switch. Measured by running
+    /// both emulators on a write sliding a dot per frame across a line and comparing the line's
+    /// colours (`docs/review/FIDELITY-LEADS.md`, A4): one pixel differed, in those two
+    /// alignments only; none since.
+    #[cold]
+    #[inline(never)]
+    fn fine_x_write_mid_line(&mut self, value: u8, cart: Cart<'_, '_>) {
+        match self.alignment {
+            0 if (1..=SCREEN_WIDTH_I32).contains(&self.dot) => {
+                #[allow(clippy::cast_sign_loss)] // dot is 1..=256 here.
+                self.render_pixel((self.dot - 1) as usize);
+            }
+            2 if self.glitch_2000
+                && self.prepaid_dots == 0
+                && (0..SCREEN_WIDTH_I32).contains(&self.dot) =>
+            {
+                self.fine_x = self.cpu_open_bus & 0x07;
+                self.run_dots(1, cart);
+                self.prepaid_dots = 1;
+                self.fine_x = value & 0x07;
+            }
+            _ => {}
+        }
+    }
+
     #[cold]
     #[inline(never)]
     fn scroll_write_on_copy(&mut self, value: u8) {
@@ -2448,6 +2482,13 @@ impl Ppu2C02 {
                 }
                 if matches!(self.dot, 257 | 304) && self.fetching() {
                     self.scroll_write_on_copy(value);
+                }
+                if !self.write_toggle
+                    && matches!(self.alignment, 0 | 2)
+                    && self.scanline < VISIBLE_SCANLINES
+                    && self.rendering_enabled()
+                {
+                    self.fine_x_write_mid_line(value, &mut cartridge);
                 }
 
                 self.write_toggle = !self.write_toggle;

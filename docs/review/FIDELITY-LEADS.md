@@ -172,10 +172,15 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   value (alignments 0, 1 and 3) or the bus value (coarse X 4, coarse Y 4, alignment 2). Now
   0 differences on P5 and P6 in all four alignments (`scroll_write_on_copy`; the bus value is
   under `emu.ppu_2000_glitch`, renamed "$2000/$2005 open-bus glitch").
-- Still open: the same one-dot `$2005` timing for **fine X**: a first write made mid-line
-  changes the pixel of the dot it lands on in TriCNES (written value, or bus value in alignment
-  2), one pixel later in this core, whose renderer has already drawn that pixel. Needs a
-  pixel-level differential before touching the renderer. Random alignment at power-on.
+- `$2005` fine X (step 31): program P7 (palette and nametables set, fine X 3 in vblank, a first
+  write of `$06` sliding a dot per frame across line 100, bus `$20`), line 100's colours
+  compared between the two emulators per frame: alignments 1 and 3 already matched; in
+  alignment 0 TriCNES shows the new fine X one pixel earlier (pixel `D - 1`, `D` this core's
+  write dot), in alignment 2 pixel `D` takes the open bus's fine X (36 frames each). Fixed by
+  `fine_x_write_mid_line` (pixel `D - 1` drawn again in alignment 0; dot `D + 1` run with the
+  bus's fine X and owed back in alignment 2, under `emu.ppu_2000_glitch`): 0 differences on P7,
+  P5 and P6 in all four alignments.
+- Still open: random alignment at power-on.
 
 ---
 

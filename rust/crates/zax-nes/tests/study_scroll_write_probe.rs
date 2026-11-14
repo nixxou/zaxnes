@@ -5,13 +5,14 @@
 //! with rendering on, sliding one dot per frame) and writes `ZAXNES_SCROLL_PROBE_OUT`. Each change
 //! of `t` on a rendered line is logged ("w"), then `v` at the first step that ends on line
 //! `ZAXNES_VLINE` between dots `ZAXNES_VDOT_MIN` and `ZAXNES_VDOT_MAX` ("vline").
-//! `ZAXNES_ALIGNMENT` selects the CPU/PPU alignment.
+//! `ZAXNES_PIXLINE` adds that picture line's colours. `ZAXNES_ALIGNMENT` selects the CPU/PPU alignment.
 
 // A study tool: an unexpected error should stop it outright.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::fmt::Write as _;
 
+use zax_nes::ppu::{PIXEL_COLOR, SCREEN_WIDTH};
 use zax_nes::NesCore;
 
 fn env_i32(name: &str, default: i32) -> i32 {
@@ -41,6 +42,8 @@ fn study_scroll_write_probe() {
         env_i32("ZAXNES_VDOT_MIN", 270),
         env_i32("ZAXNES_VDOT_MAX", 320),
     );
+    // `ZAXNES_PIXLINE`: also log that picture line's colour indices at each "vline".
+    let pixel_line = env_i32("ZAXNES_PIXLINE", -1);
     let steps = usize::try_from(env_i32("ZAXNES_SCROLL_PROBE_STEPS", 6_000_000)).unwrap();
 
     let mut log = String::new();
@@ -62,6 +65,22 @@ fn study_scroll_write_probe() {
         if line == vline && (dot_min..dot_max).contains(&dot) {
             if !done {
                 writeln!(log, "vline {:04X} v={line} h={dot}", ppu.vram_v()).unwrap();
+                if let Ok(row) = usize::try_from(pixel_line) {
+                    let frame = core.pixel_frame_with_mask();
+                    let pixels = &frame[row * SCREEN_WIDTH..(row + 1) * SCREEN_WIDTH];
+                    log.push_str("pix ");
+                    for pixel in pixels {
+                        write!(log, "{:02X}", pixel & PIXEL_COLOR).unwrap();
+                    }
+                    log.push('\n');
+                }
+                if std::env::var("ZAXNES_PAL").is_ok_and(|value| value == "1") {
+                    log.push_str("pal ");
+                    for entry in core.bus().ppu().snapshot_palette() {
+                        write!(log, "{entry:02X}").unwrap();
+                    }
+                    log.push('\n');
+                }
                 done = true;
             }
         } else {

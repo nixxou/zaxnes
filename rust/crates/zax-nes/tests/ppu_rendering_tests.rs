@@ -1046,6 +1046,83 @@ fn fidelity_2005_write_landing_on_a_copy_of_t_reaches_it() {
     assert_ne!(0x03E0, after(3, true, 305, true), "dot 305");
 }
 
+/// Lot FIDELITY step 30 (`TriCNES`, MIT, compared pixel by pixel with Zaxnes on the same program):
+/// a first `$2005` write made on dot `D` of a visible line changes fine X from pixel `D` on in
+/// alignments 1 and 3, from pixel `D - 1` in alignment 0, and in alignment 2 pixel `D` takes fine
+/// X from the CPU's open bus (`$20`, fine X 0) under the `$2000` glitch's switch.
+#[test]
+fn fidelity_2005_fine_x_reaches_the_pixel_of_its_dot_per_alignment() {
+    // Tile $35 of the minimal ROM: planes $35 and $CA, so its columns alternate colours 2 and 1.
+    const PALETTE: [u8; 4] = [0x0F, 0x16, 0x2A, 0x12];
+    fn column(k: i32) -> u8 {
+        let bit = 7 - (k & 7);
+        PALETTE[usize::from(((0x35u8 >> bit) & 1) | (((0xCAu8 >> bit) & 1) << 1))]
+    }
+    /// Pixels D - 1, D and D + 1 of the line the write lands on, fine X going from 3 to 6.
+    fn pixels(alignment: u8, glitch: bool, dot: i32) -> [u8; 3] {
+        let mut fixture = TileFixture::new();
+        fixture.core.set_cpu_ppu_alignment(alignment);
+        fixture.core.set_glitch_2000(glitch);
+        fixture.fill_vram(0x2000, 960, 0x35);
+        fixture.fill_vram(0x23C0, 64, 0x00);
+        fixture.write_vram(0x3F00, &PALETTE);
+        fixture.set_control(0x00);
+        fixture.set_scroll(3, 0);
+        fixture.set_mask(0x0A);
+        fixture.core.run_frame(0);
+        park_on_dot(&mut fixture, dot);
+        let line = usize::try_from(fixture.core.bus().ppu().scanline()).unwrap();
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        ppu.read(2, None);
+        ppu.note_cpu_open_bus(0x20);
+        ppu.write(5, 0x06, None);
+        let bus = fixture.core.bus_mut();
+        while usize::try_from(bus.ppu().scanline()).unwrap() == line {
+            bus.tick();
+            bus.sync_ppu();
+        }
+        let x = usize::try_from(dot).unwrap();
+        [
+            pixel_at(&fixture.core, x - 1, line),
+            pixel_at(&fixture.core, x, line),
+            pixel_at(&fixture.core, x + 1, line),
+        ]
+    }
+
+    // A dot where old (3), new (6) and open-bus (0) fine X give different colours around it.
+    let dot = (20..200)
+        .find(|&d| {
+            column(d - 1 + 3) != column(d - 1 + 6)
+                && column(d + 6) != column(d)
+                && column(d + 3) != column(d + 6)
+        })
+        .unwrap();
+    let old = |x: i32| column(x + 3);
+    let new = |x: i32| column(x + 6);
+    for alignment in [1, 3] {
+        assert_eq!(
+            [old(dot - 1), new(dot), new(dot + 1)],
+            pixels(alignment, true, dot),
+            "a{alignment}"
+        );
+    }
+    assert_eq!(
+        [new(dot - 1), new(dot), new(dot + 1)],
+        pixels(0, true, dot),
+        "a0: a pixel earlier"
+    );
+    assert_eq!(
+        [old(dot - 1), column(dot), new(dot + 1)],
+        pixels(2, true, dot),
+        "a2: open bus"
+    );
+    assert_eq!(
+        [old(dot - 1), new(dot), new(dot + 1)],
+        pixels(2, false, dot),
+        "a2, switch off"
+    );
+}
+
 /// Lot FIDELITY steps 28-29: a `$2007` read made while rendering latches its buffer six dots after
 /// the access in alignments 2 and 3 (3 is the default) and five in 0 and 1, so a read one dot
 /// later in alignment 0 buffers exactly what a read one dot earlier does in alignment 3.
