@@ -2038,8 +2038,6 @@ impl Ppu2C02 {
     }
 
     /// [`Self::run_cpu_cycles`] with the board reached through `K` (lot CORE-2).
-    #[allow(clippy::inline_always)] // Lot CORE-2: outlined once every board kind has its copy of the hot path (measured).
-    #[inline(always)]
     pub fn run_cpu_cycles_as<K: BoardKind>(&mut self, cycles: u32, cartridge: Option<&mut Cartridge>) {
         let mut cartridge = CartSlot::<K>::new(cartridge);
         if cycles == 0 {
