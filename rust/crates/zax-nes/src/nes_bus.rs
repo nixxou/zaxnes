@@ -515,6 +515,8 @@ impl NesBus {
     }
 
     /// CPU cycles the PPU may lag from now on, at least 1.
+    #[allow(clippy::inline_always)] // Lot CORE-2: outlined once every board kind has its copy of the hot path (measured).
+    #[inline(always)]
     fn ppu_horizon_as<K: BoardKind>(&self) -> i64 {
         // The PPU's sample of /NMI lags its line by a dot or two: when they differ, the
         // next cycle must be run in step.
