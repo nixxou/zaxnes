@@ -753,6 +753,10 @@ macro_rules! with_board_kind {
         let entry: u8 = match $board {
             $crate::cartridges::Board::Nrom(_) => 1,
             $crate::cartridges::Board::Mmc3(_) => 2,
+            $crate::cartridges::Board::Mmc1(_) => 3,
+            $crate::cartridges::Board::UxRom(_) => 4,
+            $crate::cartridges::Board::CnRom(_) => 5,
+            $crate::cartridges::Board::AxRom(_) => 6,
             _ => 0,
         };
         match entry {
@@ -762,6 +766,22 @@ macro_rules! with_board_kind {
             }
             2 => {
                 type $kind = $crate::cartridges::Mmc3Kind;
+                $run
+            }
+            3 => {
+                type $kind = $crate::cartridges::Mmc1Kind;
+                $run
+            }
+            4 => {
+                type $kind = $crate::cartridges::UxRomKind;
+                $run
+            }
+            5 => {
+                type $kind = $crate::cartridges::CnRomKind;
+                $run
+            }
+            6 => {
+                type $kind = $crate::cartridges::AxRomKind;
                 $run
             }
             _ => {
@@ -782,4 +802,24 @@ board_kind!(
     /// Mapper 4 (and the boards the registry builds on the MMC3).
     Mmc3Kind,
     Mmc3
+);
+board_kind!(
+    /// Mapper 1.
+    Mmc1Kind,
+    Mmc1
+);
+board_kind!(
+    /// Mapper 2.
+    UxRomKind,
+    UxRom
+);
+board_kind!(
+    /// Mapper 3.
+    CnRomKind,
+    CnRom
+);
+board_kind!(
+    /// Mapper 7.
+    AxRomKind,
+    AxRom
 );

@@ -29,7 +29,7 @@ use crate::rom::{InesHeader, RomImage, RomLoadError, RomLoadFailure};
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
 use mappers::Mapper;
-pub use board::{AnyBoard, BoardKind, Mmc3Kind, NromKind};
+pub use board::{AnyBoard, AxRomKind, BoardKind, CnRomKind, Mmc1Kind, Mmc3Kind, NromKind, UxRomKind};
 pub(crate) use board::with_board_kind;
 
 /// `offset % len`, without the division when `offset` is already below `len`: bank offsets
