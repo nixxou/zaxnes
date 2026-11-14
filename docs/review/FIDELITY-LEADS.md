@@ -297,6 +297,45 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
     hardware: the even dots of the clear phase (the netlist's extra copies), and the evaluation
     phase beyond "rounded up to a multiple of 4". Settling them needs a console, not the netlist.
 
+- **Other emulators (2026-11-14).** BeesNES (`OamCorruptionSeed`/`OamCorruptionApply`,
+  `LSNPpu2C0X.h:1955-1990`): Zaxnes's rule exactly (dot/2 in 1-64, address rounded up to 4 in
+  65-256, the 8-dot pattern in 257-320, row 0 copied at the next rendered dot), no alignment. Mesen 2
+  (`NesPpu::SetOamCorruptionFlags`, GitHub): the same in 0-63 and 256-319, **nothing in 65-255**.
+  NesHawk (BizHawk 2.11.1): none (a commented-out `$2003` glitch only). puNES (`src/core/ppu.c`):
+  none. nesdev "OAM internals": the mechanism (columns precharged in the first half of every dot,
+  a row selected in the second; changing rows without precharge writes the old row's data into
+  the new one, "usually" row 0 onto the next; depends on process, voltage, temperature, CPU/PPU
+  alignment and register decoding) — which is what the netlist shows in its two "second half"
+  alignments.
+- **TriCNES** (Chris Siebert, AccuracyCoin's author; MIT; `github.com/100thCoin/TriCNES`, copy in
+  `G:/3DSen/ext-tools/tricnes-src/Emulator.cs`): the most detailed model found, alignment = its
+  `PPUClock & 3` (AccuracyCoin's numbering). Read 2026-11-14:
+  - `$2001` (`Emulator.cs:10055-10066`): rendering delay 2/2/3/2 dots, OAM-corruption seed delay
+    2/3/3/2, emphasis delay 2/1/1/2 for alignments 0/1/2/3.
+  - **Re-enabling rendering outside vblank with a corruption pending: on alignments 1 and 2 the
+    corruption does not happen** (`:10096-10108`; re-enabled in vblank it happens at the
+    pre-render line on all four). This matches the netlist (corruption in 2 of 4 alignments when
+    re-enabled mid-frame) — the netlist result is not an artefact on that point.
+  - Clear phase (`:3255-3325`): seed index = secondary OAM address, taken on odd and even dots
+    with different paths (instant vs delayed switch).
+  - Evaluation (`:3327-3545`): odd or even dot matters (`OamCorruptedOnOddCycle`, OAM address
+    incremented again), whether the last object was in Y or X range matters, rounding up to 4
+    only when the address is not a multiple of 4, alignment 0/3 vs 1/2 branches, and dot 256 gives
+    row 0 or 1 ("I have no idea").
+  - Sprite fetches (`:3554-3560`, `:3721-3727`): seed taken on alignments 0/3 at one point of the
+    dot and 1/2 at another.
+  - Write delays (`:10170-10225`): `$2005` 1/1/2/1, `$2006` load 4/4/5/4 for alignments 0-3: **one
+    alignment is a dot later**. The netlist also shows one alignment differing for `$2001` and
+    `$2006` (a2, one dot *earlier*, with store times that may be early); so the claim of step 28
+    that write timings do not depend on the alignment is **not settled** and must be revisited
+    (mapping TriCNES 0-3 onto the netlist's a0/a2/a4/a6 first).
+  - Palette RAM corruption (D5, `:10077-10091`): rendering off during the first 2 dots of a
+    nametable fetch (dot & 7 < 2, dot <= 250) with `v` >= `$3C00` corrupts the palette (Fiskbit's
+    explanation in the comment: the AT input of the address mux briefly sources from `v`).
+  - Other source to read: the MiSTer NES core (a fork has an "accurate PPU OAM corruption/decay"
+    switch), Breaks (2C02 reverse-engineered from the die), the nesdev threads t14353, t18339,
+    t18284.
+
 ### D2. OAM decay when rendering is off — done as an option (`emu.oam_decay`, off, step 20)
 - Zaxnes (step 20): `Ppu2C02::refresh_oam_row` / `refresh_oam_rows_on` (`ppu/mod.rs`), one clock
   stamp per 8-byte row, checked only on a `$2004` access, an OAM DMA byte and the rendering coming
