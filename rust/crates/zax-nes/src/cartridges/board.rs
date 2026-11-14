@@ -657,3 +657,99 @@ impl Mapper for Board {
         dispatch!(self, b => b.on_cpu_cycle(memory));
     }
 }
+
+/// How the hot path of a frame reaches the cartridge's board (lot CORE-2,
+/// `docs/design/CORE-TIERS.md`, "D. One generic hot path, specialised per popular board").
+///
+/// [`AnyBoard`] is every board through the [`Board`] dispatch: the path every game took before
+/// the lot, and still the one every board outside the specialised table takes. A specialised kind
+/// names **one** concrete board, so that the CPU, PPU and bus code compiled for it calls that
+/// board directly, with no dispatch and with the board's code inlined into the fetches. The
+/// source of the CPU, the PPU, the bus and the boards is written once; the compiler makes the
+/// copies.
+///
+/// **The one rule**: a frame runs through a specialised kind only while the board is that
+/// variant ([`BoardKind::matches`], checked when the frame starts), and nothing in the hot path
+/// reaches the board other than through this trait. A board that changes variant mid-frame (the
+/// MMC5's light board arming its split) ends the specialised run at that instruction.
+pub trait BoardKind {
+    /// The board this kind reaches.
+    type B: Mapper;
+
+    /// Whether `board` is this kind's variant.
+    fn matches(board: &Board) -> bool;
+
+    /// The board, for a call that only reads it.
+    fn board(board: &Board) -> &Self::B;
+
+    /// The board, for a call that changes it.
+    fn board_mut(board: &mut Board) -> &mut Self::B;
+}
+
+/// Every board, through the [`Board`] dispatch.
+pub enum AnyBoard {}
+
+impl BoardKind for AnyBoard {
+    type B = Board;
+
+    #[inline(always)]
+    fn matches(_: &Board) -> bool {
+        true
+    }
+
+    #[inline(always)]
+    fn board(board: &Board) -> &Board {
+        board
+    }
+
+    #[inline(always)]
+    fn board_mut(board: &mut Board) -> &mut Board {
+        board
+    }
+}
+
+/// A specialised kind: one [`Board`] variant. The `unreachable!` arm costs a compare and a
+/// never-taken branch where the dispatch paid an indirect jump; it cannot be reached as long as
+/// the rule of [`BoardKind`] holds, and it panics rather than read the wrong board if it ever is.
+macro_rules! board_kind {
+    ($(#[$doc:meta])* $kind:ident, $board:ident) => {
+        $(#[$doc])*
+        pub enum $kind {}
+
+        impl BoardKind for $kind {
+            type B = $board;
+
+            #[inline(always)]
+            fn matches(board: &Board) -> bool {
+                matches!(board, Board::$board(_))
+            }
+
+            #[inline(always)]
+            fn board(board: &Board) -> &$board {
+                match board {
+                    Board::$board(b) => b,
+                    _ => unreachable!(concat!("the frame runs on ", stringify!($kind))),
+                }
+            }
+
+            #[inline(always)]
+            fn board_mut(board: &mut Board) -> &mut $board {
+                match board {
+                    Board::$board(b) => b,
+                    _ => unreachable!(concat!("the frame runs on ", stringify!($kind))),
+                }
+            }
+        }
+    };
+}
+
+board_kind!(
+    /// Mapper 0.
+    NromKind,
+    Nrom
+);
+board_kind!(
+    /// Mapper 4 (and the boards the registry builds on the MMC3).
+    Mmc3Kind,
+    Mmc3
+);
