@@ -29,12 +29,47 @@ mod tiles;
 pub use ppu_bus_access::PpuBusAccess;
 pub use tile_buffer::TileBuffer;
 
-use crate::cartridges::{Cartridge, ChrFetch};
+use crate::cartridges::{AnyBoard, BoardKind, Cartridge, ChrFetch};
+use std::marker::PhantomData;
 use crate::wide::WideExtension;
 use crate::{NametableMirroring, NesRegion, RegionTiming, TileRecord};
 
 /// The cartridge as the internal PPU paths pass it around.
-type Cart<'a, 'c> = &'a mut Option<&'c mut Cartridge>;
+type Cart<'a, 'c, K> = &'a mut CartSlot<'c, K>;
+
+/// The cartridge, with the [`BoardKind`] the frame runs on (lot CORE-2): the PPU's internal paths
+/// take it so that the compiler knows which board is behind it, and it reads as the
+/// `Option<&mut Cartridge>` it wraps.
+pub(crate) struct CartSlot<'c, K> {
+    cartridge: Option<&'c mut Cartridge>,
+    kind: PhantomData<K>,
+}
+
+impl<'c, K> CartSlot<'c, K> {
+    #[inline(always)]
+    pub(crate) const fn new(cartridge: Option<&'c mut Cartridge>) -> Self {
+        Self {
+            cartridge,
+            kind: PhantomData,
+        }
+    }
+}
+
+impl<'c, K> std::ops::Deref for CartSlot<'c, K> {
+    type Target = Option<&'c mut Cartridge>;
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        &self.cartridge
+    }
+}
+
+impl<K> std::ops::DerefMut for CartSlot<'_, K> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.cartridge
+    }
+}
 
 /// Size of nametable VRAM: 4 KiB, enough for four-screen mode (REQ-CORE-090).
 pub const VRAM_SIZE: usize = 4096;
@@ -825,7 +860,7 @@ impl Ppu2C02 {
     /// the switch has nothing to be late for.
     #[cold]
     #[inline(never)]
-    fn switch_rendering(&mut self, value: u8, cart: Cart<'_, '_>) {
+    fn switch_rendering<K: BoardKind>(&mut self, value: u8, cart: Cart<'_, '_, K>) {
         let renders =
             self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline();
         // Two dots in every alignment: the netlist with the CPU's hold time (step 33) stops and
@@ -919,7 +954,7 @@ impl Ppu2C02 {
     /// netlist's dot `z`, so `first_on` is the dot itself.
     #[cold]
     #[inline(never)]
-    fn first_fetch_on(&mut self, first_on: i32, cart: Cart<'_, '_>) {
+    fn first_fetch_on<K: BoardKind>(&mut self, first_on: i32, cart: Cart<'_, '_, K>) {
         if first_on & 1 == 0 {
             return;
         }
@@ -1017,7 +1052,7 @@ impl Ppu2C02 {
     /// to what the shift alone leaves: nothing is tested per dot.
     #[cold]
     #[inline(never)]
-    fn skip_background_reload(&mut self, cart: Cart<'_, '_>) {
+    fn skip_background_reload<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {
         let next = self.dot + 1;
         if (next & 0x07) != 1 || !matches!(next, 9..=257 | 329 | 337) {
             return;
@@ -1716,7 +1751,7 @@ impl Ppu2C02 {
     /// Its own function only so that the RC2C05's swap can reach it from the `$2001` arm as
     /// well; `#[inline]`, so the `$2000` arm is the body it always was.
     #[inline]
-    fn write_control(&mut self, value: u8, cartridge: Option<&mut Cartridge>) {
+    fn write_control<K: BoardKind>(&mut self, value: u8, cartridge: Option<&mut Cartridge>) {
         // Alignment 3 only, on dot 257: the netlist with the CPU's hold time shows it there and
         // nowhere else (step 33); TriCNES's second case, alignment 0 on dot 258, does not appear.
         if self.alignment == 3 && self.dot == 257 && self.glitch_2000 && self.fetching() {
@@ -1725,7 +1760,7 @@ impl Ppu2C02 {
         self.control = value;
         self.t = (self.t & 0xF3FF) | (u16::from(value & 0x03) << 10);
         if let Some(cartridge) = cartridge {
-            cartridge.on_ppu_control(value);
+            cartridge.on_ppu_control_as::<K>(value);
         }
     }
 
@@ -1949,7 +1984,13 @@ impl Ppu2C02 {
     }
 
     /// Advances the PPU by the dots of one CPU cycle of the current region.
-    pub fn step_cpu_cycle(&mut self, mut cartridge: Option<&mut Cartridge>) {
+    pub fn step_cpu_cycle(&mut self, cartridge: Option<&mut Cartridge>) {
+        self.step_cpu_cycle_as::<AnyBoard>(cartridge)
+    }
+
+    /// [`Self::step_cpu_cycle`] with the board reached through `K` (lot CORE-2).
+    pub fn step_cpu_cycle_as<K: BoardKind>(&mut self, cartridge: Option<&mut Cartridge>) {
+        let mut cartridge = CartSlot::<K>::new(cartridge);
         // accumulator / denominator by repeated subtraction: three or four rounds (3 or 3.2
         // dots per cycle) cost less than a division on every CPU cycle.
         let denominator = self.timing.dots_per_cycle_denominator;
@@ -1992,7 +2033,13 @@ impl Ppu2C02 {
     ///
     /// Only the NMI sample of the last cycle survives (each cycle overwrites it and nothing
     /// reads it in between), so the dots run in two stretches around that one sample.
-    pub fn run_cpu_cycles(&mut self, cycles: u32, mut cartridge: Option<&mut Cartridge>) {
+    pub fn run_cpu_cycles(&mut self, cycles: u32, cartridge: Option<&mut Cartridge>) {
+        self.run_cpu_cycles_as::<AnyBoard>(cycles, cartridge)
+    }
+
+    /// [`Self::run_cpu_cycles`] with the board reached through `K` (lot CORE-2).
+    pub fn run_cpu_cycles_as<K: BoardKind>(&mut self, cycles: u32, cartridge: Option<&mut Cartridge>) {
+        let mut cartridge = CartSlot::<K>::new(cartridge);
         if cycles == 0 {
             return;
         }
@@ -2025,7 +2072,7 @@ impl Ppu2C02 {
 
     /// Runs `count` dots, skipping in one go the stretches where a dot does nothing but
     /// move the counters (or, on a visible line with rendering off, draw the backdrop).
-    fn run_dots(&mut self, mut count: i64, cart: Cart<'_, '_>) {
+    fn run_dots<K: BoardKind>(&mut self, mut count: i64, cart: Cart<'_, '_, K>) {
         while count > 0 {
             let idle = self.idle_dots_ahead().min(count);
             if idle > 0 {
@@ -2043,7 +2090,7 @@ impl Ppu2C02 {
 
             let span = self.visible_span_ahead(count);
             if span > 0 {
-                if !self.run_visible_span(span, cart.as_deref()) {
+                if !self.run_visible_span::<K>(span, cart.as_deref()) {
                     self.run_visible_span_through_bus(span, cart);
                 }
                 count -= span;
@@ -2106,7 +2153,7 @@ impl Ppu2C02 {
         self.vblank_just_started = false;
     }
 
-    fn step_dot(&mut self, cart: Cart<'_, '_>) {
+    fn step_dot<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {
         self.advance_counters();
         self.process_dot(cart);
     }
@@ -2152,7 +2199,7 @@ impl Ppu2C02 {
         self.odd_frame = !self.odd_frame;
     }
 
-    fn process_dot(&mut self, cart: Cart<'_, '_>) {
+    fn process_dot<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {
         if self.dot == SKIP_DECISION_DOT && self.scanline == self.pre_render_scanline() {
             self.skip_latch = self.rendering_enabled();
         }
@@ -2235,7 +2282,13 @@ impl Ppu2C02 {
     // ---------------------------------------------------------------- registers
 
     /// Reads register `register` (0-7, $2000 + register) with its side effects.
-    pub fn read(&mut self, register: u16, mut cartridge: Option<&mut Cartridge>) -> u8 {
+    pub fn read(&mut self, register: u16, cartridge: Option<&mut Cartridge>) -> u8 {
+        self.read_as::<AnyBoard>(register, cartridge)
+    }
+
+    /// [`Self::read`] with the board reached through `K` (lot CORE-2).
+    pub fn read_as<K: BoardKind>(&mut self, register: u16, cartridge: Option<&mut Cartridge>) -> u8 {
+        let mut cartridge = CartSlot::<K>::new(cartridge);
         self.apply_decay();
 
         match register & 0x07 {
@@ -2342,7 +2395,7 @@ impl Ppu2C02 {
     /// the +0.161 % the hoisted prologue cost; the rest of the way is a fight with the register
     /// allocator, which `docs/progress/MF-5a.md` records rather than takes.
     #[inline(never)]
-    fn read_data(&mut self, cart: Cart<'_, '_>) -> u8 {
+    fn read_data<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) -> u8 {
         let address = self.v & 0x3FFF;
         // A `$2007` access is an ALE of `v` (step 39).
         self.ale_low = address.to_le_bytes()[0];
@@ -2427,7 +2480,7 @@ impl Ppu2C02 {
     /// every fetch.
     #[cold]
     #[inline(never)]
-    fn read_buffer_from_fetch(&mut self, cart: Cart<'_, '_>) -> bool {
+    fn read_buffer_from_fetch<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) -> bool {
         // X - D: 6 in alignments 2 and 3, 5 in 0 and 1.
         let latch_dots: i32 = if self.alignment >= 2 { 6 } else { 5 };
         if self.prepaid_dots != 0 {
@@ -2469,7 +2522,7 @@ impl Ppu2C02 {
         match dot {
             1..=256 | 321..=336 => match (dot - 1) & 0x07 {
                 1 => self.nametable_latch,
-                3 => self.peek_vram(self.attribute_address(), ChrFetch::Background, cartridge),
+                3 => self.peek_vram::<AnyBoard>(self.attribute_address(), ChrFetch::Background, cartridge),
                 5 => self.pattern_low_latch,
                 _ => self.pattern_high_latch,
             },
@@ -2484,7 +2537,7 @@ impl Ppu2C02 {
                     5 => self.sprite_pattern_low[slot],
                     7 => self.sprite_pattern_high[slot],
                     _ => {
-                        self.peek_vram(0x2000 | (self.v & 0x0FFF), ChrFetch::Background, cartridge)
+                        self.peek_vram::<AnyBoard>(0x2000 | (self.v & 0x0FFF), ChrFetch::Background, cartridge)
                     }
                 }
             }
@@ -2507,21 +2560,21 @@ impl Ppu2C02 {
         match (dot - 1) & 0x07 {
             1 => {
                 let address = with_low(0x2000 | (self.v & 0x0FFF));
-                self.nametable_latch = self.peek_vram(address, ChrFetch::Background, cartridge);
+                self.nametable_latch = self.peek_vram::<AnyBoard>(address, ChrFetch::Background, cartridge);
             }
             3 => {
                 let address = with_low(self.attribute_address());
                 let shift = ((self.v >> 4) & 0x04) | (self.v & 0x02);
                 self.attribute_latch =
-                    (self.peek_vram(address, ChrFetch::Background, cartridge) >> shift) & 0x03;
+                    (self.peek_vram::<AnyBoard>(address, ChrFetch::Background, cartridge) >> shift) & 0x03;
             }
             5 => {
                 let address = with_low(self.pattern_address(0));
-                self.pattern_low_latch = self.peek_vram(address, ChrFetch::Background, cartridge);
+                self.pattern_low_latch = self.peek_vram::<AnyBoard>(address, ChrFetch::Background, cartridge);
             }
             _ => {
                 let address = with_low(self.pattern_address(8));
-                self.pattern_high_latch = self.peek_vram(address, ChrFetch::Background, cartridge);
+                self.pattern_high_latch = self.peek_vram::<AnyBoard>(address, ChrFetch::Background, cartridge);
             }
         }
     }
@@ -2540,7 +2593,7 @@ impl Ppu2C02 {
     /// The dots are run here and owed back ([`Self::prepaid_dots`]); `write` sets `v` on return.
     #[cold]
     #[inline(never)]
-    fn delay_address_load(&mut self, cart: Cart<'_, '_>) {
+    fn delay_address_load<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {
         if self.prepaid_dots != 0 {
             return;
         }
@@ -2559,13 +2612,13 @@ impl Ppu2C02 {
                 1 => {
                     let address = hybrid(0x2000 | (self.t & 0x0FFF), self.v);
                     self.nametable_latch =
-                        self.peek_vram(address, ChrFetch::Background, cart.as_deref());
+                        self.peek_vram::<K>(address, ChrFetch::Background, cart.as_deref());
                 }
                 3 => {
                     let address = hybrid(0x23C0 | (self.t & 0x0C00), self.attribute_address());
                     let shift = ((self.v >> 4) & 0x04) | (self.v & 0x02);
                     self.attribute_latch =
-                        (self.peek_vram(address, ChrFetch::Background, cart.as_deref()) >> shift)
+                        (self.peek_vram::<K>(address, ChrFetch::Background, cart.as_deref()) >> shift)
                             & 0x03;
                 }
                 _ => {}
@@ -2684,7 +2737,7 @@ impl Ppu2C02 {
     /// side, the load has nothing to show and stays immediate.
     #[cold]
     #[inline(never)]
-    fn delay_backdrop_address(&mut self, cart: Cart<'_, '_>) {
+    fn delay_backdrop_address<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {
         let palette = |address: u16| (address & 0x3F00) == 0x3F00;
         if self.prepaid_dots != 0 || !(palette(self.v) || palette(self.t)) {
             return;
@@ -2709,7 +2762,7 @@ impl Ppu2C02 {
     /// pixel in its alignment 2 and moves alignment 0 a pixel earlier; the netlist shows neither.)
     #[cold]
     #[inline(never)]
-    fn fine_x_write_mid_line(&mut self, value: u8, cart: Cart<'_, '_>) {
+    fn fine_x_write_mid_line<K: BoardKind>(&mut self, value: u8, cart: Cart<'_, '_, K>) {
         if self.alignment == 3
             && self.glitch_2000
             && self.prepaid_dots == 0
@@ -2806,7 +2859,13 @@ impl Ppu2C02 {
     }
 
     /// Writes register `register` (0-7, $2000 + register).
-    pub fn write(&mut self, register: u16, value: u8, mut cartridge: Option<&mut Cartridge>) {
+    pub fn write(&mut self, register: u16, value: u8, cartridge: Option<&mut Cartridge>) {
+        self.write_as::<AnyBoard>(register, value, cartridge)
+    }
+
+    /// [`Self::write`] with the board reached through `K` (lot CORE-2).
+    pub fn write_as<K: BoardKind>(&mut self, register: u16, value: u8, cartridge: Option<&mut Cartridge>) {
+        let mut cartridge = CartSlot::<K>::new(cartridge);
         self.apply_decay();
 
         // A write to any PPU register, $2002 included, loads the whole bus latch
@@ -2826,7 +2885,7 @@ impl Ppu2C02 {
                 if self.swaps_control_and_mask() {
                     self.mask = value;
                 } else {
-                    self.write_control(value, cartridge.as_deref_mut());
+                    self.write_control::<K>(value, cartridge.as_deref_mut());
                 }
             }
 
@@ -2836,7 +2895,7 @@ impl Ppu2C02 {
                     return;
                 }
                 if self.swaps_control_and_mask() {
-                    self.write_control(value, cartridge.as_deref_mut());
+                    self.write_control::<K>(value, cartridge.as_deref_mut());
                 } else {
                     let was_rendering = self.rendering_enabled();
                     if was_rendering == ((value & 0x18) != 0) {
@@ -3138,7 +3197,7 @@ impl Ppu2C02 {
     /// follows the handle the owner and `AccuracyCoin` share for it — the row it wins back is
     /// called `PPU Misc. / $2007 read w/ rendering`.
     #[cfg(feature = "ppu-2007-render-read")]
-    fn increment_vram_address(&mut self, cart: Cart<'_, '_>) {
+    fn increment_vram_address<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {
         if self.fetching() {
             // Q-137: the pipeline's own increment. It does **not** reach `v_row_start` — the row
             // of the line the access is made in, which is R2-005's exception — and it **does**
@@ -3171,7 +3230,7 @@ impl Ppu2C02 {
     /// baseline. `cargo build -p zax-nes --features ppu-2007-render-read` is the one flag that
     /// swaps them, and `docs/review/BOARD-FEATURES.md` has the row (Q-139).
     #[cfg(not(feature = "ppu-2007-render-read"))]
-    fn increment_vram_address(&mut self, cart: Cart<'_, '_>) {
+    fn increment_vram_address<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {
         let step = if (self.control & 0x04) != 0 { 32 } else { 1 };
         self.v = self.v.wrapping_add(step) & 0x7FFF;
 
@@ -3218,17 +3277,29 @@ impl Ppu2C02 {
         address: u16,
         access: PpuBusAccess,
         fetch: ChrFetch,
-        mut cartridge: Option<&mut Cartridge>,
+        cartridge: Option<&mut Cartridge>,
     ) -> u8 {
+        self.read_vram_through_bus_as::<AnyBoard>(address, access, fetch, cartridge)
+    }
+
+    /// [`Self::read_vram_through_bus`] with the board reached through `K` (lot CORE-2).
+    pub fn read_vram_through_bus_as<K: BoardKind>(
+        &mut self,
+        address: u16,
+        access: PpuBusAccess,
+        fetch: ChrFetch,
+        cartridge: Option<&mut Cartridge>,
+    ) -> u8 {
+        let mut cartridge = CartSlot::<K>::new(cartridge);
         self.read_vram_inner(address, access, fetch, &mut cartridge)
     }
 
-    fn read_vram_inner(
+    fn read_vram_inner<K: BoardKind>(
         &self,
         address: u16,
         access: PpuBusAccess,
         fetch: ChrFetch,
-        cart: Cart<'_, '_>,
+        cart: Cart<'_, '_, K>,
     ) -> u8 {
         let address = address & 0x3FFF;
 
@@ -3240,9 +3311,9 @@ impl Ppu2C02 {
             return match cart.as_deref_mut() {
                 None => 0,
                 Some(cartridge) if access == PpuBusAccess::Inert => {
-                    cartridge.ppu_peek(address, fetch)
+                    cartridge.ppu_peek_as::<K>(address, fetch)
                 }
-                Some(cartridge) => cartridge.ppu_read(address, fetch),
+                Some(cartridge) => cartridge.ppu_read_as::<K>(address, fetch),
             };
         }
 
@@ -3255,10 +3326,10 @@ impl Ppu2C02 {
 
     /// Side-effect-free read of the PPU bus, for the tile emitter: the cartridge is only
     /// peeked (REQ-CORE-033).
-    fn peek_vram(&self, address: u16, fetch: ChrFetch, cartridge: Option<&Cartridge>) -> u8 {
+    fn peek_vram<K: BoardKind>(&self, address: u16, fetch: ChrFetch, cartridge: Option<&Cartridge>) -> u8 {
         let address = address & 0x3FFF;
         if address < 0x2000 {
-            return cartridge.map_or(0, |cartridge| cartridge.ppu_peek(address, fetch));
+            return cartridge.map_or(0, |cartridge| cartridge.ppu_peek_as::<K>(address, fetch));
         }
 
         if !is_palette_address(address) {
@@ -3275,17 +3346,29 @@ impl Ppu2C02 {
         address: u16,
         value: u8,
         access: PpuBusAccess,
-        mut cartridge: Option<&mut Cartridge>,
+        cartridge: Option<&mut Cartridge>,
     ) {
-        self.write_vram_inner(address, value, access, &mut cartridge);
+        self.write_vram_through_bus_as::<AnyBoard>(address, value, access, cartridge)
     }
 
-    fn write_vram_inner(
+    /// [`Self::write_vram_through_bus`] with the board reached through `K` (lot CORE-2).
+    pub fn write_vram_through_bus_as<K: BoardKind>(
         &mut self,
         address: u16,
         value: u8,
         access: PpuBusAccess,
-        cart: Cart<'_, '_>,
+        cartridge: Option<&mut Cartridge>,
+    ) {
+        let mut cartridge = CartSlot::<K>::new(cartridge);
+        self.write_vram_inner(address, value, access, &mut cartridge);
+    }
+
+    fn write_vram_inner<K: BoardKind>(
+        &mut self,
+        address: u16,
+        value: u8,
+        access: PpuBusAccess,
+        cart: Cart<'_, '_, K>,
     ) {
         let address = address & 0x3FFF;
 
@@ -3295,7 +3378,7 @@ impl Ppu2C02 {
 
         if address < 0x2000 {
             if let Some(cartridge) = cart.as_deref_mut() {
-                cartridge.ppu_write(address, value);
+                cartridge.ppu_write_as::<K>(address, value);
             }
 
             return;
@@ -3327,9 +3410,9 @@ impl Ppu2C02 {
     /// This is the notification of every fetch of a rendered line, nametable and attribute
     /// bytes included — see [`Cartridge::on_ppu_address_bus`]. It carries no cost for a board
     /// that does not ask for it: the test is a load of one `bool` settled at load time.
-    fn notify_address_bus(&self, address: u16, cart: Cart<'_, '_>) {
+    fn notify_address_bus<K: BoardKind>(&self, address: u16, cart: Cart<'_, '_, K>) {
         if let Some(cartridge) = cart.as_deref_mut() {
-            cartridge.on_ppu_address_bus(address, self.ppu_clock);
+            cartridge.on_ppu_address_bus_as::<K>(address, self.ppu_clock);
         }
     }
 
@@ -3337,9 +3420,9 @@ impl Ppu2C02 {
     /// `$2006` write loading `v`. A12 is an address line, so an A12 counter must see both, and a
     /// board whose rule is about /RD — the MMC5's in-frame detection — must not
     /// (`Cartridge::watches_ppu_bus_without_read`).
-    pub(super) fn notify_address_bus_without_read(&self, address: u16, cart: Cart<'_, '_>) {
+    pub(super) fn notify_address_bus_without_read<K: BoardKind>(&self, address: u16, cart: Cart<'_, '_, K>) {
         if let Some(cartridge) = cart.as_deref_mut() {
-            cartridge.on_ppu_address_bus_without_read(address, self.ppu_clock);
+            cartridge.on_ppu_address_bus_without_read_as::<K>(address, self.ppu_clock);
         }
     }
 
@@ -3418,7 +3501,7 @@ impl Ppu2C02 {
                 #[cfg(feature = "board-mmc5-exattr-split")]
                 return cartridge.read_nametable_from_vram(address, &self.vram);
                 #[cfg(not(feature = "board-mmc5-exattr-split"))]
-                return cartridge.read_nametable(address);
+                return cartridge.read_nametable_as::<K>(address);
             }
         }
 
@@ -3431,7 +3514,7 @@ impl Ppu2C02 {
 
     /// The rendered frame a nametable byte was last written in (0: not since power-on or the
     /// last state load; always 0 for nametables the cartridge serves), under `layout`.
-    fn nametable_written_as(
+    fn nametable_written_as<K: BoardKind>(
         &self,
         address: u16,
         cartridge: Option<&Cartridge>,
@@ -3444,7 +3527,7 @@ impl Ppu2C02 {
             // written has to be told about it rather than given the 0 that means "never".
             #[cfg(feature = "board-mmc5-exattr-split")]
             if let Some(offset) =
-                cartridge.and_then(|cartridge| cartridge.nametable_write_offset(address))
+                cartridge.and_then(|cartridge| cartridge.nametable_write_offset_as::<K>(address))
             {
                 return self.vram_written.get(offset).copied().unwrap_or(0);
             }
@@ -3458,7 +3541,7 @@ impl Ppu2C02 {
         self.vram_written.get(offset).copied().unwrap_or(0)
     }
 
-    fn write_nametable_byte(&mut self, address: u16, value: u8, cart: Cart<'_, '_>) {
+    fn write_nametable_byte<K: BoardKind>(&mut self, address: u16, value: u8, cart: Cart<'_, '_, K>) {
         let page = self.nametable_page(address, cart.as_deref());
         if page == Cartridge::SERVED_BY_CARTRIDGE {
             // Lot MF-LEG-2: with the MMC5 answering every table, a `$2007` write to one that
@@ -3469,7 +3552,7 @@ impl Ppu2C02 {
             #[cfg(feature = "board-mmc5-exattr-split")]
             if let Some(offset) = cart
                 .as_deref()
-                .and_then(|cartridge| cartridge.nametable_write_offset(address))
+                .and_then(|cartridge| cartridge.nametable_write_offset_as::<K>(address))
             {
                 self.vram[offset] = value;
                 if let Some(written) = self.vram_written.get_mut(offset) {
@@ -3480,7 +3563,7 @@ impl Ppu2C02 {
             }
 
             if let Some(cartridge) = cart.as_deref_mut() {
-                cartridge.write_nametable(address, value);
+                cartridge.write_nametable_as::<K>(address, value);
                 return;
             }
         }

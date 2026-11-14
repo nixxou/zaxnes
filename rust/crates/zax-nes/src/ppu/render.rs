@@ -12,7 +12,7 @@ use super::{
     map_nametable, Cart, Ppu2C02, PpuBusAccess, OPAQUE_PIXEL, SCREEN_WIDTH, SPRITES_PER_LINE,
     SPRITES_PER_LINE_I32, VISIBLE_SCANLINES,
 };
-use crate::cartridges::{Cartridge, ChrFetch};
+use crate::cartridges::{AnyBoard, BoardKind, Cartridge, ChrFetch};
 
 impl Ppu2C02 {
     /// The 256 x 240 image of the frame just rendered, row-major: per pixel, the NES colour
@@ -79,15 +79,15 @@ impl Ppu2C02 {
 
     /// Runs everything the current dot owes: the fetch pipeline, sprite evaluation and the
     /// pixel of the visible lines.
-    pub(super) fn run_render_dot(&mut self, cart: Cart<'_, '_>) {
+    pub(super) fn run_render_dot<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {
         let dot = self.dot;
         let visible = self.scanline < VISIBLE_SCANLINES;
 
         if self.rendering_enabled() {
             if visible {
-                self.run_rendering_dot::<true>(dot, cart);
+                self.run_rendering_dot::<K, true>(dot, cart);
             } else if self.scanline == self.pre_render_scanline() {
-                self.run_rendering_dot::<false>(dot, cart);
+                self.run_rendering_dot::<K, false>(dot, cart);
             }
         }
 
@@ -105,11 +105,11 @@ impl Ppu2C02 {
     ///
     /// Returns `false`, having run nothing, when the cartridge's fetches have side effects or
     /// another source ([`Cartridge::chr_view`], a nametable the cartridge serves itself).
-    pub(super) fn run_visible_span(&mut self, count: i64, cartridge: Option<&Cartridge>) -> bool {
+    pub(super) fn run_visible_span<K: BoardKind>(&mut self, count: i64, cartridge: Option<&Cartridge>) -> bool {
         let Some(cartridge) = cartridge else {
             return false;
         };
-        let Some(chr) = cartridge.chr_view() else {
+        let Some(chr) = cartridge.chr_view_as::<K>() else {
             return false;
         };
 
@@ -182,7 +182,7 @@ impl Ppu2C02 {
     /// source (MMC2/MMC4 latches, MMC3 and Rambo1 watching A12, MMC5): the same loop, with each
     /// fetch through the full bus path ([`Ppu2C02::background_fetch`]), so the board sees the same
     /// addresses at the same PPU clock as with [`Ppu2C02::step_dot`].
-    pub(super) fn run_visible_span_through_bus(&mut self, count: i64, cart: Cart<'_, '_>) {
+    pub(super) fn run_visible_span_through_bus<K: BoardKind>(&mut self, count: i64, cart: Cart<'_, '_, K>) {
         let pixels = SpanPixels::of(self.mask, i32::from(self.fine_x));
         #[allow(clippy::cast_sign_loss)] // Visible line, 0..240.
         let row = self.scanline as usize * SCREEN_WIDTH;
@@ -262,7 +262,7 @@ impl Ppu2C02 {
     /// The work of one dot of a line that renders (a visible line when `VISIBLE`, else the
     /// pre-render line) with rendering on, in the order of the nesdev timing diagram:
     /// background pipeline, sprite evaluation, sprite fetches, vertical reload.
-    fn run_rendering_dot<const VISIBLE: bool>(&mut self, dot: i32, cart: Cart<'_, '_>) {
+    fn run_rendering_dot<K: BoardKind, const VISIBLE: bool>(&mut self, dot: i32, cart: Cart<'_, '_, K>) {
         match dot {
             1..=256 => {
                 if dot == 1 {
@@ -334,7 +334,7 @@ impl Ppu2C02 {
 
     /// The step of the four two-dot background fetches that falls on `dot` (2 to 257 and
     /// 321 to 337).
-    fn background_fetch(&mut self, dot: i32, cart: Cart<'_, '_>) {
+    fn background_fetch<K: BoardKind>(&mut self, dot: i32, cart: Cart<'_, '_, K>) {
         match (dot - 1) & 0x07 {
             0 => {
                 self.load_background_shifters();
@@ -355,7 +355,7 @@ impl Ppu2C02 {
         }
     }
 
-    fn fetch_attribute(&self, cart: Cart<'_, '_>) -> u8 {
+    fn fetch_attribute<K: BoardKind>(&self, cart: Cart<'_, '_, K>) -> u8 {
         let attribute = self.read_vram_inner(
             self.attribute_address(),
             PpuBusAccess::Render,
@@ -366,7 +366,7 @@ impl Ppu2C02 {
         (attribute >> shift) & 0x03
     }
 
-    fn fetch_pattern(&self, plane: u16, cart: Cart<'_, '_>) -> u8 {
+    fn fetch_pattern<K: BoardKind>(&self, plane: u16, cart: Cart<'_, '_, K>) -> u8 {
         self.read_vram_inner(
             self.pattern_address(plane),
             PpuBusAccess::Render,
@@ -397,7 +397,7 @@ impl Ppu2C02 {
     /// A board watching A12 is in both latch lists and sees no difference; a board waiting on
     /// /RD — the MMC5's in-frame detection — must not count this dot, and is spared a third of
     /// the bus events of a line for it (two of the six a tile produces).
-    fn notify_pattern_address(&self, plane: u16, cart: Cart<'_, '_>) {
+    fn notify_pattern_address<K: BoardKind>(&self, plane: u16, cart: Cart<'_, '_, K>) {
         self.notify_address_bus_without_read(self.pattern_address(plane), cart);
     }
 
@@ -815,7 +815,7 @@ impl Ppu2C02 {
 
     /// Dots 257 to 320 fetch the patterns of the eight sprites of the next line and hold
     /// OAMADDR at 0 (nesdev).
-    fn run_sprite_fetches(&mut self, dot: i32, cart: Cart<'_, '_>) {
+    fn run_sprite_fetches<K: BoardKind>(&mut self, dot: i32, cart: Cart<'_, '_, K>) {
         self.oam_address = 0;
 
         if dot == 257 {
@@ -891,9 +891,9 @@ impl Ppu2C02 {
             let attribute = self.oam[(n * 4) + 2];
             let address = self.sprite_row_address(tile, attribute, self.scanline - i32::from(y));
             let slot = self.extra_loaded;
-            self.extra_pattern_low[slot] = self.peek_vram(address, ChrFetch::Sprite, cartridge);
+            self.extra_pattern_low[slot] = self.peek_vram::<AnyBoard>(address, ChrFetch::Sprite, cartridge);
             self.extra_pattern_high[slot] =
-                self.peek_vram(address + 8, ChrFetch::Sprite, cartridge);
+                self.peek_vram::<AnyBoard>(address + 8, ChrFetch::Sprite, cartridge);
             self.extra_attribute[slot] = attribute;
             self.extra_x[slot] = x;
             self.extra_loaded += 1;

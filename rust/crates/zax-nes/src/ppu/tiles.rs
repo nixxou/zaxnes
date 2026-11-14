@@ -15,7 +15,7 @@
 use super::{
     palette_index, Cart, Ppu2C02, TileBuffer, SCREEN_WIDTH, SCREEN_WIDTH_I32, VISIBLE_SCANLINES,
 };
-use crate::cartridges::{Cartridge, ChrFetch};
+use crate::cartridges::{AnyBoard, BoardKind, Cartridge, ChrFetch};
 use crate::wide_decode::{
     BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder, MaskingSprites,
 };
@@ -135,7 +135,7 @@ impl Ppu2C02 {
     /// Sprites still come before the background row of the same line (REQ-CORE-044): the
     /// row is now emitted at the *end* of that same line (R2-005), so nothing else can slip
     /// between the two.
-    pub(super) fn begin_capture_line(&mut self, line: i32, cart: Cart<'_, '_>) {
+    pub(super) fn begin_capture_line<K: BoardKind>(&mut self, line: i32, cart: Cart<'_, '_, K>) {
         if line == 0 {
             // REQ-CORE-046 reads the masks from the state at the start of visible line 0;
             // R2-005 moved the background row, not this.
@@ -157,7 +157,7 @@ impl Ppu2C02 {
     }
 
     /// Emits the background row owed by visible line `line`, at its last dot (R2-005).
-    pub(super) fn end_capture_line(&mut self, line: i32, cart: Cart<'_, '_>) {
+    pub(super) fn end_capture_line<K: BoardKind>(&mut self, line: i32, cart: Cart<'_, '_, K>) {
         if self.tracks_line_scroll {
             self.keep_line_scroll(line);
         }
@@ -227,7 +227,7 @@ impl Ppu2C02 {
     /// the loop does: in the `false` instantiation the reborrow does not exist, and that
     /// instantiation is the only one every other board reaches. Step 4 of the progress note has
     /// the three measurements.
-    fn capture_background_row(&mut self, line: i32, cart: Cart<'_, '_>) {
+    fn capture_background_row<K: BoardKind>(&mut self, line: i32, cart: Cart<'_, '_, K>) {
         // AMD-021 R2-005 (supersedes point 3 of the answer to Q-004 and DEC-02-Q4 on this
         // point): the scroll is the left-edge shadow of the internal address read at the END
         // of the line, so a $2006 write made during line L reaches the row of line L itself,
@@ -254,7 +254,7 @@ impl Ppu2C02 {
             return;
         }
 
-        self.capture_background_row_as::<false>(line, cart);
+        self.capture_background_row_as::<K, false>(line, cart);
     }
 
     /// The substituting instantiation, **behind a call**: `Ppu2C02::run_dots` inlines the
@@ -264,14 +264,14 @@ impl Ppu2C02 {
     /// step 0's trap in the largest function of the crate. Only the MMC5 pays the call.
     #[cfg(feature = "board-mmc5-exattr-split")]
     #[inline(never)]
-    fn capture_background_row_substituted(&mut self, line: i32, cart: Cart<'_, '_>) {
-        self.capture_background_row_as::<true>(line, cart);
+    fn capture_background_row_substituted<K: BoardKind>(&mut self, line: i32, cart: Cart<'_, '_, K>) {
+        self.capture_background_row_as::<K, true>(line, cart);
     }
 
-    fn capture_background_row_as<const SUBSTITUTED: bool>(
+    fn capture_background_row_as<K: BoardKind, const SUBSTITUTED: bool>(
         &mut self,
         line: i32,
-        cart: Cart<'_, '_>,
+        cart: Cart<'_, '_, K>,
     ) {
         let coarse_x = self.v_row_start & 0x1F;
         let coarse_y = (self.v_row_start >> 5) & 0x1F;
@@ -375,7 +375,7 @@ impl Ppu2C02 {
                 cart.as_deref(),
             );
             if let Some(cartridge) = cart.as_deref_mut() {
-                cartridge.advance_chr_latch(i32::from(pattern_table), i32::from(tile));
+                cartridge.advance_chr_latch_as::<K>(i32::from(pattern_table), i32::from(tile));
             }
 
             #[allow(clippy::cast_possible_truncation)] // x is -519..768.
@@ -397,7 +397,7 @@ impl Ppu2C02 {
         #[cfg(feature = "board-mmc5-exattr-split")]
         if SUBSTITUTED {
             if let Some(cartridge) = cart.as_deref_mut() {
-                cartridge.set_background_capture_state(saved_capture);
+                cartridge.set_background_capture_state_as::<K>(saved_capture);
             }
         }
     }
@@ -460,7 +460,7 @@ impl Ppu2C02 {
             // 3, Mega Man 6, Metal Force, Metroid; the NROM, UxROM and CNROM games cannot).
             let layout = captured.layout;
             let nametable = |address: u16| self.read_nametable_as(address, cart, layout);
-            let written = |address: u16| self.nametable_written_as(address, cart, layout);
+            let written = |address: u16| self.nametable_written_as::<AnyBoard>(address, cart, layout);
             let memory = &DecoderMemory {
                 nametable: &nametable,
                 nametable_written: &written,
@@ -586,7 +586,7 @@ impl Ppu2C02 {
             }
             let layout = captured.layout;
             let nametable = |address: u16| self.read_nametable_as(address, cart, layout);
-            let written = |address: u16| self.nametable_written_as(address, cart, layout);
+            let written = |address: u16| self.nametable_written_as::<AnyBoard>(address, cart, layout);
             let memory = &DecoderMemory {
                 nametable: &nametable,
                 nametable_written: &written,
@@ -1113,7 +1113,7 @@ impl Ppu2C02 {
     /// The hardware limit of eight sprites per line does *not* apply: all 64 sprites are
     /// emitted, which is what keeps 3D sprites from flickering (REQ-CORE-041, notes).
     /// Left-column masking removes no record either; it is only reported through maskX.
-    fn capture_sprites(&mut self, line: i32, cart: Cart<'_, '_>) {
+    fn capture_sprites<K: BoardKind>(&mut self, line: i32, cart: Cart<'_, '_, K>) {
         let band = line / 8;
         let mut count = 0;
         for n in 0..64 {
@@ -1211,7 +1211,7 @@ impl Ppu2C02 {
 
     /// The sprites of the extension's second page whose band starts in `band` (8 x 8 only),
     /// after the console's 64: indices 128 and up, so below them all.
-    fn capture_extra_sprites(&mut self, band: i32, sprite_table: u16, cart: Cart<'_, '_>) {
+    fn capture_extra_sprites<K: BoardKind>(&mut self, band: i32, sprite_table: u16, cart: Cart<'_, '_, K>) {
         let (visible_low, visible_high) = self.wide.sprite_range();
         let oam = *self.wide.extra_oam();
         for n in 0..64 {
@@ -1257,18 +1257,18 @@ impl Ppu2C02 {
         }
     }
 
-    fn emit_sprite(
+    fn emit_sprite<K: BoardKind>(
         &mut self,
         index: i32,
         y: i16,
         pattern_address: u16,
         sprite: &SpriteAttributes,
-        cart: Cart<'_, '_>,
+        cart: Cart<'_, '_, K>,
     ) {
         let (plane0, plane1) =
             self.read_pattern_planes(pattern_address, ChrFetch::Sprite, cart.as_deref());
         if let Some(cartridge) = cart.as_deref_mut() {
-            cartridge.advance_chr_latch(
+            cartridge.advance_chr_latch_as::<K>(
                 i32::from(pattern_address & 0x1000),
                 i32::from((pattern_address >> 4) & 0xFF),
             );
@@ -1323,8 +1323,8 @@ impl Ppu2C02 {
         let mut plane1 = 0u64;
         for row in 0..8u16 {
             plane0 |=
-                u64::from(self.peek_vram(address.wrapping_add(row), fetch, cartridge)) << (8 * row);
-            plane1 |= u64::from(self.peek_vram(address.wrapping_add(8 + row), fetch, cartridge))
+                u64::from(self.peek_vram::<AnyBoard>(address.wrapping_add(row), fetch, cartridge)) << (8 * row);
+            plane1 |= u64::from(self.peek_vram::<AnyBoard>(address.wrapping_add(8 + row), fetch, cartridge))
                 << (8 * row);
         }
 
@@ -1742,9 +1742,9 @@ struct SpriteAttributes {
     palette: u8,
 }
 
-fn restore_chr_latch(cart: Cart<'_, '_>, saved_latch: i32) {
+fn restore_chr_latch<K: BoardKind>(cart: Cart<'_, '_, K>, saved_latch: i32) {
     if let Some(cartridge) = cart.as_deref_mut() {
-        cartridge.set_chr_latch_state(saved_latch);
+        cartridge.set_chr_latch_state_as::<K>(saved_latch);
     }
 }
 
