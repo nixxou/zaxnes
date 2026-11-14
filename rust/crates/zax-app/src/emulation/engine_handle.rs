@@ -887,6 +887,20 @@ impl EngineHandle {
     }
 
     /// What the work RAM holds at the next power-on (lot CARTDB); likewise.
+    pub fn set_ppu_pre_g_revision(&mut self, enabled: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_ppu_pre_g_revision(enabled);
+        }
+    }
+
+    /// `emu.oamaddr_write_corruption` (lot FIDELITY step 37); Zaxnes only.
+    pub fn set_oamaddr_write_corruption(&mut self, enabled: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_oamaddr_write_corruption(enabled);
+        }
+    }
+
+    /// `emu.power_on_ppu_ram` (lot FIDELITY step 36); Zaxnes only.
     pub fn set_power_on_ppu_ram(&mut self, pattern: zax_nes::PowerOnPpuRam) {
         if let Some(core) = self.zaxnes_mut() {
             core.set_power_on_ppu_ram(pattern);

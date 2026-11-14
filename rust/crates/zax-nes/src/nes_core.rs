@@ -236,6 +236,19 @@ impl NesCore {
         self.bus.ppu_mut().set_reset_line(enabled);
     }
 
+    /// Chooses the PPU revision: `true` for a 2C02 older than G (palette not readable through
+    /// `$2007`, no OAMADDR write corruption), `false` for the 2C02G (default).
+    pub fn set_ppu_pre_g_revision(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_pre_g_revision(enabled);
+    }
+
+    /// Whether a 2C02G's `$2003` writes copy an OAM row over the one they address (D4). Off by
+    /// default: the console-checked OAM tests (blargg `oam_read`, `oam_stress`, `AccuracyCoin`'s
+    /// `$2004` behaviour) pass on consoles that do not show it.
+    pub fn set_oamaddr_write_corruption(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_oamaddr_write_corruption(enabled);
+    }
+
     /// Whether the PPU's reset line still holds `$2000`, `$2001`, `$2005` and `$2006` (from a
     /// reset to the pre-render line).
     #[must_use]

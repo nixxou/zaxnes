@@ -376,10 +376,14 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 - Zaxnes: per-bit decay stamps (`DECAY_DOTS`, `ppu/mod.rs:82`, `apply_decay`). Differs from Mesen on
   some reads (NMI-MESEN.md). To settle against the doc.
 
-### C6. Palette read on pre-G PPUs — open (revision option)
+### C6. Palette read on pre-G PPUs — done as an option (`emu.ppu_revision`, 2C02G default, step 37)
 - Hardware (nesdev "PPU registers": palette read "supported by the 2C02G, 2C02H, and PAL PPUs"): before 2C02G, `$2007` reads at `$3F00-$3FFF` do not return palette RAM (BeesNES TODO,
   `LSNPpu2C0X.h:1242-1246`). Zaxnes always returns palette (`ppu/mod.rs:1617`). Free; needs a
   "PPU revision" setting (see G1).
+- **Step 37**: nesdev also says "On PPUs that do not support reading palette RAM, this memory range
+  behaves the same as the rest of PPU memory": with "2C02 before G" the read returns the buffer and
+  refills it from the nametable byte underneath (`read_data`), as for any other address. Not
+  measurable on the netlist (Visual2C02 is a 2C02G die). Default 2C02G, unchanged behaviour.
 
 ---
 
@@ -536,10 +540,24 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   (writing fewer than 8 bytes on the 2C02G)".
 - Zaxnes: `Ppu2C02::oamaddr_row_copy` (`ppu/mod.rs`), skipped on PAL. Free (pre-render line, once per frame).
 
-### D4. 2C02G: writes to OAMADDR corrupt OAM — open (revision option)
+### D4. 2C02G: writes to OAMADDR corrupt OAM — done as an option (`emu.oamaddr_write_corruption`, off, step 37)
 - nesdev "PPU registers" OAMADDR: "On the 2C02G, writes to OAMADDR corrupt OAM"; on 2C03/2C04/2C05/
   2C07 "OAMADDR works as intended"; the pre-render copy of D3 is "required for 2C02 compatibility" on
   the Dendy. Zaxnes: none.
+- nesdev details (forum threads cited there): "this usually seems to copy sprites 8 and 9 (address
+  $20) over the 8-byte row at the target address", "the source address ... seems to come from the
+  previous value on the CPU BUS", "There may be other possible behaviors as well."
+- **Netlist (step 37, `benchoam2.cpp`, hold-time bench, rendering off, `STA $2003` so the bus held
+  `$20`)**: in phase a0 every write copies row `$20` over the row at the written address (the first
+  byte, and the byte at the written address, ORed with the target's) — nesdev's description; in
+  a4 the copy runs the other way, the row of the *previous* OAMADDR over row `$20`. Phase-dependent:
+  a race again.
+- **Done as an option, off by default**: `oamaddr_write_corruption` copies the row the CPU's
+  previous bus byte points to over the written row (nesdev's console description; the OR details
+  and the reverse phase not modelled). Switched on it fails blargg `oam_read`, `oam_stress`,
+  `cpu_dummy_writes_oam`, `ppu_read_buffer` and AccuracyCoin's `Address $2004 behavior` in all four
+  alignments — tests that pass on their authors' consoles, so those consoles do not show it as
+  modelled. Off under "2C02 before G" whatever the switch says.
 
 ### D5. Palette RAM corruption when rendering is turned off mid-screen — done as an option (`emu.palette_corruption`, alignment 2 only, step 32)
 - nesdev "PPU registers" PPUMASK: "Turning rendering off mid-screen can corrupt palette RAM."
@@ -614,9 +632,16 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   N20914398 profile was measured with a Sunsoft 5B cartridge and has no low-pass and no
   inversion — kept as BeesNES lists it.
 
-### E2. Per-console clock — open (free)
+### E2. Per-console clock — rejected (no effect while the pacing follows the display; step 38)
 - Each console's crystal differs (E1 table). Option "measured clock of console X" changes speed and
   pitch slightly.
+- **Step 38**: this core paces at the nominal 60 frames a second (`RegionTiming::
+  nominal_frames_per_second`), locked to the display, and derives the audio samples per frame from
+  it (`apu/mod.rs`, `nominal_frames_per_second * speed`): it already departs from the NTSC 60.0988 Hz
+  by 1 640 ppm on purpose. BeesNES's measured clocks differ from the nominal 1 789 773 Hz by tens of
+  ppm (1 789 806.677 Hz: +19 ppm). Such an option would change nothing a player can hear or see
+  while the pacing follows the display; it only makes sense with a pacing on the real clock (a
+  Fidelity+ item: A2 "real-time pacing"), where it should be added then.
 
 ### E3. APU sub-cycle — reference
 - BeesNES claims the APU completely sub-cycle accurate (README). Our APU passes every APU test ROM we

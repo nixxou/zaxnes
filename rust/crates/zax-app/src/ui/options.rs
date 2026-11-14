@@ -306,6 +306,8 @@ const EMULATION: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::EmuCartridgeDb),
     LayoutEntry::Row(SettingId::EmuPowerOnRam),
     LayoutEntry::Row(SettingId::EmuPowerOnPpuRam),
+    LayoutEntry::Row(SettingId::EmuPpuRevision),
+    LayoutEntry::Row(SettingId::EmuOamaddrWriteCorruption),
     LayoutEntry::Row(SettingId::EmuOamCorruption),
     LayoutEntry::Row(SettingId::EmuPpuBusConflicts),
     LayoutEntry::Row(SettingId::EmuOamaddrBug),

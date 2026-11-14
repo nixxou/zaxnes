@@ -533,8 +533,12 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("option.Alignment 2", "Alignement 2"),
     ("option.Alignment 3", "Alignement 3"),
     ("option.Blargg's console", "Console de blargg"),
+    ("option.2C02G", "2C02G"),
+    ("option.2C02 before G", "2C02 avant G"),
     ("setting.emu.power_on_ram", "RAM à l'allumage"),
     ("setting.emu.power_on_ppu_ram", "Mémoire vidéo à l'allumage"),
+    ("setting.emu.ppu_revision", "Révision de la puce vidéo"),
+    ("setting.emu.oamaddr_write_corruption", "Corruption par OAMADDR"),
     ("option.Zeros", "Zéros"),
     ("option.FCEUX pattern", "Motif FCEUX"),
     ("option.All $FF", "Tout à $FF"),
@@ -1203,6 +1207,14 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (
         "detail.emu.palette_corruption",
         "Un défaut de la puce vidéo : couper l'image au milieu d'une ligne, ou faire sortir l'adresse vidéo de la palette, peut changer certaines couleurs de la palette. Modélisé seulement pour les consoles en alignement 2, celui où il a été observé de façon fiable, d'après les mesures de l'auteur d'AccuracyCoin ; les couleurs exactes sont une approximation. Les jeux écrits pour la console l'évitent. Prend effet au prochain chargement. Par défaut : activé.",
+    ),
+    (
+        "detail.emu.ppu_revision",
+        "La révision de la puce vidéo de la console. Le 2C02G, par défaut et le plus courant dans les consoles plus récentes, permet à un jeu de relire la palette de couleurs ; les révisions d'avant ne le peuvent pas, et une lecture y rend ce que la puce avait lu avant, comme pour le reste de sa mémoire. Les jeux écrits pour la console ne relisent pas la palette. Prend effet au prochain chargement. Par défaut : 2C02G.",
+    ),
+    (
+        "detail.emu.oamaddr_write_corruption",
+        "Un défaut signalé pour la puce vidéo 2C02G : régler l'adresse de la mémoire des sprites recopie une rangée de huit octets de sprites sur la rangée visée. Plusieurs cartouches de test vérifiées sur console passent sans lui, il est donc désactivé ; activez-le pour imiter une console qui le montre. Prend effet au prochain chargement. Par défaut : désactivé.",
     ),
     (
         "detail.emu.power_on_ppu_ram",

@@ -155,6 +155,8 @@ setting_ids! {
     EmuPaletteCorruption => "emu.palette_corruption",
     EmuPpuResetLine => "emu.ppu_reset_line",
     EmuPowerOnPpuRam => "emu.power_on_ppu_ram",
+    EmuPpuRevision => "emu.ppu_revision",
+    EmuOamaddrWriteCorruption => "emu.oamaddr_write_corruption",
     EmuCpuPpuAlignment => "emu.cpu_ppu_alignment",
     EmuPpuBusConflicts => "emu.ppu_bus_conflicts",
     EmuCatchUp => "emu.catch_up",

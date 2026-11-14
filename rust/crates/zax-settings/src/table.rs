@@ -1113,6 +1113,35 @@ fn emulation_engine(out: &mut Vec<SettingDescriptor>) {
 /// Lot FIDELITY step 36 (docs/review/FIDELITY-LEADS.md B3): the PPU's palette RAM, OAM and
 /// nametable RAM at power-on. Zeros by default: no console is the right one.
 fn emulation_power_on_ppu(out: &mut Vec<SettingDescriptor>) {
+    // Lot FIDELITY step 37 (docs/review/FIDELITY-LEADS.md C6, D4): the PPU revision, and the
+    // 2C02G's OAMADDR write corruption (off: the console-checked OAM tests pass without it).
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuPpuRevision,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "2C02G"),
+            opt(1, "2C02 before G"),
+        ]))
+        .with_label("PPU revision"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuOamaddrWriteCorruption,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("OAMADDR write corruption"),
+    );
     out.push(
         SettingDescriptor::new(
             SettingId::EmuPowerOnPpuRam,

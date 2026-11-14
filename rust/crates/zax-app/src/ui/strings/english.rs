@@ -521,8 +521,12 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("option.Alignment 2", "Alignment 2"),
     ("option.Alignment 3", "Alignment 3"),
     ("option.Blargg's console", "Blargg's console"),
+    ("option.2C02G", "2C02G"),
+    ("option.2C02 before G", "2C02 before G"),
     ("setting.emu.power_on_ram", "Work RAM at power-on"),
     ("setting.emu.power_on_ppu_ram", "Video memory at power-on"),
+    ("setting.emu.ppu_revision", "Video chip revision"),
+    ("setting.emu.oamaddr_write_corruption", "OAMADDR write corruption"),
     ("option.Zeros", "Zeros"),
     ("option.FCEUX pattern", "FCEUX pattern"),
     ("option.All $FF", "All $FF"),
@@ -1229,6 +1233,14 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         "detail.emu.palette_corruption",
         "A defect of the video chip: switching the picture off in the middle of a line, or moving the video address out of the colour palette, can change some palette colours. Only modelled for consoles in alignment 2, the one where it was observed reliably, from the measurements of the AccuracyCoin author; the exact colours are an approximation. Games written for the console avoid it. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.ppu_revision",
+        "Which revision of the video chip the console has. The 2C02G, the default and the most common in later consoles, lets a game read the colour palette back; the revisions before it cannot, and a read there returns what the chip read before, as for the rest of its memory. Games written for the console do not read the palette. Takes effect at the next load. Default: 2C02G.",
+    ),
+    (
+        "detail.emu.oamaddr_write_corruption",
+        "A defect reported for the 2C02G video chip: setting the sprite memory address copies one row of eight sprite bytes over the row it points to. Several test cartridges checked on consoles pass without it, so it is off; turn it on to imitate a console that shows it. Takes effect at the next load. Default: off.",
     ),
     (
         "detail.emu.power_on_ppu_ram",

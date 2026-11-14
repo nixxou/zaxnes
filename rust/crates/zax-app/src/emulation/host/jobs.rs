@@ -19,12 +19,12 @@ use crate::emulation::emulation_state::EmulationState;
 use crate::emulation::engine_handle::EngineHandle;
 use crate::emulation::fceux_validated;
 use crate::emulation::game_catalog::{GameCatalog, ResolvedGame};
-use crate::emulation::rom_file::{self, RomData, INVALID_ROM_MESSAGE};
+use crate::emulation::rom_file::{self, INVALID_ROM_MESSAGE, RomData};
 use crate::game_session::{GameSession, SessionRequest};
 use crate::persistence::app_settings::{AppSettings, AppSettingsMut, TvRegionSetting};
 use crate::persistence::save_slots::is_valid_slot_id;
 use crate::persistence::save_state_file::{
-    self, SaveStateContent, CORRUPTED_MESSAGE, GAME_MISSING_MESSAGE,
+    self, CORRUPTED_MESSAGE, GAME_MISSING_MESSAGE, SaveStateContent,
 };
 
 /// What a load job does.
@@ -106,6 +106,23 @@ enum Step {
     Failed(String),
 }
 
+/// The console's power-on memories and PPU revision, read from the settings at load.
+struct ConsoleHardware {
+    power_on_ram: zax_nes::PowerOnRam,
+    power_on_ppu_ram: zax_nes::PowerOnPpuRam,
+    pre_g_revision: bool,
+    oamaddr_write_corruption: bool,
+}
+
+impl ConsoleHardware {
+    fn apply(self, core: &mut EngineHandle) {
+        core.set_power_on_ram(self.power_on_ram);
+        core.set_power_on_ppu_ram(self.power_on_ppu_ram);
+        core.set_ppu_pre_g_revision(self.pre_g_revision);
+        core.set_oamaddr_write_corruption(self.oamaddr_write_corruption);
+    }
+}
+
 /// Hands the switches of `EmulationHost::fidelity_switches` to the core, in their order.
 /// A seed for what a console draws at power-on (random RAM, random alignment): the clock.
 fn power_on_seed() -> u64 {
@@ -117,8 +134,18 @@ fn power_on_seed() -> u64 {
 }
 
 fn apply_fidelity_switches(core: &mut EngineHandle, switches: [bool; 10]) {
-    let [oam_corruption, bus_conflicts, oamaddr_bug, oam_decay, power_on_top, delay_2006, glitch_2006, glitch_2000, palette_corruption, ppu_reset_line] =
-        switches;
+    let [
+        oam_corruption,
+        bus_conflicts,
+        oamaddr_bug,
+        oam_decay,
+        power_on_top,
+        delay_2006,
+        glitch_2006,
+        glitch_2000,
+        palette_corruption,
+        ppu_reset_line,
+    ] = switches;
     core.set_palette_corruption(palette_corruption);
     core.set_ppu_reset_line(ppu_reset_line);
     core.set_address_load_delay(delay_2006);
@@ -535,6 +562,29 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
     }
 
+    /// The power-on memories and the PPU revision chosen in the emulation tab (lot CARTDB, lot
+    /// FIDELITY steps 36 and 37).
+    fn console_hardware(&self) -> ConsoleHardware {
+        ConsoleHardware {
+            power_on_ram: match self.settings.get(SettingId::EmuPowerOnRam).as_int() {
+                1 => zax_nes::PowerOnRam::Pattern,
+                2 => zax_nes::PowerOnRam::Ff,
+                3 => zax_nes::PowerOnRam::Random(power_on_seed()),
+                _ => zax_nes::PowerOnRam::Zero,
+            },
+            power_on_ppu_ram: match self.settings.get(SettingId::EmuPowerOnPpuRam).as_int() {
+                1 => zax_nes::PowerOnPpuRam::Blargg,
+                2 => zax_nes::PowerOnPpuRam::Random(power_on_seed() ^ 0x9E37),
+                _ => zax_nes::PowerOnPpuRam::Zero,
+            },
+            pre_g_revision: self.settings.get(SettingId::EmuPpuRevision).as_int() == 1,
+            oamaddr_write_corruption: self
+                .settings
+                .get(SettingId::EmuOamaddrWriteCorruption)
+                .as_bool(),
+        }
+    }
+
     /// `audio.console_profile` as the core takes it: 0 for none.
     pub(super) fn console_audio_profile(&self) -> usize {
         usize::try_from(self.settings.get(SettingId::AudioConsoleProfile).as_int()).unwrap_or(0)
@@ -584,18 +634,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let fidelity = self.fidelity_switches();
                 let console_profile = self.console_audio_profile();
                 let alignment = self.cpu_ppu_alignment();
-                let power_on_ram = match self.settings.get(SettingId::EmuPowerOnRam).as_int() {
-                    1 => zax_nes::PowerOnRam::Pattern,
-                    2 => zax_nes::PowerOnRam::Ff,
-                    3 => zax_nes::PowerOnRam::Random(power_on_seed()),
-                    _ => zax_nes::PowerOnRam::Zero,
-                };
-                let power_on_ppu_ram = match self.settings.get(SettingId::EmuPowerOnPpuRam).as_int()
-                {
-                    1 => zax_nes::PowerOnPpuRam::Blargg,
-                    2 => zax_nes::PowerOnPpuRam::Random(power_on_seed() ^ 0x9E37),
-                    _ => zax_nes::PowerOnPpuRam::Zero,
-                };
+                let console = self.console_hardware();
                 let result = match self.session.as_mut() {
                     Some(session) => {
                         session.core_mut().set_cartridge_db(cartridge_db);
@@ -604,8 +643,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                         session
                             .core_mut()
                             .set_console_audio_profile(console_profile);
-                        session.core_mut().set_power_on_ram(power_on_ram);
-                        session.core_mut().set_power_on_ppu_ram(power_on_ppu_ram);
+                        console.apply(session.core_mut());
                         session.core_mut().set_builtin_patches(builtin_patches);
                         session.core_mut().set_advanced_patches(advanced);
                         session.core_mut().set_forced_patch(forced);

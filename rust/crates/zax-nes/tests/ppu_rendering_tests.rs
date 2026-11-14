@@ -1250,3 +1250,47 @@ fn fidelity_2007_latch_dot_follows_the_cpu_ppu_alignment() {
     }
     assert!(differs, "the two alignments never latched different bytes");
 }
+
+/// Lot FIDELITY step 37 (C6): before the 2C02G a `$2007` read of palette RAM is buffered like the
+/// rest of the PPU memory (nesdev "PPU registers"); the 2C02G returns the palette at once.
+#[test]
+fn fidelity_palette_reads_need_the_g_revision() {
+    for pre_g in [false, true] {
+        let (_, mut bus) = loaded_core(None);
+        bus.ppu_mut().set_pre_g_revision(pre_g);
+        bus.poke(0x2006, 0x3F);
+        bus.poke(0x2006, 0x01);
+        bus.poke(0x2007, 0x2A);
+        bus.poke(0x2006, 0x3F);
+        bus.poke(0x2006, 0x01);
+        let first = bus.read(0x2007) & 0x3F;
+        if pre_g {
+            assert_ne!(0x2A, first, "before G: the buffer, not the palette");
+        } else {
+            assert_eq!(0x2A, first, "2C02G: the palette at once");
+        }
+    }
+}
+
+/// Lot FIDELITY step 37 (D4, `emu.oamaddr_write_corruption`, off by default): on a 2C02G a
+/// `$2003` write copies the OAM row the CPU's previous bus byte points to over the row it writes.
+#[test]
+fn fidelity_oamaddr_write_copies_the_bus_row_when_switched_on() {
+    for enabled in [false, true] {
+        let (_, mut bus) = loaded_core(None);
+        bus.ppu_mut().set_oamaddr_write_corruption(enabled);
+        *bus.ppu_mut().oam_mut() = std::array::from_fn(|index| index.to_le_bytes()[0]);
+        bus.write(0x0000, 0x20); // The previous byte on the CPU bus: $20.
+        bus.write(0x2003, 0x48);
+        let row: Vec<u8> = bus.ppu().oam()[0x48..0x50].to_vec();
+        if enabled {
+            assert_eq!(
+                row,
+                (0x20..0x28).collect::<Vec<u8>>(),
+                "row $20 copied over row $48"
+            );
+        } else {
+            assert_eq!(row, (0x48..0x50).collect::<Vec<u8>>(), "off: untouched");
+        }
+    }
+}

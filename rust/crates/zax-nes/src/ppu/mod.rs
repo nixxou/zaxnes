@@ -177,6 +177,16 @@ pub struct Ppu2C02 {
     /// Whether the console wires the PPU's /RST pin to the reset line, as the front-loading NES
     /// (NES-001) does ([`Self::after_reset`]). A core setting, not in the state.
     reset_line: bool,
+    /// Whether this is a 2C02 older than the G revision (lot FIDELITY step 37): `$2007` reads of
+    /// `$3F00-$3FFF` behave as the rest of the PPU memory, buffered, instead of returning the
+    /// palette (nesdev "PPU registers": palette reads are "supported by the 2C02G, 2C02H, and
+    /// PAL PPUs"; "On PPUs that do not support reading palette RAM, this memory range behaves
+    /// the same as the rest of PPU memory"), and `$2003` writes do not corrupt OAM. A core
+    /// setting, not in the state.
+    pre_g_revision: bool,
+    /// Whether, on a 2C02G, a `$2003` write copies the OAM row the CPU's previous bus byte points
+    /// to over the row it writes ([`Self::oamaddr_write_corruption`]). A core setting.
+    oamaddr_write_corruption: bool,
     /// Set by a reset (power-on or the Reset button) when [`Self::reset_line`] is on, cleared on
     /// dot 1 of the pre-render line: until then writes to `$2000`, `$2001`, `$2005` and `$2006`
     /// are ignored (nesdev, "PPU power up state", ~29 658 cycles; the transistor netlist's
@@ -553,6 +563,8 @@ impl Ppu2C02 {
             oam_decay: false,
             power_on_top: true,
             reset_line: true,
+            pre_g_revision: false,
+            oamaddr_write_corruption: false,
             after_reset: false,
             phase_offset: 0,
             oam_row_refresh: [0; 32],
@@ -1749,6 +1761,31 @@ impl Ppu2C02 {
         self.after_reset = shut;
     }
 
+    /// Chooses a 2C02 older than the G revision (see [`Self::pre_g_revision`]).
+    pub const fn set_pre_g_revision(&mut self, enabled: bool) {
+        self.pre_g_revision = enabled;
+    }
+
+    /// Whether a 2C02G's `$2003` writes corrupt OAM (see [`Self::oamaddr_write_corruption`]).
+    pub const fn set_oamaddr_write_corruption(&mut self, enabled: bool) {
+        self.oamaddr_write_corruption = enabled;
+    }
+
+    /// A `$2003` write on a 2C02G: "writes to OAMADDR corrupt OAM", which "usually seems to copy
+    /// sprites 8 and 9 (address $20) over the 8-byte row at the target address", the source
+    /// "from the previous value on the CPU BUS" (nesdev "PPU registers", D4). The transistor
+    /// netlist (a 2C02G) shows that copy in one CPU/PPU phase and the reverse one, from the old
+    /// address's row to the bus's, in another: a race; this follows the console description.
+    #[cold]
+    #[inline(never)]
+    fn oamaddr_write_corruption(&mut self, value: u8) {
+        let source = usize::from(self.cpu_open_bus & 0xF8);
+        let target = usize::from(value & 0xF8);
+        if source != target {
+            self.oam.copy_within(source..source + 8, target);
+        }
+    }
+
     /// Whether resets reach the PPU's /RST pin (see [`Self::after_reset`]); takes effect at the
     /// next reset, except that switching it off opens a write window still shut.
     pub const fn set_reset_line(&mut self, enabled: bool) {
@@ -2203,11 +2240,18 @@ impl Ppu2C02 {
 
         let value;
         if is_palette_address(address) {
-            // Palette reads are immediate and only drive six bits; the buffer still
-            // takes the mirrored nametable byte "underneath" the palette (nesdev).
-            value = (self.palette_raw[palette_index(address)] & self.palette_read_mask())
-                | (self.decay & 0xC0);
-            self.refresh_decay(value, 0x3F);
+            if self.pre_g_revision {
+                // Before the G revision the palette is not readable: the range reads like the
+                // rest of the PPU memory, the buffer first.
+                value = visible;
+                self.refresh_decay(value, 0xFF);
+            } else {
+                // Palette reads are immediate and only drive six bits; the buffer still
+                // takes the mirrored nametable byte "underneath" the palette (nesdev).
+                value = (self.palette_raw[palette_index(address)] & self.palette_read_mask())
+                    | (self.decay & 0xC0);
+                self.refresh_decay(value, 0x3F);
+            }
             self.read_buffer = self.read_vram_inner(
                 address & 0x2FFF,
                 PpuBusAccess::Cpu,
@@ -2679,7 +2723,12 @@ impl Ppu2C02 {
                 }
             }
 
-            3 => self.oam_address = value,
+            3 => {
+                if self.oamaddr_write_corruption && !self.pre_g_revision {
+                    self.oamaddr_write_corruption(value);
+                }
+                self.oam_address = value;
+            }
 
             4 => {
                 if self.fetching() {
