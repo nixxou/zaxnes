@@ -196,6 +196,9 @@ fn vram_address(bus: &zax_nes::NesBus) -> u16 {
 ///
 /// Every observable the fetch must not touch is then live: `v`, the buffer, and `w`.
 fn prime_the_ppu(bus: &mut zax_nes::NesBus) {
+    // Written right after power-on, which the PPU's reset line would ignore (lot FIDELITY step
+    // 34): the machine is one without it.
+    bus.ppu_mut().set_reset_line(false);
     bus.write(0x2000, 0x00); // Rendering flags clear, the $2007 step 1.
     bus.write(0x2001, 0x00);
     bus.write(0x2006, 0x23);

@@ -119,6 +119,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "emu.ppu_2006_delay",
             "emu.ppu_2006_glitch",
             "emu.ppu_bus_conflicts",
+            "emu.ppu_reset_line",
             "emu.smooth_scroll_ahead",
             "emu.smooth_scroll_view",
             "input.touch_extra",

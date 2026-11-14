@@ -153,6 +153,7 @@ setting_ids! {
     EmuPpu2006Glitch => "emu.ppu_2006_glitch",
     EmuPpu2000Glitch => "emu.ppu_2000_glitch",
     EmuPaletteCorruption => "emu.palette_corruption",
+    EmuPpuResetLine => "emu.ppu_reset_line",
     EmuCpuPpuAlignment => "emu.cpu_ppu_alignment",
     EmuPpuBusConflicts => "emu.ppu_bus_conflicts",
     EmuCatchUp => "emu.catch_up",

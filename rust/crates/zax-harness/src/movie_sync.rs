@@ -742,6 +742,11 @@ impl ZaxnesMachine {
     /// `$2006` writes that set the fill address left `v` elsewhere, and a machine that started
     /// its first frame with a different `v` would be a second change wearing this one's name.
     fn fill_ppu_ram(&mut self, pattern: RamPattern) {
+        // The PPU's reset line ignores `$2006` until the pre-render line; these writes stand for
+        // the memories' power-on contents, not for the game, so they go through and the window
+        // is left as it was.
+        let shut = self.core.ppu_reset_window_shut();
+        self.core.set_ppu_reset_window_shut(false);
         let mut oam = [0u8; 256];
         pattern.fill(&mut oam);
         self.core.write_memory(0x2003, 0);
@@ -761,6 +766,7 @@ impl ZaxnesMachine {
         }
         self.core.write_memory(0x2006, 0);
         self.core.write_memory(0x2006, 0);
+        self.core.set_ppu_reset_window_shut(shut);
     }
 
     fn fill_prg_ram(&mut self) -> Result<(), String> {

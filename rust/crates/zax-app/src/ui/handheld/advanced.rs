@@ -32,7 +32,7 @@ use crate::ui::text;
 ///
 /// Adding a setting to the desktop window therefore does not add a console row: a console row is
 /// an owner decision, written down here and placed by a page table.
-pub const ROW_SETTINGS: [SettingId; 73] = [
+pub const ROW_SETTINGS: [SettingId; 74] = [
     SettingId::VideoVSync,
     SettingId::VideoFrameRate,
     SettingId::VideoSkipFrame,
@@ -96,6 +96,7 @@ pub const ROW_SETTINGS: [SettingId; 73] = [
     SettingId::EmuPpu2006Glitch,
     SettingId::EmuPpu2000Glitch,
     SettingId::EmuPaletteCorruption,
+    SettingId::EmuPpuResetLine,
     SettingId::EmuCpuPpuAlignment,
     SettingId::EmuRunAhead,
     // KIRBY-MERGE: the experimental smooth scrolling from the run-ahead. A console row because

@@ -174,6 +174,15 @@ pub struct Ppu2C02 {
     /// Whether a power-on puts the PPU at the top of the picture (line 0, dot 11) rather than at
     /// the start of vblank ([`Self::reset`]). A core setting, off by default; read at the reset.
     power_on_top: bool,
+    /// Whether the console wires the PPU's /RST pin to the reset line, as the front-loading NES
+    /// (NES-001) does ([`Self::after_reset`]). A core setting, not in the state.
+    reset_line: bool,
+    /// Set by a reset (power-on or the Reset button) when [`Self::reset_line`] is on, cleared on
+    /// dot 1 of the pre-render line: until then writes to `$2000`, `$2001`, `$2005` and `$2006`
+    /// are ignored (nesdev, "PPU power up state", ~29 658 cycles; the transistor netlist's
+    /// `after_reset_reg`, set while /RES is low and cleared there). In the state, as bit 1 of the
+    /// write toggle's byte.
+    pub(super) after_reset: bool,
     /// Study `study/access-phase`: dots added to the power-on position, which moves the CPU/PPU
     /// alignment (0 to 2).
     phase_offset: i32,
@@ -543,6 +552,8 @@ impl Ppu2C02 {
             oamaddr_bug: true,
             oam_decay: false,
             power_on_top: true,
+            reset_line: true,
+            after_reset: false,
             phase_offset: 0,
             oam_row_refresh: [0; 32],
             oam_render_off: 0,
@@ -1675,6 +1686,13 @@ impl Ppu2C02 {
         self.wide.reset();
         self.reset_tile_state();
 
+        self.after_reset = self.reset_line;
+        self.place_after_reset();
+    }
+
+    /// Where a reset leaves the PPU: the top of the picture ([`Self::power_on_top`]) or the start
+    /// of vblank.
+    fn place_after_reset(&mut self) {
         if self.power_on_top {
             // nesdev, "PPU power up state": the PPU starts at the top of the picture, not in
             // vblank, so the first `$2002` poll waits most of a frame. Dot 11 is BeesNES's choice
@@ -1702,19 +1720,52 @@ impl Ppu2C02 {
         self.power_on_top = enabled;
     }
 
+    /// Whether the reset line still shuts `$2000`, `$2001`, `$2005` and `$2006` (see
+    /// [`Self::after_reset`]).
+    #[must_use]
+    pub const fn reset_window_shut(&self) -> bool {
+        self.after_reset
+    }
+
+    /// Shuts or opens that window by hand: for host tools that fill the PPU's memories through
+    /// its registers as if at power-on, and put the window back as they found it.
+    pub const fn set_reset_window_shut(&mut self, shut: bool) {
+        self.after_reset = shut;
+    }
+
+    /// Whether resets reach the PPU's /RST pin (see [`Self::after_reset`]); takes effect at the
+    /// next reset, except that switching it off opens a write window still shut.
+    pub const fn set_reset_line(&mut self, enabled: bool) {
+        self.reset_line = enabled;
+        if !enabled {
+            self.after_reset = false;
+        }
+    }
+
     /// The documented *after reset* state of the PPU (AMD-044 REQ-CORE-122): PPUCTRL and
     /// PPUMASK go to 0, the `$2005`/`$2006` write latch is cleared, the scroll register `t`
     /// and the `$2007` read buffer go to 0, and the odd-frame flag goes back to "even"
     /// (nesdev, "PPU power up state").
     ///
     /// Nothing else moves: PPUSTATUS, OAMADDR, the current address `v`, the nametable RAM, the
-    /// OAM, the palette RAM and the CHR RAM are all unchanged, and the PPU keeps clocking from
-    /// where it was — a RESET press does not restart the frame. `v_row_start` and `v_row_next`
-    /// follow `v`, not `t`, so they stay as they are too. The ~29 658-cycle window during which
-    /// the hardware ignores writes to PPUCTRL, PPUMASK, PPUSCROLL and PPUADDR is not modelled,
-    /// no more than it is for the power-on reset (Q-078).
+    /// OAM, the palette RAM and the CHR RAM are all unchanged. `v_row_start` and `v_row_next`
+    /// follow `v`, not `t`, so they stay as they are too. With the reset line
+    /// ([`Self::reset_line`], on by default: the front-loading NES) the PPU also goes back to its
+    /// power-on position and ignores writes to PPUCTRL, PPUMASK, PPUSCROLL and PPUADDR until the
+    /// pre-render line (the ~29 658-cycle window of Q-078, lot FIDELITY step 34); without it it
+    /// keeps clocking from where it was, as on the top-loading NES and the Famicom.
     // Q-078
     pub fn soft_reset(&mut self) {
+        if self.reset_line {
+            // The Reset button pulls /RST too: the PPU stops at line 0 dot 0 while it is held
+            // and starts again from there with the CPU's reset sequence, as at power-on (the
+            // transistor netlist, lot FIDELITY step 34), its write window shut until the
+            // pre-render line.
+            self.after_reset = true;
+            self.prepaid_dots = 0;
+            self.pending_backdrop_pixel = None;
+            self.place_after_reset();
+        }
         self.control = 0;
         self.mask = 0;
         self.write_toggle = false;
@@ -1967,6 +2018,7 @@ impl Ppu2C02 {
                 self.sprite_overflow = false;
                 self.suppress_vblank = false;
                 self.begin_rendered_frame();
+                self.after_reset = false;
             }
 
             // The sprite captures of SPEC-02 §3.5 run on the first dot of the visible line
@@ -2583,6 +2635,10 @@ impl Ppu2C02 {
             // ask nothing: a swap of the register *numbers* would have cost every write a
             // compare, and `$2007` is written thousands of times a frame.
             0 => {
+                if self.after_reset {
+                    // The reset line still holds the register (`emu.ppu_reset_line`).
+                    return;
+                }
                 if self.swaps_control_and_mask() {
                     self.mask = value;
                 } else {
@@ -2591,6 +2647,10 @@ impl Ppu2C02 {
             }
 
             1 => {
+                if self.after_reset {
+                    // The reset line still holds the register (`emu.ppu_reset_line`).
+                    return;
+                }
                 if self.swaps_control_and_mask() {
                     self.write_control(value, cartridge.as_deref_mut());
                 } else {
@@ -2624,6 +2684,10 @@ impl Ppu2C02 {
             }
 
             5 => {
+                if self.after_reset {
+                    // The reset line still holds the register (`emu.ppu_reset_line`).
+                    return;
+                }
                 if self.write_toggle {
                     self.t = (self.t & 0x8FFF) | (u16::from(value & 0x07) << 12);
                     self.t = (self.t & 0xFC1F) | (u16::from(value & 0xF8) << 2);
@@ -2646,6 +2710,10 @@ impl Ppu2C02 {
             }
 
             6 => {
+                if self.after_reset {
+                    // The reset line still holds the register (`emu.ppu_reset_line`).
+                    return;
+                }
                 if self.write_toggle {
                     self.t = (self.t & 0xFF00) | u16::from(value);
                     if (self.address_load_delay || self.bus_conflicts) && self.fetching() {

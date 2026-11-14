@@ -107,10 +107,11 @@ enum Step {
 }
 
 /// Hands the switches of `EmulationHost::fidelity_switches` to the core, in their order.
-fn apply_fidelity_switches(core: &mut EngineHandle, switches: [bool; 9]) {
-    let [oam_corruption, bus_conflicts, oamaddr_bug, oam_decay, power_on_top, delay_2006, glitch_2006, glitch_2000, palette_corruption] =
+fn apply_fidelity_switches(core: &mut EngineHandle, switches: [bool; 10]) {
+    let [oam_corruption, bus_conflicts, oamaddr_bug, oam_decay, power_on_top, delay_2006, glitch_2006, glitch_2000, palette_corruption, ppu_reset_line] =
         switches;
     core.set_palette_corruption(palette_corruption);
+    core.set_ppu_reset_line(ppu_reset_line);
     core.set_address_load_delay(delay_2006);
     core.set_glitch_2006(glitch_2006);
     core.set_glitch_2000(glitch_2000);
@@ -498,8 +499,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// The hardware-fidelity switches of the emulation tab (lot FIDELITY), in the order
     /// `advance_launch` hands them to the core: OAM corruption, PPU bus conflicts, OAMADDR
     /// defect, OAM decay, power-on at the top of the picture, `$2006` delay, `$2006` and `$2000`
-    /// glitches, palette corruption.
-    fn fidelity_switches(&self) -> [bool; 9] {
+    /// glitches, palette corruption, PPU reset line.
+    fn fidelity_switches(&self) -> [bool; 10] {
         [
             SettingId::EmuOamCorruption,
             SettingId::EmuPpuBusConflicts,
@@ -510,6 +511,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             SettingId::EmuPpu2006Glitch,
             SettingId::EmuPpu2000Glitch,
             SettingId::EmuPaletteCorruption,
+            SettingId::EmuPpuResetLine,
         ]
         .map(|id| self.settings.get(id).as_bool())
     }

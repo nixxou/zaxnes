@@ -115,6 +115,8 @@ fn a_debug_write_to_the_ppu_registers_reaches_the_palette_and_oam() {
     let mut core = NesCore::new();
     assert!(core.load_rom(&image, "1-clocking.nes").success);
     core.reset();
+    // As `fill_ppu_ram` does: through the PPU's reset window (lot FIDELITY step 34).
+    core.set_ppu_reset_window_shut(false);
 
     // The palette, through $2006/$2007, read back through $2006 and $2007 — a palette read is
     // not buffered, so the byte comes straight back.

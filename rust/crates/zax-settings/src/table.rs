@@ -2149,6 +2149,20 @@ fn ppu_write_timings(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("Palette corruption"),
     );
+    // Lot FIDELITY step 34 (docs/review/FIDELITY-LEADS.md B5): the PPU's /RST pin on the reset
+    // line, as on the front-loading NES (NES-001).
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuPpuResetLine,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("PPU reset line"),
+    );
     // Lot FIDELITY steps 28-29: which of the four CPU/PPU clock alignments the PPU follows,
     // numbered as AccuracyCoin and TriCNES do (docs/review/FIDELITY-LEADS.md, A4 and D1). 3 is the
     // one the core has always followed.

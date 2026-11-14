@@ -412,3 +412,59 @@ fn req_core_122_a_reset_detecting_multicart_puts_its_outer_bank_back() {
         "the chip's own registers never saw the reset either"
     );
 }
+
+/// Lot FIDELITY step 34 (`emu.ppu_reset_line`, on): a reset reaches the PPU's /RST pin, as on the
+/// front-loading NES. Until the pre-render line the PPU ignores `$2001` (and `$2000`, `$2005`,
+/// `$2006`), and the Reset button sends it back to the top of the picture (the transistor netlist:
+/// held at line 0 dot 0 while /RES is low, `after_reset_reg` cleared on dot 1 of line 261).
+#[test]
+fn fidelity_reset_line_shuts_the_ppu_writes_until_the_pre_render_line() {
+    fn run_to(core: &mut NesCore, line: i32, dot: i32) {
+        let bus = core.bus_mut();
+        while !(bus.ppu().scanline() == line && bus.ppu().dot() >= dot) {
+            bus.tick();
+            bus.sync_ppu();
+        }
+    }
+    let mut core = machine_with(&minimal(), "Minimal.nes");
+    core.set_ppu_reset_line(true);
+    core.set_power_on_top(true);
+    for reset in [false, true] {
+        core.run_frame(0);
+        core.run_frame(0);
+        if reset {
+            core.soft_reset();
+            assert_eq!(
+                0,
+                core.bus().ppu().scanline(),
+                "the Reset button restarts the picture"
+            );
+        } else {
+            core.reset();
+        }
+        core.write_memory(0x2001, 0x1E);
+        assert!(
+            !core.bus().ppu().rendering_enabled(),
+            "ignored right after the reset"
+        );
+        run_to(&mut core, 260, 330);
+        core.write_memory(0x2001, 0x1E);
+        assert!(
+            !core.bus().ppu().rendering_enabled(),
+            "still ignored at the end of line 260"
+        );
+        run_to(&mut core, 261, 3);
+        core.write_memory(0x2001, 0x1E);
+        assert!(
+            core.bus().ppu().rendering_enabled(),
+            "taken from dot 1 of line 261"
+        );
+        core.write_memory(0x2001, 0x00);
+    }
+
+    core.set_ppu_reset_line(false);
+    core.run_frame(0);
+    core.soft_reset();
+    core.write_memory(0x2001, 0x1E);
+    assert!(core.bus().ppu().rendering_enabled(), "off: taken at once");
+}

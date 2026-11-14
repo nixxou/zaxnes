@@ -220,6 +220,26 @@ impl NesCore {
         self.bus.ppu_mut().set_palette_corruption(enabled);
     }
 
+    /// Whether resets reach the PPU's /RST pin, as on the front-loading NES: until the
+    /// pre-render line after a reset the PPU ignores `$2000`, `$2001`, `$2005` and `$2006`, and
+    /// the Reset button sends it back to its power-on position. On by default.
+    pub fn set_ppu_reset_line(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_reset_line(enabled);
+    }
+
+    /// Whether the PPU's reset line still holds `$2000`, `$2001`, `$2005` and `$2006` (from a
+    /// reset to the pre-render line).
+    #[must_use]
+    pub fn ppu_reset_window_shut(&self) -> bool {
+        self.bus.ppu().reset_window_shut()
+    }
+
+    /// Shuts or opens that window by hand, for host tools that write the PPU's memories through
+    /// its registers (`movie-sync --ppu-ram`) and must put it back as they found it.
+    pub fn set_ppu_reset_window_shut(&mut self, shut: bool) {
+        self.bus.ppu_mut().set_reset_window_shut(shut);
+    }
+
     /// Whether a `$2000` write starting on dot 257 takes the nametable-X bit of the dot-257 copy
     /// from the CPU's open bus (nesdev; the transistor netlists). On by default.
     pub fn set_glitch_2000(&mut self, enabled: bool) {

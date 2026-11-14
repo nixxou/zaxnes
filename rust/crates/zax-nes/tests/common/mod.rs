@@ -208,6 +208,7 @@ pub fn loaded_core(program: Option<&[u8]>) -> (Cpu6502, NesBus) {
     let rom = RomImage::try_load(&minimal_rom(0x01, program, None), "Minimal.nes").unwrap();
     let mut bus = NesBus::new(Ppu2C02::new(), Apu2A03::new(), InputPorts::new());
     bus.attach(Some(Cartridge::create(rom).unwrap()));
+    bus.ppu_mut().set_reset_line(false);
     bus.ppu_mut().reset();
     let mut cpu = Cpu6502::new();
     cpu.reset(&mut bus);
@@ -225,6 +226,7 @@ pub fn bus_with(image: &[u8], name: &str) -> NesBus {
     let rom = RomImage::try_load(image, name).unwrap();
     let mut bus = NesBus::new(Ppu2C02::new(), Apu2A03::new(), InputPorts::new());
     bus.attach(Some(Cartridge::create(rom).unwrap()));
+    bus.ppu_mut().set_reset_line(false);
     bus.ppu_mut().reset();
     bus
 }
@@ -236,6 +238,9 @@ pub fn machine_with(image: &[u8], name: &str) -> NesCore {
     // against; the power-on at the top of the picture (on by default since lot FIDELITY step 27)
     // has its own tests.
     machine.set_power_on_top(false);
+    // Nor do they wait for the PPU's reset line to let their first register writes through (lot
+    // FIDELITY step 34, which has its own test).
+    machine.set_ppu_reset_line(false);
     let load = machine.load_rom(image, name);
     assert!(load.success, "{:?}", load.error);
     machine

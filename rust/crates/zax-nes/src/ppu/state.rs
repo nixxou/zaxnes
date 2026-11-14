@@ -49,7 +49,9 @@ impl Ppu2C02 {
         writer.write_u16(self.v_row_start);
         writer.write_u16(self.v_row_next);
         writer.write_u8(self.fine_x);
-        writer.write_bool(self.write_toggle);
+        // Bit 1: the reset line's write window (lot FIDELITY step 34), in the byte that held the
+        // toggle alone before, so older states load with the window open.
+        writer.write_u8(u8::from(self.write_toggle) | (u8::from(self.after_reset) << 1));
         writer.write_u8(self.read_buffer);
         writer.write_u8(self.decay);
         writer.write_bool(self.skip_latch);
@@ -106,7 +108,9 @@ impl Ppu2C02 {
         self.v_row_start = reader.read_u16()?;
         self.v_row_next = reader.read_u16()?;
         self.fine_x = reader.read_u8()?;
-        self.write_toggle = reader.read_bool()?;
+        let toggle = reader.read_u8()?;
+        self.write_toggle = (toggle & 1) != 0;
+        self.after_reset = (toggle & 2) != 0;
         self.read_buffer = reader.read_u8()?;
         // Not in the format, and nothing is lost: the window in which a `$2007` read still sees
         // the byte before the last refill is shorter than two CPU cycles, and the only pair of

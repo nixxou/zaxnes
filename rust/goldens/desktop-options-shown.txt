@@ -40,6 +40,7 @@ emu.ppu_2006_delay
 emu.ppu_2006_glitch
 emu.ppu_2000_glitch
 emu.palette_corruption
+emu.ppu_reset_line
 emu.cpu_ppu_alignment
 emu.pause_3d_in_2d
 emu.pipeline

@@ -851,6 +851,13 @@ impl EngineHandle {
         }
     }
 
+    /// `emu.ppu_reset_line` (lot FIDELITY step 34); Zaxnes only.
+    pub fn set_ppu_reset_line(&mut self, enabled: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_ppu_reset_line(enabled);
+        }
+    }
+
     /// `emu.palette_corruption` (lot FIDELITY step 32); Zaxnes only.
     pub fn set_palette_corruption(&mut self, enabled: bool) {
         if let Some(core) = self.zaxnes_mut() {

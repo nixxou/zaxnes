@@ -264,9 +264,40 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   7 vs 8 (B2) on top of it, and whether the hardware ignores `$2000`/`$2001`/`$2005`/`$2006` writes
   for ~29 658 cycles after power-on (not modelled, Q-078).
 
-### B2. Reset length 7 vs 8 cycles — open
+### B2. Reset length 7 vs 8 cycles — settled, no change (step 34)
 - Zaxnes 7 cycles (`cpu/cpu6502.rs:173-178`); Mesen 8. Sets the DMA get/put parity. nesdev gives no
   count. With 8 + B1, Zaxnes locks instruction by instruction on MesenCE (NMI-MESEN.md).
+- **Netlist (step 34, `benchreset.cpp`)**: after /RES rises the 2A03 makes one cycle (a read of
+  whatever is on its address bus) before the 7 of the interrupt sequence (opcode fetch dropped,
+  dummy read, three stack reads, vector low, vector high), so the first opcode is the 9th M2;
+  the 10th when /RES rises less than 7 half-steps before M2 does (the release is asynchronous).
+  BeesNES does 7 like this core (the dropped opcode fetch is its first cycle) with the PPU at dot
+  11; Mesen 8 with the PPU at (-1, 340).
+- The extra cycle only shifts the CPU against the PPU and the APU, and that phase is arbitrary on
+  a console (CIC release, button press). What is measurable of it passes on console-checked tests:
+  blargg `apu_reset` (all six, `4017_timing` "Delay after effective $4017 write: 10", inside the
+  documented 9-12), `blargg_apu_2005.07.30/09.reset_timing`, `cpu_reset/registers` and
+  AccuracyCoin. So the cycle stays folded into the power-on phase of B1; no change.
+
+### B5. The PPU's reset line — done as an option (`emu.ppu_reset_line`, on, step 34)
+- nesdev ("PPU power up state"): writes to PPUCTRL, PPUMASK, PPUSCROLL and PPUADDR are ignored
+  ~29 658 CPU cycles after reset. TriCNES models it (`PPU_RESET`, ignored writes to `$2000`,
+  `$2001`, `$2005`, `$2006`, cleared on dot 1 of the pre-render line) but sets it off: its author is
+  "not even 100% certain my console has this behavior". Mesen 2, BeesNES and NesHawk: not modelled.
+- **Netlist (step 34, `benchreset2.cpp`)**: the 2C02 has it. With /RES low the PPU holds its
+  counters at line 0 dot 0, clears PPUMASK and sets `after_reset_reg`; after the release `$2001`
+  writes do nothing until `after_reset_reg` clears on **dot 1 of line 261**, and the next write
+  takes. The PPU restarts from line 0 dot 0 with the CPU's reset sequence, so a Reset press puts it
+  where power-on does. Whether it happens depends on the console's wiring: the front-loading NES
+  (NES-001) drives the PPU's /RST from the reset line; the top-loader and the Famicom (button on
+  the CPU only) do not — which explains TriCNES's doubt.
+- Done: `after_reset` (set by a power-on or a Reset press when the line is on, cleared on dot 1 of
+  the pre-render line, in the state as bit 1 of the write-toggle byte so older states load), the
+  four writes ignored, and the Reset button sends the PPU back to its power-on position. Golden-core
+  and the test-ROM campaign unchanged (no game of the 98 writes those registers that early);
+  AccuracyCoin 147.
+- Unit-test machines that poke the PPU right after power-on now switch the line off
+  (`tests/common`), as they already switch `power_on_top` off.
 
 ### B3. Random power-on state — partial
 - Zaxnes: `emu.power_on_ram` (zeros / FCEUX pattern / random) for work RAM (lot CARTDB).
