@@ -512,7 +512,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.power_on_top", "Power on at the top of the picture"),
     ("setting.emu.ppu_2006_delay", "$2006 load delay"),
     ("setting.emu.ppu_2006_glitch", "$2006 scroll glitch"),
-    ("setting.emu.ppu_2000_glitch", "$2000 dot-257 glitch"),
+    ("setting.emu.ppu_2000_glitch", "$2000/$2005 open-bus glitch"),
     ("setting.emu.cpu_ppu_alignment", "CPU/PPU alignment"),
     ("option.Alignment 0", "Alignment 0"),
     ("option.Alignment 1", "Alignment 1"),
@@ -1216,7 +1216,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.ppu_2000_glitch",
-        "A defect of the video chip: a write to its control register that starts on one precise dot of a line can make the next line drawn from the left screen half. It happens only on some consoles, depending on how the chips lined up when switched on. Games written for the console avoid it. Takes effect at the next load. Default: on.",
+        "A defect of the video chip: a write to its control register that starts on one precise dot of a line can make the next line drawn from the left screen half, and a write to its scroll register that lands on the copy of the scroll can scroll a line or a frame by what was last on the data bus instead. It happens only on some consoles, depending on how the chips lined up when switched on. Games written for the console avoid it. Takes effect at the next load. Default: on.",
     ),
     (
         "detail.emu.power_on_ram",

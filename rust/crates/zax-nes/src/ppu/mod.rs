@@ -199,7 +199,9 @@ pub struct Ppu2C02 {
     /// incremented address ([`Self::address_load_collision`]). On by default.
     glitch_2006: bool,
     /// Whether a `$2000` write that starts on dot 257 lets the dot-257 copy take the nametable-X
-    /// bit from the CPU's open bus ([`Self::control_write_glitch`]). On by default.
+    /// bit from the CPU's open bus ([`Self::control_write_glitch`]), and whether, in alignment 2,
+    /// a `$2005` write that lands on a copy of `t` lets that copy take the open bus as well
+    /// ([`Self::scroll_write_on_copy`]). On by default.
     glitch_2000: bool,
     /// Which of the four CPU/PPU clock alignments this PPU follows, 0 to 3, numbered as
     /// `AccuracyCoin` and `TriCNES` number them (`docs/review/FIDELITY-LEADS.md`, A4 and D1). The
@@ -208,7 +210,9 @@ pub struct Ppu2C02 {
     /// dots after the access in alignments 2 and 3, 5 in 0 and 1 ([`Self::read_buffer_from_fetch`]);
     /// the `$2000` dot-257 glitch happens in alignment 3 (write on dot 257) and 0 (dot 258);
     /// alignment 2 takes `$2001` and the second `$2006` write one dot later; the OAM row corruption
-    /// is seeded one dot later in alignments 1 and 2. A core setting, not part of the state; 3 by
+    /// is seeded one dot later in alignments 1 and 2; a `$2005` write still reaches the copy of
+    /// `t` made on the dot it lands on, which in alignment 2 takes the open bus instead
+    /// ([`Self::scroll_write_on_copy`]). A core setting, not part of the state; 3 by
     /// default, the alignment this core always followed.
     alignment: u8,
     /// The CPU data bus before the write in progress: what the PPU's data pins see for the first
@@ -2298,6 +2302,43 @@ impl Ppu2C02 {
         self.v = (self.v & !0x0400) | (u16::from(self.cpu_open_bus & 0x01) << 10);
     }
 
+    /// A `$2005` write that lands on the copy of `t` into `v` this core has just made: the
+    /// horizontal copy of dot 257 (first write) or the last vertical copy of the pre-render line,
+    /// dot 304 (second write).
+    ///
+    /// `TriCNES` (MIT, Chris Siebert, `AccuracyCoin`'s author) applies a `$2005` write one dot
+    /// after it in alignments 0, 1 and 3 and two dots after it in alignment 2, at the start of
+    /// the dot, before that dot's copy; in the meantime `t` and fine X hold the CPU data bus as it
+    /// stood before the write ("it uses the value from the databus"), the same open-bus value as
+    /// the `$2000` glitch. A register access of this core leads it by one dot, so the copy this
+    /// core already made with the old `t` took, there, the written value (alignments 0, 1 and 3)
+    /// or the bus value (alignment 2). Measured by running both emulators on the same program,
+    /// a first write sliding a dot per frame across dot 257 (`docs/review/FIDELITY-LEADS.md`,
+    /// A4): one write position differed, this one. The bus value is the `$2000` glitch's switch;
+    /// off, alignment 2 takes the written value as the others do.
+    #[cold]
+    #[inline(never)]
+    fn scroll_write_on_copy(&mut self, value: u8) {
+        let source = if self.alignment == 2 && self.glitch_2000 {
+            self.cpu_open_bus
+        } else {
+            value
+        };
+        if !self.write_toggle && self.dot == 257 {
+            self.v = (self.v & !0x001F) | u16::from(source >> 3);
+            self.v_row_next = self.v;
+        } else if self.write_toggle
+            && self.dot == 304
+            && self.scanline == self.pre_render_scanline()
+        {
+            self.v = (self.v & !0x73E0)
+                | (u16::from(source & 0xF8) << 2)
+                | (u16::from(source & 0x07) << 12);
+            self.v_row_start = self.v;
+            self.v_row_next = self.v;
+        }
+    }
+
     /// What the palette RAM drives onto the PPU's data bus: six bits, and only the two colour
     /// bits of a grey when PPUMASK's greyscale bit is set (REQ-CORE-047).
     ///
@@ -2404,6 +2445,9 @@ impl Ppu2C02 {
                 } else {
                     self.t = (self.t & 0xFFE0) | u16::from(value >> 3);
                     self.fine_x = value & 0x07;
+                }
+                if matches!(self.dot, 257 | 304) && self.fetching() {
+                    self.scroll_write_on_copy(value);
                 }
 
                 self.write_toggle = !self.write_toggle;

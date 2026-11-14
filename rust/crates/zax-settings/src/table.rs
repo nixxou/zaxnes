@@ -2133,7 +2133,7 @@ fn ppu_write_timings(out: &mut Vec<SettingDescriptor>) {
             SettingTheme::Emulation,
         )
         .with_domain(Domain::switch())
-        .with_label("$2000 dot-257 glitch"),
+        .with_label("$2000/$2005 open-bus glitch"),
     );
     // Lot FIDELITY steps 28-29: which of the four CPU/PPU clock alignments the PPU follows,
     // numbered as AccuracyCoin and TriCNES do (docs/review/FIDELITY-LEADS.md, A4 and D1). 3 is the

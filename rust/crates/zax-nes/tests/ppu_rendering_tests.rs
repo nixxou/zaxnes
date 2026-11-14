@@ -965,6 +965,87 @@ fn fidelity_2000_write_on_dot_257_takes_nametable_x_from_open_bus() {
     }
 }
 
+/// Lot FIDELITY step 30 (`TriCNES`, MIT, run against Zaxnes on the same program): a `$2005` write
+/// that lands on a copy of `t` into `v` still reaches that copy: the first write on dot 257 (coarse
+/// X), the second on dot 304 of the pre-render line (fine and coarse Y). In alignment 2 the copy
+/// takes the CPU's open bus instead (`$20` for `STA $2005`), under the `$2000` glitch's switch.
+#[test]
+fn fidelity_2005_write_landing_on_a_copy_of_t_reaches_it() {
+    // A tick is three dots and one line a frame does not see every phase: a missed try skips
+    // the odd-frame dot once (rendering off over the end of the pre-render line), which moves it.
+    fn park(fixture: &mut TileFixture, line: i32, dot: i32) {
+        for _ in 0..12 {
+            loop {
+                let bus = fixture.core.bus_mut();
+                bus.tick();
+                bus.sync_ppu();
+                let (now_line, now_dot) = (bus.ppu().scanline(), bus.ppu().dot());
+                if now_line == line && now_dot == dot {
+                    return;
+                }
+                if now_line == line && now_dot > dot + 3 {
+                    break;
+                }
+            }
+            let run_until = |fixture: &mut TileFixture, at: (i32, i32)| loop {
+                let ppu = fixture.core.bus().ppu();
+                if ppu.scanline() == at.0 && ppu.dot() >= at.1 {
+                    break;
+                }
+                fixture.core.bus_mut().tick();
+                fixture.core.bus_mut().sync_ppu();
+            };
+            run_until(fixture, (261, 320));
+            fixture.set_mask(0x00);
+            run_until(fixture, (0, 20));
+            fixture.set_mask(0x0A);
+        }
+        panic!("never reached line {line} dot {dot}");
+    }
+    fn after(alignment: u8, second: bool, dot: i32, glitch: bool) -> u16 {
+        let mut fixture = TileFixture::new();
+        fixture.core.set_cpu_ppu_alignment(alignment);
+        fixture.core.set_glitch_2000(glitch);
+        fixture.set_mask(0x0A);
+        if second {
+            fixture.core.bus_mut().ppu_mut().write(5, 0x00, None);
+        }
+        park(&mut fixture, if second { 261 } else { 100 }, dot);
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        ppu.note_cpu_open_bus(0x20);
+        ppu.write(5, 0xF8, None);
+        ppu.vram_v() & if second { 0x73E0 } else { 0x001F }
+    }
+
+    for alignment in [0, 1, 3] {
+        assert_eq!(
+            0x1F,
+            after(alignment, false, 257, true),
+            "a{alignment}: first write, dot 257"
+        );
+        assert_eq!(
+            0x03E0,
+            after(alignment, true, 304, true),
+            "a{alignment}: second write, dot 304"
+        );
+    }
+    assert_eq!(
+        0x04,
+        after(2, false, 257, true),
+        "a2: coarse X from the open bus"
+    );
+    assert_eq!(
+        0x0080,
+        after(2, true, 304, true),
+        "a2: coarse Y from the open bus"
+    );
+    assert_eq!(0x1F, after(2, false, 257, false), "a2, switch off");
+    assert_eq!(0x03E0, after(2, true, 304, false), "a2, switch off");
+    // A dot later the copy is behind the write, as before.
+    assert_ne!(0x1F, after(3, false, 258, true), "dot 258");
+    assert_ne!(0x03E0, after(3, true, 305, true), "dot 305");
+}
+
 /// Lot FIDELITY steps 28-29: a `$2007` read made while rendering latches its buffer six dots after
 /// the access in alignments 2 and 3 (3 is the default) and five in 0 and 1, so a read one dot
 /// later in alignment 0 buffers exactly what a read one dot earlier does in alignment 3.

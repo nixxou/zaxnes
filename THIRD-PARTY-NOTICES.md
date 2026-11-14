@@ -52,8 +52,8 @@ défaut OAMADDR) en citent le fichier et la ligne. BeesNES est distribué sous l
 
 Les **réglages d'alignement CPU/PPU** (`emu.cpu_ppu_alignment`, `rust/crates/zax-nes/src/ppu`)
 reprennent le modèle de TriCNES (<https://github.com/100thCoin/TriCNES>), l'émulateur de
-l'auteur d'AccuracyCoin : délais d'écriture de `$2001` et `$2006` selon l'alignement,
-verrou de lecture de `$2007`, défaut de `$2000` sur `t`, et règles de la **corruption de
+l'auteur d'AccuracyCoin : délais d'écriture de `$2001`, `$2005` et `$2006` selon l'alignement,
+verrou de lecture de `$2007`, défauts de `$2000` et `$2005` (bus ouvert), et règles de la **corruption de
 l'OAM** quand le rendu est coupé hors vblank (ligne d'origine, copie immédiate ou différée,
 perte au rallumage en milieu d'image). Ces règles ont été mesurées en exécutant TriCNES et
 Zaxnes sur les mêmes programmes de test ; le code de Zaxnes est écrit à neuf en Rust. TriCNES

@@ -162,7 +162,20 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 - Zaxnes: option "Alignment 0-3" in TriCNES's numbering; the old fixed behaviour is alignment 3.
   Per-alignment delays from TriCNES (`$2001` 2/2/3/2, `$2006` load 4/4/5/4, `$2007` latch, `$2000`
   glitch on `t`) and the OAM corruption rules of D1. AccuracyCoin 147/147 on all four.
-- Still open: `$2005` delay 1/1/2/1 and its open-bus glitch, random alignment at power-on.
+- `$2005` (step 30): TriCNES applies the write 1/1/2/1 dots after it, at the start of the dot,
+  and in the meantime `t` and fine X hold the CPU data bus as it was before the write (the
+  `$2000` mechanism). Program P5 (a first write of `$F8`, bus `$20`, sliding a dot per frame
+  across dot 257 of line 100) and P6 (a second write sliding across dot 304 of the pre-render
+  line), run in both emulators with the same power-on phase (`ZAXNES_PHASE=-11`) and paired by
+  write: before the fix one write position differed in each alignment, the one where this
+  core's write lands on dot 257 (304), after the copy: TriCNES's copy already had the written
+  value (alignments 0, 1 and 3) or the bus value (coarse X 4, coarse Y 4, alignment 2). Now
+  0 differences on P5 and P6 in all four alignments (`scroll_write_on_copy`; the bus value is
+  under `emu.ppu_2000_glitch`, renamed "$2000/$2005 open-bus glitch").
+- Still open: the same one-dot `$2005` timing for **fine X**: a first write made mid-line
+  changes the pixel of the dot it lands on in TriCNES (written value, or bus value in alignment
+  2), one pixel later in this core, whose renderer has already drawn that pixel. Needs a
+  pixel-level differential before touching the renderer. Random alignment at power-on.
 
 ---
 
@@ -420,7 +433,17 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 
 ### D5. Palette RAM corruption when rendering is turned off mid-screen — open
 - nesdev "PPU registers" PPUMASK: "Turning rendering off mid-screen can corrupt palette RAM."
-  Zaxnes: none; no emulator studied models it. Mechanism to research.
+  Zaxnes: none.
+- TriCNES (MIT, `Emulator.cs` `CorruptPalettes`, step 29 reading) models it, **in alignment 2
+  only** ("consistent on alignment 2, and very hit or miss on other alignments"): triggered when
+  rendering stops on a visible dot during a nametable fetch with `v` at `$3C00` or above, or when
+  a `$2006` load leaves palette RAM (`v` from `$3F0x` with x not 0 to below `$3F00`) on a visible
+  dot; the colours damaged follow a per-colour-index × low-nybble-of-`v` table found with a test
+  cart, which the author calls "good enough" and partly not understood ("not sure what's going
+  on"); sprite palettes not done; plus one discoloured pixel on every alignment, not modelled.
+- AccuracyCoin has no test for it (its table lists "Palette Corruption" unimplemented, "because
+  it relies on a specific cpu/ppu clock alignment"). So no reference to check a port against:
+  left open; if ported, behind its own switch, alignment 2 only, with TriCNES's caveats.
 
 ---
 
