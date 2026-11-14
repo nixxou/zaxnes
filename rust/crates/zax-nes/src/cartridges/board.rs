@@ -697,16 +697,19 @@ pub enum AnyBoard {}
 impl BoardKind for AnyBoard {
     type B = Board;
 
+    #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
     #[inline(always)]
     fn matches(_: &Board) -> bool {
         true
     }
 
+    #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
     #[inline(always)]
     fn board(board: &Board) -> &Board {
         board
     }
 
+    #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
     #[inline(always)]
     fn board_mut(board: &mut Board) -> &mut Board {
         board
@@ -724,11 +727,13 @@ macro_rules! board_kind {
         impl BoardKind for $kind {
             type B = $board;
 
+            #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
             #[inline(always)]
             fn matches(board: &Board) -> bool {
                 matches!(board, Board::$board(_))
             }
 
+            #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
             #[inline(always)]
             fn board(board: &Board) -> &$board {
                 match board {
@@ -737,6 +742,7 @@ macro_rules! board_kind {
                 }
             }
 
+            #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
             #[inline(always)]
             fn board_mut(board: &mut Board) -> &mut $board {
                 match board {
@@ -855,11 +861,13 @@ impl BoardKind for Mmc5Kind {
 
     const SWITCHES: bool = true;
 
+    #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
     #[inline(always)]
     fn matches(board: &Board) -> bool {
         matches!(board, Board::Mmc5(_))
     }
 
+    #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
     #[inline(always)]
     fn board(board: &Board) -> &Mmc5 {
         match board {
@@ -870,6 +878,7 @@ impl BoardKind for Mmc5Kind {
         }
     }
 
+    #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
     #[inline(always)]
     fn board_mut(board: &mut Board) -> &mut Mmc5 {
         match board {

@@ -264,7 +264,11 @@ impl Ppu2C02 {
     /// step 0's trap in the largest function of the crate. Only the MMC5 pays the call.
     #[cfg(feature = "board-mmc5-exattr-split")]
     #[inline(never)]
-    fn capture_background_row_substituted<K: BoardKind>(&mut self, line: i32, cart: Cart<'_, '_, K>) {
+    fn capture_background_row_substituted<K: BoardKind>(
+        &mut self,
+        line: i32,
+        cart: Cart<'_, '_, K>,
+    ) {
         self.capture_background_row_as::<K, true>(line, cart);
     }
 
@@ -460,7 +464,8 @@ impl Ppu2C02 {
             // 3, Mega Man 6, Metal Force, Metroid; the NROM, UxROM and CNROM games cannot).
             let layout = captured.layout;
             let nametable = |address: u16| self.read_nametable_as(address, cart, layout);
-            let written = |address: u16| self.nametable_written_as::<AnyBoard>(address, cart, layout);
+            let written =
+                |address: u16| self.nametable_written_as::<AnyBoard>(address, cart, layout);
             let memory = &DecoderMemory {
                 nametable: &nametable,
                 nametable_written: &written,
@@ -586,7 +591,8 @@ impl Ppu2C02 {
             }
             let layout = captured.layout;
             let nametable = |address: u16| self.read_nametable_as(address, cart, layout);
-            let written = |address: u16| self.nametable_written_as::<AnyBoard>(address, cart, layout);
+            let written =
+                |address: u16| self.nametable_written_as::<AnyBoard>(address, cart, layout);
             let memory = &DecoderMemory {
                 nametable: &nametable,
                 nametable_written: &written,
@@ -1211,7 +1217,12 @@ impl Ppu2C02 {
 
     /// The sprites of the extension's second page whose band starts in `band` (8 x 8 only),
     /// after the console's 64: indices 128 and up, so below them all.
-    fn capture_extra_sprites<K: BoardKind>(&mut self, band: i32, sprite_table: u16, cart: Cart<'_, '_, K>) {
+    fn capture_extra_sprites<K: BoardKind>(
+        &mut self,
+        band: i32,
+        sprite_table: u16,
+        cart: Cart<'_, '_, K>,
+    ) {
         let (visible_low, visible_high) = self.wide.sprite_range();
         let oam = *self.wide.extra_oam();
         for n in 0..64 {
@@ -1323,9 +1334,13 @@ impl Ppu2C02 {
         let mut plane1 = 0u64;
         for row in 0..8u16 {
             plane0 |=
-                u64::from(self.peek_vram::<AnyBoard>(address.wrapping_add(row), fetch, cartridge)) << (8 * row);
-            plane1 |= u64::from(self.peek_vram::<AnyBoard>(address.wrapping_add(8 + row), fetch, cartridge))
-                << (8 * row);
+                u64::from(self.peek_vram::<AnyBoard>(address.wrapping_add(row), fetch, cartridge))
+                    << (8 * row);
+            plane1 |= u64::from(self.peek_vram::<AnyBoard>(
+                address.wrapping_add(8 + row),
+                fetch,
+                cartridge,
+            )) << (8 * row);
         }
 
         (plane0, plane1)

@@ -28,11 +28,13 @@ pub(crate) use flash::{FlashCommand, FlashCommandState};
 use crate::rom::{InesHeader, RomImage, RomLoadError, RomLoadFailure};
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
-use mappers::Mapper;
-pub use board::{AnyBoard, AxRomKind, BoardKind, CnRomKind, Mmc1Kind, Mmc3Kind, Mmc5Kind, NromKind, UxRomKind};
+pub(crate) use board::with_board_kind;
 #[cfg(feature = "board-mmc5-exattr-split")]
 pub use board::Mmc5ExtKind;
-pub(crate) use board::with_board_kind;
+pub use board::{
+    AnyBoard, AxRomKind, BoardKind, CnRomKind, Mmc1Kind, Mmc3Kind, Mmc5Kind, NromKind, UxRomKind,
+};
+use mappers::Mapper;
 
 /// `offset % len`, without the division when `offset` is already below `len`: bank offsets
 /// almost always fall inside the memory, and this runs on every PRG and CHR access.
@@ -959,8 +961,10 @@ impl Cartridge {
         self.irq_asserted_as::<AnyBoard>()
     }
 
+    #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
     #[inline(always)]
-        pub fn irq_asserted_as<K: BoardKind>(&self) -> bool {
+    #[must_use]
+    pub fn irq_asserted_as<K: BoardKind>(&self) -> bool {
         K::board(&self.board).irq_asserted()
     }
 
@@ -986,7 +990,7 @@ impl Cartridge {
     }
 
     #[must_use]
-        pub fn ppu_irq_horizon_as<K: BoardKind>(&self) -> Option<i64> {
+    pub fn ppu_irq_horizon_as<K: BoardKind>(&self) -> Option<i64> {
         K::board(&self.board).ppu_irq_horizon()
     }
 
@@ -1002,12 +1006,12 @@ impl Cartridge {
 
     /// True when $6000-$7FFF is readable and writable. Mappers may disable it.
     ///
-        fn prg_ram_enabled_as<K: BoardKind>(&self) -> bool {
+    fn prg_ram_enabled_as<K: BoardKind>(&self) -> bool {
         K::board(&self.board).prg_ram_enabled()
     }
 
     /// True when $6000-$7FFF accepts writes. Mappers may write-protect it.
-        fn prg_ram_writable_as<K: BoardKind>(&self) -> bool {
+    fn prg_ram_writable_as<K: BoardKind>(&self) -> bool {
         K::board(&self.board).prg_ram_writable()
     }
 
@@ -1021,7 +1025,7 @@ impl Cartridge {
     /// answer on every board but four, and this is not a path worth proving an implication on.
     #[allow(clippy::inline_always)] // Measured: MF-CART step 3, variant B2.
     #[inline(always)]
-        fn prg_ram_offset_as<K: BoardKind>(&self, address: u16) -> usize {
+    fn prg_ram_offset_as<K: BoardKind>(&self, address: u16) -> usize {
         let (base, wrap) = K::board(&self.board).prg_ram_window(&self.memory);
         (base + usize::from(address - 0x6000)) % wrap
     }
@@ -1114,8 +1118,10 @@ impl Cartridge {
         self.try_cpu_read_as::<AnyBoard>(address)
     }
 
-        pub fn try_cpu_read_as<K: BoardKind>(&mut self, address: u16) -> Option<u8> {
-        if let Some(handled) = K::board_mut(&mut self.board).cpu_read_override(&self.memory, address) {
+    pub fn try_cpu_read_as<K: BoardKind>(&mut self, address: u16) -> Option<u8> {
+        if let Some(handled) =
+            K::board_mut(&mut self.board).cpu_read_override(&self.memory, address)
+        {
             return handled;
         }
 
@@ -1130,7 +1136,7 @@ impl Cartridge {
     }
 
     #[must_use]
-        pub fn try_cpu_peek_as<K: BoardKind>(&self, address: u16) -> Option<u8> {
+    pub fn try_cpu_peek_as<K: BoardKind>(&self, address: u16) -> Option<u8> {
         if let Some(handled) = K::board(&self.board).cpu_peek_override(&self.memory, address) {
             return handled;
         }
@@ -1173,7 +1179,7 @@ impl Cartridge {
     /// together, and neither reaches the owner's tolerance alone.
     #[allow(clippy::inline_always)] // Measured: MF-CART step 4, -0.111 % on an MMC5.
     #[inline(always)]
-        fn default_cpu_read_as<K: BoardKind>(&self, address: u16) -> Option<u8> {
+    fn default_cpu_read_as<K: BoardKind>(&self, address: u16) -> Option<u8> {
         if (0x6000..=0x7FFF).contains(&address) && self.prg_ram_read_wrap != 0 {
             let offset =
                 (self.prg_ram_read_base + usize::from(address - 0x6000)) % self.prg_ram_read_wrap;
@@ -1209,11 +1215,12 @@ impl Cartridge {
     #[allow(clippy::inline_always)] // Measured: MF-6b step 5, about 1.2 M on three ROMs.
     #[inline(always)]
     pub fn cpu_write(&mut self, address: u16, value: u8) {
-        self.cpu_write_as::<AnyBoard>(address, value)
+        self.cpu_write_as::<AnyBoard>(address, value);
     }
 
+    #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
     #[inline(always)]
-        pub fn cpu_write_as<K: BoardKind>(&mut self, address: u16, value: u8) {
+    pub fn cpu_write_as<K: BoardKind>(&mut self, address: u16, value: u8) {
         if self
             .board
             .intercept_cpu_write(&mut self.memory, address, value)
@@ -1262,7 +1269,7 @@ impl Cartridge {
         self.ppu_read_as::<AnyBoard>(address, fetch)
     }
 
-        pub fn ppu_read_as<K: BoardKind>(&mut self, address: u16, fetch: ChrFetch) -> u8 {
+    pub fn ppu_read_as<K: BoardKind>(&mut self, address: u16, fetch: ChrFetch) -> u8 {
         K::board_mut(&mut self.board).ppu_read(&mut self.memory, address, fetch)
     }
 
@@ -1274,7 +1281,7 @@ impl Cartridge {
     }
 
     #[must_use]
-        pub fn chr_view_as<K: BoardKind>(&self) -> Option<ChrView<'_>> {
+    pub fn chr_view_as<K: BoardKind>(&self) -> Option<ChrView<'_>> {
         K::board(&self.board).chr_view(&self.memory)
     }
 
@@ -1286,7 +1293,7 @@ impl Cartridge {
     }
 
     #[must_use]
-        pub fn chr_peek_view_as<K: BoardKind>(&self) -> Option<ChrView<'_>> {
+    pub fn chr_peek_view_as<K: BoardKind>(&self) -> Option<ChrView<'_>> {
         K::board(&self.board).chr_peek_view(&self.memory)
     }
 
@@ -1298,16 +1305,16 @@ impl Cartridge {
     }
 
     #[must_use]
-        pub fn ppu_peek_as<K: BoardKind>(&self, address: u16, fetch: ChrFetch) -> u8 {
+    pub fn ppu_peek_as<K: BoardKind>(&self, address: u16, fetch: ChrFetch) -> u8 {
         K::board(&self.board).ppu_peek(&self.memory, address, fetch)
     }
 
     /// Writes CHR-RAM at `address` ($0000-$1FFF).
     pub fn ppu_write(&mut self, address: u16, value: u8) {
-        self.ppu_write_as::<AnyBoard>(address, value)
+        self.ppu_write_as::<AnyBoard>(address, value);
     }
 
-        pub fn ppu_write_as<K: BoardKind>(&mut self, address: u16, value: u8) {
+    pub fn ppu_write_as<K: BoardKind>(&mut self, address: u16, value: u8) {
         K::board_mut(&mut self.board).ppu_write(&mut self.memory, address, value);
     }
 
@@ -1324,26 +1331,26 @@ impl Cartridge {
     }
 
     #[must_use]
-        pub fn chr_latch_state_as<K: BoardKind>(&self) -> i32 {
+    pub fn chr_latch_state_as<K: BoardKind>(&self) -> i32 {
         K::board(&self.board).chr_latch_state()
     }
 
     /// Restores the opaque CHR latch state (see [`Cartridge::chr_latch_state`]).
     pub fn set_chr_latch_state(&mut self, state: i32) {
-        self.set_chr_latch_state_as::<AnyBoard>(state)
+        self.set_chr_latch_state_as::<AnyBoard>(state);
     }
 
-        pub fn set_chr_latch_state_as<K: BoardKind>(&mut self, state: i32) {
+    pub fn set_chr_latch_state_as<K: BoardKind>(&mut self, state: i32) {
         K::board_mut(&mut self.board).set_chr_latch_state(state);
     }
 
     /// Moves the CHR latches on as the fetch of pattern `tile` from `pattern_table` ($0000
     /// or $1000) would (REQ-CORE-039).
     pub fn advance_chr_latch(&mut self, pattern_table: i32, tile: i32) {
-        self.advance_chr_latch_as::<AnyBoard>(pattern_table, tile)
+        self.advance_chr_latch_as::<AnyBoard>(pattern_table, tile);
     }
 
-        pub fn advance_chr_latch_as<K: BoardKind>(&mut self, pattern_table: i32, tile: i32) {
+    pub fn advance_chr_latch_as<K: BoardKind>(&mut self, pattern_table: i32, tile: i32) {
         K::board_mut(&mut self.board).advance_chr_latch(pattern_table, tile);
     }
 
@@ -1365,16 +1372,15 @@ impl Cartridge {
     /// with nothing to do here never reach the `Board` dispatch — one load and one
     /// not-taken branch per fetch, instead of the dispatch's niche prologue and indirect jump.
     pub fn on_ppu_address_bus(&mut self, address: u16, ppu_clock: i64) {
-        self.on_ppu_address_bus_as::<AnyBoard>(address, ppu_clock)
+        self.on_ppu_address_bus_as::<AnyBoard>(address, ppu_clock);
     }
 
-        pub fn on_ppu_address_bus_as<K: BoardKind>(&mut self, address: u16, ppu_clock: i64) {
+    pub fn on_ppu_address_bus_as<K: BoardKind>(&mut self, address: u16, ppu_clock: i64) {
         if !self.watches_ppu_reads {
             return;
         }
 
-        K::board_mut(&mut self.board)
-            .on_ppu_address_bus(&mut self.memory, address, ppu_clock);
+        K::board_mut(&mut self.board).on_ppu_address_bus(&mut self.memory, address, ppu_clock);
     }
 
     /// Signals that the PPU put `address` (14 bits) on its bus with **/RD high**: a `$2007`
@@ -1385,25 +1391,28 @@ impl Cartridge {
     /// whose rule is about /RD must not see it. See
     /// [`Cartridge::watches_ppu_bus_without_read`].
     pub fn on_ppu_address_bus_without_read(&mut self, address: u16, ppu_clock: i64) {
-        self.on_ppu_address_bus_without_read_as::<AnyBoard>(address, ppu_clock)
+        self.on_ppu_address_bus_without_read_as::<AnyBoard>(address, ppu_clock);
     }
 
-        pub fn on_ppu_address_bus_without_read_as<K: BoardKind>(&mut self, address: u16, ppu_clock: i64) {
+    pub fn on_ppu_address_bus_without_read_as<K: BoardKind>(
+        &mut self,
+        address: u16,
+        ppu_clock: i64,
+    ) {
         if !self.watches_ppu_bus_without_read {
             return;
         }
 
-        K::board_mut(&mut self.board)
-            .on_ppu_address_bus(&mut self.memory, address, ppu_clock);
+        K::board_mut(&mut self.board).on_ppu_address_bus(&mut self.memory, address, ppu_clock);
     }
 
     /// Signals a write to PPUCTRL ($2000). MMC5 needs it: the sprite size decides whether
     /// its two CHR register sets are used separately (nesdev, "MMC5").
     pub fn on_ppu_control(&mut self, control: u8) {
-        self.on_ppu_control_as::<AnyBoard>(control)
+        self.on_ppu_control_as::<AnyBoard>(control);
     }
 
-        pub fn on_ppu_control_as<K: BoardKind>(&mut self, control: u8) {
+    pub fn on_ppu_control_as<K: BoardKind>(&mut self, control: u8) {
         K::board_mut(&mut self.board).on_ppu_control(control);
     }
 
@@ -1432,7 +1441,7 @@ impl Cartridge {
     }
 
     #[must_use]
-        pub fn read_nametable_as<K: BoardKind>(&self, address: u16) -> u8 {
+    pub fn read_nametable_as<K: BoardKind>(&self, address: u16) -> u8 {
         K::board(&self.board).read_nametable(&self.memory, address)
     }
 
@@ -1457,7 +1466,7 @@ impl Cartridge {
 
     #[cfg(feature = "board-mmc5-exattr-split")]
     #[must_use]
-        pub fn nametable_write_offset_as<K: BoardKind>(&self, address: u16) -> Option<usize> {
+    pub fn nametable_write_offset_as<K: BoardKind>(&self, address: u16) -> Option<usize> {
         K::board(&self.board).nametable_write_offset(address)
     }
 
@@ -1481,7 +1490,7 @@ impl Cartridge {
 
     #[cfg(feature = "board-mmc5-exattr-split")]
     #[must_use]
-        pub fn substitutes_background_tiles_as<K: BoardKind>(&self) -> bool {
+    pub fn substitutes_background_tiles_as<K: BoardKind>(&self) -> bool {
         K::board(&self.board).substitutes_background_tiles()
     }
 
@@ -1497,18 +1506,18 @@ impl Cartridge {
 
     #[cfg(feature = "board-mmc5-exattr-split")]
     #[must_use]
-        pub fn background_capture_state_as<K: BoardKind>(&self) -> u64 {
+    pub fn background_capture_state_as<K: BoardKind>(&self) -> u64 {
         K::board(&self.board).background_capture_state()
     }
 
     /// Restores what [`Cartridge::background_capture_state`] took.
     #[cfg(feature = "board-mmc5-exattr-split")]
     pub fn set_background_capture_state(&mut self, state: u64) {
-        self.set_background_capture_state_as::<AnyBoard>(state)
+        self.set_background_capture_state_as::<AnyBoard>(state);
     }
 
     #[cfg(feature = "board-mmc5-exattr-split")]
-        pub fn set_background_capture_state_as<K: BoardKind>(&mut self, state: u64) {
+    pub fn set_background_capture_state_as<K: BoardKind>(&mut self, state: u64) {
         K::board_mut(&mut self.board).set_background_capture_state(state);
     }
 
@@ -1522,10 +1531,10 @@ impl Cartridge {
 
     /// Writes a nametable byte the cartridge serves itself.
     pub fn write_nametable(&mut self, address: u16, value: u8) {
-        self.write_nametable_as::<AnyBoard>(address, value)
+        self.write_nametable_as::<AnyBoard>(address, value);
     }
 
-        pub fn write_nametable_as<K: BoardKind>(&mut self, address: u16, value: u8) {
+    pub fn write_nametable_as<K: BoardKind>(&mut self, address: u16, value: u8) {
         K::board_mut(&mut self.board).write_nametable(&mut self.memory, address, value);
     }
 
@@ -1536,10 +1545,10 @@ impl Cartridge {
     /// `clocks_on_cpu_cycle` for the eleven instructions a board with nothing to do used to pay
     /// here.
     pub fn step_cpu_cycle(&mut self) {
-        self.step_cpu_cycle_as::<AnyBoard>()
+        self.step_cpu_cycle_as::<AnyBoard>();
     }
 
-        pub fn step_cpu_cycle_as<K: BoardKind>(&mut self) {
+    pub fn step_cpu_cycle_as<K: BoardKind>(&mut self) {
         self.memory.cpu_cycle += 1;
         if self.clocks_on_cpu_cycle {
             K::board_mut(&mut self.board).on_cpu_cycle(&mut self.memory);

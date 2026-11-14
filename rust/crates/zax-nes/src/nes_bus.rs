@@ -2,12 +2,12 @@ use crate::apu::Apu2A03;
 #[cfg(feature = "board-vs-system")]
 use crate::cartridges::mappers::VsBoard;
 use crate::cartridges::{AnyBoard, BoardKind, Cartridge};
-use std::marker::PhantomData;
 use crate::cpu::CpuBus;
 use crate::input::InputPorts;
 use crate::ppu::Ppu2C02;
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::wide::WideExtension;
+use std::marker::PhantomData;
 
 /// Size of CPU work RAM.
 const RAM_SIZE: usize = 2048;
@@ -308,7 +308,7 @@ impl NesBus {
 
     /// The APU, mutably, caught up first.
     pub fn apu_mut(&mut self) -> &mut Apu2A03 {
-        self.sync_apu_as::<AnyBoard>();
+        self.sync_apu();
         &mut self.apu
     }
 
@@ -438,7 +438,7 @@ impl NesBus {
 
     /// Advances the whole machine by one CPU cycle.
     pub fn tick(&mut self) {
-        self.tick_as::<AnyBoard>()
+        self.tick_as::<AnyBoard>();
     }
 
     /// [`Self::tick`] with the board reached through `K` (lot CORE-2).
@@ -472,7 +472,7 @@ impl NesBus {
 
         self.apu_lag += 1;
         if self.apu_lag > self.apu_quiet {
-            self.catch_up_apu_as::<K>();
+            self.catch_up_apu();
         }
     }
 
@@ -480,7 +480,7 @@ impl NesBus {
     /// may move the NMI line ($2000), the vblank flag ($2002) or the cartridge's IRQ, so
     /// the next cycle is run in step and recomputes the deadline.
     pub fn sync_ppu(&mut self) {
-        self.sync_ppu_as::<AnyBoard>()
+        self.sync_ppu_as::<AnyBoard>();
     }
 
     /// [`Self::sync_ppu`] with the board reached through `K` (lot CORE-2).
@@ -498,7 +498,8 @@ impl NesBus {
     /// where the cartridge's IRQ line could follow the PPU (see
     /// [`Cartridge::ppu_irq_horizon`]). Outside [`NesBus::defer_ppu`] the PPU runs on every
     /// cycle, as before.
-    #[allow(clippy::inline_always)] // Lot CORE-2: called from every board kind's copy of the hot path, LLVM stops inlining it (measured, +2.8 % on metroid for span_pixel alone).
+    #[allow(clippy::inline_always)]
+    // Lot CORE-2: called from every board kind's copy of the hot path, LLVM stops inlining it (measured, +2.8 % on metroid for span_pixel alone).
     #[inline(always)]
     fn catch_up_ppu_as<K: BoardKind>(&mut self) {
         if self.ppu_lag > 0 {
@@ -550,11 +551,11 @@ impl NesBus {
     /// this function had before AMD-054 rather than adding to it, in a function of its own that
     /// is never inlined — so neither the test nor the register pressure of that code reaches
     /// `tick` for a board without expansion audio (REQ-CORE-075's "no cost for other boards").
-    fn catch_up_apu_as<K: BoardKind>(&mut self) {
+    fn catch_up_apu(&mut self) {
         if !self.apu_batching {
             // Either the board has expansion audio, or the PPU is not being batched at all.
             // Both mean the APU may not lag past this cycle, which is what `sync_apu` does.
-            self.sync_apu_as::<K>();
+            self.sync_apu();
             return;
         }
 
@@ -622,10 +623,10 @@ impl NesBus {
     /// through [`NesBus::perform_dmc_dma`] — which is why the `M` push below is the part kept out
     /// of line and not this one: a board with expansion audio runs this on every cycle and must
     /// not pay a call for it.
-    fn sync_apu_as<K: BoardKind>(&mut self) {
+    fn sync_apu(&mut self) {
         if self.apu_lag > 0 {
             if self.expansion_audio {
-                self.push_expansion_audio_as::<K>();
+                self.push_expansion_audio();
             }
             self.apu.run_cpu_cycles(self.apu_lag);
             self.apu_lag = 0;
@@ -644,7 +645,7 @@ impl NesBus {
     /// register pressure of the whole function and cost every CPU cycle of every board one more
     /// saved register — RU-3a's +15.7 % on `tick`.
     #[inline(never)]
-    fn push_expansion_audio_as<K: BoardKind>(&mut self) {
+    fn push_expansion_audio(&mut self) {
         if let Some(level) = self
             .cartridge
             .as_ref()
@@ -659,7 +660,7 @@ impl NesBus {
         self.deferred_ppu = true;
         self.apu_batching = !self.expansion_audio;
         self.sync_ppu_as::<AnyBoard>();
-        self.sync_apu_as::<AnyBoard>();
+        self.sync_apu();
     }
 
     /// Catches the PPU up and returns to running it on every cycle.
@@ -667,7 +668,7 @@ impl NesBus {
         self.deferred_ppu = false;
         self.apu_batching = false;
         self.sync_ppu_as::<AnyBoard>();
-        self.sync_apu_as::<AnyBoard>();
+        self.sync_apu();
     }
 
     /// Runs the cycles the DMA units are owed, and the transfers they serve, in place of the
@@ -784,7 +785,7 @@ impl NesBus {
                 self.dmc_dma_count += 1;
                 let address = self.apu.dmc_dma_address();
                 let value = self.dmc_fetch_read_as::<K>(address, internal, &mut decoded_before);
-                self.sync_apu_as::<K>();
+                self.sync_apu();
                 let taken_back = self.apu.supply_dmc_byte(value);
                 // Cleared last: the `sync_apu` above polls the request, which is still raised
                 // until the byte lands.
@@ -918,7 +919,7 @@ impl NesBus {
         let address = self.apu.dmc_dma_address();
         let mut decoded_before = read_address;
         let value = self.dmc_fetch_read_as::<K>(address, false, &mut decoded_before);
-        self.sync_apu_as::<K>();
+        self.sync_apu();
         let taken_back = self.apu.supply_dmc_byte(value);
         // Cleared last: the `sync_apu` above polls the request, which is still raised until the
         // byte lands.
@@ -1025,7 +1026,12 @@ impl NesBus {
     /// 2A03 alone has the bug; `decoded_before` carries the "two reads of the same input
     /// register in a row" rule, on which the controller does not react at all.
     // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
-    fn dma_read_as<K: BoardKind>(&mut self, address: u16, internal: bool, decoded_before: &mut u16) -> u8 {
+    fn dma_read_as<K: BoardKind>(
+        &mut self,
+        address: u16,
+        internal: bool,
+        decoded_before: &mut u16,
+    ) -> u8 {
         if !internal {
             // Nothing answers $4000-$401F on the external bus. Written as two returns rather
             // than one `if` expression so that the external bus — a compare and a select — stays
@@ -1089,7 +1095,12 @@ impl NesBus {
     /// so the cycle after a fetch cannot see it in bit 5 of a `$4015` read — which is
     /// `AccuracyCoin`'s `Internal Data Bus` test 2 — while an open-bus read on that cycle does
     /// see it, which is `DMA + Open Bus`. Four instructions, once per fetch.
-    fn dmc_fetch_read_as<K: BoardKind>(&mut self, address: u16, internal: bool, decoded_before: &mut u16) -> u8 {
+    fn dmc_fetch_read_as<K: BoardKind>(
+        &mut self,
+        address: u16,
+        internal: bool,
+        decoded_before: &mut u16,
+    ) -> u8 {
         let internal_bus = self.data_bus;
         let value = self.dma_read_as::<K>(address, internal, decoded_before);
         // A fetch that also reached `$4015` leaves the address's own byte on the pins, not the
@@ -1176,7 +1187,9 @@ impl NesBus {
             self.sync_ppu_as::<K>();
             // The PPU drives its own data-bus latch for the undefined bits, separate from
             // the CPU's open bus (nesdev, "PPU registers"; ppu_open_bus).
-            return self.ppu.read_as::<K>(address & 0x07, self.cartridge.as_mut());
+            return self
+                .ppu
+                .read_as::<K>(address & 0x07, self.cartridge.as_mut());
         }
 
         if address < 0x4020 {
@@ -1184,7 +1197,7 @@ impl NesBus {
         }
 
         if address < 0x8000 {
-            if let Some(value) = self.read_wide_window_as::<K>(address) {
+            if let Some(value) = self.read_wide_window(address) {
                 return value;
             }
         }
@@ -1224,7 +1237,7 @@ impl NesBus {
     fn read_io_register_as<K: BoardKind>(&mut self, address: u16) -> u8 {
         match address {
             0x4015 => {
-                self.sync_apu_as::<K>();
+                self.sync_apu();
                 // Bit 5 is the **internal** bus, and the read leaves the pins alone: the two
                 // halves of `AccuracyCoin`'s `Internal Data Bus` test, and `Open Bus` 7 and 9
                 // (see [`NesBus::external_bus`]).
@@ -1259,7 +1272,7 @@ impl NesBus {
     /// PR-1's set.
     #[cold]
     #[inline(never)]
-    fn read_wide_window_as<K: BoardKind>(&mut self, address: u16) -> Option<u8> {
+    fn read_wide_window(&mut self, address: u16) -> Option<u8> {
         // MF-FIX: what the two boards that read something of the console need, taken before the
         // cartridge is asked. **The fill is here and the reads are in the boards** because this is
         // the function that already runs on exactly the reads able to reach a window below $8000
@@ -1295,7 +1308,7 @@ impl NesBus {
         }
 
         if WideExtension::claims(address) && !self.ppu.wide().zone_data() {
-            if let Some(value) = self.wide_window_read_as::<K>(address) {
+            if let Some(value) = self.wide_window_read(address) {
                 return Some(value);
             }
             if let Some(value) = self.ppu.wide().read(address) {
@@ -1303,7 +1316,7 @@ impl NesBus {
             }
         }
         if (0x6000..0x8000).contains(&address) {
-            if let Some(value) = self.wide_window_read_as::<K>(address) {
+            if let Some(value) = self.wide_window_read(address) {
                 return Some(value);
             }
         }
@@ -1346,7 +1359,7 @@ impl NesBus {
                     self.write_vs_port(value);
                 }
                 _ => {
-                    self.sync_apu_as::<K>();
+                    self.sync_apu();
                     let ghost = if address == 0x4015 {
                         self.dmc_switch_off_window(value)
                     } else {
@@ -1512,7 +1525,7 @@ impl NesBus {
             .then_some(address + 0x2000)
     }
 
-    fn wide_window_read_as<K: BoardKind>(&self, address: u16) -> Option<u8> {
+    fn wide_window_read(&self, address: u16) -> Option<u8> {
         let offset = self.ppu.wide().prg_window(address)?;
         // A hack pack's code, when one runs; PRG-ROM otherwise.
         let code = self.ppu.wide().code();
@@ -1752,7 +1765,7 @@ impl NesBus {
         }
 
         if WideExtension::claims(address) && !self.ppu.wide().zone_data() {
-            if let Some(value) = self.wide_window_read_as::<AnyBoard>(address) {
+            if let Some(value) = self.wide_window_read(address) {
                 return value;
             }
             if let Some(value) = self.ppu.wide().read(address) {
@@ -1760,7 +1773,7 @@ impl NesBus {
             }
         }
         if (0x6000..0x8000).contains(&address) {
-            if let Some(value) = self.wide_window_read_as::<AnyBoard>(address) {
+            if let Some(value) = self.wide_window_read(address) {
                 return value;
             }
         }
@@ -1770,7 +1783,6 @@ impl NesBus {
             .and_then(|cartridge| cartridge.try_cpu_peek(address))
             .unwrap_or(0)
     }
-
 
     /// **`#[inline(always)]`, and it has to stay: a `callq` here costs about 170 M instructions
     /// over 300 frames, on every board.** This is MF-3b step 1's regression one level up, and
@@ -1792,10 +1804,12 @@ impl NesBus {
     #[allow(clippy::inline_always)] // Measured: 170 M instructions, MF-5b step 1.
     #[inline(always)]
     fn cpu_irq_asserted_as<K: BoardKind>(&self) -> bool {
-        self.apu.irq_asserted() || self.cartridge.as_ref().is_some_and(Cartridge::irq_asserted_as::<K>)
+        self.apu.irq_asserted()
+            || self
+                .cartridge
+                .as_ref()
+                .is_some_and(Cartridge::irq_asserted_as::<K>)
     }
-
-
 }
 
 impl CpuBus for NesBus {
@@ -1853,6 +1867,7 @@ pub struct KindBus<'a, K> {
 
 impl<'a, K: BoardKind> KindBus<'a, K> {
     /// Borrows `bus` for a frame on the board kind `K`.
+    #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
     #[inline(always)]
     pub fn new(bus: &'a mut NesBus) -> Self {
         Self {
@@ -1903,7 +1918,6 @@ impl<K: BoardKind> CpuBus for KindBus<'_, K> {
         self.bus.dma_gave_back
     }
 }
-
 
 impl NesBus {
     /// Appends the bus state (work RAM, open bus, clock and DMA counters) to `writer`

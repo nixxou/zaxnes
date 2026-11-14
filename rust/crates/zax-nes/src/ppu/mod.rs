@@ -30,9 +30,9 @@ pub use ppu_bus_access::PpuBusAccess;
 pub use tile_buffer::TileBuffer;
 
 use crate::cartridges::{AnyBoard, BoardKind, Cartridge, ChrFetch};
-use std::marker::PhantomData;
 use crate::wide::WideExtension;
 use crate::{NametableMirroring, NesRegion, RegionTiming, TileRecord};
+use std::marker::PhantomData;
 
 /// The cartridge as the internal PPU paths pass it around.
 type Cart<'a, 'c, K> = &'a mut CartSlot<'c, K>;
@@ -46,6 +46,7 @@ pub(crate) struct CartSlot<'c, K> {
 }
 
 impl<'c, K> CartSlot<'c, K> {
+    #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
     #[inline(always)]
     pub(crate) const fn new(cartridge: Option<&'c mut Cartridge>) -> Self {
         Self {
@@ -58,6 +59,7 @@ impl<'c, K> CartSlot<'c, K> {
 impl<'c, K> std::ops::Deref for CartSlot<'c, K> {
     type Target = Option<&'c mut Cartridge>;
 
+    #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
     #[inline(always)]
     fn deref(&self) -> &Self::Target {
         &self.cartridge
@@ -65,6 +67,7 @@ impl<'c, K> std::ops::Deref for CartSlot<'c, K> {
 }
 
 impl<K> std::ops::DerefMut for CartSlot<'_, K> {
+    #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.cartridge
@@ -1985,7 +1988,7 @@ impl Ppu2C02 {
 
     /// Advances the PPU by the dots of one CPU cycle of the current region.
     pub fn step_cpu_cycle(&mut self, cartridge: Option<&mut Cartridge>) {
-        self.step_cpu_cycle_as::<AnyBoard>(cartridge)
+        self.step_cpu_cycle_as::<AnyBoard>(cartridge);
     }
 
     /// [`Self::step_cpu_cycle`] with the board reached through `K` (lot CORE-2).
@@ -2034,11 +2037,15 @@ impl Ppu2C02 {
     /// Only the NMI sample of the last cycle survives (each cycle overwrites it and nothing
     /// reads it in between), so the dots run in two stretches around that one sample.
     pub fn run_cpu_cycles(&mut self, cycles: u32, cartridge: Option<&mut Cartridge>) {
-        self.run_cpu_cycles_as::<AnyBoard>(cycles, cartridge)
+        self.run_cpu_cycles_as::<AnyBoard>(cycles, cartridge);
     }
 
     /// [`Self::run_cpu_cycles`] with the board reached through `K` (lot CORE-2).
-    pub fn run_cpu_cycles_as<K: BoardKind>(&mut self, cycles: u32, cartridge: Option<&mut Cartridge>) {
+    pub fn run_cpu_cycles_as<K: BoardKind>(
+        &mut self,
+        cycles: u32,
+        cartridge: Option<&mut Cartridge>,
+    ) {
         let mut cartridge = CartSlot::<K>::new(cartridge);
         if cycles == 0 {
             return;
@@ -2287,7 +2294,11 @@ impl Ppu2C02 {
     }
 
     /// [`Self::read`] with the board reached through `K` (lot CORE-2).
-    pub fn read_as<K: BoardKind>(&mut self, register: u16, cartridge: Option<&mut Cartridge>) -> u8 {
+    pub fn read_as<K: BoardKind>(
+        &mut self,
+        register: u16,
+        cartridge: Option<&mut Cartridge>,
+    ) -> u8 {
         let mut cartridge = CartSlot::<K>::new(cartridge);
         self.apply_decay();
 
@@ -2522,7 +2533,11 @@ impl Ppu2C02 {
         match dot {
             1..=256 | 321..=336 => match (dot - 1) & 0x07 {
                 1 => self.nametable_latch,
-                3 => self.peek_vram::<AnyBoard>(self.attribute_address(), ChrFetch::Background, cartridge),
+                3 => self.peek_vram::<AnyBoard>(
+                    self.attribute_address(),
+                    ChrFetch::Background,
+                    cartridge,
+                ),
                 5 => self.pattern_low_latch,
                 _ => self.pattern_high_latch,
             },
@@ -2536,9 +2551,11 @@ impl Ppu2C02 {
                 match (dot - 257) & 0x07 {
                     5 => self.sprite_pattern_low[slot],
                     7 => self.sprite_pattern_high[slot],
-                    _ => {
-                        self.peek_vram::<AnyBoard>(0x2000 | (self.v & 0x0FFF), ChrFetch::Background, cartridge)
-                    }
+                    _ => self.peek_vram::<AnyBoard>(
+                        0x2000 | (self.v & 0x0FFF),
+                        ChrFetch::Background,
+                        cartridge,
+                    ),
                 }
             }
             _ => self.nametable_latch,
@@ -2560,21 +2577,25 @@ impl Ppu2C02 {
         match (dot - 1) & 0x07 {
             1 => {
                 let address = with_low(0x2000 | (self.v & 0x0FFF));
-                self.nametable_latch = self.peek_vram::<AnyBoard>(address, ChrFetch::Background, cartridge);
+                self.nametable_latch =
+                    self.peek_vram::<AnyBoard>(address, ChrFetch::Background, cartridge);
             }
             3 => {
                 let address = with_low(self.attribute_address());
                 let shift = ((self.v >> 4) & 0x04) | (self.v & 0x02);
                 self.attribute_latch =
-                    (self.peek_vram::<AnyBoard>(address, ChrFetch::Background, cartridge) >> shift) & 0x03;
+                    (self.peek_vram::<AnyBoard>(address, ChrFetch::Background, cartridge) >> shift)
+                        & 0x03;
             }
             5 => {
                 let address = with_low(self.pattern_address(0));
-                self.pattern_low_latch = self.peek_vram::<AnyBoard>(address, ChrFetch::Background, cartridge);
+                self.pattern_low_latch =
+                    self.peek_vram::<AnyBoard>(address, ChrFetch::Background, cartridge);
             }
             _ => {
                 let address = with_low(self.pattern_address(8));
-                self.pattern_high_latch = self.peek_vram::<AnyBoard>(address, ChrFetch::Background, cartridge);
+                self.pattern_high_latch =
+                    self.peek_vram::<AnyBoard>(address, ChrFetch::Background, cartridge);
             }
         }
     }
@@ -2618,7 +2639,8 @@ impl Ppu2C02 {
                     let address = hybrid(0x23C0 | (self.t & 0x0C00), self.attribute_address());
                     let shift = ((self.v >> 4) & 0x04) | (self.v & 0x02);
                     self.attribute_latch =
-                        (self.peek_vram::<K>(address, ChrFetch::Background, cart.as_deref()) >> shift)
+                        (self.peek_vram::<K>(address, ChrFetch::Background, cart.as_deref())
+                            >> shift)
                             & 0x03;
                 }
                 _ => {}
@@ -2860,11 +2882,16 @@ impl Ppu2C02 {
 
     /// Writes register `register` (0-7, $2000 + register).
     pub fn write(&mut self, register: u16, value: u8, cartridge: Option<&mut Cartridge>) {
-        self.write_as::<AnyBoard>(register, value, cartridge)
+        self.write_as::<AnyBoard>(register, value, cartridge);
     }
 
     /// [`Self::write`] with the board reached through `K` (lot CORE-2).
-    pub fn write_as<K: BoardKind>(&mut self, register: u16, value: u8, cartridge: Option<&mut Cartridge>) {
+    pub fn write_as<K: BoardKind>(
+        &mut self,
+        register: u16,
+        value: u8,
+        cartridge: Option<&mut Cartridge>,
+    ) {
         let mut cartridge = CartSlot::<K>::new(cartridge);
         self.apply_decay();
 
@@ -3294,7 +3321,8 @@ impl Ppu2C02 {
         self.read_vram_inner(address, access, fetch, &mut cartridge)
     }
 
-    #[allow(clippy::inline_always)] // Lot CORE-2: called from every board kind's copy of the hot path, LLVM stops inlining it (measured, +2.8 % on metroid for span_pixel alone).
+    #[allow(clippy::inline_always)]
+    // Lot CORE-2: called from every board kind's copy of the hot path, LLVM stops inlining it (measured, +2.8 % on metroid for span_pixel alone).
     #[inline(always)]
     fn read_vram_inner<K: BoardKind>(
         &self,
@@ -3328,7 +3356,12 @@ impl Ppu2C02 {
 
     /// Side-effect-free read of the PPU bus, for the tile emitter: the cartridge is only
     /// peeked (REQ-CORE-033).
-    fn peek_vram<K: BoardKind>(&self, address: u16, fetch: ChrFetch, cartridge: Option<&Cartridge>) -> u8 {
+    fn peek_vram<K: BoardKind>(
+        &self,
+        address: u16,
+        fetch: ChrFetch,
+        cartridge: Option<&Cartridge>,
+    ) -> u8 {
         let address = address & 0x3FFF;
         if address < 0x2000 {
             return cartridge.map_or(0, |cartridge| cartridge.ppu_peek_as::<K>(address, fetch));
@@ -3350,7 +3383,7 @@ impl Ppu2C02 {
         access: PpuBusAccess,
         cartridge: Option<&mut Cartridge>,
     ) {
-        self.write_vram_through_bus_as::<AnyBoard>(address, value, access, cartridge)
+        self.write_vram_through_bus_as::<AnyBoard>(address, value, access, cartridge);
     }
 
     /// [`Self::write_vram_through_bus`] with the board reached through `K` (lot CORE-2).
@@ -3422,7 +3455,11 @@ impl Ppu2C02 {
     /// `$2006` write loading `v`. A12 is an address line, so an A12 counter must see both, and a
     /// board whose rule is about /RD — the MMC5's in-frame detection — must not
     /// (`Cartridge::watches_ppu_bus_without_read`).
-    pub(super) fn notify_address_bus_without_read<K: BoardKind>(&self, address: u16, cart: Cart<'_, '_, K>) {
+    pub(super) fn notify_address_bus_without_read<K: BoardKind>(
+        &self,
+        address: u16,
+        cart: Cart<'_, '_, K>,
+    ) {
         if let Some(cartridge) = cart.as_deref_mut() {
             cartridge.on_ppu_address_bus_without_read_as::<K>(address, self.ppu_clock);
         }
@@ -3543,7 +3580,12 @@ impl Ppu2C02 {
         self.vram_written.get(offset).copied().unwrap_or(0)
     }
 
-    fn write_nametable_byte<K: BoardKind>(&mut self, address: u16, value: u8, cart: Cart<'_, '_, K>) {
+    fn write_nametable_byte<K: BoardKind>(
+        &mut self,
+        address: u16,
+        value: u8,
+        cart: Cart<'_, '_, K>,
+    ) {
         let page = self.nametable_page(address, cart.as_deref());
         if page == Cartridge::SERVED_BY_CARTRIDGE {
             // Lot MF-LEG-2: with the MMC5 answering every table, a `$2007` write to one that

@@ -105,7 +105,11 @@ impl Ppu2C02 {
     ///
     /// Returns `false`, having run nothing, when the cartridge's fetches have side effects or
     /// another source ([`Cartridge::chr_view`], a nametable the cartridge serves itself).
-    pub(super) fn run_visible_span<K: BoardKind>(&mut self, count: i64, cartridge: Option<&Cartridge>) -> bool {
+    pub(super) fn run_visible_span<K: BoardKind>(
+        &mut self,
+        count: i64,
+        cartridge: Option<&Cartridge>,
+    ) -> bool {
         let Some(cartridge) = cartridge else {
             return false;
         };
@@ -182,7 +186,11 @@ impl Ppu2C02 {
     /// source (MMC2/MMC4 latches, MMC3 and Rambo1 watching A12, MMC5): the same loop, with each
     /// fetch through the full bus path ([`Ppu2C02::background_fetch`]), so the board sees the same
     /// addresses at the same PPU clock as with [`Ppu2C02::step_dot`].
-    pub(super) fn run_visible_span_through_bus<K: BoardKind>(&mut self, count: i64, cart: Cart<'_, '_, K>) {
+    pub(super) fn run_visible_span_through_bus<K: BoardKind>(
+        &mut self,
+        count: i64,
+        cart: Cart<'_, '_, K>,
+    ) {
         let pixels = SpanPixels::of(self.mask, i32::from(self.fine_x));
         #[allow(clippy::cast_sign_loss)] // Visible line, 0..240.
         let row = self.scanline as usize * SCREEN_WIDTH;
@@ -208,7 +216,8 @@ impl Ppu2C02 {
     }
 
     /// The colour of pixel `x` of a span, as [`Ppu2C02::render_pixel`] composes it.
-    #[allow(clippy::inline_always)] // Lot CORE-2: called from every board kind's copy of the hot path, LLVM stops inlining it (measured, +2.8 % on metroid for span_pixel alone).
+    #[allow(clippy::inline_always)]
+    // Lot CORE-2: called from every board kind's copy of the hot path, LLVM stops inlining it (measured, +2.8 % on metroid for span_pixel alone).
     #[inline(always)]
     fn span_pixel(&mut self, x: usize, pixels: &SpanPixels) -> u8 {
         let left = x >= 8;
@@ -264,7 +273,11 @@ impl Ppu2C02 {
     /// The work of one dot of a line that renders (a visible line when `VISIBLE`, else the
     /// pre-render line) with rendering on, in the order of the nesdev timing diagram:
     /// background pipeline, sprite evaluation, sprite fetches, vertical reload.
-    fn run_rendering_dot<K: BoardKind, const VISIBLE: bool>(&mut self, dot: i32, cart: Cart<'_, '_, K>) {
+    fn run_rendering_dot<K: BoardKind, const VISIBLE: bool>(
+        &mut self,
+        dot: i32,
+        cart: Cart<'_, '_, K>,
+    ) {
         match dot {
             1..=256 => {
                 if dot == 1 {
@@ -336,7 +349,8 @@ impl Ppu2C02 {
 
     /// The step of the four two-dot background fetches that falls on `dot` (2 to 257 and
     /// 321 to 337).
-    #[allow(clippy::inline_always)] // Lot CORE-2: called from every board kind's copy of the hot path, LLVM stops inlining it (measured, +2.8 % on metroid for span_pixel alone).
+    #[allow(clippy::inline_always)]
+    // Lot CORE-2: called from every board kind's copy of the hot path, LLVM stops inlining it (measured, +2.8 % on metroid for span_pixel alone).
     #[inline(always)]
     fn background_fetch<K: BoardKind>(&mut self, dot: i32, cart: Cart<'_, '_, K>) {
         match (dot - 1) & 0x07 {
@@ -895,7 +909,8 @@ impl Ppu2C02 {
             let attribute = self.oam[(n * 4) + 2];
             let address = self.sprite_row_address(tile, attribute, self.scanline - i32::from(y));
             let slot = self.extra_loaded;
-            self.extra_pattern_low[slot] = self.peek_vram::<AnyBoard>(address, ChrFetch::Sprite, cartridge);
+            self.extra_pattern_low[slot] =
+                self.peek_vram::<AnyBoard>(address, ChrFetch::Sprite, cartridge);
             self.extra_pattern_high[slot] =
                 self.peek_vram::<AnyBoard>(address + 8, ChrFetch::Sprite, cartridge);
             self.extra_attribute[slot] = attribute;
@@ -1103,7 +1118,8 @@ impl Ppu2C02 {
         }
     }
 
-    #[allow(clippy::inline_always)] // Lot CORE-2: called from every board kind's copy of the hot path, LLVM stops inlining it (measured, +2.8 % on metroid for span_pixel alone).
+    #[allow(clippy::inline_always)]
+    // Lot CORE-2: called from every board kind's copy of the hot path, LLVM stops inlining it (measured, +2.8 % on metroid for span_pixel alone).
     #[inline(always)]
     pub(super) fn render_pixel(&mut self, x: usize) {
         let mask = self.mask;

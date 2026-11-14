@@ -19,7 +19,10 @@ fn roms(folder: &Path, out: &mut Vec<PathBuf>) {
         let path = entry.path();
         if path.is_dir() {
             roms(&path, out);
-        } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("nes")) {
+        } else if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("nes"))
+        {
             out.push(path);
         }
     }
@@ -53,8 +56,12 @@ fn core_2_specialised_paths_match_the_path_of_every_board() {
             let mut core = machine_with(&image, &name);
             core.set_generic_path(generic);
             let mut frames = Vec::new();
-            for frame in 0..600u32 {
-                let input = if frame % 64 < 20 { 0x08 | (frame as u16 & 0x81) } else { 0 };
+            for frame in 0..600u16 {
+                let input = if frame % 64 < 20 {
+                    0x08 | (frame & 0x81)
+                } else {
+                    0
+                };
                 let cycles = core.run_frame(input);
                 frames.push((cycles, core.pixel_frame_with_mask().to_vec()));
             }

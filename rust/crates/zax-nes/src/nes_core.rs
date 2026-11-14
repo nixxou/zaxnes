@@ -1,8 +1,8 @@
 use crate::apu::{Apu2A03, AudioError, AudioReader};
 use crate::cartridges::{with_board_kind, AnyBoard, BoardKind, Cartridge};
-use crate::nes_bus::KindBus;
 use crate::cpu::{Cpu6502, CpuBus};
 use crate::input::{ControllerPortType, InputPorts, InvalidPort, ZapperPosition};
+use crate::nes_bus::KindBus;
 use crate::ppu::{Ppu2C02, MAX_TILE_RECORD_STATE_SIZE, OAM_SIZE, PALETTE_SIZE, VRAM_SIZE};
 use crate::rom::{InesHeader, RomImage, RomLoadResult};
 use crate::state::{CoreState, InvalidState, StateLoadFailure, StateReader, StateWriter};
