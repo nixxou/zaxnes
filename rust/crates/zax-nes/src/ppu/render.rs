@@ -690,6 +690,7 @@ impl Ppu2C02 {
 
         self.eval_byte += 1;
         self.secondary_oam_addr += 1;
+        self.eval_copy_dot = dot;
         if self.eval_byte >= 4 {
             self.eval_sprite = (self.eval_sprite + 1) & 0x3F;
             self.eval_byte = 0;

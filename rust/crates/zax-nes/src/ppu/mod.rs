@@ -155,11 +155,15 @@ pub struct Ppu2C02 {
     vram_clock: u32,
     oam: [u8; OAM_SIZE],
     /// Whether the OAM row corruption of [`Self::rendering_switched`] is emulated. A core setting,
-    /// off by default (owner, 2026-11-13, until the model is complete), and not part of the state: it describes the machine, not the game.
+    /// on by default (lot FIDELITY), and not part of the state: it describes the machine, not the
+    /// game.
     oam_corruption: bool,
     /// The OAM rows a switch-off of the rendering marked, one bit a row, waiting for the rendering
     /// to come back on a line that renders. Transient: a state load drops it.
     oam_corrupt_rows: u32,
+    /// The row the last switch-off seeded, which a switch-off at the end of the clear (dot 65)
+    /// copies again without taking a new one (`TriCNES`). Transient like `oam_corrupt_rows`.
+    oam_seed_row: u32,
     /// Whether the 2C02's OAMADDR copy at the start of rendering is emulated
     /// ([`Self::oamaddr_row_copy`]). A core setting, on by default; not part of the state.
     oamaddr_bug: bool,
@@ -402,6 +406,11 @@ pub struct Ppu2C02 {
     /// Not in the savestate, for the reason given on `secondary_oam_addr`.
     #[cfg(feature = "ppu-exact-sprite-eval")]
     sprite_in_range: bool,
+    /// The last dot the evaluation copied a byte on, for the OAM row corruption of alignment 2,
+    /// which differs on the dot of a copy (lot FIDELITY step 29). Not in the savestate, like
+    /// `secondary_oam_addr`.
+    #[cfg(feature = "ppu-exact-sprite-eval")]
+    eval_copy_dot: i32,
     eval_found: i32,
     overflow_copy: i32,
     eval_finished: bool,
@@ -513,6 +522,7 @@ impl Ppu2C02 {
             oam: [0; OAM_SIZE],
             oam_corruption: true,
             oam_corrupt_rows: 0,
+            oam_seed_row: 0,
             oamaddr_bug: true,
             oam_decay: false,
             power_on_top: true,
@@ -591,6 +601,8 @@ impl Ppu2C02 {
             eval_byte: 0,
             #[cfg(feature = "ppu-exact-sprite-eval")]
             secondary_oam_addr: 0,
+            #[cfg(feature = "ppu-exact-sprite-eval")]
+            eval_copy_dot: -1,
             #[cfg(feature = "ppu-exact-sprite-eval")]
             sprite_in_range: false,
             eval_found: 0,
@@ -949,7 +961,13 @@ impl Ppu2C02 {
         }
         if on {
             if renders {
-                self.corrupt_oam_rows();
+                if matches!(self.alignment, 1 | 2) {
+                    // Back on outside vblank: the pending seed is lost in these alignments
+                    // (TriCNES); only what was copied at the switch itself remains.
+                    self.oam_corrupt_rows = 0;
+                } else {
+                    self.corrupt_oam_rows();
+                }
             }
             return;
         }
@@ -960,17 +978,90 @@ impl Ppu2C02 {
         // The seed is taken one dot later in alignment 1 than the switch itself (TriCNES: 3 dots
         // after the write, the rendering 2); in alignment 2 both are already a dot later.
         let dot = self.dot + i32::from(self.alignment == 1);
+        // TriCNES (`docs/review/FIDELITY-LEADS.md`, D1), measured against it dot by dot: during
+        // the clear, a switch whose seed lands on an even dot (on every dot in alignment 2) also
+        // corrupts the row before — the seed taken at once while the rendering still counts as
+        // on, besides the one taken when it stops; and in alignment 1 the sprite fetches seed the
+        // row after, their increment coming before it is used.
+        // During the evaluation the row is the secondary OAM address rounded up to a sprite —
+        // the address before this dot's increment on an even dot (on every dot in alignment 2),
+        // and in alignment 2 the row after it as well on an even dot. Dot 256 seeds row 0.
+        // In alignment 2, and on an even dot in alignment 1, the evaluation row is copied at
+        // once (the evaluation still sees the rendering on), so a re-enable outside vblank, which
+        // drops the pending seed in these alignments, keeps it; measured against TriCNES with a
+        // re-enable ten lines on (lot FIDELITY step 29).
+        // TriCNES also copies the clear's extra row at once, but then fails AccuracyCoin's own
+        // `OAM Corruption` test 3 (OAM intact right after the switch, measured on a console in
+        // every alignment) in alignment 2: the console wins, that row waits like the main one.
+        let mut rows = 0u32;
+        let mut deferred = 0u32;
+        let mut seed = None;
+        let even = dot % 2 == 0;
         #[allow(clippy::cast_sign_loss)] // Each arm is 0..32 by its range.
         let row = match dot {
-            1..=64 => (dot >> 1) as u32 & 0x1F,
-            65..=256 => self.evaluation_row(),
-            257..=320 => {
-                let since = dot - 256;
-                (((since >> 3) * 4) + (since & 0x07).min(3)) as u32 & 0x1F
+            0 => 1,
+            1..=64 => {
+                let row = (dot >> 1) as u32 & 0x1F;
+                if even || (self.alignment == 2 && dot > 1) {
+                    deferred |= 1 << ((row + 31) & 0x1F);
+                }
+                row
             }
+            65 => {
+                // The clear's last step marks the corruption without taking a row: the one the
+                // previous switch-off seeded is copied at once.
+                rows |= 1 << self.oam_seed_row;
+                seed = Some(self.oam_seed_row);
+                0
+            }
+            66..=255 => {
+                // Alignment 1, which seeds a dot late, always reads the address as it stands.
+                let behind = (even && self.alignment != 1) || self.alignment == 2;
+                let row = self.evaluation_row(behind);
+                match self.alignment {
+                    2 => {
+                        rows |= 1 << row;
+                        seed = Some(row);
+                        if even && self.copied_within(self.dot, 2) {
+                            (row + 1) & 0x1F
+                        } else {
+                            0
+                        }
+                    }
+                    1 if self.dot % 2 == 0 => {
+                        rows |= 1 << row;
+                        seed = Some(row);
+                        0
+                    }
+                    _ => row,
+                }
+            }
+            256 if self.alignment == 2 => {
+                let row = self.evaluation_row(true);
+                rows |= 1 << row;
+                seed = Some(row);
+                0
+            }
+            257..=320 => {
+                let since = dot - 256 + i32::from(self.alignment == 1);
+                if (dot == 257 && self.alignment == 1) || (dot == 258 && self.alignment == 2) {
+                    rows |= 1 << 1;
+                }
+                if since > 64 {
+                    // Alignment 1's last fetch dot seeds as the dots after the fetches do.
+                    0
+                } else {
+                    (((since >> 3) * 4) + (since & 0x07).min(3)) as u32 & 0x1F
+                }
+            }
+            340 if self.alignment == 1 => 1,
             _ => 0,
         };
-        self.oam_corrupt_rows |= 1 << row;
+        // The extra rows come from the seed taken while the rendering still counts as on, and
+        // that one is copied at once; the main row waits for the rendering to come back.
+        self.copy_row_zero_over(rows);
+        self.oam_corrupt_rows |= deferred | (1 << row);
+        self.oam_seed_row = seed.unwrap_or(row);
     }
 
     /// Keeps count of the steps the secondary OAM address misses when the rendering is off for part
@@ -1044,18 +1135,37 @@ impl Ppu2C02 {
     }
 
     /// The row [`Self::rendering_switched`] marks during the evaluation: the secondary OAM
-    /// address "ceilinged to the nearest multiple of 4", and 0 once the secondary OAM is full.
+    /// address "ceilinged to the nearest multiple of 4", and 0 once the secondary OAM is full;
+    /// `behind` takes the address one step back (the value before this dot's increment, which is
+    /// the same rounding when nothing was copied).
     #[cfg(feature = "ppu-exact-sprite-eval")]
     #[allow(clippy::cast_sign_loss)] // 0..=32 before the mask.
-    const fn evaluation_row(&self) -> u32 {
-        ((self.secondary_oam_addr + 3) & !3) as u32 & 0x1F
+    const fn evaluation_row(&self, behind: bool) -> u32 {
+        let address = if behind && self.secondary_oam_addr > 0 {
+            self.secondary_oam_addr - 1
+        } else {
+            self.secondary_oam_addr
+        };
+        ((address + 3) & !3) as u32 & 0x1F
     }
 
     /// Without the exact evaluation there is no secondary OAM address to read; row 0 is the one
     /// that does nothing.
     #[cfg(not(feature = "ppu-exact-sprite-eval"))]
-    const fn evaluation_row(&self) -> u32 {
+    const fn evaluation_row(&self, _behind: bool) -> u32 {
         0
+    }
+
+    /// Whether the evaluation copied a byte within the `window` dots up to `dot`.
+    #[cfg(feature = "ppu-exact-sprite-eval")]
+    const fn copied_within(&self, dot: i32, window: i32) -> bool {
+        self.eval_copy_dot <= dot && dot - self.eval_copy_dot < window
+    }
+
+    /// Without the exact evaluation nothing is copied dot by dot.
+    #[cfg(not(feature = "ppu-exact-sprite-eval"))]
+    const fn copied_within(&self, _dot: i32, _window: i32) -> bool {
+        false
     }
 
     /// Copies OAM row 0 over every row [`Self::rendering_switched`] marked, and the first byte of
@@ -1064,6 +1174,12 @@ impl Ppu2C02 {
     #[inline(never)]
     fn corrupt_oam_rows(&mut self) {
         let rows = std::mem::take(&mut self.oam_corrupt_rows);
+        self.copy_row_zero_over(rows);
+    }
+
+    /// Copies OAM row 0 over every row of `rows` (bit n = row n), and the first byte of the
+    /// secondary OAM over the byte of the same index.
+    fn copy_row_zero_over(&mut self, rows: u32) {
         for row in 1..32usize {
             if (rows >> row) & 1 != 0 {
                 self.oam.copy_within(0..8, row * 8);

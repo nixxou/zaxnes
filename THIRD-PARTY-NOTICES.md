@@ -48,6 +48,39 @@ défaut OAMADDR) en citent le fichier et la ligne. BeesNES est distribué sous l
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
+### TriCNES — (c) 2025 Chris Siebert — licence MIT
+
+Les **réglages d'alignement CPU/PPU** (`emu.cpu_ppu_alignment`, `rust/crates/zax-nes/src/ppu`)
+reprennent le modèle de TriCNES (<https://github.com/100thCoin/TriCNES>), l'émulateur de
+l'auteur d'AccuracyCoin : délais d'écriture de `$2001` et `$2006` selon l'alignement,
+verrou de lecture de `$2007`, défaut de `$2000` sur `t`, et règles de la **corruption de
+l'OAM** quand le rendu est coupé hors vblank (ligne d'origine, copie immédiate ou différée,
+perte au rallumage en milieu d'image). Ces règles ont été mesurées en exécutant TriCNES et
+Zaxnes sur les mêmes programmes de test ; le code de Zaxnes est écrit à neuf en Rust. TriCNES
+est distribué sous licence MIT :
+
+    MIT License
+
+    Copyright (c) 2025 Chris Siebert
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
 ### Mesen 2 — (c) Sour — GNU GPL v3
 
 Plusieurs expressions de cartes du cœur NES (`rust/crates/zax-nes/src/cartridges/mappers`) et de

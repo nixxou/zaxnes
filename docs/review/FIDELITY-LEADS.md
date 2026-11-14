@@ -156,11 +156,13 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   through the `$2002` race, compare PPU address bus and `v` per dot) to settle `$2001` per
   alignment, `$2007` reads, and the `$2000`/`$2006` glitches of plan 1.4/1.5 before enabling them.
 
-### A4. CPU/PPU alignment variants — open, Fidélité+
+### A4. CPU/PPU alignment variants — done (`emu.cpu_ppu_alignment`, default 3, steps 28-29)
 - Hardware: four CPU/PPU clock alignments chosen at power-on; several tests (AccuracyCoin
   `BG Serial In`, `ALE + Read`, `Hybrid Addresses`, `OAM Corruption`) say results depend on it.
-- Zaxnes: one fixed alignment. An option "alignment 0-3" (or random) would expose them all.
-- Cost: A1 or a per-alignment table of the delays of A3.
+- Zaxnes: option "Alignment 0-3" in TriCNES's numbering; the old fixed behaviour is alignment 3.
+  Per-alignment delays from TriCNES (`$2001` 2/2/3/2, `$2006` load 4/4/5/4, `$2007` latch, `$2000`
+  glitch on `t`) and the OAM corruption rules of D1. AccuracyCoin 147/147 on all four.
+- Still open: `$2005` delay 1/1/2/1 and its open-bus glitch, random alignment at power-on.
 
 ---
 
@@ -260,7 +262,7 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 
 ## D. PPU — OAM
 
-### D1. OAM row corruption — done (option, off by default)
+### D1. OAM row corruption — done (option `emu.oam_corruption`, on by default)
 - Zaxnes `rendering_switched` (`ppu/mod.rs:677`), `corrupt_oam_rows` (`:801`); `emu.oam_corruption`.
 - Off because blargg `5.Emulator` test 3 fails with it; BeesNES has the same model
   (`OamCorruptionSeed`, `LSNPpu2C0X.h:1955-1971`) **always on** and passes thanks to B1.
@@ -335,6 +337,34 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   - Other source to read: the MiSTer NES core (a fork has an "accurate PPU OAM corruption/decay"
     switch), Breaks (2C02 reverse-engineered from the die), the nesdev threads t14353, t18339,
     t18284.
+- **Differential port of TriCNES (steps 29a/29b, 2026-11-14).** TriCNES built and run headless
+  (patched copy in the scratchpad: OAM2 index masked to 0-31 to avoid its out-of-range crash, a
+  hook logging each `CorruptOAM`). Three NROM programs run in both emulators with OAM filled with
+  byte = address, the switch-off sliding one dot per frame, OAM read back and restored after the
+  re-enable: P1 off near line 100 and on in vblank, P1b the same at line 20, P3 off at line 60 and
+  **on again ten lines later** (mid-frame). Compared per (line, dot) of the switch.
+  - Result: 0 differences on 10 of the 12 program × alignment pairs, apart from 3 single events
+    (a2 and a3, dot 65) where the two runs did not have the same previous event, which matters
+    there (below); P3 in alignments 1 and 2 differs on 41 events each, by choice (next point).
+  - **TriCNES fails AccuracyCoin's own `OAM Corruption` test in alignment 2** (TriCNES run on the
+    ROM, 3 billion master clocks, result byte `$47B` = `$0E`, code 3: OAM must still be intact
+    right after the switch-off; 147/147 in alignments 0 and 3, 145 in 1 and 2). The cause is its
+    extra row of the clear phase, copied at once. AccuracyCoin's results were measured on a
+    console in every alignment, so on that point the console contradicts TriCNES: Zaxnes keeps
+    that extra row pending (copied at the re-enable, dropped by a mid-frame re-enable in
+    alignments 1 and 2, which is where P3 then differs from TriCNES). With that, AccuracyCoin is
+    147/147 in all four alignments.
+  - Rules found (now in `rendering_switched`): the seed is a dot later in alignment 1; extra rows
+    on even dots of the clear (row k-1), on every dot in alignment 2; in alignment 2, and on even
+    dots in alignment 1, the evaluation row is copied **at once** (the evaluation still sees the
+    rendering on), so a mid-frame re-enable, which drops the pending seed in alignments 1 and 2,
+    keeps it; in alignment 2 the row after it is the pending one when the evaluation copied a byte
+    on the dot before; dot 65 takes no new row and copies the row the previous switch-off seeded
+    (TriCNES `Dot == 64` path that leaves `PPU_OAMCorruptionIndex` as it was); alignment 1's last
+    fetch dot (320) seeds row 0.
+  - Still TriCNES's model, not a console measurement: where TriCNES says "I have no idea" (dot 256)
+    the port copies it. The stale-row behaviour of dot 65 is the most fragile point.
+
 
 ### D2. OAM decay when rendering is off — done as an option (`emu.oam_decay`, off, step 20)
 - Zaxnes (step 20): `Ppu2C02::refresh_oam_row` / `refresh_oam_rows_on` (`ppu/mod.rs`), one clock
