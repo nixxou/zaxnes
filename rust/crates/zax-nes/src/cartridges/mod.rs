@@ -984,7 +984,9 @@ impl Cartridge {
     }
 
     #[must_use]
-        pub fn ppu_irq_horizon_as<K: BoardKind>(&self) -> Option<i64> {
+    #[allow(clippy::inline_always)] // Lot CORE-2: outlined once every board kind has its copy of the hot path (measured).
+    #[inline(always)]
+    pub fn ppu_irq_horizon_as<K: BoardKind>(&self) -> Option<i64> {
         K::board(&self.board).ppu_irq_horizon()
     }
 
@@ -1267,7 +1269,9 @@ impl Cartridge {
     }
 
     #[must_use]
-        pub fn chr_view_as<K: BoardKind>(&self) -> Option<ChrView<'_>> {
+    #[allow(clippy::inline_always)] // Lot CORE-2: outlined once every board kind has its copy of the hot path (measured).
+    #[inline(always)]
+    pub fn chr_view_as<K: BoardKind>(&self) -> Option<ChrView<'_>> {
         K::board(&self.board).chr_view(&self.memory)
     }
 
