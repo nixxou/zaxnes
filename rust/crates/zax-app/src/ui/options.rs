@@ -313,6 +313,7 @@ const EMULATION: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::EmuPpu2006Delay),
     LayoutEntry::Row(SettingId::EmuPpu2006Glitch),
     LayoutEntry::Row(SettingId::EmuPpu2000Glitch),
+    LayoutEntry::Row(SettingId::EmuPaletteCorruption),
     LayoutEntry::Row(SettingId::EmuCpuPpuAlignment),
 ];
 

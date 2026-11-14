@@ -106,6 +106,7 @@ options
       emu.ppu_2006_delay
       emu.ppu_2006_glitch
       emu.ppu_2000_glitch
+      emu.palette_corruption
       emu.cpu_ppu_alignment
       emu.run_ahead
       emu.smooth_scroll_ahead

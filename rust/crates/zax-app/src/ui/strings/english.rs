@@ -513,6 +513,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.ppu_2006_delay", "$2006 load delay"),
     ("setting.emu.ppu_2006_glitch", "$2006 scroll glitch"),
     ("setting.emu.ppu_2000_glitch", "$2000/$2005 open-bus glitch"),
+    ("setting.emu.palette_corruption", "Palette corruption"),
     ("setting.emu.cpu_ppu_alignment", "CPU/PPU alignment"),
     ("option.Alignment 0", "Alignment 0"),
     ("option.Alignment 1", "Alignment 1"),
@@ -1217,6 +1218,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         "detail.emu.ppu_2000_glitch",
         "A defect of the video chip: a write to its control register that starts on one precise dot of a line can make the next line drawn from the left screen half, and a write to its scroll register that lands on the copy of the scroll can scroll a line or a frame by what was last on the data bus instead. It happens only on some consoles, depending on how the chips lined up when switched on. Games written for the console avoid it. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.palette_corruption",
+        "A defect of the video chip: switching the picture off in the middle of a line, or moving the video address out of the colour palette, can change some palette colours. Only modelled for consoles in alignment 2, the one where it was observed reliably, from the measurements of the AccuracyCoin author; the exact colours are an approximation. Games written for the console avoid it. Takes effect at the next load. Default: on.",
     ),
     (
         "detail.emu.power_on_ram",

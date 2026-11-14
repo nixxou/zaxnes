@@ -214,6 +214,12 @@ impl NesCore {
         self.bus.ppu_mut().set_glitch_2006(enabled);
     }
 
+    /// Whether switching rendering off mid-picture, or a `$2006` load leaving palette RAM, can
+    /// corrupt the palettes in alignment 2 (`TriCNES`'s model, D5). On by default.
+    pub fn set_palette_corruption(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_palette_corruption(enabled);
+    }
+
     /// Whether a `$2000` write starting on dot 257 takes the nametable-X bit of the dot-257 copy
     /// from the CPU's open bus (nesdev; the transistor netlists). On by default.
     pub fn set_glitch_2000(&mut self, enabled: bool) {

@@ -525,6 +525,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.ppu_2006_delay", "Délai de chargement $2006"),
     ("setting.emu.ppu_2006_glitch", "Glitch de défilement $2006"),
     ("setting.emu.ppu_2000_glitch", "Glitch bus ouvert $2000/$2005"),
+    ("setting.emu.palette_corruption", "Corruption de palette"),
     ("setting.emu.cpu_ppu_alignment", "Alignement CPU/PPU"),
     ("option.Alignment 0", "Alignement 0"),
     ("option.Alignment 1", "Alignement 1"),
@@ -1191,6 +1192,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (
         "detail.emu.ppu_2000_glitch",
         "Un défaut de la puce vidéo : une écriture dans son registre de contrôle qui commence sur un point précis d'une ligne peut faire dessiner la ligne suivante depuis la moitié gauche de l'écran, et une écriture dans son registre de défilement qui tombe sur la recopie du défilement peut décaler une ligne ou une image de ce qui était sur le bus de données. Cela n'arrive que sur certaines consoles, selon l'alignement des puces à l'allumage. Les jeux écrits pour la console l'évitent. Prend effet au prochain chargement. Par défaut : activé.",
+    ),
+    (
+        "detail.emu.palette_corruption",
+        "Un défaut de la puce vidéo : couper l'image au milieu d'une ligne, ou faire sortir l'adresse vidéo de la palette, peut changer certaines couleurs de la palette. Modélisé seulement pour les consoles en alignement 2, celui où il a été observé de façon fiable, d'après les mesures de l'auteur d'AccuracyCoin ; les couleurs exactes sont une approximation. Les jeux écrits pour la console l'évitent. Prend effet au prochain chargement. Par défaut : activé.",
     ),
     (
         "detail.emu.power_on_ram",

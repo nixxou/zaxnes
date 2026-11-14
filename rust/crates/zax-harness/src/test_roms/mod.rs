@@ -593,11 +593,12 @@ fn run_one_zaxnes(
             .and_then(|value| value.parse().ok())
             .unwrap_or(0),
     );
-    // `ZAXNES_PPU_GLITCHES=0` turns the three on-by-default netlist timings off together.
+    // `ZAXNES_PPU_GLITCHES=0` turns the on-by-default PPU write timings and palette corruption off together.
     let glitches = std::env::var("ZAXNES_PPU_GLITCHES").map_or(true, |value| value != "0");
     core.set_address_load_delay(glitches);
     core.set_glitch_2006(glitches);
     core.set_glitch_2000(glitches);
+    core.set_palette_corruption(glitches);
     // The built-in widescreen patches rewrite game code; a test ROM must run as it is.
     core.set_builtin_patches(false);
     core.set_advanced_patches(false);

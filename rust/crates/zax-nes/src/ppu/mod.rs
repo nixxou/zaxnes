@@ -18,6 +18,7 @@
 //! **Cartridge.** The bus owns the cartridge, so every PPU call that may reach it takes it
 //! as an `Option<&mut Cartridge>` instead of holding a reference.
 
+mod palette_corruption;
 mod ppu_bus_access;
 mod render;
 mod sprite_hw;
@@ -199,10 +200,16 @@ pub struct Ppu2C02 {
     /// incremented address ([`Self::address_load_collision`]). On by default.
     glitch_2006: bool,
     /// Whether a `$2000` write that starts on dot 257 lets the dot-257 copy take the nametable-X
-    /// bit from the CPU's open bus ([`Self::control_write_glitch`]), and whether, in alignment 2,
-    /// a `$2005` write that lands on a copy of `t` lets that copy take the open bus as well
-    /// ([`Self::scroll_write_on_copy`]). On by default.
+    /// bit from the CPU's open bus ([`Self::control_write_glitch`]), and whether, in alignment 3,
+    /// a `$2005` write takes the open bus for the copy of `t` it lands on
+    /// ([`Self::scroll_write_on_copy`]) and for the fine X of its dot's pixel
+    /// ([`Self::fine_x_write_mid_line`]). On by default.
     glitch_2000: bool,
+    /// Whether, in alignment 2, switching rendering off on the first two dots of a nametable
+    /// fetch with `v` at `$3C00` or above, or a `$2006` load taking `v` out of palette RAM on a
+    /// visible dot, corrupts the background palettes ([`Self::corrupt_palettes`], `TriCNES`'s
+    /// model, D5). On by default; a core setting, not in the state.
+    palette_corruption: bool,
     /// Which of the four CPU/PPU clock alignments this PPU follows, 0 to 3, numbered as
     /// `AccuracyCoin` and `TriCNES` number them (`docs/review/FIDELITY-LEADS.md`, A4 and D1). The
     /// table is `TriCNES`'s (MIT, Chris Siebert, `AccuracyCoin`'s author, calibrated on his
@@ -211,7 +218,7 @@ pub struct Ppu2C02 {
     /// the `$2000` dot-257 glitch happens in alignment 3 (write on dot 257) and 0 (dot 258);
     /// alignment 2 takes `$2001` and the second `$2006` write one dot later; the OAM row corruption
     /// is seeded one dot later in alignments 1 and 2; a `$2005` write still reaches the copy of
-    /// `t` made on the dot it lands on, which in alignment 2 takes the open bus instead
+    /// `t` made on the dot it lands on, which in alignment 3 takes the open bus instead
     /// ([`Self::scroll_write_on_copy`]). A core setting, not part of the state; 3 by
     /// default, the alignment this core always followed.
     alignment: u8,
@@ -537,6 +544,7 @@ impl Ppu2C02 {
             address_load_delay: true,
             glitch_2006: true,
             glitch_2000: true,
+            palette_corruption: true,
             alignment: 3,
             cpu_open_bus: 0,
             prepaid_dots: 0,
@@ -785,9 +793,19 @@ impl Ppu2C02 {
             self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline();
         // One dot more in alignment 2 (TriCNES; see `alignment`).
         let delay = if self.alignment == 2 { 3 } else { 2 };
+        let corrupts = (value & 0x18) == 0 && self.switch_off_corrupts_palettes();
         if renders && self.prepaid_dots == 0 {
+            if corrupts {
+                // It strikes the pixel the next dot draws, rendering still on.
+                let color = self.next_pixel_color_index();
+                self.corrupt_palettes(color);
+            }
             self.run_dots(i64::from(delay), cart);
             self.prepaid_dots = delay;
+        } else if corrupts {
+            // Line 240 or a pre-render line already run: the next pixel is line 0's first,
+            // drawn with rendering off, colour index 0.
+            self.corrupt_palettes(0);
         }
         self.mask = value;
         let on = (value & 0x18) != 0;
@@ -914,6 +932,11 @@ impl Ppu2C02 {
     /// See `alignment`; values above 3 are taken modulo 4.
     pub const fn set_cpu_ppu_alignment(&mut self, alignment: u8) {
         self.alignment = alignment & 3;
+    }
+
+    /// See `palette_corruption`.
+    pub const fn set_palette_corruption(&mut self, enabled: bool) {
+        self.palette_corruption = enabled;
     }
 
     /// See `glitch_2000`.
@@ -2302,58 +2325,127 @@ impl Ppu2C02 {
         self.v = (self.v & !0x0400) | (u16::from(self.cpu_open_bus & 0x01) << 10);
     }
 
+    /// Whether switching rendering off now corrupts the palettes (see `palette_corruption`):
+    /// `TriCNES`'s condition — the write on the first two dots of a fetch, at most dot 250, on a
+    /// rendered line or line 240, `v` at `$3C00` or above. Its write dot is this core's (measured
+    /// frame by frame on a switch-off sliding a dot per frame), but its `v` is the one before
+    /// this dot's coarse-X increment, which this core has already made.
+    #[cold]
+    #[inline(never)]
+    fn switch_off_corrupts_palettes(&self) -> bool {
+        let dot = self.dot;
+        let fetching_line =
+            self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline();
+        if !(self.palette_corruption
+            && self.alignment == 2
+            && self.rendering_enabled()
+            && (fetching_line || self.scanline == VISIBLE_SCANLINES)
+            && (dot & 0x07) < 2
+            && dot <= 250)
+        {
+            return false;
+        }
+        let mut v = self.v;
+        if fetching_line && dot.trailing_zeros() >= 3 && dot >= 8 {
+            v = if v.trailing_zeros() >= 5 {
+                (v | 0x1F) ^ 0x0400
+            } else {
+                v - 1
+            };
+        }
+        (v & 0x3FFF) >= 0x3C00
+    }
+
+    /// A `$2006` load that took `v` out of palette RAM, `previous` being the address before it
+    /// (see `palette_corruption`): `TriCNES` corrupts the palettes when the load lands on a
+    /// visible dot and the old address did not end in 0, at the pixel of that dot, which here is
+    /// the next one ([`Self::delay_backdrop_address`] ran the dots before it).
+    #[cold]
+    #[inline(never)]
+    fn palette_load_corruption(&mut self, previous: u16) {
+        if self.palette_corruption
+            && self.alignment == 2
+            && self.scanline < VISIBLE_SCANLINES
+            && self.dot < SCREEN_WIDTH_I32
+            && (previous & 0x000F) != 0
+            && (self.v & 0x3FFF) < 0x3F00
+        {
+            let color = self.next_pixel_color_index();
+            self.corrupt_palettes(color);
+        }
+    }
+
+    /// The second `$2006` write on a visible line with rendering off: the pixels keep showing
+    /// the old `v`'s backdrop for a few more dots (see `backdrop_entry` in the renderer, the
+    /// palette background).
+    ///
+    /// Measured on the transistor netlist (`VisualNes`, rendering off, `v` loaded with `$3F05` and
+    /// back with `$2000` every 81 dots across visible lines, pixel colours read where `VisualNes`
+    /// reads them): a load made on dot `D` shows from pixel `D + 2` in the alignment this core
+    /// follows by default and in another, which this core drew from pixel `D`; the two dots are
+    /// run with the old `v` and owed back ([`Self::prepaid_dots`]), in every alignment
+    /// (`docs/review/FIDELITY-LEADS.md`, D5; `TriCNES` gives 2 to 4 dots by alignment).
+    /// Only the picture moves: outside the visible lines, or with no palette address on either
+    /// side, the load has nothing to show and stays immediate.
+    #[cold]
+    #[inline(never)]
+    fn delay_backdrop_address(&mut self, cart: Cart<'_, '_>) {
+        let palette = |address: u16| (address & 0x3F00) == 0x3F00;
+        if self.prepaid_dots != 0 || !(palette(self.v) || palette(self.t)) {
+            return;
+        }
+        let delay = 2;
+        self.run_dots(i64::from(delay), cart);
+        self.prepaid_dots = delay;
+    }
+
+    /// A first `$2005` write on a visible line with rendering on, in alignment 3: the pixel of
+    /// the dot it lands on takes fine X from the CPU's open bus.
+    ///
+    /// This core draws pixel `x` on dot `x + 1`, so a write made on dot `D` changes fine X from
+    /// pixel `D` on. Measured on the transistor netlist (`VisualNes`, 2A03 + 2C02, a first write
+    /// sliding across the line, pixel colours read where `VisualNes` reads them,
+    /// `docs/review/FIDELITY-LEADS.md`, A4): pixel `D - 1` keeps the old fine X in all four
+    /// alignments; pixel `D` shows the new one in the others, but in the alignment this core
+    /// follows by default — the one whose `$2000` write on dot 257 takes the open bus — the
+    /// fine X of the data bus as it stood before the write, the new one from pixel `D + 1`. The
+    /// same open bus as [`Self::scroll_write_on_copy`]. Its dot is run here with that fine X and
+    /// owed back ([`Self::prepaid_dots`]), under the `$2000` glitch's switch. (`TriCNES` puts that
+    /// pixel in its alignment 2 and moves alignment 0 a pixel earlier; the netlist shows neither.)
+    #[cold]
+    #[inline(never)]
+    fn fine_x_write_mid_line(&mut self, value: u8, cart: Cart<'_, '_>) {
+        if self.alignment == 3
+            && self.glitch_2000
+            && self.prepaid_dots == 0
+            && (0..SCREEN_WIDTH_I32).contains(&self.dot)
+        {
+            self.fine_x = self.cpu_open_bus & 0x07;
+            self.run_dots(1, cart);
+            self.prepaid_dots = 1;
+            self.fine_x = value & 0x07;
+        }
+    }
+
     /// A `$2005` write that lands on the copy of `t` into `v` this core has just made: the
     /// horizontal copy of dot 257 (first write) or the last vertical copy of the pre-render line,
     /// dot 304 (second write).
     ///
-    /// `TriCNES` (MIT, Chris Siebert, `AccuracyCoin`'s author) applies a `$2005` write one dot
-    /// after it in alignments 0, 1 and 3 and two dots after it in alignment 2, at the start of
-    /// the dot, before that dot's copy; in the meantime `t` and fine X hold the CPU data bus as it
-    /// stood before the write ("it uses the value from the databus"), the same open-bus value as
-    /// the `$2000` glitch. A register access of this core leads it by one dot, so the copy this
-    /// core already made with the old `t` took, there, the written value (alignments 0, 1 and 3)
-    /// or the bus value (alignment 2). Measured by running both emulators on the same program,
-    /// a first write sliding a dot per frame across dot 257 (`docs/review/FIDELITY-LEADS.md`,
-    /// A4): one write position differed, this one. The bus value is the `$2000` glitch's switch;
-    /// off, alignment 2 takes the written value as the others do.
-    /// A first `$2005` write on a visible line with rendering on, in alignments 0 and 2: the
-    /// pixel of the dot it lands on.
-    ///
-    /// This core draws pixel `x` on dot `x + 1`, and a write made on dot `D` changes fine X from
-    /// pixel `D` on, which is what `TriCNES` (MIT, Chris Siebert) shows in alignments 1 and 3.
-    /// In alignment 0 it already shows the written fine X on pixel `D - 1`, drawn here with the
-    /// old one: that pixel is drawn again, the shift registers still standing where its dot
-    /// left them. In alignment 2 pixel `D` takes fine X from the CPU's open bus (the two-dot
-    /// delay of [`Self::scroll_write_on_copy`]): its dot is run here with that fine X and owed
-    /// back ([`Self::prepaid_dots`]), under the `$2000` glitch's switch. Measured by running
-    /// both emulators on a write sliding a dot per frame across a line and comparing the line's
-    /// colours (`docs/review/FIDELITY-LEADS.md`, A4): one pixel differed, in those two
-    /// alignments only; none since.
-    #[cold]
-    #[inline(never)]
-    fn fine_x_write_mid_line(&mut self, value: u8, cart: Cart<'_, '_>) {
-        match self.alignment {
-            0 if (1..=SCREEN_WIDTH_I32).contains(&self.dot) => {
-                #[allow(clippy::cast_sign_loss)] // dot is 1..=256 here.
-                self.render_pixel((self.dot - 1) as usize);
-            }
-            2 if self.glitch_2000
-                && self.prepaid_dots == 0
-                && (0..SCREEN_WIDTH_I32).contains(&self.dot) =>
-            {
-                self.fine_x = self.cpu_open_bus & 0x07;
-                self.run_dots(1, cart);
-                self.prepaid_dots = 1;
-                self.fine_x = value & 0x07;
-            }
-            _ => {}
-        }
-    }
-
+    /// A register access of this core leads the hardware's effect by about a dot, so the copy
+    /// this core already made with the old `t` took, on the console, the written value — or, in
+    /// the alignment this core follows by default (3), the CPU data bus as it stood before the
+    /// write, the same open bus as the `$2000` glitch of that dot. Measured on the transistor
+    /// netlist (`VisualNes`, a first write of `$F8` or `$00` with `$20` on the bus, sliding across
+    /// dot 257): written on dot 257, coarse X 31 or 0 in three alignments, 4 (`$20 >> 3`) in the
+    /// fourth, the one where `$2000` glitches; on dot 258, the old value everywhere
+    /// (`docs/review/FIDELITY-LEADS.md`, A4). Mesen 2 and `BeesNES` apply the same open bus on dot
+    /// 257 in the one alignment they emulate. The vertical copy of dot 304 is taken by the same
+    /// mechanism, not measured. The bus value is the `$2000` glitch's switch; off, the written
+    /// value.
     #[cold]
     #[inline(never)]
     fn scroll_write_on_copy(&mut self, value: u8) {
-        let source = if self.alignment == 2 && self.glitch_2000 {
+        let source = if self.alignment == 3 && self.glitch_2000 {
             self.cpu_open_bus
         } else {
             value
@@ -2484,7 +2576,7 @@ impl Ppu2C02 {
                     self.scroll_write_on_copy(value);
                 }
                 if !self.write_toggle
-                    && matches!(self.alignment, 0 | 2)
+                    && self.alignment == 3
                     && self.scanline < VISIBLE_SCANLINES
                     && self.rendering_enabled()
                 {
@@ -2499,8 +2591,17 @@ impl Ppu2C02 {
                     self.t = (self.t & 0xFF00) | u16::from(value);
                     if (self.address_load_delay || self.bus_conflicts) && self.fetching() {
                         self.delay_address_load(&mut cartridge);
+                    } else if self.address_load_delay
+                        && self.scanline < VISIBLE_SCANLINES
+                        && !self.rendering_enabled()
+                    {
+                        self.delay_backdrop_address(&mut cartridge);
                     }
+                    let previous = self.v;
                     self.v = self.t;
+                    if (previous & 0x3F00) == 0x3F00 {
+                        self.palette_load_corruption(previous);
+                    }
 
                     // A CPU write reaches the row of the line it is made in (R2-005).
                     self.v_row_start = self.v;

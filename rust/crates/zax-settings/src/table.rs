@@ -2135,6 +2135,20 @@ fn ppu_write_timings(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("$2000/$2005 open-bus glitch"),
     );
+    // Lot FIDELITY step 32 (docs/review/FIDELITY-LEADS.md D5): TriCNES's palette RAM corruption,
+    // which it applies in alignment 2 only.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuPaletteCorruption,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Palette corruption"),
+    );
     // Lot FIDELITY steps 28-29: which of the four CPU/PPU clock alignments the PPU follows,
     // numbered as AccuracyCoin and TriCNES do (docs/review/FIDELITY-LEADS.md, A4 and D1). 3 is the
     // one the core has always followed.

@@ -110,6 +110,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "emu.oam_corruption",
             "emu.oam_decay",
             "emu.oamaddr_bug",
+            "emu.palette_corruption",
             "emu.pause_3d_in_2d",
             "emu.pipeline",
             "emu.power_on_ram",

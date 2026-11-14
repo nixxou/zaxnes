@@ -180,7 +180,26 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   `fine_x_write_mid_line` (pixel `D - 1` drawn again in alignment 0; dot `D + 1` run with the
   bus's fine X and owed back in alignment 2, under `emu.ppu_2000_glitch`): 0 differences on P7,
   P5 and P6 in all four alignments.
-- Still open: random alignment at power-on.
+- **Step 32: the transistor netlist overrules TriCNES on `$2005`** (VisualNes, owner-approved,
+  measurement only; bench `ext-tools/visualnes-bench`, `g2005.bin` + `g2005.py`, `g2005px.bin` +
+  `benchpx.cpp` + `pxana.py`; D = the dot where /CS falls = this core's access dot; pixel =
+  hpos - 2 as VisualNes draws it):
+  - Recopy of dot 257: a first write on D = 257 gives the written coarse X in netlist
+    alignments a0, a2, a6 and the **bus value** (`$20 >> 3` = 4) in **a4**; D = 258 gives the old
+    value everywhere. a4 is the alignment this core follows by default (the `$2007` latch at D+6
+    and the `$2000` glitch at D = 257 both single it out, steps 24-28), i.e. TriCNES's
+    alignment 3. So the open bus belongs to alignment 3, where `$2000` glitches too (same
+    mechanism), not to TriCNES's alignment 2. Mesen 2 (`ProcessTmpAddrScrollGlitch`) and
+    BeesNES (`GlitchyVUpdate`) also take the bus on dot 257 in the one alignment they emulate.
+  - Fine X pixel: pixel D - 1 keeps the old fine X in all four netlist alignments (TriCNES's
+    "alignment 0 a pixel earlier" appears nowhere); pixel D shows the new fine X in a6, the
+    **bus's fine X in a4**, a mix (about 75 % new) in a0 and a2 (two /CS phases in those runs).
+  - Done: `scroll_write_on_copy` and `fine_x_write_mid_line` now apply the open bus in
+    alignment 3 (under `emu.ppu_2000_glitch`), the written value in 0, 1 and 2; the a0 pixel rule
+    is gone. The dot-304 vertical copy follows by the same mechanism, not measured.
+- Still open: random alignment at power-on; the mapping of netlist a0, a2, a6 onto alignments
+  0, 1, 2 (TriCNES has two D+6 `$2007` alignments where the netlist has one, so the two
+  numberings cannot be matched one to one).
 
 ---
 
@@ -436,9 +455,8 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   2C07 "OAMADDR works as intended"; the pre-render copy of D3 is "required for 2C02 compatibility" on
   the Dendy. Zaxnes: none.
 
-### D5. Palette RAM corruption when rendering is turned off mid-screen — open
+### D5. Palette RAM corruption when rendering is turned off mid-screen — done as an option (`emu.palette_corruption`, alignment 2 only, step 32)
 - nesdev "PPU registers" PPUMASK: "Turning rendering off mid-screen can corrupt palette RAM."
-  Zaxnes: none.
 - TriCNES (MIT, `Emulator.cs` `CorruptPalettes`, step 29 reading) models it, **in alignment 2
   only** ("consistent on alignment 2, and very hit or miss on other alignments"): triggered when
   rendering stops on a visible dot during a nametable fetch with `v` at `$3C00` or above, or when
@@ -447,8 +465,38 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   cart, which the author calls "good enough" and partly not understood ("not sure what's going
   on"); sprite palettes not done; plus one discoloured pixel on every alignment, not modelled.
 - AccuracyCoin has no test for it (its table lists "Palette Corruption" unimplemented, "because
-  it relies on a specific cpu/ppu clock alignment"). So no reference to check a port against:
-  left open; if ported, behind its own switch, alignment 2 only, with TriCNES's caveats.
+  it relies on a specific cpu/ppu clock alignment"). So no reference to check a port against
+  but TriCNES itself; a transistor netlist cannot settle it either (analog races: TriCNES quotes
+  "magic numbers", "probably a temperature thing").
+- **Step 32, ported** (`ppu/palette_corruption.rs`): the table is generated from TriCNES's
+  source by `conv_palette.py` (138 assignments, not retyped); triggers in `switch_rendering`
+  (`switch_off_corrupts_palettes`: TriCNES's write dot is this core's write dot, measured, but
+  its `v` is the one before this dot's coarse-X increment) and after `$2006` loads
+  (`palette_load_corruption`); the colour index is the next pixel's (`next_pixel_color_index`,
+  no shift on dot 1). Differential against TriCNES in alignment 2 (scratchpad `tric/`, programs
+  P10 `$2006` into palette RAM and out, P11 rendering off on line 99 with nametable 3, fine Y 3):
+  P11 0 palette differences, P10 one. Behind `emu.palette_corruption` (on; it acts only in
+  alignment 2).
+- **Palette background** (same step, no switch: documented hardware): rendering off with `v` in
+  `$3F00-$3FFF` shows the entry `v` points to (nesdev "PPU palettes"; Mesen 2 `DrawPixel`;
+  AMD-050 already names the case, opacity bit 0). `backdrop_entry` in the renderer.
+- **Edges measured on the netlist (step 32, `g2001px.bin`, `g2006px.bin`, `bdana.py`)**: in the
+  default alignment (a4) a `$2001` switch off made on D shows the backdrop from pixel D + 2 (as
+  this core already drew it), a switch on shows tiles from pixel D + 3 (this core: D + 2; **open**:
+  drawing that pixel again with a dot run ahead moved AccuracyCoin's `$2007 Stress Test` code 2,
+  so it was taken out — to redo without running a dot ahead, e.g. the pixel fixed at the end of
+  the line), a `$2006` load with rendering off shows its palette
+  background from pixel D + 2 (this core loaded at once: `delay_backdrop_address` runs two dots,
+  every alignment; TriCNES's 2/3/4/3 dropped). Other netlist alignments: switch off D + 1 (a6,
+  a0 and a2 mostly), switch on D + 3 (a2 mostly D + 2), `$2006` D + 2 (a2 D + 1 or 2) — left as
+  the step 29 timings for alignments 0 to 2 until the alignments are mapped.
+- **Still open**: re-enabling rendering in the middle of a tile fetch. TriCNES reads on the
+  second dot of each fetch pair, with an address made of the pattern-address register's high
+  byte (left by the last fetch, sprite fetches included) and the octal latch's low byte (left
+  by the last ALE, `$2006`/`$2007` included); this core reads on the first dot and skips the
+  fetch whose first dot had rendering off. P12 (rendering on mid-line) differs on 64 of 379
+  frames in every alignment, all of this kind. Needs those two registers modelled, hot path
+  included, and a netlist measurement first.
 
 ---
 

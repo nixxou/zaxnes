@@ -851,6 +851,13 @@ impl EngineHandle {
         }
     }
 
+    /// `emu.palette_corruption` (lot FIDELITY step 32); Zaxnes only.
+    pub fn set_palette_corruption(&mut self, enabled: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_palette_corruption(enabled);
+        }
+    }
+
     /// `emu.cpu_ppu_alignment` (lot FIDELITY step 28); Zaxnes only.
     pub fn set_cpu_ppu_alignment(&mut self, alignment: u8) {
         if let Some(core) = self.zaxnes_mut() {

@@ -22,6 +22,8 @@ fn pixel_at(core: &NesCore, x: usize, y: usize) -> u8 {
 fn req_core_048_a_disabled_screen_is_filled_with_the_universal_backdrop() {
     let mut fixture = TileFixture::new();
     fixture.write_vram(0x3F00, &[0x21]);
+    // `v` out of palette RAM, or the screen shows the entry it points to (next test).
+    fixture.write_vram(0x2000, &[]);
     fixture.set_mask(0x00);
     fixture.next_batch();
 
@@ -34,6 +36,29 @@ fn req_core_048_a_disabled_screen_is_filled_with_the_universal_backdrop() {
             .all(|&byte| byte == 0x21),
         "rendering off: the backdrop, and the opacity bit clear"
     );
+}
+
+/// Lot FIDELITY step 32 (nesdev, "PPU palettes", the background palette hack; Mesen 2 and
+/// `TriCNES` do the same): with rendering off and `v` in palette RAM, the screen shows the entry
+/// `v` points to, $3F04/$3F08/$3F0C and the $3F1x mirrors of entry 0 folding as palette reads
+/// do, the opacity bit still clear (AMD-050).
+#[test]
+fn fidelity_palette_background_shows_the_entry_v_points_to() {
+    fn shown(address: u16) -> u8 {
+        let mut fixture = TileFixture::new();
+        fixture.write_vram(0x3F00, &[0x21, 0x16, 0x2A, 0x12, 0x05, 0x38]);
+        fixture.write_vram(address, &[]);
+        fixture.set_mask(0x00);
+        fixture.next_batch();
+        let frame = fixture.core.pixel_frame_with_mask();
+        assert!(frame.iter().all(|&byte| byte == frame[0]), "one colour");
+        frame[0]
+    }
+    assert_eq!(0x2A, shown(0x3F02));
+    assert_eq!(0x38, shown(0x3F05));
+    assert_eq!(0x05, shown(0x3F04), "$3F04 is shown as written");
+    assert_eq!(0x21, shown(0x3F10), "$3F10 mirrors $3F00");
+    assert_eq!(0x21, shown(0x2000), "out of palette RAM: entry 0");
 }
 
 #[test]
@@ -965,9 +990,9 @@ fn fidelity_2000_write_on_dot_257_takes_nametable_x_from_open_bus() {
     }
 }
 
-/// Lot FIDELITY step 30 (`TriCNES`, MIT, run against Zaxnes on the same program): a `$2005` write
-/// that lands on a copy of `t` into `v` still reaches that copy: the first write on dot 257 (coarse
-/// X), the second on dot 304 of the pre-render line (fine and coarse Y). In alignment 2 the copy
+/// Lot FIDELITY steps 30 and 32 (transistor netlist, `VisualNes`): a `$2005` write that lands on a
+/// copy of `t` into `v` still reaches that copy: the first write on dot 257 (coarse X), the second
+/// on dot 304 of the pre-render line (fine and coarse Y). In alignment 3, the default, the copy
 /// takes the CPU's open bus instead (`$20` for `STA $2005`), under the `$2000` glitch's switch.
 #[test]
 fn fidelity_2005_write_landing_on_a_copy_of_t_reaches_it() {
@@ -1017,7 +1042,7 @@ fn fidelity_2005_write_landing_on_a_copy_of_t_reaches_it() {
         ppu.vram_v() & if second { 0x73E0 } else { 0x001F }
     }
 
-    for alignment in [0, 1, 3] {
+    for alignment in [0, 1, 2] {
         assert_eq!(
             0x1F,
             after(alignment, false, 257, true),
@@ -1031,25 +1056,24 @@ fn fidelity_2005_write_landing_on_a_copy_of_t_reaches_it() {
     }
     assert_eq!(
         0x04,
-        after(2, false, 257, true),
-        "a2: coarse X from the open bus"
+        after(3, false, 257, true),
+        "a3: coarse X from the open bus"
     );
     assert_eq!(
         0x0080,
-        after(2, true, 304, true),
-        "a2: coarse Y from the open bus"
+        after(3, true, 304, true),
+        "a3: coarse Y from the open bus"
     );
-    assert_eq!(0x1F, after(2, false, 257, false), "a2, switch off");
-    assert_eq!(0x03E0, after(2, true, 304, false), "a2, switch off");
+    assert_eq!(0x1F, after(3, false, 257, false), "a3, switch off");
+    assert_eq!(0x03E0, after(3, true, 304, false), "a3, switch off");
     // A dot later the copy is behind the write, as before.
     assert_ne!(0x1F, after(3, false, 258, true), "dot 258");
     assert_ne!(0x03E0, after(3, true, 305, true), "dot 305");
 }
 
-/// Lot FIDELITY step 30 (`TriCNES`, MIT, compared pixel by pixel with Zaxnes on the same program):
-/// a first `$2005` write made on dot `D` of a visible line changes fine X from pixel `D` on in
-/// alignments 1 and 3, from pixel `D - 1` in alignment 0, and in alignment 2 pixel `D` takes fine
-/// X from the CPU's open bus (`$20`, fine X 0) under the `$2000` glitch's switch.
+/// Lot FIDELITY step 32 (transistor netlist, `VisualNes`): a first `$2005` write made on dot `D` of a
+/// visible line changes fine X from pixel `D` on, and in alignment 3 pixel `D` takes fine X from
+/// the CPU's open bus (`$20`, fine X 0) under the `$2000` glitch's switch.
 #[test]
 fn fidelity_2005_fine_x_reaches_the_pixel_of_its_dot_per_alignment() {
     // Tile $35 of the minimal ROM: planes $35 and $CA, so its columns alternate colours 2 and 1.
@@ -1099,7 +1123,7 @@ fn fidelity_2005_fine_x_reaches_the_pixel_of_its_dot_per_alignment() {
         .unwrap();
     let old = |x: i32| column(x + 3);
     let new = |x: i32| column(x + 6);
-    for alignment in [1, 3] {
+    for alignment in [0, 1, 2] {
         assert_eq!(
             [old(dot - 1), new(dot), new(dot + 1)],
             pixels(alignment, true, dot),
@@ -1107,19 +1131,83 @@ fn fidelity_2005_fine_x_reaches_the_pixel_of_its_dot_per_alignment() {
         );
     }
     assert_eq!(
-        [new(dot - 1), new(dot), new(dot + 1)],
-        pixels(0, true, dot),
-        "a0: a pixel earlier"
-    );
-    assert_eq!(
         [old(dot - 1), column(dot), new(dot + 1)],
-        pixels(2, true, dot),
-        "a2: open bus"
+        pixels(3, true, dot),
+        "a3: open bus"
     );
     assert_eq!(
         [old(dot - 1), new(dot), new(dot + 1)],
-        pixels(2, false, dot),
-        "a2, switch off"
+        pixels(3, false, dot),
+        "a3, switch off"
+    );
+}
+
+/// Lot FIDELITY step 32 (transistor netlist, `VisualNes`, alignment 3 = the default): written on dot
+/// `D` of a visible line, a `$2001` switch off shows the backdrop from pixel `D + 2` and with
+/// rendering off a `$2006` load into palette RAM shows its palette background from pixel `D + 2`.
+#[test]
+fn fidelity_switch_and_load_pixel_edges_follow_the_netlist() {
+    const PALETTE: [u8; 8] = [0x0F, 0x16, 0x2A, 0x12, 0x05, 0x38, 0x21, 0x1C];
+    /// The first pixel from `D - 2` on that `changed` accepts, written `value` to `register`
+    /// on dot `D`.
+    fn first_changed(mask: u8, register: u16, value: u8, dot: i32, changed: fn(u8) -> bool) -> i32 {
+        let mut fixture = TileFixture::new();
+        fixture.fill_vram(0x2000, 960, 0x35);
+        fixture.fill_vram(0x23C0, 64, 0x00);
+        fixture.write_vram(0x3F00, &PALETTE);
+        fixture.write_vram(0x2000, &[]);
+        fixture.set_control(0x00);
+        fixture.set_scroll(0, 0);
+        fixture.set_mask(0x0A);
+        fixture.core.run_frame(0);
+        if mask == 0x00 && register == 1 {
+            // Switched off 18 dots before, as in the netlist loop: the shift registers still hold
+            // tiles.
+            park_on_dot(&mut fixture, dot - 18);
+            fixture.core.bus_mut().ppu_mut().write(1, 0x00, None);
+            let bus = fixture.core.bus_mut();
+            while bus.ppu().dot() != dot {
+                bus.tick();
+                bus.sync_ppu();
+            }
+        } else {
+            fixture.set_mask(mask);
+            park_on_dot(&mut fixture, dot);
+        }
+        let line = usize::try_from(fixture.core.bus().ppu().scanline()).unwrap();
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        if register == 6 {
+            ppu.write(6, 0x3F, None);
+        }
+        ppu.write(register, value, None);
+        let bus = fixture.core.bus_mut();
+        while usize::try_from(bus.ppu().scanline()).unwrap() == line {
+            bus.tick();
+            bus.sync_ppu();
+        }
+        (dot - 2..dot + 8)
+            .find(|&x| changed(pixel_at(&fixture.core, usize::try_from(x).unwrap(), line)))
+            .unwrap()
+            - dot
+    }
+    let dot = 100;
+    assert_eq!(
+        2,
+        first_changed(0x0A, 1, 0x00, dot, |c| c == 0x0F),
+        "switch off"
+    );
+    // The netlist shows the tiles from pixel D + 3; this core from D + 2: drawing that pixel
+    // again needed a dot run ahead, which moved AccuracyCoin's `$2007 Stress Test` (FIDELITY-LEADS
+    // D5, open).
+    assert_eq!(
+        2,
+        first_changed(0x00, 1, 0x0A, dot, |c| c != 0x0F),
+        "switch on"
+    );
+    assert_eq!(
+        2,
+        first_changed(0x00, 6, 0x05, dot, |c| c == 0x38),
+        "$2006 into palette RAM"
     );
 }
 

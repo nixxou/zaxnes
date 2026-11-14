@@ -1010,6 +1010,26 @@ impl Ppu2C02 {
         }
     }
 
+    /// The palette entry a pixel shows while rendering is off: entry 0, unless `v` points into
+    /// palette RAM, where the PPU shows the entry `v` points to ($3F04, $3F08, $3F0C and their
+    /// $3F1x mirrors folding onto $3F00 to $3F0C as for any palette read) — the "background
+    /// palette hack" of nesdev, "PPU palettes", and `TriCNES` (MIT, `PPU_Render_CalculatePixel`:
+    /// "The palette RAM address is simply wherever the v register is"). AMD-050 already names
+    /// the case; its opacity bit stays 0, as for any pixel drawn with rendering off.
+    #[inline]
+    const fn backdrop_entry(&self) -> usize {
+        if (self.v & 0x3F00) == 0x3F00 {
+            let entry = (self.v & 0x1F) as usize;
+            if entry.trailing_zeros() >= 2 {
+                entry & 0x0F
+            } else {
+                entry
+            }
+        } else {
+            0
+        }
+    }
+
     /// Draws dots `first` to `last` (1 to 256) of a visible line with rendering off: the
     /// backdrop, as [`Ppu2C02::render_pixel`] draws it when both layers are off.
     pub(super) fn fill_backdrop(&mut self, first: i32, last: i32) {
@@ -1017,7 +1037,7 @@ impl Ppu2C02 {
         // bit stays 0 — entry 0 of `palette`, not of `palette_marked`, is the right source. The
         // amendment's note settles the hardware "palette background" case the same way (it is
         // rendering disabled, so the bit is 0).
-        let mut color = self.palette[0];
+        let mut color = self.palette[self.backdrop_entry()];
         if (self.mask & 0x01) != 0 {
             color &= 0x30;
         }
@@ -1027,6 +1047,42 @@ impl Ppu2C02 {
         let start = line * SCREEN_WIDTH + first - 1;
         if let Some(row) = self.pixels.get_mut(start..start + (last + 1 - first)) {
             row.fill(color);
+        }
+    }
+
+    /// The colour index (0 to 3) of the pixel the next dot draws, as `render_pixel` will pick
+    /// it with the current mask: the background's two pattern bits one shift ahead, or the
+    /// sprite's when the sprite wins. For the palette corruption, which takes it from the pixel
+    /// drawn when it strikes. 0 outside the picture.
+    pub(super) fn next_pixel_color_index(&mut self) -> u8 {
+        let x = self.dot;
+        if !(0..256).contains(&x) || self.scanline >= VISIBLE_SCANLINES {
+            return 0;
+        }
+        #[allow(clippy::cast_sign_loss)] // 0..256 here.
+        let x = x as usize;
+        let mask = self.mask;
+        let mut background = 0u8;
+        if (mask & 0x08) != 0 && (x >= 8 || (mask & 0x02) != 0) {
+            // One shift ahead, except for pixel 0: dot 1 does not shift.
+            let ahead = if self.dot == 0 { 15 } else { 14 };
+            let shift = ahead - (self.fine_x & 0x07);
+            #[allow(clippy::cast_possible_truncation)] // Two bits.
+            let pixel = (((self.pattern_shift_low >> shift) & 1)
+                | (((self.pattern_shift_high >> shift) & 1) << 1)) as u8;
+            background = pixel;
+        }
+        let mut sprite = 0u8;
+        if (mask & 0x10) != 0 && (x >= 8 || (mask & 0x04) != 0) {
+            if self.sprite_line_stale {
+                self.rebuild_sprite_line();
+            }
+            sprite = self.sprite_line[x];
+        }
+        if (sprite & SPRITE_OPAQUE) != 0 && (background == 0 || (sprite & SPRITE_BEHIND) == 0) {
+            sprite & 0x03
+        } else {
+            background
         }
     }
 
@@ -1075,8 +1131,13 @@ impl Ppu2C02 {
         };
 
         // AMD-050 REQ-CORE-049: the shadow palette, as in `span_pixel` — `entry` is non-zero
-        // exactly where the pixel is opaque, so the bit comes with the colour.
-        let mut color = self.palette_marked[usize::from(entry & 0x1F)];
+        // exactly where the pixel is opaque, so the bit comes with the colour. With both layers
+        // off, the backdrop of `fill_backdrop`, never opaque.
+        let mut color = if (mask & 0x18) == 0 {
+            self.palette[self.backdrop_entry()]
+        } else {
+            self.palette_marked[usize::from(entry & 0x1F)]
+        };
 
         // The greyscale bit of PPUMASK is a video effect: it changes the image but neither
         // the tile records nor the palette handed to the engine (REQ-CORE-047). The mask keeps
