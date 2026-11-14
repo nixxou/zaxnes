@@ -177,6 +177,12 @@ pub struct Ppu2C02 {
     /// Whether the console wires the PPU's /RST pin to the reset line, as the front-loading NES
     /// (NES-001) does ([`Self::after_reset`]). A core setting, not in the state.
     reset_line: bool,
+    /// The low byte of the address the PPU's octal latch last took (its last ALE, lot FIDELITY
+    /// step 39): the low eight address lines share their pins with the data, and the latch keeps
+    /// them through the read. Only read when the rendering comes back on an odd dot in alignments
+    /// 2 and 3 ([`Self::stale_first_fetch`]); kept up to date only where the bus stops moving —
+    /// a switch off, the end of a rendered frame, a `$2007` access — never per fetch.
+    ale_low: u8,
     /// Whether this is a 2C02 older than the G revision (lot FIDELITY step 37): `$2007` reads of
     /// `$3F00-$3FFF` behave as the rest of the PPU memory, buffered, instead of returning the
     /// palette (nesdev "PPU registers": palette reads are "supported by the 2C02G, 2C02H, and
@@ -563,6 +569,7 @@ impl Ppu2C02 {
             oam_decay: false,
             power_on_top: true,
             reset_line: true,
+            ale_low: 0,
             pre_g_revision: false,
             oamaddr_write_corruption: false,
             after_reset: false,
@@ -847,9 +854,120 @@ impl Ppu2C02 {
         if ran_ahead {
             self.switch_pixel_edge(on, write_dot);
         }
-        if on && ran_ahead {
-            self.skip_background_reload(cart);
+        if ran_ahead && renders {
+            if on {
+                self.first_fetch_on(self.dot, cart);
+                self.skip_background_reload(cart);
+            } else {
+                self.note_last_ale(self.dot);
+            }
         }
+    }
+
+    /// Takes the latch's last address when the rendering stops (step 39). The netlist with the
+    /// CPU's hold time (`benchhold`, `aleoff.py`) shows no ALE at all while the rendering is off,
+    /// and a switch off on dot `h` leaves the ALE of `h` itself when `h` is odd (it comes before
+    /// the switch within the dot, in every phase), else that of `h - 1`. In this core's dots the
+    /// ALE of the fetch read on odd dot `z` is the netlist's dot `z`, and `first_off` is the
+    /// netlist's `h`. The address is worked out from the state, which nothing has moved since.
+    #[cold]
+    #[inline(never)]
+    fn note_last_ale(&mut self, first_off: i32) {
+        let dot = first_off - (1 - (first_off & 1));
+        if let Some(address) = self.fetch_address_at(dot) {
+            self.ale_low = address.to_le_bytes()[0];
+        }
+    }
+
+    /// The address the fetch read on odd dot `dot` of a line that renders puts on the bus, from
+    /// the current state; `None` past the line's last fetch.
+    fn fetch_address_at(&self, dot: i32) -> Option<u16> {
+        let nametable = 0x2000 | (self.v & 0x0FFF);
+        Some(match dot {
+            1..=256 | 321..=336 => match (dot - 1) & 0x07 {
+                0 => nametable,
+                2 => self.attribute_address(),
+                4 => self.pattern_address(0),
+                _ => self.pattern_address(8),
+            },
+            257..=320 => {
+                #[allow(clippy::cast_sign_loss)] // dot is 257..=320 here, so the slot is 0..=7.
+                let slot = (((dot - 257) >> 3) & 0x07) as usize;
+                match (dot - 257) & 0x07 {
+                    0 | 2 => nametable,
+                    4 => self.sprite_pattern_address(slot),
+                    _ => self.sprite_pattern_address(slot) + 8,
+                }
+            }
+            337..=340 => nametable,
+            _ => return None,
+        })
+    }
+
+    /// The fetch of the dot the rendering comes back on (lot FIDELITY step 39,
+    /// `docs/review/FIDELITY-LEADS.md` D5).
+    ///
+    /// The netlist with the CPU's hold time (`bench2007h`, `onlag.py`, `staleana.py`) releases
+    /// the rendering on the dot `D + 2` of a write on `D`, in all four phases: the dot this core
+    /// has just run under the old mask, so its fetch was skipped. When that dot is odd it is the
+    /// dot of a fetch's ALE, and the hardware does that fetch. In phases a0 and a2 (alignments 1
+    /// and 0) the ALE comes after the release within the dot and the fetch is the usual one; in
+    /// a4 and a6 (alignments 3 and 2) it came before, with the rendering still off, so the read
+    /// of the next dot uses the high byte of the address on the pins and the low byte the octal
+    /// latch kept, that of the last ALE ([`Self::ale_low`]). `TriCNES` models the same read,
+    /// `(PAR & $FF00) |` its octal latch. The fetch read on odd dot `z` has its ALE on the
+    /// netlist's dot `z`, so `first_on` is the dot itself.
+    #[cold]
+    #[inline(never)]
+    fn first_fetch_on(&mut self, first_on: i32, cart: Cart<'_, '_>) {
+        if first_on & 1 == 0 {
+            return;
+        }
+        let background = matches!(first_on, 3..=255 | 321..=337);
+        let sprite = matches!(first_on, 257..=320) && (first_on - 257) & 0x07 >= 4;
+        if !background && !sprite {
+            return;
+        }
+        let Some(intended) = self.fetch_address_at(first_on) else {
+            return;
+        };
+        let address = if self.alignment >= 2 {
+            (intended & 0xFF00) | u16::from(self.ale_low)
+        } else {
+            intended
+        };
+        self.ale_low = intended.to_le_bytes()[0];
+        let attribute_shift = ((self.v >> 4) & 0x04) | (self.v & 0x02);
+        let data = self.read_vram_inner(
+            address,
+            PpuBusAccess::Render,
+            if background {
+                ChrFetch::Background
+            } else {
+                ChrFetch::Sprite
+            },
+            cart,
+        );
+        if background {
+            match (first_on - 1) & 0x07 {
+                0 => self.nametable_latch = data,
+                2 => self.attribute_latch = (data >> attribute_shift) & 0x03,
+                4 => self.pattern_low_latch = data,
+                _ => self.pattern_high_latch = data,
+            }
+            return;
+        }
+        #[allow(clippy::cast_sign_loss)] // first_on is 257..=320 here, so the slot is 0..=7.
+        let slot = (((first_on - 257) >> 3) & 0x07) as usize;
+        if self.fetched_sprite_in_margin(slot) {
+            return;
+        }
+        if (first_on - 257) & 0x07 == 4 {
+            self.sprite_pattern_low[slot] = data;
+        } else {
+            self.sprite_pattern_high[slot] = data;
+        }
+        self.sprite_line_stale = true;
     }
 
     /// The pixel the netlist draws differently from the dot the switch acts on (step 33).
@@ -2005,6 +2123,10 @@ impl Ppu2C02 {
         self.scanline += 1;
         if self.scanline == VISIBLE_SCANLINES {
             self.wide.arm_overclock();
+            if (self.mask & 0x18) != 0 {
+                // The rendered frame's last ALE, the nametable fetch of dot 339 (step 39).
+                self.ale_low = self.v.to_le_bytes()[0];
+            }
         }
 
         if self.scanline < self.timing.scanlines_per_frame {
@@ -2222,6 +2344,8 @@ impl Ppu2C02 {
     #[inline(never)]
     fn read_data(&mut self, cart: Cart<'_, '_>) -> u8 {
         let address = self.v & 0x3FFF;
+        // A `$2007` access is an ALE of `v` (step 39).
+        self.ale_low = address.to_le_bytes()[0];
         // The buffer this read sees. A read refills it only `READ_BUFFER_READY_DOTS`
         // dots later, so a second read one CPU cycle behind still gets the old byte.
         //
@@ -2812,6 +2936,8 @@ impl Ppu2C02 {
             }
 
             7 => {
+                // A `$2007` access is an ALE of `v` (step 39).
+                self.ale_low = self.v.to_le_bytes()[0];
                 self.write_vram_inner(self.v & 0x3FFF, value, PpuBusAccess::Cpu, &mut cartridge);
                 self.increment_vram_address(&mut cartridge);
             }

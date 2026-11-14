@@ -19,12 +19,12 @@ use crate::emulation::emulation_state::EmulationState;
 use crate::emulation::engine_handle::EngineHandle;
 use crate::emulation::fceux_validated;
 use crate::emulation::game_catalog::{GameCatalog, ResolvedGame};
-use crate::emulation::rom_file::{self, INVALID_ROM_MESSAGE, RomData};
+use crate::emulation::rom_file::{self, RomData, INVALID_ROM_MESSAGE};
 use crate::game_session::{GameSession, SessionRequest};
 use crate::persistence::app_settings::{AppSettings, AppSettingsMut, TvRegionSetting};
 use crate::persistence::save_slots::is_valid_slot_id;
 use crate::persistence::save_state_file::{
-    self, CORRUPTED_MESSAGE, GAME_MISSING_MESSAGE, SaveStateContent,
+    self, SaveStateContent, CORRUPTED_MESSAGE, GAME_MISSING_MESSAGE,
 };
 
 /// What a load job does.
@@ -134,18 +134,8 @@ fn power_on_seed() -> u64 {
 }
 
 fn apply_fidelity_switches(core: &mut EngineHandle, switches: [bool; 10]) {
-    let [
-        oam_corruption,
-        bus_conflicts,
-        oamaddr_bug,
-        oam_decay,
-        power_on_top,
-        delay_2006,
-        glitch_2006,
-        glitch_2000,
-        palette_corruption,
-        ppu_reset_line,
-    ] = switches;
+    let [oam_corruption, bus_conflicts, oamaddr_bug, oam_decay, power_on_top, delay_2006, glitch_2006, glitch_2000, palette_corruption, ppu_reset_line] =
+        switches;
     core.set_palette_corruption(palette_corruption);
     core.set_ppu_reset_line(ppu_reset_line);
     core.set_address_load_delay(delay_2006);

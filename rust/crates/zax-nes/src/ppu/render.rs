@@ -356,9 +356,12 @@ impl Ppu2C02 {
     }
 
     fn fetch_attribute(&self, cart: Cart<'_, '_>) -> u8 {
-        let address = 0x23C0 | (self.v & 0x0C00) | ((self.v >> 4) & 0x38) | ((self.v >> 2) & 0x07);
-        let attribute =
-            self.read_vram_inner(address, PpuBusAccess::Render, ChrFetch::Background, cart);
+        let attribute = self.read_vram_inner(
+            self.attribute_address(),
+            PpuBusAccess::Render,
+            ChrFetch::Background,
+            cart,
+        );
         let shift = ((self.v >> 4) & 0x04) | (self.v & 0x02);
         (attribute >> shift) & 0x03
     }
@@ -849,13 +852,11 @@ impl Ppu2C02 {
         // The widescreen extension: a sprite whose high byte puts it in a margin is not on the
         // screen; the fetch happens all the same (the bus activity of the hardware).
         let x = self.secondary_oam[(slot * 4) + 3];
-        let in_margin = i32::try_from(slot).is_ok_and(|slot| slot < self.sprites_loaded)
-            && !(0..256).contains(
-                &self
-                    .wide
-                    .sprite_x(usize::from(self.secondary_source[slot]), x),
-            );
-        let data = if in_margin { 0 } else { data };
+        let data = if self.fetched_sprite_in_margin(slot) {
+            0
+        } else {
+            data
+        };
         if step == 4 {
             self.sprite_pattern_low[slot] = data;
             self.sprite_attribute[slot] = self.secondary_oam[(slot * 4) + 2];
@@ -926,7 +927,19 @@ impl Ppu2C02 {
         false
     }
 
-    fn sprite_pattern_address(&self, slot: usize) -> u16 {
+    /// The widescreen extension: whether the sprite of `slot` has its high byte put it in a
+    /// margin, off the screen (its fetch happens all the same, the bus activity of the hardware).
+    pub(super) fn fetched_sprite_in_margin(&self, slot: usize) -> bool {
+        let x = self.secondary_oam[(slot * 4) + 3];
+        i32::try_from(slot).is_ok_and(|slot| slot < self.sprites_loaded)
+            && !(0..256).contains(
+                &self
+                    .wide
+                    .sprite_x(usize::from(self.secondary_source[slot]), x),
+            )
+    }
+
+    pub(super) fn sprite_pattern_address(&self, slot: usize) -> u16 {
         let sprite_y = self.secondary_oam[slot * 4];
         let tile = u16::from(self.secondary_oam[(slot * 4) + 1]);
         let attribute = self.secondary_oam[(slot * 4) + 2];

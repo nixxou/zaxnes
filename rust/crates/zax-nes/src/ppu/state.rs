@@ -51,10 +51,14 @@ impl Ppu2C02 {
         writer.write_u8(self.fine_x);
         // Bit 1: the reset line's write window (lot FIDELITY step 34), in the byte that held the
         // toggle alone before, so older states load with the window open.
-        writer.write_u8(u8::from(self.write_toggle) | (u8::from(self.after_reset) << 1));
+        // Bits 2 to 7: the top six bits of the latch's last address (step 39); its two low bits
+        // are bits 1 and 2 of the frame-skip byte below. Older states load with zeros there.
+        writer.write_u8(
+            u8::from(self.write_toggle) | (u8::from(self.after_reset) << 1) | (self.ale_low & 0xFC),
+        );
         writer.write_u8(self.read_buffer);
         writer.write_u8(self.decay);
-        writer.write_bool(self.skip_latch);
+        writer.write_u8(u8::from(self.skip_latch) | ((self.ale_low & 0x03) << 1));
         for stamp in self.decay_stamp {
             writer.write_i64(stamp);
         }
@@ -111,6 +115,7 @@ impl Ppu2C02 {
         let toggle = reader.read_u8()?;
         self.write_toggle = (toggle & 1) != 0;
         self.after_reset = (toggle & 2) != 0;
+        let ale_high = toggle & 0xFC;
         self.read_buffer = reader.read_u8()?;
         // Not in the format, and nothing is lost: the window in which a `$2007` read still sees
         // the byte before the last refill is shorter than two CPU cycles, and the only pair of
@@ -119,7 +124,9 @@ impl Ppu2C02 {
         // instructions. `read_buffer_prev` is only looked at inside that window.
         self.read_buffer_clock = 0;
         self.decay = reader.read_u8()?;
-        self.skip_latch = reader.read_bool()?;
+        let skip = reader.read_u8()?;
+        self.skip_latch = (skip & 1) != 0;
+        self.ale_low = ale_high | ((skip >> 1) & 0x03);
         for stamp in &mut self.decay_stamp {
             *stamp = reader.read_i64()?;
         }

@@ -1294,3 +1294,48 @@ fn fidelity_oamaddr_write_copies_the_bus_row_when_switched_on() {
         }
     }
 }
+
+/// Lot FIDELITY step 39: rendering switched back on mid-line releases on dot `D + 2` of a write on
+/// `D`; on an odd dot that dot's fetch happens. In alignments 0 and 1 it reads its own address; in
+/// 2 and 3 its ALE was missed and the read takes the low byte of the last address latched before
+/// the switch off (the transistor netlist, as `TriCNES`). The minimal ROM's tile `t` has `t` for
+/// low plane and `255 - t` for high plane, tile 0 is empty. On a line of coarse Y 8 every tile is
+/// tile 1; the switch off lands on dot 97, the nametable fetch of `$2000 | $0E`, and the switch on on dot 127, the
+/// high plane fetch of the tile drawn at x 136-143: in 2 and 3 it reads `$000E`, tile 0, and the
+/// tile loses its high plane.
+#[test]
+fn fidelity_switch_on_fetch_reads_the_stale_low_byte_in_alignments_2_and_3() {
+    const PALETTE: [u8; 4] = [0x0F, 0x16, 0x2A, 0x12];
+    /// Runs to `dot` of one of `lines` (the CPU clock reaches one dot in three); a write through
+    /// the bus lands three dots later.
+    fn run_to(fixture: &mut TileFixture, lines: std::ops::RangeInclusive<i32>, dot: i32) -> i32 {
+        let bus = fixture.core.bus_mut();
+        while !lines.contains(&bus.ppu().scanline()) || bus.ppu().dot() != dot {
+            bus.tick();
+            bus.sync_ppu();
+        }
+        bus.ppu().scanline()
+    }
+    for alignment in 0..4u8 {
+        let mut fixture = TileFixture::new();
+        fixture.core.set_cpu_ppu_alignment(alignment);
+        fixture.fill_vram(0x2000, 960, 0x01);
+        fixture.fill_vram(0x23C0, 64, 0x00);
+        fixture.write_vram(0x3F00, &PALETTE);
+        fixture.write_vram(0x2000, &[]);
+        fixture.set_control(0x00);
+        fixture.set_scroll(0, 0);
+        fixture.set_mask(0x0A);
+        fixture.core.run_frame(0);
+        // Lines 64 to 71 have coarse Y 8: the nametable addresses' low byte is coarse X.
+        let line = run_to(&mut fixture, 64..=66, 92);
+        fixture.core.bus_mut().write(0x2001, 0x00);
+        run_to(&mut fixture, line..=line, 122);
+        fixture.core.bus_mut().write(0x2001, 0x0A);
+        run_to(&mut fixture, line..=line, 299);
+        let y = usize::try_from(line).unwrap();
+        let row: Vec<u8> = (136..143).map(|x| pixel_at(&fixture.core, x, y)).collect();
+        let expected = if alignment >= 2 { 0x0F } else { 0x2A };
+        assert_eq!(row, vec![expected; 7], "alignment {alignment}");
+    }
+}

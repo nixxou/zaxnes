@@ -600,6 +600,29 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   fetch whose first dot had rendering off. P12 (rendering on mid-line) differs on 64 of 379
   frames in every alignment, all of this kind. Needs those two registers modelled, hot path
   included, and a netlist measurement first.
+- **Step 39, measured and done (no switch)**. Netlist with the CPU's hold time (`bench2007h`,
+  `g2001px.bin`, four phases, `visualnes-bench/s39`; scripts `onlag.py`, `staleana.py`,
+  `aleoff.py`):
+  - a `$2001` write on `D` releases the rendering on `D + 2` in all four phases (switch off and
+    on alike, the nearest write before every edge);
+  - no ALE happens while the rendering is off; a switch off on `h` leaves the ALE of `h` when `h`
+    is odd (it comes first within the dot), else that of `h - 1`;
+  - a switch on landing on an odd dot (the dot of a fetch's ALE) does that fetch: in a0 and a2
+    (alignments 1 and 0) the ALE comes after the release and the fetch reads its own address; in
+    a4 and a6 (alignments 3 and 2) the ALE came before, and the read of the next dot puts the
+    high byte of the fetch's own address on the pins (the nametable range for a nametable fetch,
+    `$23xx` for an attribute) and the low byte the octal latch kept, that of the last ALE:
+    TriCNES's octal-latch read, with the high byte the fetch's rather than the previous one's;
+  - on an even dot the next fetch is the usual one, in every phase.
+  This core ran that odd dot under the old mask and skipped its fetch in every alignment.
+  `first_fetch_on` (cold, on the `$2001` path) now does it, with the stale low byte in
+  alignments 2 and 3; the last ALE's low byte (`ale_low`) is taken where the bus stops — the
+  switch off, the end of a rendered frame (the nametable fetch of dot 339), `$2007` accesses —
+  and kept in the savestate in spare bits of two existing bytes (format unchanged). Approximation
+  kept: a switch off whose last ALE was on dot 255 takes its address after the dot-256 Y
+  increment. The board sees the read, as on the console. Test
+  `fidelity_switch_on_fetch_reads_the_stale_low_byte_in_alignments_2_and_3`. AccuracyCoin
+  147/147 in the four alignments, campaign 213/6, golden identical to step 37.
 
 ---
 
