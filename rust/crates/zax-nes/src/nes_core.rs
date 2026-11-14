@@ -101,6 +101,9 @@ pub struct NesCore {
     /// with [`NesCore::smooth_scroll_on`] and for the same reason — finding it means scanning
     /// `builtin_patches::PATCHES`, and `end_frame` did that once a frame.
     idle_loop: Option<(u16, u16)>,
+    /// Lot CORE-2: every frame through the path of every board, even for a specialised board
+    /// (the equivalence test's reference). Not a setting, not in the state.
+    generic_path: bool,
     /// The margin decoder of the ROM loaded, found by [`NesCore::find_margin_decoder`] when the
     /// ROM, the pack or `emu.builtin_patches` changes, and read by `end_frame` every frame.
     decoder: Option<&'static dyn crate::wide_decode::MarginDecoder>,
@@ -161,6 +164,7 @@ impl NesCore {
             smooth_scroll_on: false,
             smooth_scroll_live: false,
             idle_loop: None,
+            generic_path: false,
             decoder: None,
             steady_sprites: Vec::new(),
             steady_places: Vec::new(),
@@ -995,7 +999,7 @@ impl NesCore {
         // The frame's path (lot CORE-2, `docs/design/CORE-TIERS.md`): the board is looked at once
         // here, and the frame runs through the code compiled for it, or for every board when it
         // is not in the table. `run_frame` checked that a cartridge is loaded.
-        match self.bus.cartridge() {
+        match self.bus.cartridge().filter(|_| !self.generic_path) {
             Some(cartridge) => {
                 with_board_kind!(cartridge.board(), K => self.run_frame_steps::<K>(idle_loop));
             }
@@ -1026,6 +1030,13 @@ impl NesCore {
         }
 
         self.bus.cycle_count() - start_cycle
+    }
+
+    /// Runs every frame through the path of every board, specialised board or not (lot CORE-2):
+    /// the reference [`with_board_kind!`]'s paths are checked against. Off by default.
+    #[doc(hidden)]
+    pub const fn set_generic_path(&mut self, generic: bool) {
+        self.generic_path = generic;
     }
 
     /// The instructions of one frame, on the board kind `K` (lot CORE-2): the bus is lent to the
