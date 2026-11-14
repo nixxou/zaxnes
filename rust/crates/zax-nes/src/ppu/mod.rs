@@ -3294,6 +3294,8 @@ impl Ppu2C02 {
         self.read_vram_inner(address, access, fetch, &mut cartridge)
     }
 
+    #[allow(clippy::inline_always)] // Lot CORE-2: called from every board kind's copy of the hot path, LLVM stops inlining it (measured, +2.8 % on metroid for span_pixel alone).
+    #[inline(always)]
     fn read_vram_inner<K: BoardKind>(
         &self,
         address: u16,

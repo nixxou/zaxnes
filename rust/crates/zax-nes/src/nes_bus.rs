@@ -498,6 +498,8 @@ impl NesBus {
     /// where the cartridge's IRQ line could follow the PPU (see
     /// [`Cartridge::ppu_irq_horizon`]). Outside [`NesBus::defer_ppu`] the PPU runs on every
     /// cycle, as before.
+    #[allow(clippy::inline_always)] // Lot CORE-2: called from every board kind's copy of the hot path, LLVM stops inlining it (measured, +2.8 % on metroid for span_pixel alone).
+    #[inline(always)]
     fn catch_up_ppu_as<K: BoardKind>(&mut self) {
         if self.ppu_lag > 0 {
             self.ppu

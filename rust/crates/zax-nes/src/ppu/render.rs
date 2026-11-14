@@ -208,6 +208,8 @@ impl Ppu2C02 {
     }
 
     /// The colour of pixel `x` of a span, as [`Ppu2C02::render_pixel`] composes it.
+    #[allow(clippy::inline_always)] // Lot CORE-2: called from every board kind's copy of the hot path, LLVM stops inlining it (measured, +2.8 % on metroid for span_pixel alone).
+    #[inline(always)]
     fn span_pixel(&mut self, x: usize, pixels: &SpanPixels) -> u8 {
         let left = x >= 8;
 
@@ -334,6 +336,8 @@ impl Ppu2C02 {
 
     /// The step of the four two-dot background fetches that falls on `dot` (2 to 257 and
     /// 321 to 337).
+    #[allow(clippy::inline_always)] // Lot CORE-2: called from every board kind's copy of the hot path, LLVM stops inlining it (measured, +2.8 % on metroid for span_pixel alone).
+    #[inline(always)]
     fn background_fetch<K: BoardKind>(&mut self, dot: i32, cart: Cart<'_, '_, K>) {
         match (dot - 1) & 0x07 {
             0 => {
@@ -1099,6 +1103,8 @@ impl Ppu2C02 {
         }
     }
 
+    #[allow(clippy::inline_always)] // Lot CORE-2: called from every board kind's copy of the hot path, LLVM stops inlining it (measured, +2.8 % on metroid for span_pixel alone).
+    #[inline(always)]
     pub(super) fn render_pixel(&mut self, x: usize) {
         let mask = self.mask;
         let x = x & 0xFF;
