@@ -402,6 +402,8 @@ impl Mapper for Board {
 
     #[allow(clippy::inline_always)] // Lot CORE-2: outlined once every board kind has its copy of the hot path (measured).
     #[inline(always)]
+    #[allow(clippy::inline_always)] // Lot CORE-2: outlined once every board kind has its copy of the hot path (measured).
+    #[inline(always)]
     fn ppu_irq_horizon(&self) -> Option<i64> {
         dispatch!(self, b => b.ppu_irq_horizon())
     }
@@ -523,6 +525,8 @@ impl Mapper for Board {
         dispatch_ext!(self, b => b.ppu_peek(memory, address, fetch))
     }
 
+    #[allow(clippy::inline_always)] // Lot CORE-2: outlined once every board kind has its copy of the hot path (measured).
+    #[inline(always)]
     #[allow(clippy::inline_always)] // Lot CORE-2: outlined once every board kind has its copy of the hot path (measured).
     #[inline(always)]
     fn chr_view<'m>(&self, memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
