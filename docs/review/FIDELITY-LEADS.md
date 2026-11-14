@@ -379,9 +379,14 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 - Open: sprite-overflow bit difference in *The Legend of Zelda* vs Mesen (to recheck since exact
   eval is in default).
 
-### C5. `$2002` / PPU open bus decay — partial
+### C5. `$2002` / PPU open bus decay — settled, no change (FIDPLUS-1)
 - Zaxnes: per-bit decay stamps (`DECAY_DOTS`, `ppu/mod.rs:82`, `apply_decay`). Differs from Mesen on
   some reads (NMI-MESEN.md). To settle against the doc.
+- **FIDPLUS-1 (2026-11-14)**: the differences NMI-MESEN.md lists are the five low bits of `$2002` in
+  eight ROMs, values the programs drop. nesdev gives the decay as "about 600 ms" and console-dependent
+  (`ppu_open_bus` only asks for it within a second); Zaxnes decays after 3.2 M dots (about 600 ms),
+  Mesen after its own frame count, both inside that range, both passing `ppu_open_bus` and
+  AccuracyCoin's open-bus rows. No reference tells them apart: nothing to change.
 
 ### C6. Palette read on pre-G PPUs — done as an option (`emu.ppu_revision`, 2C02G default, step 37)
 - Hardware (nesdev "PPU registers": palette read "supported by the 2C02G, 2C02H, and PAL PPUs"): before 2C02G, `$2007` reads at `$3F00-$3FFF` do not return palette RAM (BeesNES TODO,
@@ -528,7 +533,7 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   (console-dependent; maybe a setting). nesdev also: the 2C07 (PAL) "forcibly refreshes OAM during
   scanlines 265 through 310", so no decay on PAL while rendering stays enabled.
 
-### D2b. Performance lead found on the way (lot FIDELITY, not fidelity)
+### D2b. Performance lead found on the way (lot FIDELITY, not fidelity) — tried and dropped (FIDPLUS-1)
 - Callgrind `f4185fa8` vs `27e2c3e2`: the APU stage costs +0.8 to +0.9 % on every game (+17 to
   +21 M instructions per 600 frames) while the PPU stage gains 0.24 %; totals are -0.03 to
   -0.14 %. The APU changes of the lot are frame-counter (`Frame Counter IRQ` I-M) and DMC
@@ -539,6 +544,12 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   the rest flat: register allocation of the per-CPU-cycle path, not the new code itself. Leads:
   bit 6 branchless (`u8::from(..) << 6`); compose `readable_status` only when a `$4015` read is
   coming instead of every cycle (bigger change).
+- **FIDPLUS-1 (2026-11-14), dropped.** The batch idea holds (a `$4015` read only sees the value
+  latched on the last cycle of the APU batch run before it), but avoiding the other compositions
+  costs more than they do: two inlined copies of the step (`step_cycle::<LATCH>`) took the APU stage
+  **+3.2 to +4.4 %** (games +0.3 to +0.7 %); one call site with a `bool` still **+0.24 to +0.29 %**
+  (games +0.03 to +0.06 %), callgrind against `6d252c10`. The composition is a handful of loads and
+  ORs the per-cycle path absorbs; nothing to gain here.
 
 ### D3. 2C02G/H OAMADDR bug at pre-render — done (option `emu.oamaddr_bug`, on, step 19)
 - Hardware: at dot 1 of the pre-render line with rendering on, if OAMADDR >= 8 the 8 bytes at
