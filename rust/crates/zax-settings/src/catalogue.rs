@@ -154,6 +154,7 @@ setting_ids! {
     EmuPpu2000Glitch => "emu.ppu_2000_glitch",
     EmuPaletteCorruption => "emu.palette_corruption",
     EmuPpuResetLine => "emu.ppu_reset_line",
+    EmuPowerOnPpuRam => "emu.power_on_ppu_ram",
     EmuCpuPpuAlignment => "emu.cpu_ppu_alignment",
     EmuPpuBusConflicts => "emu.ppu_bus_conflicts",
     EmuCatchUp => "emu.catch_up",

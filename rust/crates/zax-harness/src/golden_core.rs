@@ -116,6 +116,17 @@ pub fn golden_row(rel: &str, image: &[u8], frames: u32) -> Result<Value, Harness
     // vblank, so this command keeps that power-on; `ZAXNES_POWER_ON_TOP=1` measures the one the
     // app uses by default since lot FIDELITY step 27.
     core.set_power_on_top(std::env::var("ZAXNES_POWER_ON_TOP").is_ok_and(|value| value != "0"));
+    // `ZAXNES_POWER_ON_PPU_RAM=zero|blargg|random:<seed>`: the PPU memories at power-on
+    // (lot FIDELITY step 36); the core's default otherwise.
+    if let Ok(value) = std::env::var("ZAXNES_POWER_ON_PPU_RAM") {
+        core.set_power_on_ppu_ram(match value.as_str() {
+            "blargg" => zax_nes::PowerOnPpuRam::Blargg,
+            "zero" => zax_nes::PowerOnPpuRam::Zero,
+            other => zax_nes::PowerOnPpuRam::Random(
+                other.trim_start_matches("random:").parse().unwrap_or(1),
+            ),
+        });
+    }
     let load = core.load_rom(image, &name);
     row.insert("load_ok".into(), json!(load.success));
     if !load.success {

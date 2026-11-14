@@ -1620,6 +1620,22 @@ impl Ppu2C02 {
         written
     }
 
+    /// Puts power-on contents in the palette RAM, OAM and nametable RAM (after [`Self::reset`],
+    /// which clears them): a palette byte keeps its 6 bits, and the four entries `$3F10`,
+    /// `$3F14`, `$3F18`, `$3F1C` follow the ones they mirror.
+    pub fn fill_power_on_memories(&mut self, palette: &[u8; 32], oam: &[u8; 256], vram: &[u8]) {
+        for (index, &byte) in palette.iter().enumerate() {
+            self.palette_raw[index] = byte & 0x3F;
+        }
+        for mirror in [0x10, 0x14, 0x18, 0x1C] {
+            self.palette_raw[mirror] = self.palette_raw[mirror - 0x10];
+        }
+        self.refresh_palette_views();
+        self.oam.copy_from_slice(oam);
+        let length = vram.len().min(self.vram.len());
+        self.vram[..length].copy_from_slice(&vram[..length]);
+    }
+
     /// Rebuilds [`Self::palette`] from [`Self::palette_raw`] and [`Self::palette_marked`] from
     /// that. Called wherever the whole palette is replaced — the power-up fill, a state restore
     /// and the choice of a VS PPU — and never per pixel.

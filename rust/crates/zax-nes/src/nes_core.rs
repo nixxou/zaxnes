@@ -47,6 +47,8 @@ pub struct NesCore {
     /// What the 2 KiB of work RAM hold at power-on (lot CARTDB step 2); FCEUX's and NesHawk's
     /// `00 00 00 00 FF FF FF FF` by default since the owner's decision of 2026-11-13.
     power_on_ram: crate::PowerOnRam,
+    /// What the PPU's palette RAM, OAM and nametable RAM hold at power-on (lot FIDELITY step 36).
+    power_on_ppu_ram: crate::PowerOnPpuRam,
     advanced_patches_enabled: bool,
     /// The built-in patch applied to a ROM none is made for (Rust-only, owner request: forced).
     forced_patch: Option<&'static crate::builtin_patches::BuiltinPatch>,
@@ -139,6 +141,7 @@ impl NesCore {
             builtin_patches_enabled: true,
             cartridge_db: true,
             power_on_ram: crate::PowerOnRam::Pattern,
+            power_on_ppu_ram: crate::PowerOnPpuRam::Zero,
             advanced_patches_enabled: false,
             forced_patch: None,
             rom_crc: None,
@@ -188,6 +191,12 @@ impl NesCore {
     /// default (owner, 2026-11-13); REQ-CORE-004's zeros are one choice among four.
     pub fn set_power_on_ram(&mut self, pattern: crate::PowerOnRam) {
         self.power_on_ram = pattern;
+    }
+
+    /// Chooses what the PPU's palette RAM, OAM and nametable RAM hold at power-on; takes effect
+    /// at the next one.
+    pub fn set_power_on_ppu_ram(&mut self, pattern: crate::PowerOnPpuRam) {
+        self.power_on_ppu_ram = pattern;
     }
 
     /// Whether the PPU corrupts a row of OAM when the rendering is switched off inside a line and
@@ -802,6 +811,11 @@ impl NesCore {
             self.power_on_ram.fill(self.bus.ram_mut());
         }
         self.bus.ppu_mut().reset();
+        if let Some((palette, oam, vram)) = self.power_on_ppu_ram.contents() {
+            self.bus
+                .ppu_mut()
+                .fill_power_on_memories(&palette, &oam, &vram);
+        }
         self.boot_patch_window(self.builtin_patch);
         self.boot_pack_zone();
         self.bus.apu_mut().reset();

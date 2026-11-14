@@ -46,6 +46,49 @@ impl PowerOnRam {
     }
 }
 
+/// What the PPU's own memories — palette RAM, OAM and the 2 KiB of nametable RAM — hold at
+/// power-on (lot FIDELITY step 36, `docs/review/FIDELITY-LEADS.md` B3). Like the work RAM they
+/// start with whatever their cells settled to, and that differs from one console to another:
+/// blargg's `power_up_palette` test reads the palette of his console, which `NesHawk` copies and
+/// `TriCNES` keeps as an alternative to its author's own, a different one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PowerOnPpuRam {
+    /// All `$00` (REQ-CORE-004): this core's power-on so far.
+    #[default]
+    Zero,
+    /// The palette blargg's `power_up_palette` expects (his console's); OAM and the nametable
+    /// RAM at `$00`.
+    Blargg,
+    /// Pseudo-random palette, OAM and nametable RAM from the seed, so a run can be repeated.
+    Random(u64),
+}
+
+/// The palette of blargg's console at power-on, as `power_up_palette` checks it.
+pub const BLARGG_POWER_UP_PALETTE: [u8; 32] = [
+    0x09, 0x01, 0x00, 0x01, 0x00, 0x02, 0x02, 0x0D, 0x08, 0x10, 0x08, 0x24, 0x00, 0x00, 0x04, 0x2C,
+    0x09, 0x01, 0x34, 0x03, 0x00, 0x04, 0x00, 0x14, 0x08, 0x3A, 0x00, 0x02, 0x00, 0x20, 0x2C, 0x08,
+];
+
+impl PowerOnPpuRam {
+    /// The palette, OAM and nametable RAM contents, or `None` for all zeros.
+    #[must_use]
+    pub fn contents(self) -> Option<([u8; 32], [u8; 256], [u8; 2048])> {
+        match self {
+            Self::Zero => None,
+            Self::Blargg => Some((BLARGG_POWER_UP_PALETTE, [0; 256], [0; 2048])),
+            Self::Random(seed) => {
+                let mut palette = [0u8; 32];
+                let mut oam = [0u8; 256];
+                let mut vram = [0u8; 2048];
+                PowerOnRam::Random(seed).fill(&mut palette);
+                PowerOnRam::Random(seed ^ 0x5A5A).fill(&mut oam);
+                PowerOnRam::Random(seed ^ 0xA5A5).fill(&mut vram);
+                Some((palette, oam, vram))
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

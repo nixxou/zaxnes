@@ -260,9 +260,11 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   AccuracyCoin 147 with all options), so both could go on by default together. golden-core: all 98
   games move (`cycles`, first frame 27 392 cycles instead of 29 782; audio of 64), 23 dumps of 7
   families show a different picture at frame 1200 (Excitebike, Mega Man 4, Rockman 4/5, Metal
-  Force, SMB3 Japan, Zelda II Europe): a phase shift, to check by eye. Still open: reset length
-  7 vs 8 (B2) on top of it, and whether the hardware ignores `$2000`/`$2001`/`$2005`/`$2006` writes
-  for ~29 658 cycles after power-on (not modelled, Q-078).
+  Force, SMB3 Japan, Zelda II Europe): a phase shift, to check by eye. Reset length settled (B2,
+  no change); the ignored writes after power-on are modelled (B5, step 34). **A random PPU
+  position is not needed on the NES-001**: its reset line holds the PPU at line 0 dot 0 until the
+  CPU starts (netlist, step 34), so the position at the first opcode is fixed; only the sub-dot
+  alignment varies (A4, "Random" since step 36).
 
 ### B2. Reset length 7 vs 8 cycles — settled, no change (step 34)
 - Zaxnes 7 cycles (`cpu/cpu6502.rs:173-178`); Mesen 8. Sets the DMA get/put parity. nesdev gives no
@@ -299,11 +301,22 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 - Unit-test machines that poke the PPU right after power-on now switch the line off
   (`tests/common`), as they already switch `power_on_top` off.
 
-### B3. Random power-on state — partial
+### B3. Random power-on state — done as options (step 36)
 - Zaxnes: `emu.power_on_ram` (zeros / FCEUX pattern / random) for work RAM (lot CARTDB).
 - Not randomized: palette RAM, OAM, PPU registers, CPU/PPU alignment (A4), APU state.
 - BeesNES: "start from known state or random state" (README), bus/PPU bus randomizable
   (`Src/System/LSNSystem.h:324-325`).
+- **Step 36**: `emu.power_on_ppu_ram` (zeros / blargg's console / random) for the palette RAM,
+  OAM and nametable RAM (`PowerOnPpuRam`, `Ppu2C02::fill_power_on_memories`, mirrors kept).
+  The power-on palette differs per console: blargg's `power_up_palette` reads his (NesHawk copies
+  it; TriCNES keeps it as `BlarggPalette` but uses its author's, a different one); FCEUX fills
+  the PPU memories with zeros by default (`FCEU_MemoryRand(..., true)` in `ppu.cpp`; its
+  `00 00 00 00 FF FF FF FF` pattern is for work RAM only). **Zeros stay the default**: with
+  blargg's table the campaign gains `power_up_palette` (214 / 5) but every game's first pictures
+  change (golden-core `pixel_sha256` of all 98; cycles unchanged), for one console's values.
+- **Step 36**: `emu.cpu_ppu_alignment` gains "Random", drawn at each load (`power_on_seed`).
+- PPU registers and APU state at power-on: left as they are (the PPU's are cleared by its reset
+  line, B5; the APU's power-on is covered by blargg `apu_reset`).
 
 ### B4. Taken-branch delay of NMI — keep, documented divergence
 - Zaxnes delays IRQ **and** NMI on a taken non-crossing branch (`cpu/cpu6502.rs:733-745`, per

@@ -113,6 +113,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "emu.palette_corruption",
             "emu.pause_3d_in_2d",
             "emu.pipeline",
+            "emu.power_on_ppu_ram",
             "emu.power_on_ram",
             "emu.power_on_top",
             "emu.ppu_2000_glitch",

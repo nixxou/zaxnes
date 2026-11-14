@@ -107,6 +107,15 @@ enum Step {
 }
 
 /// Hands the switches of `EmulationHost::fidelity_switches` to the core, in their order.
+/// A seed for what a console draws at power-on (random RAM, random alignment): the clock.
+fn power_on_seed() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(1, |elapsed| {
+            u64::try_from(elapsed.as_nanos() & u128::from(u64::MAX)).unwrap_or(1)
+        })
+}
+
 fn apply_fidelity_switches(core: &mut EngineHandle, switches: [bool; 10]) {
     let [oam_corruption, bus_conflicts, oamaddr_bug, oam_decay, power_on_top, delay_2006, glitch_2006, glitch_2000, palette_corruption, ppu_reset_line] =
         switches;
@@ -518,7 +527,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
 
     /// `emu.cpu_ppu_alignment` as the core takes it, 0 to 3 (lot FIDELITY step 28).
     fn cpu_ppu_alignment(&self) -> u8 {
-        u8::try_from(self.settings.get(SettingId::EmuCpuPpuAlignment).as_int() & 3).unwrap_or(3)
+        match self.settings.get(SettingId::EmuCpuPpuAlignment).as_int() {
+            // Random (lot FIDELITY step 36): drawn at each load, as a console draws it at each
+            // power-on.
+            4 => u8::try_from(power_on_seed() & 3).unwrap_or(3),
+            value => u8::try_from(value & 3).unwrap_or(3),
+        }
     }
 
     /// `audio.console_profile` as the core takes it: 0 for none.
@@ -573,15 +587,14 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let power_on_ram = match self.settings.get(SettingId::EmuPowerOnRam).as_int() {
                     1 => zax_nes::PowerOnRam::Pattern,
                     2 => zax_nes::PowerOnRam::Ff,
-                    3 => zax_nes::PowerOnRam::Random(
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map_or(1, |elapsed| {
-                                u64::try_from(elapsed.as_nanos() & u128::from(u64::MAX))
-                                    .unwrap_or(1)
-                            }),
-                    ),
+                    3 => zax_nes::PowerOnRam::Random(power_on_seed()),
                     _ => zax_nes::PowerOnRam::Zero,
+                };
+                let power_on_ppu_ram = match self.settings.get(SettingId::EmuPowerOnPpuRam).as_int()
+                {
+                    1 => zax_nes::PowerOnPpuRam::Blargg,
+                    2 => zax_nes::PowerOnPpuRam::Random(power_on_seed() ^ 0x9E37),
+                    _ => zax_nes::PowerOnPpuRam::Zero,
                 };
                 let result = match self.session.as_mut() {
                     Some(session) => {
@@ -592,6 +605,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                             .core_mut()
                             .set_console_audio_profile(console_profile);
                         session.core_mut().set_power_on_ram(power_on_ram);
+                        session.core_mut().set_power_on_ppu_ram(power_on_ppu_ram);
                         session.core_mut().set_builtin_patches(builtin_patches);
                         session.core_mut().set_advanced_patches(advanced);
                         session.core_mut().set_forced_patch(forced);

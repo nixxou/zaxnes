@@ -520,7 +520,9 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("option.Alignment 1", "Alignment 1"),
     ("option.Alignment 2", "Alignment 2"),
     ("option.Alignment 3", "Alignment 3"),
+    ("option.Blargg's console", "Blargg's console"),
     ("setting.emu.power_on_ram", "Work RAM at power-on"),
+    ("setting.emu.power_on_ppu_ram", "Video memory at power-on"),
     ("option.Zeros", "Zeros"),
     ("option.FCEUX pattern", "FCEUX pattern"),
     ("option.All $FF", "All $FF"),
@@ -1214,7 +1216,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.cpu_ppu_alignment",
-        "When it is switched on, the console's processor and video chip settle into one of four ways their clocks line up (numbered 0 to 3, as the AccuracyCoin test cartridge numbers them), a different one from one power-on to the next. A few defects depend on it: when a read of video memory made during the picture lands, the $2000 glitch (alignments 0 and 3), a dot more of delay for some writes (alignment 2), and the sprite-memory damage, which a console in alignment 1 or 2 does not show when the picture is switched back on mid-screen. Games written for the console work in all four. Alignment 3 is the one Zaxnes has always followed. Takes effect at the next load. Default: Alignment 3.",
+        "When it is switched on, the console's processor and video chip settle into one of four ways their clocks line up (numbered 0 to 3, as the AccuracyCoin test cartridge numbers them), a different one from one power-on to the next. A few defects depend on it: when a read of video memory made during the picture lands, the open-bus glitch of the $2000 and $2005 writes (alignment 3), the edge pixel of a picture switched off mid-line, and the sprite-memory damage, which a console in alignment 1 or 2 does not show when the picture is switched back on mid-screen. Games written for the console work in all four. Alignment 3 is the one Zaxnes has always followed; Random draws one at each load, as a console does at each power-on. Takes effect at the next load. Default: Alignment 3.",
     ),
     (
         "detail.emu.ppu_2000_glitch",
@@ -1227,6 +1229,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         "detail.emu.palette_corruption",
         "A defect of the video chip: switching the picture off in the middle of a line, or moving the video address out of the colour palette, can change some palette colours. Only modelled for consoles in alignment 2, the one where it was observed reliably, from the measurements of the AccuracyCoin author; the exact colours are an approximation. Games written for the console avoid it. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.power_on_ppu_ram",
+        "What the video chip's own memories (colour palette, sprite table and background memory) hold when the console is switched on. Like the work RAM they start with whatever their cells settled to, which differs from one console to the next. Zeros, the default, is what this emulator always did; Blargg's console is the palette a well-known test ROM expects (measured on one console); Random changes at every power-on. Only the first pictures before a game sets its colours can show it. Takes effect at the next load. Default: Zeros.",
     ),
     (
         "detail.emu.power_on_ram",

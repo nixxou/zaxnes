@@ -468,3 +468,33 @@ fn fidelity_reset_line_shuts_the_ppu_writes_until_the_pre_render_line() {
     core.write_memory(0x2001, 0x1E);
     assert!(core.bus().ppu().rendering_enabled(), "off: taken at once");
 }
+
+/// Lot FIDELITY step 36 (`emu.power_on_ppu_ram`): the power-on palette of blargg's console, as
+/// his `power_up_palette` reads it, mirrors included; zeros by default.
+#[test]
+fn fidelity_power_on_palette_can_be_blarggs_console() {
+    let mut core = machine_with(&minimal(), "Minimal.nes");
+    let palette = |core: &mut NesCore| -> Vec<u8> {
+        (0..32u16)
+            .map(|index| {
+                // A palette read is not buffered: one read hands the byte over.
+                let address = 0x3F00 + index;
+                core.write_memory(0x2006, (address >> 8) as u8);
+                core.write_memory(0x2006, address as u8);
+                core.ppu_read(7) & 0x3F
+            })
+            .collect()
+    };
+    core.reset();
+    assert!(
+        palette(&mut core).iter().all(|&byte| byte == 0),
+        "zeros by default"
+    );
+
+    core.set_power_on_ppu_ram(zax_nes::PowerOnPpuRam::Blargg);
+    core.reset();
+    assert_eq!(
+        palette(&mut core),
+        zax_nes::BLARGG_POWER_UP_PALETTE.to_vec()
+    );
+}

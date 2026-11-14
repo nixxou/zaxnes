@@ -1051,6 +1051,7 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
     video_nes_palette(out);
     emulation_engine(out);
     emulation_cartridge(out);
+    emulation_power_on_ppu(out);
     out.push(
         SettingDescriptor::new(
             SettingId::EmuCore,
@@ -1109,6 +1110,27 @@ fn emulation_engine(out: &mut Vec<SettingDescriptor>) {
 /// ROM load. The database is on by default — it only completes iNES 1.0 headers it knows, never
 /// changes a mapper number and never touches a NES 2.0 header; the RAM takes FCEUX's and NesHawk's
 /// pattern by default (owner, 2026-11-13).
+/// Lot FIDELITY step 36 (docs/review/FIDELITY-LEADS.md B3): the PPU's palette RAM, OAM and
+/// nametable RAM at power-on. Zeros by default: no console is the right one.
+fn emulation_power_on_ppu(out: &mut Vec<SettingDescriptor>) {
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuPowerOnPpuRam,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Zeros"),
+            opt(1, "Blargg's console"),
+            opt(2, "Random"),
+        ]))
+        .with_label("Power-on video memory"),
+    );
+}
+
 fn emulation_cartridge(out: &mut Vec<SettingDescriptor>) {
     out.push(
         SettingDescriptor::new(
@@ -2180,6 +2202,7 @@ fn ppu_write_timings(out: &mut Vec<SettingDescriptor>) {
             opt(1, "Alignment 1"),
             opt(2, "Alignment 2"),
             opt(3, "Alignment 3"),
+            opt(4, "Random"),
         ]))
         .with_label("CPU/PPU alignment"),
     );

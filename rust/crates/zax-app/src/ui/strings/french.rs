@@ -532,7 +532,9 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("option.Alignment 1", "Alignement 1"),
     ("option.Alignment 2", "Alignement 2"),
     ("option.Alignment 3", "Alignement 3"),
+    ("option.Blargg's console", "Console de blargg"),
     ("setting.emu.power_on_ram", "RAM à l'allumage"),
+    ("setting.emu.power_on_ppu_ram", "Mémoire vidéo à l'allumage"),
     ("option.Zeros", "Zéros"),
     ("option.FCEUX pattern", "Motif FCEUX"),
     ("option.All $FF", "Tout à $FF"),
@@ -1188,7 +1190,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.cpu_ppu_alignment",
-        "À l'allumage, le processeur et la puce vidéo de la console calent leurs horloges de l'une de quatre façons (numérotées de 0 à 3, comme la cartouche de test AccuracyCoin), qui change d'un allumage à l'autre. Quelques défauts en dépendent : le moment où arrive une lecture de la mémoire vidéo faite pendant l'image, le glitch $2000 (alignements 0 et 3), un point de délai en plus pour certaines écritures (alignement 2), et l'altération de la mémoire des sprites, qu'une console en alignement 1 ou 2 ne montre pas quand l'image est rallumée en cours d'écran. Les jeux écrits pour la console fonctionnent dans les quatre. L'alignement 3 est celui que Zaxnes a toujours suivi. Prend effet au prochain chargement. Par défaut : Alignement 3.",
+        "À l'allumage, le processeur et la puce vidéo de la console calent leurs horloges de l'une de quatre façons (numérotées de 0 à 3, comme la cartouche de test AccuracyCoin), qui change d'un allumage à l'autre. Quelques défauts en dépendent : le moment où arrive une lecture de la mémoire vidéo faite pendant l'image, le glitch de bus ouvert des écritures $2000 et $2005 (alignement 3), le pixel de bord d'une image coupée en milieu de ligne, et l'altération de la mémoire des sprites, qu'une console en alignement 1 ou 2 ne montre pas quand l'image est rallumée en cours d'écran. Les jeux écrits pour la console fonctionnent dans les quatre. L'alignement 3 est celui que Zaxnes a toujours suivi ; Aléatoire en tire un à chaque chargement, comme une console à chaque allumage. Prend effet au prochain chargement. Par défaut : Alignement 3.",
     ),
     (
         "detail.emu.ppu_2000_glitch",
@@ -1201,6 +1203,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (
         "detail.emu.palette_corruption",
         "Un défaut de la puce vidéo : couper l'image au milieu d'une ligne, ou faire sortir l'adresse vidéo de la palette, peut changer certaines couleurs de la palette. Modélisé seulement pour les consoles en alignement 2, celui où il a été observé de façon fiable, d'après les mesures de l'auteur d'AccuracyCoin ; les couleurs exactes sont une approximation. Les jeux écrits pour la console l'évitent. Prend effet au prochain chargement. Par défaut : activé.",
+    ),
+    (
+        "detail.emu.power_on_ppu_ram",
+        "Ce que contiennent les mémoires propres de la puce vidéo (palette de couleurs, table des sprites et mémoire de fond) à l'allumage. Comme la RAM de travail, elles démarrent avec ce que leurs cellules ont pris, ce qui change d'une console à l'autre. Zéros, par défaut, est ce que faisait toujours cet émulateur ; Console de blargg est la palette qu'attend une ROM de test connue (mesurée sur une console) ; Aléatoire change à chaque allumage. Seules les premières images, avant que le jeu ne pose ses couleurs, peuvent le montrer. Prend effet au prochain chargement. Par défaut : Zéros.",
     ),
     (
         "detail.emu.power_on_ram",
