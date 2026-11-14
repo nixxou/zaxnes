@@ -1,5 +1,5 @@
 //! Lot FIDELITY step 29: the OAM corruption probe, the Zaxnes half of a differential study against
-//! TriCNES (MIT, Chris Siebert) run on the same program.
+//! `TriCNES` (MIT, Chris Siebert) run on the same program.
 //!
 //! Ignored: it needs `ZAXNES_OAM_PROBE_ROM` (an NROM program that switches the rendering off and
 //! on mid-line, sliding one dot per try) and writes `ZAXNES_OAM_PROBE_OUT`. OAM is filled with
