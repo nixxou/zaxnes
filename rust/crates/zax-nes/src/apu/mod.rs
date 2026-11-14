@@ -673,18 +673,13 @@ impl Apu2A03 {
 
     /// Advances the APU by one CPU cycle.
     pub fn step_cpu_cycle(&mut self) {
-        self.step_cycle::<true>();
+        self.step_cycle(true);
     }
 
-    /// One CPU cycle; `LATCH` says whether `$4015`'s readable value is latched on it.
-    ///
-    /// Lot FIDPLUS-1, `docs/review/FIDELITY-LEADS.md` D2b: the APU runs in batches
-    /// ([`Self::run_cpu_cycles`]) and a `$4015` read only ever sees the value latched on the last
-    /// cycle of the batch run before it, so composing it on the others was a store nobody read,
-    /// seven tests on every stepped cycle of every game.
-    #[allow(clippy::inline_always)] // The per-cycle step, inlined into the batch loop as before.
-    #[inline(always)]
-    fn step_cycle<const LATCH: bool>(&mut self) {
+    /// One CPU cycle; `latch` says whether `$4015`'s readable value is latched on it (lot
+    /// FIDPLUS-1, `docs/review/FIDELITY-LEADS.md` D2b): a `$4015` read only ever sees the value
+    /// latched on the last cycle of the batch [`Self::run_cpu_cycles`] ran before it.
+    fn step_cycle(&mut self, latch: bool) {
         // The frame counter's "set the IRQ flag" signal reaches the flag at the end of the
         // cycle it is raised on, so the CPU can only see it from the next cycle (blargg's
         // 08.irq_timing).
@@ -702,8 +697,8 @@ impl Apu2A03 {
 
         // A CPU read of $4015 sees the register as it stood before this cycle's internal
         // clocking; the bus performs the access after stepping the machine, so the value a
-        // read may return is latched here — on the batch's last cycle only (see above).
-        if LATCH {
+        // read may return is latched here.
+        if latch {
             self.readable_status = self.compose_status(0);
         }
 
@@ -792,11 +787,7 @@ impl Apu2A03 {
                 self.skip_quiet_cycles(skip);
                 count -= skip;
             }
-            if count == 1 {
-                self.step_cycle::<true>();
-            } else {
-                self.step_cycle::<false>();
-            }
+            self.step_cycle(count == 1);
             count -= 1;
         }
     }
