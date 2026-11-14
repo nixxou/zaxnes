@@ -1230,6 +1230,13 @@ impl Ppu2C02 {
         &self.oam
     }
 
+    /// Object attribute memory, writable: for tests and studies that set OAM directly (the OAM
+    /// corruption probe of lot FIDELITY step 29), never for the emulation itself.
+    #[doc(hidden)]
+    pub const fn oam_mut(&mut self) -> &mut [u8; OAM_SIZE] {
+        &mut self.oam
+    }
+
     /// Nametable VRAM, 4 KiB.
     #[must_use]
     pub const fn vram(&self) -> &[u8; VRAM_SIZE] {
