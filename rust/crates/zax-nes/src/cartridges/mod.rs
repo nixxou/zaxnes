@@ -29,7 +29,9 @@ use crate::rom::{InesHeader, RomImage, RomLoadError, RomLoadFailure};
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
 use mappers::Mapper;
-pub use board::{AnyBoard, AxRomKind, BoardKind, CnRomKind, Mmc1Kind, Mmc3Kind, NromKind, UxRomKind};
+pub use board::{AnyBoard, AxRomKind, BoardKind, CnRomKind, Mmc1Kind, Mmc3Kind, Mmc5Kind, NromKind, UxRomKind};
+#[cfg(feature = "board-mmc5-exattr-split")]
+pub use board::Mmc5ExtKind;
 pub(crate) use board::with_board_kind;
 
 /// `offset % len`, without the division when `offset` is already below `len`: bank offsets
@@ -1245,7 +1247,12 @@ impl Cartridge {
             value
         };
 
-        K::board_mut(&mut self.board).write_register(&mut self.memory, address, value);
+        if K::SWITCHES && !K::matches(&self.board) {
+            // The intercept above has just armed the MMC5's full board: the write is its.
+            self.board.write_register(&mut self.memory, address, value);
+        } else {
+            K::board_mut(&mut self.board).write_register(&mut self.memory, address, value);
+        }
         self.refresh_rom_windows();
     }
 

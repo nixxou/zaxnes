@@ -676,6 +676,11 @@ pub trait BoardKind {
     /// The board this kind reaches.
     type B: Mapper;
 
+    /// Whether a CPU write can turn the board into another variant (the MMC5's light board arming
+    /// its split or extended attributes): the frame's loop then checks [`Self::matches`] after
+    /// every instruction and hands the rest of the frame back to `with_board_kind!`.
+    const SWITCHES: bool = false;
+
     /// Whether `board` is this kind's variant.
     fn matches(board: &Board) -> bool;
 
@@ -757,6 +762,9 @@ macro_rules! with_board_kind {
             $crate::cartridges::Board::UxRom(_) => 4,
             $crate::cartridges::Board::CnRom(_) => 5,
             $crate::cartridges::Board::AxRom(_) => 6,
+            $crate::cartridges::Board::Mmc5(_) => 7,
+            #[cfg(feature = "board-mmc5-exattr-split")]
+            $crate::cartridges::Board::Mmc5Ext(_) => 8,
             _ => 0,
         };
         match entry {
@@ -782,6 +790,15 @@ macro_rules! with_board_kind {
             }
             6 => {
                 type $kind = $crate::cartridges::AxRomKind;
+                $run
+            }
+            7 => {
+                type $kind = $crate::cartridges::Mmc5Kind;
+                $run
+            }
+            #[cfg(feature = "board-mmc5-exattr-split")]
+            8 => {
+                type $kind = $crate::cartridges::Mmc5ExtKind;
                 $run
             }
             _ => {
@@ -822,4 +839,51 @@ board_kind!(
     /// Mapper 7.
     AxRomKind,
     AxRom
+);
+
+/// Mapper 5, the light board (lot MF-LEG-3): neither extended attributes nor the split armed.
+///
+/// The one kind whose board changes variant mid-frame. A CPU write that arms either mode replaces
+/// [`Board::Mmc5`] with [`Board::Mmc5Ext`]; the frame's loop sees it after that instruction
+/// ([`BoardKind::SWITCHES`]) and goes on under [`Mmc5ExtKind`]. For the cycles of the arming
+/// instruction left after the write, this kind still reaches the light board, which is
+/// [`Mmc5Ext`]'s first field (`Mmc5Ext::base`); the write itself goes to the full board.
+pub enum Mmc5Kind {}
+
+impl BoardKind for Mmc5Kind {
+    type B = Mmc5;
+
+    const SWITCHES: bool = true;
+
+    #[inline(always)]
+    fn matches(board: &Board) -> bool {
+        matches!(board, Board::Mmc5(_))
+    }
+
+    #[inline(always)]
+    fn board(board: &Board) -> &Mmc5 {
+        match board {
+            Board::Mmc5(b) => b,
+            #[cfg(feature = "board-mmc5-exattr-split")]
+            Board::Mmc5Ext(e) => &e.base,
+            _ => unreachable!("the frame runs on Mmc5Kind"),
+        }
+    }
+
+    #[inline(always)]
+    fn board_mut(board: &mut Board) -> &mut Mmc5 {
+        match board {
+            Board::Mmc5(b) => b,
+            #[cfg(feature = "board-mmc5-exattr-split")]
+            Board::Mmc5Ext(e) => &mut e.base,
+            _ => unreachable!("the frame runs on Mmc5Kind"),
+        }
+    }
+}
+
+#[cfg(feature = "board-mmc5-exattr-split")]
+board_kind!(
+    /// Mapper 5 with extended attributes or the split armed; it stays so until a reset or a state.
+    Mmc5ExtKind,
+    Mmc5Ext
 );

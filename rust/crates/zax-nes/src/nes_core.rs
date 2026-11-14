@@ -999,11 +999,16 @@ impl NesCore {
         // The frame's path (lot CORE-2, `docs/design/CORE-TIERS.md`): the board is looked at once
         // here, and the frame runs through the code compiled for it, or for every board when it
         // is not in the table. `run_frame` checked that a cartridge is loaded.
-        match self.bus.cartridge().filter(|_| !self.generic_path) {
-            Some(cartridge) => {
-                with_board_kind!(cartridge.board(), K => self.run_frame_steps::<K>(idle_loop));
+        loop {
+            let done = match self.bus.cartridge().filter(|_| !self.generic_path) {
+                Some(cartridge) => {
+                    with_board_kind!(cartridge.board(), K => self.run_frame_steps::<K>(idle_loop))
+                }
+                None => self.run_frame_steps::<AnyBoard>(idle_loop),
+            };
+            if done {
+                break;
             }
-            None => self.run_frame_steps::<AnyBoard>(idle_loop),
         }
         self.bus.end_deferred_ppu();
         if let Some(decoder) = decoder {
@@ -1041,7 +1046,9 @@ impl NesCore {
 
     /// The instructions of one frame, on the board kind `K` (lot CORE-2): the bus is lent to the
     /// CPU as a [`KindBus`] so that every cartridge call of the frame reaches `K`'s board.
-    fn run_frame_steps<K: BoardKind>(&mut self, idle_loop: Option<(u16, u16)>) {
+    /// Returns `false` when the board changed variant (see [`BoardKind::SWITCHES`]) before the
+    /// frame was over, for `run_frame` to go on with the right kind.
+    fn run_frame_steps<K: BoardKind>(&mut self, idle_loop: Option<(u16, u16)>) -> bool {
         loop {
             self.cpu.step(&mut KindBus::<K>::new(&mut self.bus));
             if let Some((first, last)) = idle_loop {
@@ -1050,7 +1057,15 @@ impl NesCore {
                 }
             }
             if self.bus.ppu().vblank_just_started() {
-                break;
+                return true;
+            }
+            if K::SWITCHES
+                && !self
+                    .bus
+                    .cartridge()
+                    .is_some_and(|cartridge| K::matches(cartridge.board()))
+            {
+                return false;
             }
         }
     }

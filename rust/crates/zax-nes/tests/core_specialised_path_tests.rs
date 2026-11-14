@@ -9,7 +9,7 @@ use common::machine_with;
 use std::path::{Path, PathBuf};
 
 /// The mappers of the table of specialised boards.
-const SPECIALISED: [u8; 6] = [0, 1, 2, 3, 4, 7];
+const SPECIALISED: [u8; 7] = [0, 1, 2, 3, 4, 5, 7];
 
 fn roms(folder: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(folder) else {
