@@ -34,6 +34,7 @@ runs through a specialised kind only while the board is that variant.
 | 12d6b8ba | −4.39 % | −1.59 % | −0.48 % | −2.13 % | −2.10 % | MMC1, UxROM, CNROM, AxROM specialised |
 | ab65eb6d | −4.19 % | −1.23 % | −0.19 % | −1.75 % | −1.94 % | PPU catch-up pinned: helps test ROMs, costs games, reverted |
 | ec1dfc86 | −4.40 % | −1.59 % | −0.48 % | −2.12 % | −2.10 % | MMC5 specialised (PR-1 `mmc5` +2.98 % → +0.28 %) |
+| **e75a8d2c** (final) | **−4.29 %** | **−1.50 %** | **−0.40 %** | **−2.15 %** | **−2.01 %** | clippy clean-up (board kind dropped where unused) |
 
 Lesson: with several copies of the hot path LLVM stops inlining functions that every copy calls;
 pinning helps only for the per-pixel and per-fetch ones, and pinning more hurt twice.
@@ -42,7 +43,11 @@ Known cost: three blargg test ROMs of the PR-1 set (`oam_stress`, `ppu_vbl_nmi`,
 stay +1.3 to +2.4 %: they hit the PPU registers constantly, and the PPU catch-up is out of line in
 the specialised copies. Every game measured gains.
 
-Code size (`.text`): 4.90 MB on dev, 5.02 MB with two specialised boards; final figure below.
+PR-1 set at e75a8d2c against dev: m1 −1.30 %, m0 −1.72 %, m4 −4.19 %, smb3 −5.30 %, metroid −2.33 %,
+z2 −1.82 %, mm2 −0.30 %, smb1 −0.13 %, duelito −0.06 %, mmc5 +0.60 %, readbuf +1.64 %, vblnmi +2.73 %,
+oamstr +2.94 %.
+
+Code size (`.text` of the Linux harness): 4.90 MB on dev, 5.33 MB with the eight kinds (+8.8 %).
 
 ## Equivalence
 
