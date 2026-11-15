@@ -39,6 +39,12 @@ Revision A fails `5-MMC3` (both suites) and `6.MMC3_rev_B`: no single model pass
   profile says so (FIDELITY-LEADS G4: its own period table, no short mode). Default campaign and
   golden unchanged. The console-model menu's presets do not set it: no reference ties it to one of
   the menu's models (the early Famicoms are not a model of the menu).
-* C3: the other variants of the goal: RP2A03 letter revisions (the DMC/OAM DMA and `$4015` read
+* C3b (state, 2026-11-15): a random CPU/PPU alignment and random power-on memories are already
+  choices (`emu.cpu_ppu_alignment` "Random", `emu.power_on_ram` and `emu.power_on_ppu_ram`
+  "Random", lot FIDELITY step 36), drawn at each load as a console draws them at power-on.
+* C3c (blocked): the PAL 2C07 measured as the 2C02 was needs a 2C07 netlist; only the 2C02's
+  (`ext-tools/visualnes-src/Core/segdefs.txt`) is here. Getting one is a download, gated by the
+  owner. The 2A03 CPU netlist is here too (`cpusegdefs.txt`), which lot A-bis's bench would use.
+* C3 (the goal's list, for the record): RP2A03 letter revisions (the DMC/OAM DMA and `$4015` read
   differences), the PAL 2C07 measured as the 2C02 was, random CPU/PPU alignment and RAM at power-on
   as a model choice; each with the test ROM or netlist that judges it.
