@@ -52,6 +52,18 @@ pub enum Mmc3CloneKind {
     /// Mapper 250, the Nitra MMC3 whose ports are decoded from the address lines (Mesen2
     /// `MMC3_250.h`): *Queen Bee V*.
     M250,
+    /// Mapper 126, Mesen2 `MMC3_126.h` (TEC9719 / PJ-008 multicarts).
+    M126,
+    /// Mapper 224, Mesen2 `MMC3_224.h` (KT-008, outer bank at `$5000`).
+    M224,
+    /// Mapper 259, Mesen2 `MMC3_BmcF15.h` (BMC-F-15).
+    M259,
+    /// Mapper 287, Mesen2 `MMC3_Bmc411120C.h` (BMC-411120-C / K-3088).
+    M287,
+    /// Mapper 313, Mesen2 `ResetTxrom.h` (reset-based TxROM multicarts).
+    M313,
+    /// Mapper 325, Mesen2 `MMC3_MaliSB.h` (UNL-MALISB).
+    M325,
 }
 
 impl Mmc3CloneKind {
@@ -71,6 +83,12 @@ impl Mmc3CloneKind {
             245 => Self::M245,
             249 => Self::M249,
             250 => Self::M250,
+            126 => Self::M126,
+            224 => Self::M224,
+            259 => Self::M259,
+            287 => Self::M287,
+            313 => Self::M313,
+            325 => Self::M325,
             _ => return None,
         })
     }
@@ -89,6 +107,12 @@ impl Mmc3CloneKind {
             Self::M245 => 245,
             Self::M249 => 249,
             Self::M250 => 250,
+            Self::M126 => 126,
+            Self::M224 => 224,
+            Self::M259 => 259,
+            Self::M287 => 287,
+            Self::M313 => 313,
+            Self::M325 => 325,
         }
     }
 }
@@ -121,6 +145,15 @@ impl Mmc3Clone {
             index: 0,
             chr_ram: memory.rom().chr_rom().is_empty(),
         }
+    }
+
+    /// `MMC3_126.h:40-47`, `GetChrOuterBank`.
+    fn outer_126(&self) -> i32 {
+        let reg = i32::from(self.outer[0]);
+        ((!reg) & 0x0080 & i32::from(self.outer[2]))
+            | ((reg << 4) & 0x0080 & reg)
+            | ((reg << 3) & 0x0100)
+            | ((reg << 5) & 0x0200)
     }
 
     fn power_on(&mut self, memory: &mut CartridgeMemory) {
@@ -190,6 +223,22 @@ impl Mmc3Clone {
                     scramble_249(page - 0x20)
                 }
             }
+            // `MMC3_126.h:9-13`: the outer register masks and offsets every page; the 16/32 KiB
+            // modes are in `refresh`.
+            Mmc3CloneKind::M126 => {
+                let reg = i32::from(r[0]);
+                (page & (((!reg >> 2) & 0x10) | 0x0F))
+                    | ((reg & (0x06 | ((reg & 0x40) >> 6))) << 4)
+                    | ((reg & 0x10) << 3)
+            }
+            // `MMC3_224.h:20-32`: `$5000` bit 2 is PRG A19.
+            Mmc3CloneKind::M224 => (page & 0x3F) | (i32::from(r[0]) << 6),
+            // `MMC3_Bmc411120C.h:19-25`, DIP switch 0: `$xx` bits 0-1 are PRG A17-A18.
+            Mmc3CloneKind::M287 => (page & 0x0F) | ((i32::from(r[0]) & 0x03) << 4),
+            // `ResetTxrom.h:22-26`: the reset counter is PRG A17-A18.
+            Mmc3CloneKind::M313 => (i32::from(r[0]) << 4) | (page & 0x0F),
+            // `MMC3_MaliSB.h:13-16`: PRG A15 and A16 swapped.
+            Mmc3CloneKind::M325 => (page & 0x03) | ((page & 0x08) >> 1) | ((page & 0x04) << 1),
             _ => page,
         }
     }
@@ -236,6 +285,17 @@ impl Mmc3Clone {
             }
             // `MMC3_249.h:21-25`.
             Mmc3CloneKind::M249 if r[0] & 0x02 != 0 => scramble_249(page & 0xFFFF),
+            // `MMC3_126.h:33-37,40-47`.
+            Mmc3CloneKind::M126 => {
+                let mask = if r[0] & 0x80 != 0 { 0x7F } else { 0xFFFF };
+                self.outer_126() | (page & mask)
+            }
+            // `MMC3_Bmc411120C.h:15-17`.
+            Mmc3CloneKind::M287 => page | ((i32::from(r[0]) & 0x03) << 7),
+            // `ResetTxrom.h:16-20`.
+            Mmc3CloneKind::M313 => (i32::from(r[0]) << 7) | (page & 0x7F),
+            // `MMC3_MaliSB.h:8-11`: CHR A11 and A15 swapped.
+            Mmc3CloneKind::M325 => (page & 0xDD) | ((page & 0x20) >> 4) | ((page & 0x02) << 4),
             _ => page,
         }
     }
@@ -297,6 +357,36 @@ impl Mmc3Clone {
             // `MMC3_245.h:9-46`: `R0` bit 1 is PRG A19 for both switchable banks and for the fixed
             // ones (the last two of that 512 KiB block, or of the image when it is smaller), and
             // with CHR-RAM the two 4 KiB halves follow the CHR mode.
+            // `MMC3_126.h:14-27`: `$6003` bits 0-1 select an NROM-128/256 mode built from the
+            // switchable window's page; bit 4 one 8 KiB CHR bank (`MMC3_126.h:57-61`).
+            Mmc3CloneKind::M126 => {
+                let mode = self.outer[3] & 0x03;
+                if mode != 0 {
+                    let base = prg[if self.mmc3.select() & 0x40 == 0 { 0 } else { 2 }];
+                    prg = if mode == 0x03 {
+                        [base, base + 1, base + 2, base + 3]
+                    } else {
+                        [base, base + 1, base, base + 1]
+                    };
+                }
+                if self.outer[3] & 0x10 != 0 {
+                    let base = self.outer_126() | ((i32::from(self.outer[2]) & 0x0F) << 3);
+                    chr = std::array::from_fn(|slot| base + i32::try_from(slot).unwrap_or(0));
+                }
+            }
+            // `MMC3_Bmc411120C.h:19-22`: `$xx` bit 3 (DIP 0) selects one 32 KiB bank.
+            Mmc3CloneKind::M287 if self.outer[0] & 0x08 != 0 => {
+                let base = ((i32::from(self.outer[0] >> 4) & 0x03) | 0x0C) << 2;
+                prg = [base, base + 1, base + 2, base + 3];
+            }
+            // `MMC3_BmcF15.h:14-21`: two 16 KiB banks from the outer register alone.
+            Mmc3CloneKind::M259 => {
+                let bank = i32::from(self.outer[0] & 0x0F);
+                let mode = (bank & 0x08) >> 3;
+                let low = (bank & !mode) << 1;
+                let high = ((bank & !mode) | mode) << 1;
+                prg = [low, low + 1, high, high + 1];
+            }
             Mmc3CloneKind::M245 => {
                 let or = if self.mmc3.bank_register(0) & 0x02 != 0 {
                     0x40
@@ -363,6 +453,15 @@ impl Mmc3Clone {
                 };
                 (port, value)
             }
+            // `MMC3_MaliSB.h:19-25`.
+            Mmc3CloneKind::M325 => {
+                let port = if address >= 0xC000 {
+                    (address & 0xFFFE) | ((address >> 2) & 0x01) | ((address >> 3) & 0x01)
+                } else {
+                    (address & 0xFFFE) | ((address >> 3) & 0x01)
+                };
+                (port, value)
+            }
             _ => (address, value),
         }
     }
@@ -419,6 +518,25 @@ impl Mmc3Clone {
             }
             // `MMC3_249.h:13,42-46`.
             Mmc3CloneKind::M249 if address == 0x5000 => self.outer[0] = value,
+            // `MMC3_126.h:62-81`: four registers under mask 3; 0 and 3 lock when bit 7 of 3 is set.
+            Mmc3CloneKind::M126 if (0x6000..=0x7FFF).contains(&address) => {
+                let index = usize::from(address & 0x03);
+                if index == 1 || index == 2 || self.outer[3] & 0x80 == 0 {
+                    self.outer[index] = value;
+                }
+            }
+            // `MMC3_224.h:35-41`: `$5000` bit 2.
+            Mmc3CloneKind::M224 if address == 0x5000 => self.outer[0] = (value >> 2) & 0x01,
+            // `MMC3_Bmc411120C.h:27-33`: the **address** is the register, over `$6000-$7FFF`.
+            Mmc3CloneKind::M287 if (0x6000..=0x7FFF).contains(&address) => {
+                self.outer[0] = address.to_le_bytes()[0];
+            }
+            // `MMC3_BmcF15.h:24-29`: only while `$A001` enables the work RAM.
+            Mmc3CloneKind::M259 if (0x6000..=0x7FFF).contains(&address) => {
+                if self.mmc3.prg_ram_enabled() {
+                    self.outer[0] = value & 0x0F;
+                }
+            }
             _ => return None,
         }
         self.refresh();
@@ -461,6 +579,16 @@ impl Mapper for Mmc3Clone {
         self.index = reader.read_u8()? & 0x03;
         self.refresh();
         Ok(())
+    }
+
+    /// Mapper 313 is a reset-based multicart: "When an interruption of the M2 signal is detected,
+    /// the higher address lines are automatically incremented" (nesdev, "NES 2.0 Mapper 313");
+    /// Mesen2 `ResetTxrom.h:9-14`. No other kind reacts to RESET.
+    fn soft_reset(&mut self, _memory: &mut CartridgeMemory) {
+        if self.kind == Mmc3CloneKind::M313 {
+            self.outer[0] = (self.outer[0] + 1) & 0x03;
+            self.refresh();
+        }
     }
 
     fn reset(&mut self, memory: &mut CartridgeMemory) {

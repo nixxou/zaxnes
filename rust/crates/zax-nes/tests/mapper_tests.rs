@@ -256,7 +256,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let sachen8259 = cfg!(feature = "board-sachen8259");
     let huang1 = cfg!(feature = "board-huang1");
     let cony = cfg!(feature = "board-cony");
-    let additions: [(i32, bool); 170] = [
+    let additions: [(i32, bool); 177] = [
         (12, huang1),
         (14, huang1),
         (19, true),
@@ -330,6 +330,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (121, scramble),
         (123, scramble),
         (125, cfg!(feature = "board-125")),
+        (126, cfg!(feature = "board-126")),
         (132, jv001),
         (133, cfg!(feature = "board-133")),
         (134, cfg!(feature = "board-134")),
@@ -372,6 +373,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (187, scramble),
         (189, cfg!(feature = "board-189")),
         (190, cfg!(feature = "board-190")),
+        (191, cfg!(feature = "board-191")),
         (192, chrram),
         (193, cfg!(feature = "board-193")),
         (194, chrram),
@@ -398,6 +400,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (218, cfg!(feature = "board-218")),
         (219, cfg!(feature = "board-219")),
         (221, cfg!(feature = "board-221")),
+        (224, cfg!(feature = "board-224")),
         (226, cfg!(feature = "board-226")),
         (227, cfg!(feature = "board-227")),
         (229, cfg!(feature = "board-229")),
@@ -419,6 +422,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (250, cfg!(feature = "board-250")),
         (253, cfg!(feature = "board-253")),
         (255, cfg!(feature = "board-255")),
+        (259, cfg!(feature = "board-259")),
         (261, cfg!(feature = "board-261")),
         (262, cfg!(feature = "board-262")),
         (263, cfg!(feature = "board-263")),
@@ -426,8 +430,11 @@ fn req_core_100_every_required_mapper_is_registered() {
         (268, cfg!(feature = "board-268")),
         (274, cfg!(feature = "board-274")),
         (286, cfg!(feature = "board-286")),
+        (287, cfg!(feature = "board-287")),
         (292, cfg!(feature = "board-292")),
         (298, cfg!(feature = "board-298")),
+        (313, cfg!(feature = "board-313")),
+        (325, cfg!(feature = "board-325")),
         (552, taito_x1),
     ];
     let expected: Vec<i32> = additions

@@ -630,6 +630,13 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 245
             | 249
             | 250
+            | 126
+            | 224
+            | 259
+            | 287
+            | 313
+            | 325
+            | 191
     )
 }
 
@@ -700,6 +707,13 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 245
             | 249
             | 250
+            | 126
+            | 224
+            | 259
+            | 287
+            | 313
+            | 325
+            | 191
     )
 }
 
@@ -1936,7 +1950,10 @@ mod tests {
         expected.extend_from_slice(&[292, 292]);
         // MAPPERS-N: the MMC3 clones hold an `Mmc3`, so each moves for 114's reason, twice. They
         // are appended here and the list is sorted below, since the sweep runs in number order.
-        for number in [44, 45, 49, 52, 134, 196, 197, 205, 238, 245, 249, 250] {
+        for number in [
+            44, 45, 49, 52, 126, 134, 191, 196, 197, 205, 224, 238, 245, 249, 250, 259, 287, 313,
+            325,
+        ] {
             if Cartridge::is_supported(number) {
                 expected.extend_from_slice(&[number, number]);
             }

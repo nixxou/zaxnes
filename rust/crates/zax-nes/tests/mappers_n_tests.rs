@@ -322,3 +322,47 @@ fn mappers_n_170_reads_back_its_latch() {
     core.mapper_write(0x6502, 0x40);
     assert_eq!(0x80 | 0x77, core.read_memory(0x7777));
 }
+
+/// `MMC3_224.h:20-41`: `$5000` bit 2 is PRG A19.
+#[cfg(feature = "board-224")]
+#[test]
+fn mappers_n_224_takes_prg_a19_from_5000() {
+    let mut core = MapperRom::new(224).prg(128).chr_ram(8192).load();
+    core.mapper_write(0x5000, 0x04);
+    core.mmc3_bank(6, 3);
+    assert_eq!([0x43, 0x41, 0x7E, 0x7F], core.prg_windows());
+}
+
+/// `ResetTxrom.h:9-26`: each RESET moves to the next 128 KiB game.
+#[cfg(feature = "board-313")]
+#[test]
+fn mappers_n_313_steps_through_its_games_on_reset() {
+    let mut core = MapperRom::new(313).prg(64).chr(512).load();
+    assert_eq!([0, 1, 14, 15], core.prg_windows());
+    core.soft_reset();
+    assert_eq!(16 + 14, core.prg_windows()[2]);
+}
+
+/// `MMC3_BmcF15.h:14-29`: two 16 KiB banks, written while the work RAM is enabled.
+#[cfg(feature = "board-259")]
+#[test]
+fn mappers_n_259_banks_16_kib_from_its_outer_register() {
+    let mut core = MapperRom::new(259).prg(32).chr(256).load();
+    core.mapper_write(0xA001, 0x80);
+    core.mapper_write(0x6000, 0x03);
+    assert_eq!([6, 7, 6, 7], core.prg_windows());
+    core.mapper_write(0x6000, 0x0B);
+    assert_eq!([20, 21, 22, 23], core.prg_windows());
+}
+
+/// `MMC3_Bmc411120C.h:15-33`: the address written at `$6000-$7FFF` is the outer register.
+#[cfg(feature = "board-287")]
+#[test]
+fn mappers_n_287_offsets_prg_from_the_written_address() {
+    let mut core = MapperRom::new(287).prg(64).chr(512).load();
+    core.mapper_write(0x6001, 0);
+    core.mmc3_bank(6, 3);
+    assert_eq!([0x13, 0x11, 0x1E, 0x1F], core.prg_windows());
+    core.mapper_write(0x6008 | 0x10, 0);
+    assert_eq!([0x34, 0x35, 0x36, 0x37], core.prg_windows());
+}

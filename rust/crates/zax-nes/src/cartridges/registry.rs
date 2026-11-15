@@ -292,6 +292,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     123,
     #[cfg(feature = "board-125")]
     125,
+    #[cfg(feature = "board-126")]
+    126,
     #[cfg(feature = "board-jv001")]
     132,
     #[cfg(feature = "board-133")]
@@ -379,6 +381,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     189,
     #[cfg(feature = "board-190")]
     190,
+    #[cfg(feature = "board-191")]
+    191,
     #[cfg(feature = "board-mmc3-chrram")]
     192,
     #[cfg(feature = "board-193")]
@@ -435,6 +439,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     219,
     #[cfg(feature = "board-221")]
     221,
+    #[cfg(feature = "board-224")]
+    224,
     225,
     #[cfg(feature = "board-226")]
     226,
@@ -481,6 +487,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     253,
     #[cfg(feature = "board-255")]
     255,
+    #[cfg(feature = "board-259")]
+    259,
     #[cfg(feature = "board-261")]
     261,
     // The Sachen UNL-SHERO, an MMC3 clone with 8 KiB of CHR-RAM, four CHR A18 lines at $4100 and
@@ -497,12 +505,18 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     274,
     #[cfg(feature = "board-286")]
     286,
+    #[cfg(feature = "board-287")]
+    287,
     // The BMW8544 / UNL-DRAGONFIGHTER, an MMC3 clone whose CHR banking is XORed with two
     // registers a read of $6000-$7FFF fills (MF-UNL-12 step 2).
     #[cfg(feature = "board-292")]
     292,
     #[cfg(feature = "board-298")]
     298,
+    #[cfg(feature = "board-313")]
+    313,
+    #[cfg(feature = "board-325")]
+    325,
     #[cfg(feature = "board-taito-x1")]
     552,
 ];
@@ -660,6 +674,11 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
             ..BoardMemorySizes::default()
         },
         #[cfg(feature = "board-mmc3-chrram")]
+        #[cfg(feature = "board-191")]
+        191 => BoardMemorySizes {
+            chr_ram: Mmc3ChrRamBoard::chr_ram_size(mapper),
+            ..BoardMemorySizes::default()
+        },
         74 | 192 | 194 => BoardMemorySizes {
             chr_ram: Mmc3ChrRamBoard::chr_ram_size(mapper),
             ..BoardMemorySizes::default()
@@ -2056,6 +2075,40 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
             memory,
             LatchKind::of(mapper)?,
         ))),
+        #[cfg(feature = "board-126")]
+        126 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-224")]
+        224 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-259")]
+        259 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-287")]
+        287 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-313")]
+        313 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-325")]
+        325 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-191")]
+        191 => Board::IrqBoard(IrqBoard::Mmc3ChrRam(Box::new(Mmc3ChrRamBoard::new(
+            memory, mapper,
+        )?))),
         _ => return None,
     })
 }

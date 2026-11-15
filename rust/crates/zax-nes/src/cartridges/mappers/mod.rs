@@ -213,6 +213,8 @@ pub use magic_floor::MagicFloor;
 pub use mapper091::Mapper091;
 pub use mmc1::Mmc1;
 pub use mmc2::Mmc2;
+#[cfg(feature = "board-191")]
+pub use mmc3::Mmc3ChrRam191;
 #[cfg(feature = "board-mmc3-multicart")]
 pub use mmc3::Mmc3Multicart;
 #[cfg(feature = "board-119")]
