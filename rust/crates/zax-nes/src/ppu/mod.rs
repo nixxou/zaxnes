@@ -3000,8 +3000,7 @@ impl Ppu2C02 {
     #[cold]
     #[inline(never)]
     fn fine_x_write_mid_line<K: BoardKind>(&mut self, value: u8, cart: Cart<'_, '_, K>) {
-        if self.alignment == 3
-            && self.glitch_2000
+        if self.open_bus_on_copies()
             && self.prepaid_dots == 0
             && (0..SCREEN_WIDTH_I32).contains(&self.dot)
         {
@@ -3030,7 +3029,7 @@ impl Ppu2C02 {
     #[cold]
     #[inline(never)]
     fn scroll_write_on_copy(&mut self, value: u8) {
-        let source = if self.alignment == 3 && self.glitch_2000 {
+        let source = if self.open_bus_on_copies() {
             self.cpu_open_bus
         } else {
             value
@@ -3039,7 +3038,7 @@ impl Ppu2C02 {
             self.v = (self.v & !0x001F) | u16::from(source >> 3);
             self.v_row_next = self.v;
         } else if self.write_toggle
-            && self.dot == 304
+            && self.dot == *self.vertical_copy_dots().end()
             && self.scanline == self.pre_render_scanline()
         {
             self.v = (self.v & !0x73E0)
@@ -3196,7 +3195,9 @@ impl Ppu2C02 {
                     self.t = (self.t & 0xFFE0) | u16::from(value >> 3);
                     self.fine_x = value & 0x07;
                 }
-                if matches!(self.dot, 257 | 304) && self.fetching() {
+                if (self.dot == 257 || self.dot == *self.vertical_copy_dots().end())
+                    && self.fetching()
+                {
                     self.scroll_write_on_copy(value);
                 }
                 if !self.write_toggle
@@ -3275,6 +3276,18 @@ impl Ppu2C02 {
     const fn rendering_now(&self) -> bool {
         self.rendering_enabled()
             && (self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline())
+    }
+
+    /// Whether a register write landing on a copy of `t` into `v` (or on a pixel) takes the CPU's
+    /// open bus instead of the written value: alignment 3 on the 2C02 (A4), under the `$2000`
+    /// glitch's switch. On the PAL 2C07 (16 dots for 5 CPU cycles) only on the cycle whose dot
+    /// accumulator is 4, one in five (Visual 2C07 netlist, lot FIDPLUS-C C3c, `g2005` /
+    /// `g2005px`: a first `$2005` write on dot 257 gives the written coarse X on the other cycles;
+    /// of the 32 sets of phases, {4} alone leaves the fewest differing dots).
+    const fn open_bus_on_copies(&self) -> bool {
+        self.alignment == 3
+            && self.glitch_2000
+            && (!matches!(self.timing.region, NesRegion::Pal) || self.dot_accumulator == 4)
     }
 
     /// The dots of the pre-render line that copy `t`'s vertical bits into `v`: 280 to 304 on the

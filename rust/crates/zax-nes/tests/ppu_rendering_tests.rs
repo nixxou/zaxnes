@@ -1370,6 +1370,29 @@ fn fidplus_c3c_pal_rendering_switch_takes_four_dots() {
     assert!(!increments(false), "NTSC: the switch is in force by dot 16");
 }
 
+/// Lot FIDPLUS-C C3c (Visual 2C07 netlist, `g2005`, `g2005px`): a first `$2005` write landing on
+/// the dot-257 copy takes the written coarse X on the PAL 2C07, the CPU's open bus only on the
+/// cycle whose dot accumulator is 4 (alignment 3, the default).
+#[test]
+fn fidplus_c3c_pal_2005_on_dot_257_takes_the_open_bus_one_cycle_in_five() {
+    fn coarse_x(phase: i32) -> u16 {
+        let mut fixture = TileFixture::new();
+        fixture.core.set_region(zax_nes::NesRegion::Pal);
+        fixture.set_mask(0x0A);
+        fixture.core.run_frame(0);
+        park_on_dot(&mut fixture, 257);
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        ppu.set_dot_accumulator_phase(phase);
+        ppu.note_cpu_open_bus(0x20);
+        ppu.write(5, 0xF8, None);
+        ppu.vram_v() & 0x1F
+    }
+    for phase in 0..5 {
+        let expected = if phase == 4 { 0x04 } else { 0x1F };
+        assert_eq!(expected, coarse_x(phase), "accumulator {phase}");
+    }
+}
+
 /// Lot FIDPLUS-C C3c (Visual 2C07 netlist, `r2007`): on the PAL 2C07 a `$2007` read during
 /// rendering latches 6 dots after its access dot on the cycles whose dot accumulator is 3 or 4,
 /// 5 on the others. Read on dot 98: with 6 the latch is dot 104, which increments coarse X anyway,
