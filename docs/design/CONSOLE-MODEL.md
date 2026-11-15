@@ -55,6 +55,17 @@ Revision A fails `5-MMC3` (both suites) and `6.MMC3_rev_B`: no single model pass
   register-write and read timing with a CPU on the bus. The 2A07 is not in the netlist set; the
   2A03 netlist clocked at 12/16 of the master would give the PAL CPU rate, its M2 duty left as
   the 2A03's (to state as an approximation).
+  Step 2 (2026-11-15), a PAL console on the netlists (`visual2c07-tools/benchpal.cpp`,
+  `datadefs_pal.cpp`, `macros_pal.cpp`): the 2C07 wired to VisualNes's 2A03 as the NTSC console
+  is (pins found by the 2C07's own names), the CPU's clock input separate from the PPU's on a
+  common grid (master edge every 3 ticks, CPU input edge every 4: CPU = master / 16, the 2A03's
+  M2 duty of 15/24 standing in for the 2A07's, `/CS` decoded from M2 as on the NTSC bench). A
+  loop writing `$2000 = $80`: the writes of the first frame are ignored (the 2C07 has the
+  after-reset window, as Zaxnes models it up to the pre-render line), the first NMI vector fetch
+  at CPU cycle 58 931 (line 241), then 33 245 and 33 249 cycles apart (33 247.5 expected, the
+  difference the loop's 7-cycle instruction boundaries). The bench is sound; next, the A-lot
+  programs run on it against Zaxnes's PAL mode (register-write dots, read merge, OAMADDR defects,
+  OAM refresh on lines 265-310, logic defects).
 * C3 (the goal's list, for the record): RP2A03 letter revisions (the DMC/OAM DMA and `$4015` read
   differences), the PAL 2C07 measured as the 2C02 was, random CPU/PPU alignment and RAM at power-on
   as a model choice; each with the test ROM or netlist that judges it.
