@@ -173,3 +173,17 @@ always a callee appearing with a body of its own.
 The PPU DATA read and write state machines as state, on PPU clock halves (AccuracyCoin's
 description, checked on the netlist), the AD bus and the address latch: `$2007 Stress Test` in
 alignments 0 and 1, the tile latch of A5, the stale fetch, A7's two-phase coarse-Y wrap.
+
+## Final validation (2026-11-15, head 94eaa221)
+
+* Standard: tests 1677 (zax-nes, harness, settings, NesHawk, ignored included with the ROM sets)
+  and 871 (zax-app) passed, 0 failed; campaign 215 pass / 4 fail as before; AccuracyCoin 147/147
+  in the four alignments; golden byte-identical to the previous validations (the 5 changes against
+  the old base are FIDPLUS-2's known corrections: SMB3 Japan, Zelda II Europe).
+* Fidélité+ (`ZAXNES_FIDELITY_PLUS=1`): same campaign, AccuracyCoin 147/147 x4, golden
+  byte-identical to the standard core's.
+* Speed (`bench-core`, 1200 frames): metroid 0.866 ms/frame standard, 0.803 Fidélité+; smb3 1.184
+  and 1.151. The Fidélité+ frames cost nothing measurable.
+* Standard core against base 6c9cb163 (callgrind, 13 ROMs): within ±0.002 %.
+
+Lot FIDPLUS-A done; merge and push await the owner.
