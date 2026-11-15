@@ -695,6 +695,14 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   8 frames because blargg tests verified on hardware keep OAM for ~123 ms. To settle before coding
   (console-dependent; maybe a setting). nesdev also: the 2C07 (PAL) "forcibly refreshes OAM during
   scanlines 265 through 310", so no decay on PAL while rendering stays enabled.
+- **A hardware measurement (2026-11-15)**: FireSide's `oam_decay_test.nes` (NESdev Discord; A
+  holds rendering off and counts the frames, its release prints OAM): OAM stays intact about **7
+  frames** on their console (model and PPU revision not given), i.e. ~117 ms on NTSC, on the side
+  of blargg's ~123 ms and BeesNES's 8 frames, not of nesdev's "not much longer than a vblank". Read
+  in its source (`main.s`): the counter counts the first frame of a press while rendering is still on
+  (PPUMASK is written with the old value before the mask is cleared), so the true figure may be 6;
+  its readout writes back each byte it reads, so a readout re-seeds OAM. Other consoles' results
+  are asked for on the thread; the `$E3` bytes it shows are the attribute bytes' missing bits 2-4.
 
 ### D2b. Performance lead found on the way (lot FIDELITY, not fidelity) — tried and dropped (FIDPLUS-1)
 - Callgrind `f4185fa8` vs `27e2c3e2`: the APU stage costs +0.8 to +0.9 % on every game (+17 to
