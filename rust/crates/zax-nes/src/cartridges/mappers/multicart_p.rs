@@ -129,6 +129,10 @@ pub enum MultiPKind {
     /// 4 KiB at `$7000` and 1 KiB + 3 KiB at `$6C00`/`$C000`, and an 8 KiB work RAM in three
     /// pieces at `$6000`, `$B800` and `$CC00`.
     M347,
+    /// 452, `mapper_452.c` (DS-9-27): every write to ROM latches its address and data; the 8 KiB
+    /// work RAM is laid over one (or two) of the four `$8000-$FFFF` windows, `$6000-$7FFF` being
+    /// open bus; submapper 1 decodes the address's top nibble instead.
+    M452,
 }
 
 impl MultiPKind {
@@ -180,6 +184,7 @@ impl MultiPKind {
             557 => Self::M557,
             539 => Self::M539,
             347 => Self::M347,
+            452 => Self::M452,
             _ => return None,
         })
     }
@@ -230,6 +235,7 @@ impl MultiPKind {
             Self::M557 => 557,
             Self::M539 => 539,
             Self::M347 => 347,
+            Self::M452 => 452,
         }
     }
 
@@ -261,6 +267,7 @@ impl MultiPKind {
                 | Self::M428
                 | Self::M539
                 | Self::M347
+                | Self::M452
         )
     }
 }
@@ -424,7 +431,8 @@ impl MultiP {
                     r[0] = address;
                 }
             }
-            MultiPKind::M438 => {
+            // `extcl_cpu_wr_mem_452`: the address and the data of a write to ROM, as 438.
+            MultiPKind::M438 | MultiPKind::M452 => {
                 r[0] = address;
                 r[1] = u16::from(value);
             }
@@ -1010,6 +1018,7 @@ impl MultiP {
                 }
                 mirror(r[1] & 0x01 == 0)
             }
+            MultiPKind::M452 => Some(self.map_452()),
             // `prg_fix_347`: PRG `$18000` onwards at `$8000`, the pieces in `source_347`;
             // `mirroring_fix_347`: `reg[0]` D3 horizontal.
             MultiPKind::M347 => {
@@ -1111,6 +1120,89 @@ impl MultiP {
             MultiPKind::M380 => self.submapper == 0 && self.regs[0] & 0x100 != 0,
             _ => false,
         }
+    }
+
+    /// `mirroring_fix_452`: horizontal from `reg[0]` D11 on submapper 1, `reg[1]` D0 otherwise.
+    const fn mirroring_452(&self) -> bool {
+        if self.submapper == 1 {
+            self.regs[0] & 0x0800 != 0
+        } else {
+            self.regs[1] & 0x01 != 0
+        }
+    }
+
+    /// `prg_fix_452`'s PRG windows and `mirroring_fix_452`.
+    fn map_452(&mut self) -> NametableMirroring {
+        let (a, d) = (i32::from(self.regs[0]), i32::from(self.regs[1]));
+        let bank = a >> 1;
+        let b = &mut self.banks;
+        if self.submapper == 1 {
+            match a & 0xF000 {
+                0xC000 => {
+                    b.map_prg_16k(0, bank);
+                    b.map_prg_16k(2, bank | 1);
+                }
+                0xD000 => {
+                    for slot in 0..4 {
+                        b.map_prg_8k(slot, a);
+                    }
+                }
+                0xE000 => {
+                    b.map_prg_16k(0, bank);
+                    b.map_prg_16k(2, if a & 0x0100 != 0 { bank | 0x07 } else { 0 });
+                }
+                _ => {
+                    b.map_prg_16k(0, bank);
+                    b.map_prg_16k(2, 0);
+                }
+            }
+        } else if d & 0x02 != 0 {
+            for slot in 0..4 {
+                b.map_prg_8k(slot, bank);
+            }
+        } else if d & 0x08 != 0 {
+            let bank = bank & !1;
+            b.map_prg_8k(0, bank);
+            b.map_prg_8k(1, bank | 0x01);
+            b.map_prg_8k(2, bank | 0x02);
+            b.map_prg_8k(3, bank | 0x03 | (d & 0x04));
+        } else {
+            b.map_prg_16k(0, bank >> 1);
+            b.map_prg_16k(2, 0);
+        }
+        b.map_chr_8k(0);
+        if self.mirroring_452() {
+            NametableMirroring::Horizontal
+        } else {
+            NametableMirroring::Vertical
+        }
+    }
+
+    /// `prg_fix_452`'s `memmap_wram_8k` calls: one bit per `$8000-$FFFF` window the work RAM
+    /// covers.
+    const fn ram_windows_452(&self) -> u8 {
+        let (a, d) = (self.regs[0], self.regs[1]);
+        if self.submapper == 1 {
+            let slot = (a >> 9) & 0x03;
+            return match a & 0xF000 {
+                0xA000 | 0xC000 | 0xE000 => 1 << slot,
+                0xD000 => (1 << (slot & 0x01)) | (1 << (2 | (slot & 0x01))),
+                _ => 0,
+            };
+        }
+        let slot = (d >> 4) & 0x03;
+        let mut windows = 1 << slot;
+        if d & 0x02 != 0 {
+            windows |= 1 << (slot ^ 0x02);
+        }
+        windows
+    }
+
+    /// Where `address` falls in 452's work RAM, when a RAM window covers it.
+    fn ram_offset_452(&self, address: u16) -> Option<usize> {
+        let window = usize::from(address >> 13) & 0x03;
+        (address >= 0x8000 && self.ram_windows_452() & (1 << window) != 0)
+            .then(|| usize::from(address & 0x1FFF))
     }
 
     /// `map_init_347`: the *Doki Doki Panic* dump whose PRG CRC is `$FA4DAC91` predates the
@@ -1236,7 +1328,8 @@ impl MultiP {
             }
             // `extcl_cpu_rd_mem_428`: open bus with the two DIP bits (0) below; this core's open
             // bus is whole, so the read is open bus (J37).
-            MultiPKind::M122 | MultiPKind::M428 | MultiPKind::M434 => Some(None),
+            // `wram_fix_452`: `$6000-$7FFF` disabled there.
+            MultiPKind::M122 | MultiPKind::M428 | MultiPKind::M434 | MultiPKind::M452 => Some(None),
             // `wram_fix_415`: `$6000-$7FFF` an 8 KiB PRG-ROM bank from D0-D3.
             MultiPKind::M415 => {
                 let bank = usize::from(self.regs[0] & 0x0F);
@@ -1368,6 +1461,9 @@ impl Mapper for MultiP {
         address: u16,
         value: u8,
     ) -> bool {
+        if self.kind == MultiPKind::M452 && address < 0x8000 {
+            return (0x6000..=0x7FFF).contains(&address);
+        }
         if self.kind == MultiPKind::M347 && address < 0x8000 {
             self.write_347(memory, address, value);
             return (0x6000..=0x7FFF).contains(&address);
@@ -1405,6 +1501,18 @@ impl Mapper for MultiP {
         if self.kind == MultiPKind::M347 {
             self.write_347(memory, address, value);
         }
+        // `extcl_cpu_wr_mem_452`: a write to a RAM window is a RAM write and latches nothing.
+        if let Some(offset) = (self.kind == MultiPKind::M452)
+            .then(|| self.ram_offset_452(address))
+            .flatten()
+        {
+            let ram = memory.prg_ram_mut();
+            if !ram.is_empty() {
+                let len = ram.len();
+                ram[offset % len] = value;
+            }
+            return;
+        }
         self.latch(address, value);
         if let Some(mirroring) = self.map() {
             memory.set_mirroring(mirroring);
@@ -1427,6 +1535,14 @@ impl Mapper for MultiP {
         if self.kind == MultiPKind::M539 {
             windows[0] = NO_ROM_WINDOW;
             windows[2] = NO_ROM_WINDOW;
+        }
+        if self.kind == MultiPKind::M452 {
+            let ram = self.ram_windows_452();
+            for (slot, window) in windows.iter_mut().enumerate() {
+                if ram & (1 << slot) != 0 {
+                    *window = NO_ROM_WINDOW;
+                }
+            }
         }
         // 347's RAM at `$B800` and its pieces at `$C000-$D7FF`.
         if self.kind == MultiPKind::M347 {
@@ -1473,6 +1589,12 @@ impl Mapper for MultiP {
         }
         if self.kind == MultiPKind::M347 && address >= 0x8000 {
             return self.read_347(memory, address);
+        }
+        if self.kind == MultiPKind::M452 {
+            if let Some(offset) = self.ram_offset_452(address) {
+                let ram = memory.prg_ram();
+                return Some((!ram.is_empty()).then(|| ram[offset % ram.len()]));
+            }
         }
         // `extcl_cpu_rd_mem_237`: with A0 of the address register set, `$8000-$FFFF` reads the
         // DIP switches (none set here: J37); 338's two DIP reads the same way.

@@ -1301,3 +1301,17 @@ fn mappers_p_442_banks_and_latches_a9_for_its_1bpp_mode() {
     core.mapper_write(0x5000, 0xC3);
     assert_eq!(4, core.chr_bank(0x0000));
 }
+
+/// `mapper_452.c`: a write to ROM latches address and data; data D3 the four 8 KiB banks from
+/// the address, D4-D5 the window the work RAM covers, where a write is a RAM write.
+#[cfg(feature = "board-452")]
+#[test]
+fn mappers_p_452_latches_rom_writes_and_moves_its_ram() {
+    let mut core = MapperRom::new(452).prg(32).chr(0).load();
+    assert_eq!([0, 1, 0, 1], core.prg_windows());
+    core.mapper_write(0xA00A, 0x18);
+    assert_eq!([4, 0, 6, 7], core.prg_windows());
+    core.mapper_write(0xA010, 0x77);
+    assert_eq!(0x77, core.read_memory(0xA010));
+    assert_eq!([4, 0, 6, 7], core.prg_windows());
+}

@@ -121,7 +121,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 446 | `mapper_446.c` | 746 | 4 | 0 | todo |
 | 447 | `mapper_447.c` | 98 | 1 | 0 | done (batch 16, `VrcP`) |
 | 451 | `mapper_451.c` | 147 | 2 | 0 | todo |
-| 452 | `mapper_452.c` | 119 | 1 | 0 | todo |
+| 452 | `mapper_452.c` | 119 | 1 | 0 | done (batch 40, `MultiP`) |
 | 455 | `mapper_455.c` | 97 | 1 | 0 | done (batch 14, `Mmc3P`) |
 | 456 | `mapper_456.c` | 83 | 1 | 0 | done (batch 14, `Mmc3P`) |
 | 457 | `mapper_457.c` | 86 | 1 | 0 | done (batch 14, `Mmc3P`) |
@@ -295,3 +295,6 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   A0/A9 latched on the rise of A13 in `on_ppu_address_bus` (both PPU-bus lists and the mf_3b
   sweep, as mapper 164) and substituted for CHR A3/A12 in `ppu_peek`; `chr_peek_view` is `None`
   for it.
+* Batch 40: `MultiP` 452 (DS-9-27): a write to ROM latches address and data (438's arm); the
+  8 KiB work RAM covers one or two `$8000-$FFFF` windows (`ram_windows_452`), which leave the ROM
+  cache and take writes as RAM; submapper 1's top-nibble decode as puNES has it.
