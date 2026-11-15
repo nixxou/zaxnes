@@ -26,6 +26,8 @@ use super::mappers::IremLrog017;
 use super::mappers::Jv001;
 #[cfg(feature = "board-jy-asic")]
 use super::mappers::JyCompany;
+#[cfg(feature = "board-303")]
+use super::mappers::Kaiser7017;
 #[cfg(feature = "board-218")]
 use super::mappers::MagicFloor;
 #[cfg(feature = "board-91")]
@@ -615,6 +617,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     301,
     #[cfg(feature = "board-302")]
     302,
+    #[cfg(feature = "board-303")]
+    303,
     #[cfg(feature = "board-304")]
     304,
     #[cfg(feature = "board-305")]
@@ -725,12 +729,12 @@ fn datach_has_external_eeprom(header: &InesHeader) -> bool {
 /// The MAPPERS-N boards whose iNES 1.0 CHR-RAM is Mesen2's 8 KiB default (see
 /// [`board_memory_sizes`]).
 const MAPPERS_N_CHR_RAM_8K: &[i32] = &[
-    39, 40, 42, 43, 44, 45, 46, 49, 50, 51, 52, 54, 56, 57, 58, 59, 60, 61, 62, 63, 104, 106, 108,
-    113, 117, 120, 125, 126, 134, 142, 148, 166, 167, 170, 171, 174, 177, 179, 183, 196, 197, 200,
-    201, 202, 203, 204, 205, 212, 213, 214, 216, 217, 221, 222, 224, 226, 227, 229, 230, 231, 233,
-    235, 236, 238, 240, 241, 242, 244, 245, 249, 250, 254, 255, 258, 259, 261, 265, 274, 283, 285,
-    286, 287, 288, 289, 290, 299, 300, 301, 302, 304, 305, 306, 309, 312, 313, 314, 319, 320, 324,
-    325, 329, 331, 332, 333, 336, 346, 348, 349, 366, 521, 522,
+    39, 40, 42, 43, 44, 45, 46, 49, 50, 51, 52, 54, 56, 57, 58, 59, 60, 61, 62, 63, 103, 104, 106,
+    108, 113, 117, 120, 125, 126, 134, 142, 148, 166, 167, 170, 171, 174, 177, 179, 183, 196, 197,
+    200, 201, 202, 203, 204, 205, 212, 213, 214, 216, 217, 221, 222, 224, 226, 227, 229, 230, 231,
+    233, 235, 236, 238, 240, 241, 242, 244, 245, 249, 250, 254, 255, 258, 259, 261, 265, 274, 283,
+    285, 286, 287, 288, 289, 290, 299, 300, 301, 302, 303, 304, 305, 306, 307, 309, 312, 313, 314,
+    319, 320, 324, 325, 329, 331, 332, 333, 336, 346, 348, 349, 366, 521, 522,
 ];
 
 /// The volatile-memory sizes of `mapper`'s board for `header`.
@@ -2138,6 +2142,8 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         )))),
         #[cfg(feature = "board-168")]
         168 => Board::IrqBoard(IrqBoard::Racermate(Box::new(Racermate::new(memory)))),
+        #[cfg(feature = "board-303")]
+        303 => Board::IrqBoard(IrqBoard::Kaiser7017(Box::new(Kaiser7017::new(memory)))),
         #[cfg(feature = "board-252")]
         252 => Board::IrqBoard(IrqBoard::Waixing252(Box::new(Waixing252::new(memory)))),
         #[cfg(feature = "board-253")]

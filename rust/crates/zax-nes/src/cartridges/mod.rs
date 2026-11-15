@@ -574,6 +574,8 @@ const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
             | 252
             // MAPPERS-N: mapper 168's counter runs from power-on (nesdev "INES Mapper 168").
             | 168
+            // MAPPERS-N: mapper 303's counter, `Kaiser7017.h` `ProcessCpuClock`.
+            | 303
             // MAPPERS-N: the CPU-clocked counters of `IrqLatch`.
             | 56
             | 142

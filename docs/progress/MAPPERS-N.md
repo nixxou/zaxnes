@@ -126,3 +126,5 @@ Owner's request (2026-11-15): implement the mappers missing compared with the ot
   103 verified on Doki Doki Panic (world 1-1); the three others have no dump. The
   `nametable_pages_vary` list left `Cartridge::create` for a const fn, as the clock list did.
   Remaining: 53 260 266 284 303 323 328 487 513 518 519 529 530 682.
+* 303 (KS7017) in `IrqBoard`, no dump. Remaining: 53 260 266 284 323 328 487 513 518 519 529
+  530 682.

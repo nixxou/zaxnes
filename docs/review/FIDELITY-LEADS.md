@@ -937,6 +937,12 @@ CHR-RAM) and puNES (`mapper_198.c`, banks from `$50` folding onto `$40-$4F`). Th
 password screen cleanly; the later `[T+ChSFIX2]` and `[T+ChTFIX2]` patches show stray glyphs on
 the password screen, not investigated (translation hacks; their CHR use may differ).
 
+### J25. Mapper 303 (KS7017): the `$4030` status read
+Mesen2 (`Kaiser7017.h` `ReadRegister`) answers `$4030` with 1 while the IRQ is pending, 0 else,
+and acknowledges it; puNES (`mapper_303.c`) acknowledges and computes the same value but returns
+the work-RAM read at `$4030` instead, which looks like an oversight. This board answers the full
+byte as Mesen2 does (bits 7-1 zero, where the hardware's open bus is unknown). No dump at hand.
+
 ### J24. Mappers 31, 103, 175 and 307 (`FineRom`): where the sources part
 * 31: nesdev ("INES Mapper 031") sets only `$5FFF` to `$FF` at power-on and says it does not
   change on reset; Mesen2 (`NsfCart31.h`) leaves the seven others at 0, puNES (`mapper_031.c`)

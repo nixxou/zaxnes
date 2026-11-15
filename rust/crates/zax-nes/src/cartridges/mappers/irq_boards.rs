@@ -8,6 +8,8 @@ use super::Huang1;
 use super::IrqLatch;
 #[cfg(feature = "board-jy-asic")]
 use super::JyCompany;
+#[cfg(feature = "board-303")]
+use super::Kaiser7017;
 #[cfg(feature = "board-91")]
 use super::Mapper091;
 #[cfg(feature = "board-219")]
@@ -351,6 +353,9 @@ pub enum IrqBoard {
     /// Mapper 168, RacerMate Challenge II (lot MAPPERS-N).
     #[cfg(feature = "board-168")]
     Racermate(Box<Racermate>),
+    /// Mapper 303, Kaiser KS7017 (lot MAPPERS-N).
+    #[cfg(feature = "board-303")]
+    Kaiser7017(Box<Kaiser7017>),
     #[cfg(feature = "board-252")]
     Waixing252(Box<Waixing252>),
     #[cfg(feature = "board-253")]
@@ -416,6 +421,8 @@ macro_rules! inner {
             IrqBoard::Mmc3Clone($b) => $body,
             #[cfg(feature = "board-168")]
             IrqBoard::Racermate($b) => $body,
+            #[cfg(feature = "board-303")]
+            IrqBoard::Kaiser7017($b) => $body,
             #[cfg(feature = "board-252")]
             IrqBoard::Waixing252($b) => $body,
             #[cfg(feature = "board-253")]
@@ -672,7 +679,7 @@ impl Mapper for IrqBoard {
     /// **Behaviour-neutral for the other boards of this enum**: none of the fourteen overrides
     /// either method, so each one's own default is `Mapper::cpu_peek_override`'s `None` -- the
     /// same answer the un-forwarded dispatch gave them.
-    #[cfg(feature = "board-292")]
+    #[cfg(any(feature = "board-292", feature = "board-303"))]
     #[inline(never)]
     fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
         inner!(self, b => b.cpu_read_override(memory, address))
@@ -680,7 +687,7 @@ impl Mapper for IrqBoard {
 
     /// The side-effect-free counterpart, for the same board and the same reason: without it
     /// `Mapper::cpu_read_override`'s own default would route a host peek through the fill.
-    #[cfg(feature = "board-292")]
+    #[cfg(any(feature = "board-292", feature = "board-303"))]
     #[inline(never)]
     fn cpu_peek_override(&self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
         inner!(self, b => b.cpu_peek_override(memory, address))

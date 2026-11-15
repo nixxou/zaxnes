@@ -826,3 +826,25 @@ fn mappers_n_307_mixes_rom_and_ram_and_pages_each_table() {
         [0, 1, 2, 3].map(|table| board.nametable_page(table))
     );
 }
+
+/// Mesen2 `Kaiser7017.h` and puNES `mapper_303.c`: the bank from the address of a `$4A00-$4AFF`
+/// write, mapped by a `$5100` write, `$C000` bank 2; a 16-bit counter from `$4020`/`$4021` that
+/// raises the IRQ at 0, read and acknowledged at `$4030`.
+#[cfg(feature = "board-303")]
+#[test]
+fn mappers_n_303_banks_by_address_and_counts_down() {
+    let mut core = MapperRom::new(303).prg(16).chr(0).load();
+    assert_eq!([0, 1, 4, 5], core.prg_windows());
+    core.mapper_write(0x4A4C, 0); // (A >> 2) & 3 = 3, (A >> 4) & 4 = 4: bank 7
+    assert_eq!([0, 1, 4, 5], core.prg_windows());
+    core.mapper_write(0x5100, 0);
+    assert_eq!([14, 15, 4, 5], core.prg_windows());
+    core.mapper_write(0x4020, 0x10);
+    core.mapper_write(0x4021, 0x00);
+    for _ in 0..0x20 {
+        core.bus_mut().tick();
+    }
+    assert!(core.cartridge().unwrap().irq_asserted());
+    assert_eq!(Some(1), core.cartridge_mut().unwrap().try_cpu_read(0x4030));
+    assert!(!core.cartridge().unwrap().irq_asserted());
+}

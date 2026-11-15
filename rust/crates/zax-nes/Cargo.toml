@@ -182,6 +182,7 @@ default = [
     "board-103",
     "board-175",
     "board-307",
+    "board-303",
     "board-302",
     "board-305",
     "board-306",
@@ -343,6 +344,8 @@ board-31 = ["board-fine-rom"]
 board-103 = ["board-fine-rom"]
 board-175 = ["board-fine-rom"]
 board-307 = ["board-fine-rom"]
+# MAPPERS-N: Kaiser KS7017, the 16-bit CPU-cycle IRQ (`Kaiser7017`).
+board-303 = []
 board-305 = ["board-fine-rom"]
 board-306 = ["board-latch-multi"]
 board-217 = ["board-mmc3-clones"]
