@@ -1257,3 +1257,30 @@ fn mappers_p_272_counts_pattern_fetches() {
     core.mapper_write(0xC004, 0);
     assert!(!core.cartridge().unwrap().irq_asserted());
 }
+
+/// `mapper_347.c`, the real mask-ROM layout: `$C000` and `$6C00` from `$9000`'s A0-A3, `$7000`
+/// from `$8000`'s above `$10000`, the RAM pieces at `$6000`, `$B800` and `$CC00`.
+#[cfg(feature = "board-347")]
+#[test]
+fn mappers_p_347_maps_its_pieces() {
+    let mut core = MapperRom::new(347).prg(16).chr(0).load();
+    assert_eq!([12, 13, 7, 15], core.prg_windows());
+    core.mapper_write(0x9004, 0);
+    core.mapper_write(0x8003, 0);
+    assert_eq!(
+        [2, 2, 9],
+        [0xC100, 0x6C00, 0x7000].map(|address| core.read_memory(address))
+    );
+    core.mapper_write(0xB810, 0x21);
+    core.mapper_write(0xCC10, 0x22);
+    core.mapper_write(0x6010, 0x23);
+    assert_eq!(
+        [0x21, 0x22, 0x23],
+        [0xB810, 0xCC10, 0x6010].map(|address| core.read_memory(address))
+    );
+    core.mapper_write(0x8008, 0);
+    assert_eq!(
+        zax_nes::NametableMirroring::Horizontal,
+        core.cartridge().unwrap().mirroring()
+    );
+}

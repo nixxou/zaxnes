@@ -124,6 +124,11 @@ pub enum MultiPKind {
     /// `$0D` at `$6000`, one switchable at `$A000`, with pieces of an 8 KiB work RAM laid over
     /// `$6000-$65FF`, `$8200-$82FF`, `$C000-$D1FF` and `$DF00-$DFFF` (the FDS's RAM).
     M539,
+    /// 347, `mapper_347.c` (Kaiser KS-7030, *Yume Kōjō: Doki Doki Panic* FDS conversion): the
+    /// last 32 KiB at `$8000`, two registers taken from the address (`$8000`, `$9000`) selecting
+    /// 4 KiB at `$7000` and 1 KiB + 3 KiB at `$6C00`/`$C000`, and an 8 KiB work RAM in three
+    /// pieces at `$6000`, `$B800` and `$CC00`.
+    M347,
 }
 
 impl MultiPKind {
@@ -174,6 +179,7 @@ impl MultiPKind {
             340 => Self::M340,
             557 => Self::M557,
             539 => Self::M539,
+            347 => Self::M347,
             _ => return None,
         })
     }
@@ -223,6 +229,7 @@ impl MultiPKind {
             Self::M340 => 340,
             Self::M557 => 557,
             Self::M539 => 539,
+            Self::M347 => 347,
         }
     }
 
@@ -253,6 +260,7 @@ impl MultiPKind {
                 | Self::M415
                 | Self::M428
                 | Self::M539
+                | Self::M347
         )
     }
 }
@@ -290,6 +298,8 @@ impl MultiP {
                 MultiPKind::M429 => [0x04, 0, 0, 0],
                 // `map_init_539`: `reg[1] = $08`, horizontal mirroring.
                 MultiPKind::M539 => [0, 0x08, 0, 0],
+                // `map_init_347`: both registers `$0F`; `regs[2]` is the layout flag below.
+                MultiPKind::M347 => [0x0F, 0x0F, Self::old_layout_347(memory), 0],
                 _ => [0; 4],
             },
             adc: [0; 3],
@@ -436,6 +446,12 @@ impl MultiP {
                 0x8000 => r[0] = u16::from(value),
                 0x9000 => r[1] = u16::from(value),
                 0xB000 => self.chr[usize::from(address & 0x07)] = value,
+                _ => {}
+            },
+            // `extcl_cpu_wr_mem_347`: A0-A3 of a write to `$8000-$8FFF` / `$9000-$9FFF`.
+            MultiPKind::M347 => match address & 0xF000 {
+                0x8000 => r[0] = address & 0x0F,
+                0x9000 => r[1] = address & 0x0F,
                 _ => {}
             },
             // `extcl_cpu_wr_mem_539`: `$A000-$AFFF` the PRG bank, `$F000-$FFFF` the mirroring.
@@ -994,6 +1010,15 @@ impl MultiP {
                 }
                 mirror(r[1] & 0x01 == 0)
             }
+            // `prg_fix_347`: PRG `$18000` onwards at `$8000`, the pieces in `source_347`;
+            // `mirroring_fix_347`: `reg[0]` D3 horizontal.
+            MultiPKind::M347 => {
+                for slot in 0..4 {
+                    b.map_prg_8k(slot, 12 + i32::try_from(slot).unwrap_or(0));
+                }
+                b.map_chr_8k(0);
+                mirror(r[0] & 0x08 == 0)
+            }
             // `prg_fix_539`/`mirroring_fix_539`.
             MultiPKind::M539 => {
                 b.map_prg_8k(0, 0x0C);
@@ -1085,6 +1110,61 @@ impl MultiP {
             // `extcl_cpu_rd_mem_380`: submapper 0 with A8 latched reads `(A0-A7) | DIP`.
             MultiPKind::M380 => self.submapper == 0 && self.regs[0] & 0x100 != 0,
             _ => false,
+        }
+    }
+
+    /// `map_init_347`: the *Doki Doki Panic* dump whose PRG CRC is `$FA4DAC91` predates the
+    /// mask ROM's real layout (July 2020) and keeps the old bank order (1 for that layout).
+    fn old_layout_347(memory: &CartridgeMemory) -> u16 {
+        u16::from(crate::builtin_patches::crc32(memory.rom().prg_rom()) == 0xFA4D_AC91)
+    }
+
+    /// `prg_fix_347`/`wram_fix_347`: what `address` shows outside the plain `$18000` mapping —
+    /// work RAM (`true`) or PRG-ROM (`false`), and the offset in it.
+    fn source_347(&self, address: u16) -> Option<(bool, usize)> {
+        let old = self.regs[2] != 0;
+        let a = usize::from(address);
+        let (r0, r1) = (usize::from(self.regs[0]), usize::from(self.regs[1]));
+        Some(match address {
+            0x6000..=0x6BFF => (true, a - 0x6000),
+            0x6C00..=0x6FFF => (
+                false,
+                r1 * 0x1000 + if old { 0x8000 } else { 0x0C00 } + (a & 0x03FF),
+            ),
+            0x7000..=0x7FFF => (
+                false,
+                (r0 & 0x07) * 0x1000 + if old { 0 } else { 0x1_0000 } + (a & 0x0FFF),
+            ),
+            0xB800..=0xBFFF => (true, 0x0C00 + (a - 0xB800)),
+            0xC000..=0xCBFF => (
+                false,
+                r1 * 0x1000 + if old { 0x8400 } else { 0 } + (a - 0xC000),
+            ),
+            0xCC00..=0xD7FF => (true, 0x1400 + (a - 0xCC00)),
+            _ => return None,
+        })
+    }
+
+    /// A read of one of 347's pieces, `None` outside them; `Some(None)` without the memory.
+    #[allow(clippy::option_option)]
+    fn read_347(&self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+        let (ram, offset) = self.source_347(address)?;
+        let bytes = if ram {
+            memory.prg_ram()
+        } else {
+            memory.rom().prg_rom()
+        };
+        Some((!bytes.is_empty()).then(|| bytes[offset % bytes.len()]))
+    }
+
+    /// A CPU write to one of 347's RAM pieces.
+    fn write_347(&self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        if let Some((true, offset)) = self.source_347(address) {
+            let ram = memory.prg_ram_mut();
+            if !ram.is_empty() {
+                let len = ram.len();
+                ram[offset % len] = value;
+            }
         }
     }
 
@@ -1181,6 +1261,7 @@ impl MultiP {
                 });
                 Some(Self::rom_8k(memory, bank, address))
             }
+            MultiPKind::M347 => self.read_347(memory, address),
             // `wram_fix_539`: PRG-ROM bank `$0D` under the RAM pieces.
             MultiPKind::M539 => {
                 Self::ram_539(memory, address).or_else(|| Some(Self::rom_8k(memory, 0x0D, address)))
@@ -1261,6 +1342,14 @@ impl Mapper for MultiP {
     /// 352 and 381 count the console's resets (`map_init_352`/`map_init_381` on `RESET`): the
     /// count picks the game. The other kinds keep the default, nothing.
     fn soft_reset(&mut self, memory: &mut CartridgeMemory) {
+        // `map_init_347` sets both registers to `$0F` on every reset, not only at power-on.
+        if self.kind == MultiPKind::M347 {
+            self.regs[0] = 0x0F;
+            self.regs[1] = 0x0F;
+            if let Some(mirroring) = self.map() {
+                memory.set_mirroring(mirroring);
+            }
+        }
         if matches!(self.kind, MultiPKind::M352 | MultiPKind::M381) {
             self.regs[3] = self.regs[3].wrapping_add(1) & 0xFF;
             if let Some(mirroring) = self.map() {
@@ -1279,6 +1368,10 @@ impl Mapper for MultiP {
         address: u16,
         value: u8,
     ) -> bool {
+        if self.kind == MultiPKind::M347 && address < 0x8000 {
+            self.write_347(memory, address, value);
+            return (0x6000..=0x7FFF).contains(&address);
+        }
         if self.kind == MultiPKind::M539 && address < 0x8000 {
             Self::write_ram_539(memory, address, value);
             return (0x6000..=0x7FFF).contains(&address);
@@ -1309,6 +1402,9 @@ impl Mapper for MultiP {
         if self.kind == MultiPKind::M539 {
             Self::write_ram_539(memory, address, value);
         }
+        if self.kind == MultiPKind::M347 {
+            self.write_347(memory, address, value);
+        }
         self.latch(address, value);
         if let Some(mirroring) = self.map() {
             memory.set_mirroring(mirroring);
@@ -1330,6 +1426,11 @@ impl Mapper for MultiP {
         // 539's RAM pieces at `$8200` and `$C000`/`$DF00` take those two windows off the cache.
         if self.kind == MultiPKind::M539 {
             windows[0] = NO_ROM_WINDOW;
+            windows[2] = NO_ROM_WINDOW;
+        }
+        // 347's RAM at `$B800` and its pieces at `$C000-$D7FF`.
+        if self.kind == MultiPKind::M347 {
+            windows[1] = NO_ROM_WINDOW;
             windows[2] = NO_ROM_WINDOW;
         }
         windows
@@ -1369,6 +1470,9 @@ impl Mapper for MultiP {
         }
         if self.kind == MultiPKind::M539 && address >= 0x8000 {
             return Self::ram_539(memory, address);
+        }
+        if self.kind == MultiPKind::M347 && address >= 0x8000 {
+            return self.read_347(memory, address);
         }
         // `extcl_cpu_rd_mem_237`: with A0 of the address register set, `$8000-$FFFF` reads the
         // DIP switches (none set here: J37); 338's two DIP reads the same way.

@@ -54,13 +54,13 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 343 | `mapper_343.c` | 71 | 0 | 0 | done (batch 2, `MultiP`) |
 | 344 | `mapper_344.c` | 125 | 3 | 0 | done (batch 24, `Mmc3P`) |
 | 345 | `mapper_345.c` | 102 | 0 | 0 | done (batch 12, `Mmc3P`) |
-| 347 | `mapper_347.c` | 122 | 2 | 0 | todo |
+| 347 | `mapper_347.c` | 122 | 2 | 0 | done (batch 38, `MultiP`) |
 | 350 | `mapper_350.c` | 99 | 0 | 0 | done (batch 3, `MultiP`) |
 | 351 | `mapper_351.c` | 305 | 0 | 0 | todo |
 | 352 | `mapper_352.c` | 66 | 0 | 0 | done (batch 2, `MultiP`) |
 | 353 | `mapper_353.c` | 149 | 1 | 0 | done (batch 28, `Mmc3P`) |
 | 354 | `mapper_354.c` | 111 | 0 | 0 | done (batch 4, `MultiP`) |
-| 355 | `mapper_355.c` | 258 | 4 | 1 | todo |
+| 355 | `mapper_355.c` | 258 | 4 | 1 | blocked (needs a PIC16C5x core, see batch 38) |
 | 356 | `mapper_356.c` | 106 | 1 | 0 | done (batch 25, `Mmc3P`) |
 | 357 | `mapper_357.c` | 118 | 1 | 0 | done (batch 18, `IrqP`) |
 | 358 | `mapper_358.c` | 76 | 4 | 0 | done (batch 3, `JyCompany` + `JyMulticart`) |
@@ -285,3 +285,9 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 * Batch 37: `IrqP` 272 (J.Y. *Akumajō Special* bootleg): two decodes per write, nibble CHR
   registers, and an IRQ stepped by each low-plane pattern fetch (in `watches_ppu_reads` only;
   absent from the mf_3b expectations, since its counter moves only once enabled).
+* Batch 38: `MultiP` 347 (Kaiser KS-7030, *Doki Doki Panic* conversion): 1 KiB-grained pieces
+  of PRG-ROM and an 8 KiB RAM over `$6000-$7FFF`, `$B800-$BFFF` and `$C000-$D7FF`
+  (`source_347`); the dump with PRG CRC `$FA4DAC91` keeps the pre-2020 bank order, as puNES
+  checks; both registers return to `$0F` on a soft reset. 355 (*3D Block*) is blocked: its
+  board runs a PIC16C5x microcontroller program (puNES embeds the EPROM and a PIC core), which
+  is a CPU emulator of its own.

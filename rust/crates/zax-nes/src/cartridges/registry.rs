@@ -766,6 +766,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     345,
     #[cfg(feature = "board-346")]
     346,
+    #[cfg(feature = "board-347")]
+    347,
     #[cfg(feature = "board-348")]
     348,
     #[cfg(feature = "board-349")]
@@ -1010,6 +1012,7 @@ fn datach_has_external_eeprom(header: &InesHeader) -> bool {
 /// The MAPPERS-N boards whose iNES 1.0 CHR-RAM is Mesen2's 8 KiB default (see
 /// [`board_memory_sizes`]).
 const MAPPERS_N_CHR_RAM_8K: &[i32] = &[
+    347,
     558, 539, 368, 357, 311, 340, 564, 541, 538, 481, 437, 434, 433, 431, 415, 409, 396, 382, 380,
     354, 375, 350, 337, 381, 237, 39, 40, 42, 43, 44, 45, 46, 49, 50, 51, 52, 54, 56, 57, 58, 59,
     60, 61, 53, 62, 63, 103, 104, 106, 108, 113, 117, 120, 125, 126, 134, 142, 148, 166, 167, 170,
@@ -3496,6 +3499,8 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
             memory,
             IrqPKind::of(mapper)?,
         )))),
+        #[cfg(feature = "board-347")]
+        347 => Board::DecodeBoard(DecodeBoard::MultiP(MultiP::new(memory, MultiPKind::of(mapper)?))),
         #[cfg(feature = "board-299")]
         299 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
             memory,
