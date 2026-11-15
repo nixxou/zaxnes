@@ -144,7 +144,12 @@ Callgrind, clean builds, PR-1 set against 6c9cb163 (before FIDPLUS-A):
 | 7c7d3c52 (step 1) | +0.001 % | — |
 | bcfd363e (step 4) | +2.31 % (`metroid`), +1.95 % `mm2`, +1.79 % `smb1` | `step_dot` outlined from `run_dots`: the Fidélité+ loop gave it more callers |
 | c5836c29 | +0.995 % `duelito`, +0.61 % `mmc5`, +0.57 % `smb3` (most ROMs -0.2 to -0.7 %) | `step_dot` pinned; `process_dot` and `run_visible_span_through_bus` then outlined (`smb3`) |
-| 0b5dbf58 | (measuring) | `process_dot` and both span functions pinned; the Fidélité+ paths call `step_dot_out_of_line` |
+| 0b5dbf58 | worse (+3.35 % `duelito`) | `process_dot` and both span functions pinned; the Fidélité+ paths call `step_dot_out_of_line` |
+| d66853a5 | +0.344 % `metroid`, +0.29 % `mm2`, +0.28 % `z2` (`smb3`, `mmc5`, `m4` ±0.002 %) | `Fid<K>` (a compile-time copy of the bus and PPU code for Fidélité+): no outlining left; the rest on `render.rs` line 159, a file identical to the base: the PPU's new fields moved the standard layout |
+| 2f49ab4f | +0.001 % (`metroid`, `duelito`, `oamstr`, `vblnmi`, `z2`); the 13 ROMs within ±0.002 % | the Fidélité+ fields boxed apart (`edges::FidState`): the PPU's standard layout is the base's again |
+
+Lesson: a field added to a hot struct changes its layout, and the codegen of a loop that never
+reads it (here the background shifters). State only a separate path uses goes behind a `Box`.
 
 Found with `callgrind_annotate` per function, base against new: the regressed functions are
 always a callee appearing with a body of its own.
