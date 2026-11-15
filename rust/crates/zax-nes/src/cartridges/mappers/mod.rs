@@ -43,10 +43,6 @@ mod eeprom24c0x;
 mod eeprom93c66;
 #[cfg(feature = "board-fine-rom")]
 mod fine_rom;
-#[cfg(feature = "board-111")]
-mod mmc1_parallel;
-#[cfg(feature = "board-234")]
-mod maxi15;
 #[cfg(feature = "board-176")]
 mod fk23c;
 mod fme7;
@@ -80,7 +76,11 @@ mod latch_multi;
 mod magic_floor;
 #[cfg(feature = "board-91")]
 mod mapper091;
+#[cfg(feature = "board-234")]
+mod maxi15;
 mod mmc1;
+#[cfg(feature = "board-111")]
+mod mmc1_parallel;
 mod mmc2;
 mod mmc3;
 #[cfg(feature = "board-219")]
@@ -164,6 +164,8 @@ mod vrc7;
 mod vrc_irq;
 #[cfg(feature = "board-vs-system")]
 mod vs_system;
+#[cfg(feature = "board-252")]
+mod waixing252;
 #[cfg(feature = "board-253")]
 mod waixing253;
 #[cfg(feature = "board-178")]
@@ -194,10 +196,6 @@ pub use eeprom24c0x::{Eeprom24C0X, EepromKind, EepromPort};
 pub use eeprom93c66::Eeprom93C66;
 #[cfg(feature = "board-fine-rom")]
 pub use fine_rom::{FineRom, FineRomKind};
-#[cfg(feature = "board-111")]
-pub use mmc1_parallel::Mmc1Parallel;
-#[cfg(feature = "board-234")]
-pub use maxi15::Maxi15;
 #[cfg(feature = "board-176")]
 pub use fk23c::Fk23c;
 pub use fme7::Fme7;
@@ -231,7 +229,11 @@ pub use latch_multi::{LatchKind, LatchMulti};
 pub use magic_floor::MagicFloor;
 #[cfg(feature = "board-91")]
 pub use mapper091::Mapper091;
+#[cfg(feature = "board-234")]
+pub use maxi15::Maxi15;
 pub use mmc1::Mmc1;
+#[cfg(feature = "board-111")]
+pub use mmc1_parallel::Mmc1Parallel;
 pub use mmc2::Mmc2;
 #[cfg(feature = "board-191")]
 pub use mmc3::Mmc3ChrRam191;
@@ -328,6 +330,8 @@ pub use vrc6::Vrc6;
 pub use vrc7::Vrc7;
 #[cfg(feature = "board-vs-system")]
 pub use vs_system::VsBoard;
+#[cfg(feature = "board-252")]
+pub use waixing252::Waixing252;
 #[cfg(feature = "board-253")]
 pub use waixing253::Waixing253;
 #[cfg(feature = "board-178")]

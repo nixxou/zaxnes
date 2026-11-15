@@ -44,6 +44,8 @@ use super::Sunsoft4;
 use super::Tengen800037;
 #[cfg(feature = "board-119")]
 use super::Tqrom;
+#[cfg(feature = "board-252")]
+use super::Waixing252;
 #[cfg(feature = "board-253")]
 use super::Waixing253;
 use super::{IremH3001, Mapper, Sunsoft3, TaitoTc0690, Vrc3};
@@ -343,6 +345,9 @@ pub enum IrqBoard {
     #[cfg(feature = "board-mmc3-clones")]
     Mmc3Clone(Box<Mmc3Clone>),
     /// Mapper 253, the Waixing VRC4-like board with 2 KiB of CHR-RAM (lot MAPPERS-N).
+    /// Mapper 252, the Waixing VRC4 clone with CHR-RAM chosen by mask/compare (lot MAPPERS-N).
+    #[cfg(feature = "board-252")]
+    Waixing252(Box<Waixing252>),
     #[cfg(feature = "board-253")]
     Waixing253(Box<Waixing253>),
     /// Mappers 40, 42, 43, 50, 106, 117, 183 and 222, the small boards with an IRQ counter (lot
@@ -404,6 +409,8 @@ macro_rules! inner {
             IrqBoard::Mapper091($b) => $body,
             #[cfg(feature = "board-mmc3-clones")]
             IrqBoard::Mmc3Clone($b) => $body,
+            #[cfg(feature = "board-252")]
+            IrqBoard::Waixing252($b) => $body,
             #[cfg(feature = "board-253")]
             IrqBoard::Waixing253($b) => $body,
             #[cfg(feature = "board-irq-latch")]

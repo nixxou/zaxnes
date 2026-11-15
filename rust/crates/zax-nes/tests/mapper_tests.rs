@@ -256,7 +256,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let sachen8259 = cfg!(feature = "board-sachen8259");
     let huang1 = cfg!(feature = "board-huang1");
     let cony = cfg!(feature = "board-cony");
-    let additions: [(i32, bool); 231] = [
+    let additions: [(i32, bool); 232] = [
         (6, cfg!(feature = "board-6")),
         (8, cfg!(feature = "board-8")),
         (12, huang1),
@@ -442,6 +442,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (246, cfg!(feature = "board-246")),
         (249, cfg!(feature = "board-249")),
         (250, cfg!(feature = "board-250")),
+        (252, cfg!(feature = "board-252")),
         (253, cfg!(feature = "board-253")),
         (254, cfg!(feature = "board-254")),
         (255, cfg!(feature = "board-255")),

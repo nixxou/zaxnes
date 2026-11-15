@@ -81,6 +81,8 @@ use super::mappers::Tengen800037;
 use super::mappers::Tqrom;
 #[cfg(feature = "board-vs-system")]
 use super::mappers::VsBoard;
+#[cfg(feature = "board-252")]
+use super::mappers::Waixing252;
 #[cfg(feature = "board-253")]
 use super::mappers::Waixing253;
 #[cfg(feature = "board-178")]
@@ -537,6 +539,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     249,
     #[cfg(feature = "board-250")]
     250,
+    #[cfg(feature = "board-252")]
+    252,
     #[cfg(feature = "board-253")]
     253,
     #[cfg(feature = "board-254")]
@@ -944,6 +948,13 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         },
         // MAPPERS-N: "GetChrRamSize() { return 0x800; }" (Mesen2 `Mapper253.h:21`).
         // A CHR-RAM-only image keeps the header's size: the 2 KiB is the chip beside the CHR-ROM.
+        // MAPPERS-N: the 2 KiB beside the CHR-ROM (cartridge database `8B7EE49B`, puNES
+        // `mapper_252.c` mapping it through `vram`).
+        #[cfg(feature = "board-252")]
+        252 if header.chr_rom_size != 0 => BoardMemorySizes {
+            chr_ram: Some(Waixing252::CHR_RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
         #[cfg(feature = "board-253")]
         253 if header.chr_rom_size != 0 => BoardMemorySizes {
             chr_ram: Some(Waixing253::CHR_RAM_SIZE),
@@ -2037,6 +2048,8 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
             memory,
             Mmc3CloneKind::of(mapper)?,
         )))),
+        #[cfg(feature = "board-252")]
+        252 => Board::IrqBoard(IrqBoard::Waixing252(Box::new(Waixing252::new(memory)))),
         #[cfg(feature = "board-253")]
         253 => Board::IrqBoard(IrqBoard::Waixing253(Box::new(Waixing253::new(memory)))),
         #[cfg(feature = "board-57")]

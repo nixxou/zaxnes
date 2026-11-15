@@ -918,6 +918,16 @@ gives a board no mutable access to the cartridge memory, so a mirroring change l
 Maxi 15, Maxi 1P) go from the menu into a game correctly. Every PRG read of the board goes
 through `cpu_read_override` (no cached window), its cost bounded to this board.
 
+### J19. Mapper 252: Mesen2's decode, puNES's CHR-RAM
+Mesen2 (`Waixing252.h`) has no CHR-RAM for 252 and lets the game write into CHR-ROM ("CHR needs to
+be writeable (according to Nestopia's source)"), and decodes no mirroring register. puNES
+(`mapper_252.c`) maps 2 KiB of CHR-RAM for register values matching `mask`/`compare` (`$FE`/`$06`,
+switched by CHR writes through windows holding `$88`, `$C2` or `$C8`) and decodes the VRC4's `$9000`
+mirroring. This board takes Mesen2's register and IRQ decode and puNES's CHR-RAM and mirroring; the
+cartridge database gives the dump 2 KiB of CHR-RAM. The two good Hackset dumps (`san_guo_zhi_ch`,
+`_b2`) show the Waixing logo and the Chinese menu, whose text is drawn in that RAM; `_b1` is a bad
+dump.
+
 ### J15. Mapper 15: CHR-RAM write protection only on the K-1029
 MR-15-1 (from nesdev: "CHR-RAM is write-protected in PRG banking modes 0 and 3") write-protected
 every mapper-15 image. The same nesdev page says the K-1029 multicarts are the only genuine

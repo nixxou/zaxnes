@@ -624,3 +624,22 @@ fn mappers_n_234_latches_on_reads_and_locks() {
         assert_eq!(expected, core.prg_windows());
     }
 }
+
+/// puNES `mapper_252.c`: a CHR register value whose bits under `$FE` equal `$06` (6 or 7) maps
+/// the 2 KiB CHR-RAM; writing CHR through a window holding `$C8` moves the selection to `$04`/`$05`.
+/// Mesen2 `Waixing252.h` gives the register decode: CHR 0 at `$B000`/`$B004`.
+#[cfg(feature = "board-252")]
+#[test]
+fn mappers_n_252_selects_chr_ram_by_mask_and_compare() {
+    let mut core = MapperRom::new(252).prg(32).chr(128).load();
+    core.mapper_write(0xB000, 0x06); // CHR 0 = 6: CHR-RAM page 0
+    core.cartridge_mut().unwrap().ppu_write(0x0000, 0xA5);
+    assert_eq!(0xA5, core.chr_bank(0x0000));
+    // CHR 1 = $C8, then a CHR write through it switches the compare to $04.
+    core.mapper_write(0xB008, 0x08);
+    core.mapper_write(0xB00C, 0x0C);
+    core.cartridge_mut().unwrap().ppu_write(0x0400, 0x00);
+    assert_eq!(6, core.chr_bank(0x0000), "6 is CHR-ROM again");
+    core.mapper_write(0xB000, 0x04);
+    assert_eq!(0xA5, core.chr_bank(0x0000), "4 now maps CHR-RAM page 0");
+}
