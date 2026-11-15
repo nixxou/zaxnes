@@ -925,3 +925,17 @@ fn mappers_p_534_has_an_outer_bank() {
     core.mapper_write(0x6000, 0x02);
     assert_eq!([33, 34, 62, 63], core.prg_windows());
 }
+
+/// `mapper_543.c`: power-on PRG register `$0E`; four `$5000` writes shift the outer bank in by D3.
+#[cfg(feature = "board-543")]
+#[test]
+fn mappers_p_543_shifts_its_outer_bank_in() {
+    let mut core = MapperRom::new(543).prg(128).chr(0).load();
+    assert_eq!([28, 29, 30, 31], core.prg_windows());
+    for value in [0x08, 0x00, 0x00] {
+        core.mapper_write(0x5000, value);
+    }
+    assert_eq!([28, 29, 30, 31], core.prg_windows());
+    core.mapper_write(0x5000, 0x00);
+    assert_eq!([60, 61, 62, 63], core.prg_windows());
+}

@@ -196,6 +196,7 @@ default = [
     "board-266",
     "board-284",
     "board-682",
+    "board-543",
     "board-534",
     "board-422",
     "board-536",
@@ -406,6 +407,7 @@ board-168 = []
 board-latch-multi = ["board-decode-boards"]
 # MAPPERS-P umbrella: the boards of `mmc1_outer.rs`.
 board-mmc1-outer = ["board-decode-boards"]
+board-543 = ["board-mmc1-outer"]
 board-550 = ["board-mmc1-outer"]
 board-404 = ["board-mmc1-outer"]
 board-374 = ["board-mmc1-outer"]

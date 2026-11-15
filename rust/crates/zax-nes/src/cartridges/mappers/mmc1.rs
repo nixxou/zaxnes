@@ -296,9 +296,16 @@ impl Mmc1 {
     }
 
     /// The committed `$A000` register, which on the NES-EVENT is `[...I OAA.]`.
-    #[cfg(feature = "board-105")]
+    #[cfg(any(feature = "board-105", feature = "board-mmc1-outer"))]
     pub(crate) const fn chr0_register(&self) -> u8 {
         self.chr0
+    }
+
+    /// Forces `$E000` to `value` without a commit, for mapper 543's power-on `$0E` (lot
+    /// MAPPERS-P, puNES `map_init_543`). The caller refreshes the banks.
+    #[cfg(feature = "board-mmc1-outer")]
+    pub(crate) const fn force_prg_register(&mut self, value: u8) {
+        self.prg = value;
     }
 
     /// The committed `$E000` register, `[...W BBBB]` on both boards.

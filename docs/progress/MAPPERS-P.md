@@ -142,7 +142,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 539 | `mapper_539.c` | 113 | 1 | 0 | todo |
 | 540 | `mapper_359.c` | 293 | 1 | 0 | todo |
 | 541 | `mapper_541.c` | 70 | 1 | 0 | done (batch 9, `MultiP`) |
-| 543 | `mapper_543.c` | 87 | 0 | 0 | todo |
+| 543 | `mapper_543.c` | 87 | 0 | 0 | done (batch 22, `Mmc1Outer`) |
 | 547 | `mapper_547.c` | 241 | 8 | 4 | todo |
 | 550 | `mapper_550.c` | 86 | 1 | 0 | done (batch 11, `Mmc1Outer`) |
 | 551 | `mapper_178.c` | 109 | 4 | 0 | done (batch 19, `WaixingFs305`) |
@@ -235,3 +235,4 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   lists from that number and keeps the header's as `mapper_number`. The mf_3b sweep lists both.
 * Batch 21: 422 and 534 in `Mmc3P`, puNES's own `mapper_126.c` model (Zaxnes's 126 follows
   Mesen2's `MMC3_126.h` and is left as it is). 534 inverts `$C000`/`$C001` data.
+* Batch 22: `Mmc1Outer` 543 (outer register shifted in through `$5000` D3, WRAM bank from it and the MMC1's `$A000` D3, power-on `$E000` = `$0E` via `Mmc1::force_prg_register`).

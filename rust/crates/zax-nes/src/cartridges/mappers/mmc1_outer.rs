@@ -29,6 +29,9 @@ pub enum Mmc1OuterKind {
     /// 550, `mapper_550.c` (JY-215): `$7000-$7FFF` the outer bank from A0-A3, a lock in A3;
     /// outer value `x11.` selects the MMC1, anything else a latch at `$8000`.
     M550,
+    /// 543, `mapper_543.c` (CH-501 5-in-1): an outer register shifted in one bit at a time
+    /// through `$5000-$5FFF` D3, which also banks the work RAM.
+    M543,
 }
 
 impl Mmc1OuterKind {
@@ -40,6 +43,7 @@ impl Mmc1OuterKind {
             374 => Self::M374,
             404 => Self::M404,
             550 => Self::M550,
+            543 => Self::M543,
             _ => return None,
         })
     }
@@ -50,6 +54,7 @@ impl Mmc1OuterKind {
             Self::M374 => 374,
             Self::M404 => 404,
             Self::M550 => 550,
+            Self::M543 => 543,
         }
     }
 }
@@ -61,6 +66,8 @@ pub struct Mmc1Outer {
     kind: Mmc1OuterKind,
     /// The outer register and, on 297 and 550, the latch of their non-MMC1 mode.
     regs: [u8; 2],
+    /// 543's serial shift count (its accumulator is `regs[1]`).
+    shift: u8,
 }
 
 impl Mmc1Outer {
@@ -69,6 +76,7 @@ impl Mmc1Outer {
             mmc1: Mmc1::new(memory),
             kind,
             regs: [0; 2],
+            shift: 0,
         }
     }
 
@@ -77,7 +85,7 @@ impl Mmc1Outer {
         match self.kind {
             Mmc1OuterKind::M297 => self.regs[0] & 0x01 != 0,
             Mmc1OuterKind::M550 => self.regs[0] & 0x06 == 0x06,
-            Mmc1OuterKind::M374 | Mmc1OuterKind::M404 => true,
+            Mmc1OuterKind::M374 | Mmc1OuterKind::M404 | Mmc1OuterKind::M543 => true,
         }
     }
 
@@ -123,6 +131,11 @@ impl Mmc1Outer {
             }
             // The latch mode: 32 KiB `outer << 1 | D4-D7`, 8 KiB CHR `(outer << 1 & $0C) | D0-D1`;
             // the MMC1's mirroring stays.
+            // `prg_swap_mmc1_543`: 16 KiB `outer << 4 | (v & $0F)`, 4 KiB `v & 7`.
+            (Mmc1OuterKind::M543, _) => {
+                b.remap_prg_banks(0x1F, r0 << 5);
+                b.remap_chr_banks(0x1F, 0);
+            }
             (Mmc1OuterKind::M550, false) => {
                 b.map_prg_32k((r0 << 1) | (r1 >> 4));
                 b.map_chr_8k(((r0 << 1) & 0x0C) | (r1 & 0x03));
@@ -147,17 +160,25 @@ impl Mapper for Mmc1Outer {
     fn save_registers(&self, writer: &mut StateWriter) {
         self.mmc1.save_registers(writer);
         writer.write_raw(&self.regs);
+        writer.write_u8(self.shift);
     }
 
     /// The windows are in the state block already ([`Mapper::load_state`]).
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
         self.mmc1.load_registers(reader)?;
-        reader.read_into(&mut self.regs)
+        reader.read_into(&mut self.regs)?;
+        self.shift = reader.read_u8()? & 0x03;
+        Ok(())
     }
 
     fn reset(&mut self, memory: &mut CartridgeMemory) {
         self.regs = [0; 2];
+        self.shift = 0;
         self.mmc1.reset(memory);
+        // `map_init_543`: the PRG register powers on as `$0E`, so that the menu boots.
+        if self.kind == Mmc1OuterKind::M543 {
+            self.mmc1.force_prg_register(0x0E);
+        }
         self.apply(memory);
     }
 
@@ -175,8 +196,22 @@ impl Mapper for Mmc1Outer {
         self.mmc1.prg_ram_enabled()
     }
 
+    /// `wram_fix_mmc1_543`: the outer register's D1 picks a bank from D0/D2 over one from D0
+    /// and the MMC1's `$A000` D3.
     fn prg_ram_window(&self, memory: &CartridgeMemory) -> (usize, usize) {
-        self.mmc1.prg_ram_window(memory)
+        if self.kind != Mmc1OuterKind::M543 {
+            return self.mmc1.prg_ram_window(memory);
+        }
+        let r = self.regs[0];
+        let bank = if r & 0x02 != 0 {
+            0x04 | ((r & 0x04) >> 1) | (r & 0x01)
+        } else {
+            ((r & 0x01) << 1) | ((self.mmc1.chr0_register() & 0x08) >> 3)
+        };
+        (
+            usize::from(bank) * BankWindows::PRG_WINDOW_SIZE,
+            memory.prg_ram().len(),
+        )
     }
 
     /// The outer registers below `$8000`: 297's at `$4100` (A8 set, `$4000-$5FFF`), 404's at
@@ -196,6 +231,17 @@ impl Mapper for Mmc1Outer {
                 if self.regs[0] & 0x80 == 0 {
                     self.regs[0] = value;
                 }
+            }
+            // `extcl_cpu_wr_mem_543`: D3 shifted in, four bits make the register.
+            Mmc1OuterKind::M543 if (0x5000..0x6000).contains(&address) => {
+                self.regs[1] |= ((value & 0x08) >> 3) << self.shift;
+                if self.shift < 3 {
+                    self.shift += 1;
+                    return true;
+                }
+                self.regs[0] = self.regs[1];
+                self.regs[1] = 0;
+                self.shift = 0;
             }
             Mmc1OuterKind::M550 if (0x7000..0x8000).contains(&address) => {
                 if self.regs[0] & 0x08 == 0 {
