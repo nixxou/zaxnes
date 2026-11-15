@@ -306,6 +306,15 @@ impl NesBus {
         &self.apu
     }
 
+    /// Diagnostic (the CPU differential against the 2A03 netlist): the other CPU / APU get-put
+    /// parity, which a console takes at power-on: the bus's cycle parity (the DMA's get and put
+    /// cycles) and the APU's together, as one clock.
+    #[doc(hidden)]
+    pub fn diagnostic_flip_get_put(&mut self) {
+        self.cycles += 1;
+        self.apu.diagnostic_flip_parity();
+    }
+
     /// The APU, mutably, caught up first.
     pub fn apu_mut(&mut self) -> &mut Apu2A03 {
         self.sync_apu();

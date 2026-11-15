@@ -76,6 +76,37 @@ correct; validate with blargg's `sync_dmc`, `sprdma_and_dmc_dma`, `dmc_dma_durin
 `AccuracyCoin`. Bus-visible effect today: which address the stall repeats (open bus and
 side-effect reads such as `$2007` / `$4016`), not the cycle count.
 
+## DMC and OAM DMA, step 4: two power-on phases, then 0 cycles (2026-11-15)
+
+* `oam0` / `oam1` (OAM DMA started one cycle apart): the netlist takes 513 and 514 cycles, Zaxnes
+  514 and 513. Together with step 3 this is one thing: **the CPU / APU get-put parity after
+  reset is the other one in Zaxnes**. `cpu-bus-trace --flip-get-put` (`NesBus::
+  diagnostic_flip_get_put`: the bus's cycle parity and the APU's together, as the one clock they
+  are on the chip) gives the netlist's parity: OAM DMA 513 / 514 and the DMC load halts land
+  exactly where the netlist's do.
+* The DMC output unit's power-on phase (`--dmc <timer>,<bits>`) is the second free value: a scan
+  of the timer (380-470) and the bit counter (1-8) over `dmc`, `dmc0` and `dmc1` together finds
+  one value, **timer 431, 8 bits, that makes all three identical** (3 x 2 990 cycles), and nothing
+  else near it.
+* With those two settings (and the PPU's phase of step 1), the whole corpus, every cycle:
+
+| Program | Cycles | DMA cycles (Zaxnes) | Differing cycles |
+|---|---|---|---|
+| `loop`, `modes`, `allops`, `branch` | 3 990 each | 0 | 0 |
+| `dma`, `oam0`, `oam1` | 3 999 each | 513 / 513 / 514 | 0 |
+| `nmi` | 29 990 | 0 | 0 |
+| `irq` | 59 990 | 0 | 0 |
+| `dmc`, `dmc0`, `dmc1` | 29 999 each | 272 / 274 / 273 | 0 |
+
+  The DMC programs' DMAs land on reads, on writes (the halt waits for the next read) and inside
+  read-modify-writes (`INC abs`), with 3- and 4-cycle stalls; the netlist's stalls repeat the
+  CPU's read as Zaxnes's model says (`0202R 0202R 0202R C000R`).
+* Neither value is a model difference: both are states the console leaves to power-on. The
+  netlist simulation sets them at the end of its reset; whether a console's get / put parity is
+  random at power-on (as the CPU / PPU alignment is) or fixed by the reset is not settled here. A
+  console-model choice "CPU / APU alignment" (random, either) would cover both; recorded as
+  FIDELITY-LEADS G5.
+
 ## Meaning for A-bis
 
 Nothing measured needs the CPU on half-cycles: where the CPU differs, it is a timing value of the

@@ -949,6 +949,19 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   console-model choice of its own (with the other RP2A03 letter differences, DMA timings) is part
   of C3.
 
+### G5. CPU / APU get-put parity and the DMC timer at power-on — open (2026-11-15)
+
+- The 2A03 netlist differential (`docs/progress/CPU-NETLIST-DIAG.md`) finds the CPU identical
+  cycle for cycle once two power-on values are set as the netlist's: the get / put parity (Zaxnes
+  starts on the other one: OAM DMA 514 / 513 where the netlist takes 513 / 514, and the DMC load's
+  halt one read apart) and the DMC output unit's timer (431 with 8 bits remaining, against this
+  core's 427).
+- Open: whether a console fixes the parity at reset (the netlist does) or draws it at power-on.
+  The CPU / PPU alignment is already a choice (`emu.cpu_ppu_alignment`, random among four); a
+  "CPU / APU alignment" choice (random, either) would treat the APU the same way. No test ROM in
+  the campaign tells the two apart (all pass either way); a game that depends on it would be one
+  timing an OAM DMA's length or a DMC halt's repeated read without syncing first.
+
 ## H. Video output (shaders lot, not core)
 
 ### H1. Composite / RF signal, CRT gamma, phosphor decay — open
