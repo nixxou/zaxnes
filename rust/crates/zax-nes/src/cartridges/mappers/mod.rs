@@ -135,6 +135,8 @@ mod oeka_kids;
 mod pec9588;
 #[cfg(feature = "board-168")]
 mod racermate;
+#[cfg(feature = "board-multi-p")]
+mod multicart_p;
 #[cfg(feature = "board-682")]
 mod rainbow;
 #[cfg(feature = "board-682")]
@@ -322,6 +324,8 @@ pub use oeka_kids::OekaKids;
 pub use pec9588::Pec9588;
 #[cfg(feature = "board-168")]
 pub use racermate::Racermate;
+#[cfg(feature = "board-multi-p")]
+pub use multicart_p::{MultiPKind, MultiP};
 #[cfg(feature = "board-682")]
 pub use rainbow::Rainbow;
 #[cfg(feature = "board-158")]

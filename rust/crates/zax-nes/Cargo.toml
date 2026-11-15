@@ -196,6 +196,12 @@ default = [
     "board-266",
     "board-284",
     "board-682",
+    "board-517",
+    "board-389",
+    "board-237",
+    "board-122",
+    "board-81",
+    "board-55",
     # MAPPERS-N: the VS. System, out of `parked-boards` since its quirks left the PPU and the
     # specialised paths (`Ppu2C02::remap_palette`, `BoardKind::RUNS_VS`): mm2/zelda2 `core`
     # +0.000 % / +0.001 % with it on.
@@ -273,6 +279,14 @@ board-168 = []
 
 # MAPPERS-N umbrella.
 board-latch-multi = ["board-decode-boards"]
+# MAPPERS-P umbrella: the discrete boards of `multicart_p.rs`.
+board-multi-p = ["board-decode-boards"]
+board-517 = ["board-multi-p"]
+board-389 = ["board-multi-p"]
+board-237 = ["board-multi-p"]
+board-122 = ["board-multi-p"]
+board-81 = ["board-multi-p"]
+board-55 = ["board-multi-p"]
 board-57 = ["board-latch-multi"]
 board-58 = ["board-latch-multi"]
 board-59 = ["board-latch-multi"]

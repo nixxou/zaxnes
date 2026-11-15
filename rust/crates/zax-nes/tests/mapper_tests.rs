@@ -256,7 +256,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let sachen8259 = cfg!(feature = "board-sachen8259");
     let huang1 = cfg!(feature = "board-huang1");
     let cony = cfg!(feature = "board-cony");
-    let additions: [(i32, bool); 255] = [
+    let additions: [(i32, bool); 261] = [
         (6, cfg!(feature = "board-6")),
         (8, cfg!(feature = "board-8")),
         (12, huang1),
@@ -287,6 +287,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (52, cfg!(feature = "board-52")),
         (53, cfg!(feature = "board-53")),
         (54, cfg!(feature = "board-54")),
+        (55, cfg!(feature = "board-55")),
         (56, cfg!(feature = "board-56")),
         (57, cfg!(feature = "board-57")),
         (58, cfg!(feature = "board-58")),
@@ -309,6 +310,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (78, true),
         (79, nina03),
         (80, taito_x1),
+        (81, cfg!(feature = "board-81")),
         (82, taito_x1),
         (83, cony),
         (85, true),
@@ -343,6 +345,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (119, cfg!(feature = "board-119")),
         (120, cfg!(feature = "board-120")),
         (121, scramble),
+        (122, cfg!(feature = "board-122")),
         (123, scramble),
         (125, cfg!(feature = "board-125")),
         (126, cfg!(feature = "board-126")),
@@ -441,6 +444,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (234, cfg!(feature = "board-234")),
         (235, cfg!(feature = "board-235")),
         (236, cfg!(feature = "board-236")),
+        (237, cfg!(feature = "board-237")),
         (238, cfg!(feature = "board-238")),
         (240, cfg!(feature = "board-240")),
         (241, cfg!(feature = "board-241")),
@@ -504,8 +508,10 @@ fn req_core_100_every_required_mapper_is_registered() {
         (348, cfg!(feature = "board-348")),
         (349, cfg!(feature = "board-349")),
         (366, cfg!(feature = "board-366")),
+        (389, cfg!(feature = "board-389")),
         (487, cfg!(feature = "board-487")),
         (513, cfg!(feature = "board-513")),
+        (517, cfg!(feature = "board-517")),
         (518, cfg!(feature = "board-518")),
         (519, cfg!(feature = "board-519")),
         (521, cfg!(feature = "board-521")),

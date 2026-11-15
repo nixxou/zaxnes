@@ -143,6 +143,8 @@ use super::mappers::{LatchKind, LatchMulti};
 use super::mappers::{MiscKind, MiscN};
 #[cfg(feature = "board-mmc3-clones")]
 use super::mappers::{Mmc3Clone, Mmc3CloneKind};
+#[cfg(feature = "board-multi-p")]
+use super::mappers::{MultiP, MultiPKind};
 #[cfg(feature = "board-taito-x1")]
 use super::mappers::{TaitoX1005, TaitoX1017};
 #[cfg(feature = "board-111")]
@@ -242,6 +244,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     53,
     #[cfg(feature = "board-54")]
     54,
+    #[cfg(feature = "board-55")]
+    55,
     #[cfg(feature = "board-56")]
     56,
     #[cfg(feature = "board-57")]
@@ -284,6 +288,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     79,
     #[cfg(feature = "board-taito-x1")]
     80,
+    #[cfg(feature = "board-81")]
+    81,
     #[cfg(feature = "board-taito-x1")]
     82,
     // The Cony / Yoko ASIC, with NES 2.0 mapper 264 at the end of this list (MF-UNL-8 step 3).
@@ -350,6 +356,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     120,
     #[cfg(feature = "board-mmc3-scramble")]
     121,
+    #[cfg(feature = "board-122")]
+    122,
     #[cfg(feature = "board-mmc3-scramble")]
     123,
     #[cfg(feature = "board-125")]
@@ -555,6 +563,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     235,
     #[cfg(feature = "board-236")]
     236,
+    #[cfg(feature = "board-237")]
+    237,
     #[cfg(feature = "board-238")]
     238,
     #[cfg(feature = "board-240")]
@@ -687,10 +697,14 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     349,
     #[cfg(feature = "board-366")]
     366,
+    #[cfg(feature = "board-389")]
+    389,
     #[cfg(feature = "board-487")]
     487,
     #[cfg(feature = "board-513")]
     513,
+    #[cfg(feature = "board-517")]
+    517,
     #[cfg(feature = "board-518")]
     518,
     #[cfg(feature = "board-519")]
@@ -769,12 +783,12 @@ fn datach_has_external_eeprom(header: &InesHeader) -> bool {
 /// The MAPPERS-N boards whose iNES 1.0 CHR-RAM is Mesen2's 8 KiB default (see
 /// [`board_memory_sizes`]).
 const MAPPERS_N_CHR_RAM_8K: &[i32] = &[
-    39, 40, 42, 43, 44, 45, 46, 49, 50, 51, 52, 54, 56, 57, 58, 59, 60, 61, 53, 62, 63, 103, 104,
-    106, 108, 113, 117, 120, 125, 126, 134, 142, 148, 166, 167, 170, 171, 174, 177, 179, 183, 196,
-    197, 200, 201, 202, 203, 204, 205, 212, 213, 214, 216, 217, 221, 222, 224, 226, 227, 229, 230,
-    231, 233, 235, 236, 238, 240, 241, 242, 244, 245, 249, 250, 254, 255, 258, 259, 261, 265, 274,
-    283, 285, 286, 287, 288, 289, 290, 299, 300, 301, 302, 303, 304, 305, 306, 307, 309, 312, 313,
-    314, 319, 320, 324, 325, 329, 331, 332, 333, 336, 346, 348, 349, 366, 518, 521, 522,
+    237, 39, 40, 42, 43, 44, 45, 46, 49, 50, 51, 52, 54, 56, 57, 58, 59, 60, 61, 53, 62, 63, 103,
+    104, 106, 108, 113, 117, 120, 125, 126, 134, 142, 148, 166, 167, 170, 171, 174, 177, 179, 183,
+    196, 197, 200, 201, 202, 203, 204, 205, 212, 213, 214, 216, 217, 221, 222, 224, 226, 227, 229,
+    230, 231, 233, 235, 236, 238, 240, 241, 242, 244, 245, 249, 250, 254, 255, 258, 259, 261, 265,
+    274, 283, 285, 286, 287, 288, 289, 290, 299, 300, 301, 302, 303, 304, 305, 306, 307, 309, 312,
+    313, 314, 319, 320, 324, 325, 329, 331, 332, 333, 336, 346, 348, 349, 366, 518, 521, 522,
 ];
 
 /// The volatile-memory sizes of `mapper`'s board for `header`.
@@ -2688,6 +2702,36 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         290 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
             memory,
             LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-55")]
+        55 => Board::DecodeBoard(DecodeBoard::MultiP(MultiP::new(
+            memory,
+            MultiPKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-81")]
+        81 => Board::DecodeBoard(DecodeBoard::MultiP(MultiP::new(
+            memory,
+            MultiPKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-122")]
+        122 => Board::DecodeBoard(DecodeBoard::MultiP(MultiP::new(
+            memory,
+            MultiPKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-237")]
+        237 => Board::DecodeBoard(DecodeBoard::MultiP(MultiP::new(
+            memory,
+            MultiPKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-389")]
+        389 => Board::DecodeBoard(DecodeBoard::MultiP(MultiP::new(
+            memory,
+            MultiPKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-517")]
+        517 => Board::DecodeBoard(DecodeBoard::MultiP(MultiP::new(
+            memory,
+            MultiPKind::of(mapper)?,
         ))),
         #[cfg(feature = "board-299")]
         299 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(

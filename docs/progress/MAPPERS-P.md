@@ -21,12 +21,12 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 
 | mapper | puNES source | lines | db | hk | state |
 | ---: | --- | ---: | ---: | ---: | --- |
-| 55 | `mapper_055.c` | 38 | 3 | 0 | todo |
-| 81 | `mapper_081.c` | 60 | 3 | 0 | todo |
+| 55 | `mapper_055.c` | 38 | 3 | 0 | done (batch 1, `MultiP`) |
+| 81 | `mapper_081.c` | 60 | 3 | 0 | done (batch 1, `MultiP`) |
 | 100 | `mapper_100.c` | 175 | 1 | 0 | todo |
-| 122 | `mapper_184.c` | 64 | 0 | 0 | todo |
+| 122 | `mapper_184.c` | 64 | 0 | 0 | done (batch 1, `MultiP`) |
 | 186 | `mapper_186.c` | 82 | 1 | 0 | todo |
-| 237 | `mapper_237.c` | 98 | 1 | 0 | todo |
+| 237 | `mapper_237.c` | 98 | 1 | 0 | done (batch 1, `MultiP`) |
 | 248 | `mapper_115.c` | 115 | 0 | 0 | todo |
 | 256 | `mapper_256.c` | 123 | 241 | 0 | todo |
 | 267 | `mapper_267.c` | 87 | 1 | 0 | todo |
@@ -82,7 +82,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 386 | `mapper_386.c` | 76 | 1 | 0 | todo |
 | 387 | `mapper_387.c` | 76 | 4 | 0 | todo |
 | 388 | `mapper_388.c` | 76 | 2 | 0 | todo |
-| 389 | `mapper_389.c` | 90 | 1 | 1 | todo |
+| 389 | `mapper_389.c` | 90 | 1 | 1 | done (batch 1, `MultiP`) |
 | 390 | `mapper_390.c` | 93 | 0 | 0 | todo |
 | 393 | `mapper_393.c` | 123 | 1 | 0 | todo |
 | 394 | `mapper_394.c` | 193 | 0 | 0 | todo |
@@ -129,7 +129,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 481 | `mapper_481.c` | 55 | 0 | 0 | todo |
 | 512 | `mapper_512.c` | 94 | 2 | 1 | todo |
 | 516 | `mapper_516.c` | 79 | 2 | 0 | todo |
-| 517 | `mapper_517.c` | 107 | 1 | 1 | todo |
+| 517 | `mapper_517.c` | 107 | 1 | 1 | done (batch 1, `MultiP`) |
 | 524 | `mapper_524.c` | 81 | 0 | 0 | todo |
 | 525 | `mapper_525.c` | 91 | 1 | 0 | todo |
 | 526 | `mapper_526.c` | 123 | 1 | 0 | todo |
@@ -166,3 +166,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 
 ## Log
 
+* Batch 1 (`multicart_p.rs`, `MultiP`, umbrella `board-multi-p`): 55, 81, 122, 237, 389, 517.
+  Unit tests in `tests/mappers_p_tests.rs`; leads in FIDELITY-LEADS J37. The `additions` table of
+  `mapper_tests.rs` is now kept in ascending order (the scratchpad helper sorts it after each
+  registration).

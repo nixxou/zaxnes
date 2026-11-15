@@ -940,6 +940,19 @@ CHR-RAM) and puNES (`mapper_198.c`, banks from `$50` folding onto `$40-$4F`). Th
 password screen cleanly; the later `[T+ChSFIX2]` and `[T+ChTFIX2]` patches show stray glyphs on
 the password screen, not investigated (translation hacks; their CHR use may differ).
 
+### J37. MAPPERS-P batch 1 (55, 81, 122, 237, 389, 517): puNES readings kept as they are
+Every board of `multicart_p.rs` follows its puNES file; nesdev has no page for most of them. Three
+places where puNES itself is incomplete are copied, not invented around:
+* 517 (`mapper_517.c`): the ADC behind `$6000` is the microphone of a karaoke cartridge. puNES
+  feeds it no sample (its TODO); Zaxnes runs the same state machine on a silent input, so the start
+  bits read 0, 1, 1 and the data bits read 0. A real microphone input would need a host source.
+* 237 (`mapper_237.c`): with A0 set the board reads its DIP switches instead of ROM; puNES has no
+  DIP setting and returns 0, so the menu always shows the first variant. Same here.
+* 55 (`mapper_055.c`): `$6000-$6FFF` shows PRG-ROM from offset `$8000` and `$7000-$7FFF` is 4 KiB of
+  RAM, which is puNES's reading of the BTL-MARIO1-MALEE2 board; nesdev describes 2 KiB of RAM
+  mirrored. Unverified on a dump (none in the Hackset).
+* 122 runs puNES's `mapper_184.c` with the `$6000-$7FFF` decode puNES gives it.
+
 ### J36. Mapper 682 (Rainbow): the ESP is modelled from the protocol document
 The ESP (`rainbow_esp.rs`) follows Broke Studio's `rainbow-net.md` and `mapper-doc.md`; no
 emulator's ESP was read (the Broke Studio Mesen fork that has one is not local, and fetching it
