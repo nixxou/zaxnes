@@ -937,9 +937,10 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   (`Write400E`, `OldNoiseTable`). Zaxnes had the missing short mode only (`audio.console_profile`'s
   letterless consoles, the N0260073). Done: `LETTERLESS_PERIODS` in `apu/noise_channel.rs`, taken
   with the flag; a reset keeps the chip's table (it used to fall back to the default).
-- Open: BeesNES's reset (`LSNApu2A0X.h:576`) does not rewrite `$4017` on a letterless NTSC chip;
-  Zaxnes follows the 2A03G on every chip (Q-078, a spec decision). Changing it for the letterless
-  chip is a spec change for the owner.
+- Done (owner, 2026-11-15, an exception to Q-078): a reset leaves the frame sequencer running on
+  a letterless NTSC chip when that chip is chosen (`emu.cpu_revision` or a letterless audio
+  profile), as nesdev "CPU power up state" and BeesNES (`LSNApu2A0X.h:576`) have it; every other
+  chip keeps Q-078's 2A03G reset. Test `fidplus_c_a_reset_leaves_the_letterless_sequencer_running`.
 - Open: the letterless chip is reached only through the audio profile of one measured console; a
   console-model choice of its own (with the other RP2A03 letter differences, DMA timings) is part
   of C3.

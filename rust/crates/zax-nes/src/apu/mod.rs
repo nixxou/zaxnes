@@ -644,9 +644,15 @@ impl Apu2A03 {
         self.frame_irq_status = false;
         self.frame_irq_clear_at = 0;
         self.frame_irq_pending = false;
-        self.frame_counter = 0;
-        self.frame_step = 0;
-        self.pending_sequencer_reset = 0;
+        // Q-078 keeps the 2A03G's reset of the frame sequencer; the letterless RP2A03 leaves it
+        // running (nesdev "CPU power up state", BeesNES `LSNApu2A0X.h:576`, which excludes the
+        // PAL chip). Owner, 2026-11-15: that chip, when chosen (`emu.cpu_revision` or a letterless
+        // audio profile), keeps its own behaviour (FIDELITY-LEADS G4).
+        if !self.letterless_reset() {
+            self.frame_counter = 0;
+            self.frame_step = 0;
+            self.pending_sequencer_reset = 0;
+        }
 
         // Every channel output may have moved, and the status byte a read would see with it.
         // The level is recomputed on the next cycle, test point included.
@@ -1128,6 +1134,15 @@ impl Apu2A03 {
         self.apply_letterless();
     }
 
+    /// Whether a reset leaves the frame sequencer running: a letterless NTSC RP2A03.
+    fn letterless_reset(&self) -> bool {
+        !self.timing.uses_pal_noise_and_dmc_periods
+            && (self.letterless_cpu
+                || self
+                    .console_profile
+                    .is_some_and(|profile| profile.letterless))
+    }
+
     fn apply_letterless(&mut self) {
         self.noise.set_letterless(
             self.letterless_cpu
@@ -1343,4 +1358,34 @@ impl Apu2A03 {
 #[allow(clippy::cast_possible_truncation)] // At most FULL_SCALE.
 fn profile_mix(profile: &console_profile::ConsoleAudioProfile, levels: [i32; 5]) -> i32 {
     (mixer::NORMALISATION * profile.mix(levels)).round() as i32
+}
+
+#[cfg(test)]
+mod letterless_tests {
+    use super::*;
+
+    #[test]
+    fn fidplus_c_a_reset_leaves_the_letterless_sequencer_running() {
+        for (letterless, kept) in [(false, false), (true, true)] {
+            let mut apu = Apu2A03::new();
+            apu.set_letterless_cpu(letterless);
+            apu.run_cpu_cycles(5000);
+            let before = (apu.frame_counter, apu.frame_step);
+            assert_ne!((0, 0), before);
+            apu.soft_reset();
+            let after = (apu.frame_counter, apu.frame_step);
+            assert_eq!(
+                kept,
+                after == before,
+                "letterless {letterless}: {before:?} -> {after:?}"
+            );
+        }
+        // The PAL chip has no letterless revision.
+        let mut apu = Apu2A03::new();
+        apu.set_timing(RegionTiming::for_region(crate::NesRegion::Pal));
+        apu.set_letterless_cpu(true);
+        apu.run_cpu_cycles(5000);
+        apu.soft_reset();
+        assert_eq!((0, 0), (apu.frame_counter, apu.frame_step));
+    }
 }
