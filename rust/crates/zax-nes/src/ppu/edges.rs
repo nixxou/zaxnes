@@ -38,6 +38,13 @@ pub(super) enum EdgeKind {
     /// A `$2007` read whose latch dot X is an even fetching dot: after X's work, the byte X's fetch
     /// read. Then the increment, merged with X's own.
     ReadLatchAfterFetch,
+    /// A `$2001` write that switches the rendering on or off: the mask, from the third dot after
+    /// the write in every alignment (A3c, step 33).
+    SwitchRendering,
+    /// The horizontal copy of dot 257 after a switch off landing on it: made in the first half of
+    /// the dot, before the switch (applied after dot 257's work, which with the rendering off
+    /// does nothing else to `v`).
+    CopyAfterSwitchOff,
 }
 
 /// One pending edge: applied after the work of the `dots`-th dot from now.
@@ -45,18 +52,25 @@ pub(super) enum EdgeKind {
 pub(super) struct Edge {
     pub(super) dots: i32,
     pub(super) kind: EdgeKind,
+    /// The byte the edge carries (`SwitchRendering`: the mask written).
+    pub(super) value: u8,
 }
 
 impl Edge {
     pub(super) const NONE: Self = Self {
         dots: 0,
         kind: EdgeKind::LoadAddress,
+        value: 0,
     };
 }
 
 /// Latency of the `$2006` load, in half master clocks from M2 fall: `v` is loaded in the middle
 /// of the third dot after the access dot in all four alignments (A3c, step 33; A5 `g2006x`).
 const LOAD_ADDRESS_LATENCY: i32 = 18;
+
+/// Latency of a rendering switch by `$2001`: the fetches and `v`'s increments stop or start on the
+/// third dot after the write in all four alignments (A3c, step 33).
+const SWITCH_RENDERING_LATENCY: i32 = 10;
 
 /// Latency of the `$2007` read latch: the very start of dot D+5 in alignments 0 and 1, D+6 in 2
 /// and 3 (A3c, step 25, netlist), one latency with the alignment offsets.
@@ -96,6 +110,11 @@ impl Ppu2C02 {
 
     /// Posts an edge `dots` dots from now.
     pub(super) fn post_edge(&mut self, dots: i32, kind: EdgeKind) {
+        self.post_edge_with(dots, kind, 0);
+    }
+
+    /// [`Self::post_edge`] with the byte the edge carries.
+    pub(super) fn post_edge_with(&mut self, dots: i32, kind: EdgeKind, value: u8) {
         // Dots another access already ran ahead are behind the edge's count.
         let dots = dots - self.prepaid_dots;
         let count = usize::from(self.edge_count);
@@ -105,7 +124,7 @@ impl Ppu2C02 {
             debug_assert!(false, "edge queue full");
             return;
         }
-        self.edges[count] = Edge { dots, kind };
+        self.edges[count] = Edge { dots, kind, value };
         self.edge_count += 1;
     }
 
@@ -114,7 +133,11 @@ impl Ppu2C02 {
     fn post_edge_now(&mut self, dots: i32, kind: EdgeKind) {
         let count = usize::from(self.edge_count);
         if count < EDGE_SLOTS {
-            self.edges[count] = Edge { dots, kind };
+            self.edges[count] = Edge {
+                dots,
+                kind,
+                value: 0,
+            };
             self.edge_count += 1;
         }
     }
@@ -135,12 +158,12 @@ impl Ppu2C02 {
             while index < pending {
                 self.edges[index].dots -= 1;
                 if self.edges[index].dots <= 0 {
-                    let kind = self.edges[index].kind;
+                    let Edge { kind, value, .. } = self.edges[index];
                     self.edges
                         .copy_within(index + 1..usize::from(self.edge_count), index);
                     self.edge_count -= 1;
                     pending -= 1;
-                    self.apply_edge(kind, cart);
+                    self.apply_edge(kind, value, cart);
                 } else {
                     index += 1;
                 }
@@ -151,8 +174,10 @@ impl Ppu2C02 {
         }
     }
 
-    fn apply_edge<K: BoardKind>(&mut self, kind: EdgeKind, cart: Cart<'_, '_, K>) {
+    fn apply_edge<K: BoardKind>(&mut self, kind: EdgeKind, value: u8, cart: Cart<'_, '_, K>) {
         match kind {
+            EdgeKind::SwitchRendering => self.edge_switch_rendering(value, cart),
+            EdgeKind::CopyAfterSwitchOff => self.transfer_address_x(),
             EdgeKind::LoadAddress => self.edge_load_address(cart),
             EdgeKind::StoreData => {
                 let address = self.v & 0x3FFF;
@@ -248,6 +273,62 @@ impl Ppu2C02 {
         self.v_row_start = self.v;
         self.v_row_next = self.v;
         self.notify_address_bus_without_read(self.v & 0x3FFF, cart);
+    }
+
+    /// A `$2001` write that switches the rendering, in Fidélité+: the palette corruption of a
+    /// switch off strikes the pixel the next dot draws (as the standard core), the rest is an edge.
+    pub(super) fn post_switch_rendering(&mut self, value: u8) {
+        let corrupts = (value & 0x18) == 0 && self.switch_off_corrupts_palettes();
+        if corrupts {
+            let renders = self.scanline < super::VISIBLE_SCANLINES
+                || self.scanline == self.pre_render_scanline();
+            // On a line that renders, the pixel the next dot draws; past line 239 or the
+            // pre-render line, line 0's first, drawn with rendering off: colour index 0.
+            let color = if renders {
+                self.next_pixel_color_index()
+            } else {
+                0
+            };
+            self.corrupt_palettes(color);
+        }
+        let dots = self.edge_dot(SWITCH_RENDERING_LATENCY);
+        self.post_edge_with(dots, EdgeKind::SwitchRendering, value);
+    }
+
+    /// The switch reaching the mask, after the work of the dot before the first one it governs.
+    /// What follows is the standard core's own code after its prepaid dots
+    /// (`Ppu2C02::switch_rendering`), with the line read when the switch lands.
+    fn edge_switch_rendering<K: BoardKind>(&mut self, value: u8, cart: Cart<'_, '_, K>) {
+        let renders =
+            self.scanline < super::VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline();
+        let was_rendering = self.rendering_enabled();
+        self.mask = value;
+        let now_rendering = self.rendering_enabled();
+        if was_rendering == now_rendering {
+            return;
+        }
+        if renders && self.dot == 256 && self.alignment >= 2 {
+            // The horizontal copy of dot 257 comes in the first half of the dot, before a switch
+            // landing in it: it follows the old state (netlist, A5; alignments 0 and 1 hit the
+            // switch-on race of step 33 and keep the plain order).
+            if was_rendering {
+                self.post_edge_now(1, EdgeKind::CopyAfterSwitchOff);
+            } else {
+                self.copy_257_suppressed = true;
+            }
+        }
+        let on = now_rendering;
+        self.rendering_switched(on);
+        if renders {
+            // `switch_pixel_edge` takes the write's dot, two before the first governed one.
+            self.switch_pixel_edge(on, self.dot - 2);
+            if on {
+                self.first_fetch_on(self.dot, cart);
+                self.skip_background_reload(cart);
+            } else {
+                self.note_last_ale(self.dot);
+            }
+        }
     }
 
     /// The second `$2006` write in Fidélité+: posted, every time (the load is never immediate on

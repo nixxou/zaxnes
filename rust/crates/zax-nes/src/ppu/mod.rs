@@ -3081,6 +3081,8 @@ impl Ppu2C02 {
                     let was_rendering = self.rendering_enabled();
                     if was_rendering == ((value & 0x18) != 0) {
                         self.mask = value;
+                    } else if self.edges_on() {
+                        self.post_switch_rendering(value);
                     } else {
                         self.switch_rendering(value, &mut cartridge);
                     }
