@@ -828,6 +828,8 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 222
             // MAPPERS-P: mapper 471's IRQ on every A12 rise (`IrqP`).
             | 471
+            // MAPPERS-P: mapper 442 latches PPU A0/A9 on the rise of A13 (`IrqP`).
+            | 442
             // MAPPERS-P: mapper 272's IRQ counts the rendering's pattern fetches (`IrqP`).
             | 272
             | 176
@@ -939,6 +941,8 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 222
             // MAPPERS-P: mapper 471's IRQ on every A12 rise (`IrqP`).
             | 471
+            // MAPPERS-P: mapper 442 latches PPU A0/A9 on the rise of A13 (`IrqP`).
+            | 442
             | 176
             | 217
             | 254
@@ -2275,6 +2279,8 @@ mod tests {
             248, 536, 422, 534, 370, 344, 432, 356, 269, 353, 100, 555,
             // MAPPERS-P: 471, an IRQ on every A12 rise (`IrqP`).
             471,
+            // MAPPERS-P: 442, the 1 bpp latch of PPU A0/A9 on A13's rise (`IrqP`).
+            442,
             // MAPPERS-P: 272 is latched too but absent here: its counter only moves once a game
             // enables it, and the sweep enables nothing.
         ] {

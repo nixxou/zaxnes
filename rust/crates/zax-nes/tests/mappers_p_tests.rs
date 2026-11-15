@@ -1284,3 +1284,20 @@ fn mappers_p_347_maps_its_pieces() {
         core.cartridge().unwrap().mirroring()
     );
 }
+
+/// `mapper_442.c`: `$5000` D6 and D0-D4 the 32 KiB bank; with D7 set a pattern fetch takes CHR
+/// A12 from PPU A9 latched on the last rise of A13.
+#[cfg(feature = "board-442")]
+#[test]
+fn mappers_p_442_banks_and_latches_a9_for_its_1bpp_mode() {
+    let mut core = MapperRom::new(442).prg(256).chr(8).load();
+    core.mapper_write(0x5000, 0x43);
+    assert_eq!([140, 141, 142, 143], core.prg_windows());
+    let cartridge = core.cartridge_mut().unwrap();
+    cartridge.on_ppu_address_bus(0x0000, 0);
+    cartridge.on_ppu_address_bus(0x2200, 2);
+    cartridge.on_ppu_address_bus(0x0000, 4);
+    assert_eq!(0, core.chr_bank(0x0000));
+    core.mapper_write(0x5000, 0xC3);
+    assert_eq!(4, core.chr_bank(0x0000));
+}

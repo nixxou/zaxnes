@@ -117,7 +117,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 436 | `mapper_436.c` | 59 | 1 | 0 | todo |
 | 437 | `mapper_437.c` | 74 | 1 | 0 | done (batch 8, `MultiP`) |
 | 438 | `mapper_438.c` | 71 | 2 | 0 | done (batch 8, `MultiP`) |
-| 442 | `mapper_442.c` | 127 | 1 | 0 | todo |
+| 442 | `mapper_442.c` | 127 | 1 | 0 | done (batch 39, `IrqP`) |
 | 446 | `mapper_446.c` | 746 | 4 | 0 | todo |
 | 447 | `mapper_447.c` | 98 | 1 | 0 | done (batch 16, `VrcP`) |
 | 451 | `mapper_451.c` | 147 | 2 | 0 | todo |
@@ -291,3 +291,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   checks; both registers return to `$0F` on a soft reset. 355 (*3D Block*) is blocked: its
   board runs a PIC16C5x microcontroller program (puNES embeds the EPROM and a PIC core), which
   is a CPU emulator of its own.
+* Batch 39: `IrqP` 442 (a PEC-9588 relative): `$5000` the 32 KiB bank and the 1 bpp mode, PPU
+  A0/A9 latched on the rise of A13 in `on_ppu_address_bus` (both PPU-bus lists and the mf_3b
+  sweep, as mapper 164) and substituted for CHR A3/A12 in `ppu_peek`; `chr_peek_view` is `None`
+  for it.

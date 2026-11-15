@@ -7,7 +7,7 @@
 //! The PRG-ROM these boards show at `$5000`/`$6000` is answered by [`Mapper::try_read_prg`], with
 //! the work RAM disabled ([`Mapper::prg_ram_enabled`]).
 use super::{windows_for, Eeprom93C66, Mapper};
-use crate::cartridges::{A12Watcher, BankWindows, CartridgeMemory};
+use crate::cartridges::{A12Watcher, BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
 
@@ -45,6 +45,10 @@ pub enum IrqPKind {
     /// nibble CHR registers, and an IRQ counting the rendering's tile slots, asserting at 84
     /// (every second rendered line).
     M272,
+    /// 442, `mapper_442.c` (a PEC-9588 relative): `$5000` the 32 KiB bank and the 1 bpp mode,
+    /// in which a pattern fetch takes CHR A3 and A12 from PPU A0 and A9 latched on the last rise
+    /// of PPU A13. No IRQ.
+    M442,
 }
 
 impl IrqPKind {
@@ -61,6 +65,7 @@ impl IrqPKind {
             526 => Self::M526,
             558 => Self::M558,
             272 => Self::M272,
+            442 => Self::M442,
             _ => return None,
         })
     }
@@ -76,6 +81,7 @@ impl IrqPKind {
             Self::M526 => 526,
             Self::M558 => 558,
             Self::M272 => 272,
+            Self::M442 => 442,
         }
     }
 }
@@ -180,6 +186,11 @@ impl IrqP {
                     b.map_prg_8k(3, 3);
                 }
                 b.map_chr_8k((r[1] & 0x06) >> 1);
+            }
+            // `prg_fix_442`: `reg[0]` D6 above D0-D4.
+            IrqPKind::M442 => {
+                b.map_prg_32k(((r[0] & 0x40) >> 1) | (r[0] & 0x1F));
+                b.map_chr_8k(0);
             }
             // `prg_fix_272`/`chr_fix_272`: two 8 KiB registers, the last 16 KiB fixed.
             IrqPKind::M272 => {
@@ -408,6 +419,13 @@ impl IrqP {
                 }
             }
             IrqPKind::M272 => self.latch_272(address, value),
+            // `extcl_cpu_wr_mem_442`: `$5000-$5FFF`, A8-A10 the register, of which only the
+            // first is read.
+            IrqPKind::M442 => {
+                if (0x5000..=0x5FFF).contains(&address) && address & 0x0700 == 0 {
+                    r[0] = value;
+                }
+            }
             // `extcl_cpu_wr_mem_558` decodes `$5000-$53FF` only ([`IrqP::write_558`]).
             IrqPKind::M558 => {}
         }
@@ -520,7 +538,7 @@ impl Mapper for IrqP {
                     self.irq_pending = true;
                 }
             }
-            IrqPKind::M471 | IrqPKind::M558 | IrqPKind::M272 => {}
+            IrqPKind::M471 | IrqPKind::M558 | IrqPKind::M272 | IrqPKind::M442 => {}
         }
     }
 
@@ -529,6 +547,16 @@ impl Mapper for IrqP {
     fn on_ppu_address_bus(&mut self, _memory: &mut CartridgeMemory, address: u16, clock: i64) {
         if self.kind == IrqPKind::M471 && self.a12.rose(address, clock) {
             self.irq_pending = true;
+        }
+        // `mode1_bpp`: PPU A0 and A9 on the rise of A13 (`regs[1]`, `regs[2]`; `regs[3]` the
+        // previous A13).
+        if self.kind == IrqPKind::M442 {
+            let a13 = u8::from(address & 0x2000 != 0);
+            if self.regs[3] == 0 && a13 != 0 {
+                self.regs[1] = u8::from(address & 0x0001 != 0);
+                self.regs[2] = u8::from(address & 0x0200 != 0);
+            }
+            self.regs[3] = a13;
         }
         // `extcl_ppu_000_to_34x_272`: puNES steps every eighth dot of a rendered line, which are
         // its 34 background tile slots and 8 sprite slots; here each slot's low-plane pattern
@@ -607,6 +635,39 @@ impl Mapper for IrqP {
         }
         self.latch(address, value);
         self.settle(memory);
+    }
+
+    /// 442's 1 bpp mode reads its own CHR address, so the peek view is not the windows'.
+    fn chr_peek_view<'m>(&self, memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
+        if self.kind == IrqPKind::M442 {
+            return None;
+        }
+        let chr_rom = memory.rom().chr_rom();
+        let chr = if chr_rom.is_empty() {
+            memory.chr_ram()
+        } else {
+            chr_rom
+        };
+        Some(ChrView::new(chr, &self.banks))
+    }
+
+    /// `extcl_rd_chr_442`: in the 1 bpp mode (`reg[0]` D7) CHR A12 and A3 are the latched PPU A9
+    /// and A0.
+    fn ppu_peek(&self, memory: &CartridgeMemory, address: u16, _fetch: ChrFetch) -> u8 {
+        let address = if self.kind == IrqPKind::M442 && self.regs[0] & 0x80 != 0 {
+            (u16::from(self.regs[2]) << 12) | (address & 0x0FF7) | (u16::from(self.regs[1]) << 3)
+        } else {
+            address
+        };
+        let chr_rom = memory.rom().chr_rom();
+        self.banks.read_chr(
+            address,
+            if chr_rom.is_empty() {
+                memory.chr_ram()
+            } else {
+                chr_rom
+            },
+        )
     }
 
     /// `mirroring_fix_417`: a CIRAM page per table from each register's D0.
