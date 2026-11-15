@@ -182,6 +182,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     37,
     #[cfg(feature = "board-38")]
     38,
+    #[cfg(feature = "board-39")]
+    39,
     #[cfg(feature = "board-40")]
     40,
     41,
@@ -206,6 +208,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     51,
     #[cfg(feature = "board-52")]
     52,
+    #[cfg(feature = "board-54")]
+    54,
     #[cfg(feature = "board-57")]
     57,
     #[cfg(feature = "board-58")]
@@ -346,6 +350,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     146,
     #[cfg(feature = "board-jv001")]
     147,
+    #[cfg(feature = "board-148")]
+    148,
     #[cfg(feature = "board-149")]
     149,
     #[cfg(feature = "board-sachen-8reg")]
@@ -378,6 +384,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     164,
     #[cfg(feature = "board-170")]
     170,
+    #[cfg(feature = "board-171")]
+    171,
     #[cfg(feature = "board-jv001")]
     172,
     #[cfg(feature = "board-jv001")]
@@ -541,6 +549,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     292,
     #[cfg(feature = "board-298")]
     298,
+    #[cfg(feature = "board-312")]
+    312,
     #[cfg(feature = "board-313")]
     313,
     #[cfg(feature = "board-325")]
@@ -1367,6 +1377,10 @@ pub(crate) fn has_bus_conflicts(mapper: i32, header: &InesHeader) -> bool {
         // **bit 0** win whatever the CPU drove, and the generic path below would AND that bit
         // away before the board saw it, so `SingleLatch` reads the ROM byte and does the
         // arithmetic itself (`LatchBoard::Agci144`, MF-UNL-3 step 3).
+        // MAPPERS-N: Mesen2 gives the Sachen SA-008-A conflicts (`Sachen_148.h:10`,
+        // `HasBusConflicts` true), its register sitting over the PRG-ROM.
+        #[cfg(feature = "board-148")]
+        148 => true,
         #[cfg(feature = "board-149")]
         149 => true, // Q-147 for the two numbers of this lot that are absent by a choice
         11 | 13 | 66 | 70 | 78 | 89 | 93 | 152 | 180 | 185 => true,
@@ -2209,6 +2223,31 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         )))),
         #[cfg(feature = "board-176")]
         176 => Board::IrqBoard(IrqBoard::Fk23c(Box::new(Fk23c::new(memory)))),
+        #[cfg(feature = "board-39")]
+        39 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-54")]
+        54 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-148")]
+        148 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-171")]
+        171 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-312")]
+        312 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
         _ => return None,
     })
 }

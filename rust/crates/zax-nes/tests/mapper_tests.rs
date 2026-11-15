@@ -256,7 +256,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let sachen8259 = cfg!(feature = "board-sachen8259");
     let huang1 = cfg!(feature = "board-huang1");
     let cony = cfg!(feature = "board-cony");
-    let additions: [(i32, bool); 189] = [
+    let additions: [(i32, bool); 194] = [
         (6, cfg!(feature = "board-6")),
         (8, cfg!(feature = "board-8")),
         (12, huang1),
@@ -271,6 +271,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (36, jv001),
         (37, multicart),
         (38, cfg!(feature = "board-38")),
+        (39, cfg!(feature = "board-39")),
         (40, cfg!(feature = "board-40")),
         (42, cfg!(feature = "board-42")),
         (43, cfg!(feature = "board-43")),
@@ -283,6 +284,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (50, cfg!(feature = "board-50")),
         (51, cfg!(feature = "board-51")),
         (52, cfg!(feature = "board-52")),
+        (54, cfg!(feature = "board-54")),
         (57, cfg!(feature = "board-57")),
         (58, cfg!(feature = "board-58")),
         (59, cfg!(feature = "board-59")),
@@ -354,6 +356,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (145, cfg!(feature = "board-145")),
         (146, nina03),
         (147, jv001),
+        (148, cfg!(feature = "board-148")),
         (149, cfg!(feature = "board-149")),
         (150, sachen),
         (151, cfg!(feature = "board-vs-system")),
@@ -369,6 +372,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (163, cfg!(feature = "board-163")),
         (164, cfg!(feature = "board-164")),
         (170, cfg!(feature = "board-170")),
+        (171, cfg!(feature = "board-171")),
         (172, jv001),
         (173, jv001),
         (174, cfg!(feature = "board-174")),
@@ -445,6 +449,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (287, cfg!(feature = "board-287")),
         (292, cfg!(feature = "board-292")),
         (298, cfg!(feature = "board-298")),
+        (312, cfg!(feature = "board-312")),
         (313, cfg!(feature = "board-313")),
         (325, cfg!(feature = "board-325")),
         (552, taito_x1),

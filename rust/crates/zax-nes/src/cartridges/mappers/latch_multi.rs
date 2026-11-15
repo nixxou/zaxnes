@@ -127,6 +127,16 @@ pub enum LatchKind {
     M274,
     /// 286, `Waixing/Bs5.h` (BS-5).
     M286,
+    /// 39, `Unlicensed/Mapper39.h` (Study and Game 32-in-1).
+    M39,
+    /// 54, `Unlicensed/NovelDiamond.h`, the same board as 201.
+    M54,
+    /// 148, `Sachen/Sachen_148.h` (Sachen SA-008-A, Tengen 800008).
+    M148,
+    /// 171, `Kaiser/Kaiser7058.h`.
+    M171,
+    /// 312, `Kaiser/Kaiser7013B.h`.
+    M312,
 }
 
 impl LatchKind {
@@ -178,6 +188,11 @@ impl LatchKind {
             261 => Self::M261,
             274 => Self::M274,
             286 => Self::M286,
+            39 => Self::M39,
+            54 => Self::M54,
+            148 => Self::M148,
+            171 => Self::M171,
+            312 => Self::M312,
             _ => return None,
         })
     }
@@ -228,6 +243,11 @@ impl LatchKind {
             Self::M261 => 261,
             Self::M274 => 274,
             Self::M286 => 286,
+            Self::M39 => 39,
+            Self::M54 => 54,
+            Self::M148 => 148,
+            Self::M171 => 171,
+            Self::M312 => 312,
         }
     }
 
@@ -252,6 +272,7 @@ impl LatchKind {
                 | Self::M261
                 | Self::M274
                 | Self::M51
+                | Self::M312
         )
     }
 }
@@ -392,8 +413,8 @@ impl LatchMulti {
                 self.banks.map_chr_8k(bank);
                 (self.addr != 0 || self.flag).then(|| pick(a & 0x08 != 0, V, H))
             }
-            // `NovelDiamond.h:16-19`, 32 KiB pages.
-            LatchKind::M201 => {
+            // `NovelDiamond.h:16-19`, 32 KiB pages; 54 is the same class in Mesen2.
+            LatchKind::M54 | LatchKind::M201 => {
                 self.banks.map_prg_32k(a & 0x03);
                 self.banks.map_chr_8k(a & 0x07);
                 None
@@ -590,7 +611,8 @@ impl LatchMulti {
                 None
             }
             // `Mapper241.h:13-16`, 32 KiB pages.
-            LatchKind::M241 => {
+            // `Mapper39.h:13-19` is the same board.
+            LatchKind::M39 | LatchKind::M241 => {
                 self.banks.map_prg_32k(r0);
                 self.banks.map_chr_8k(0);
                 None
@@ -784,6 +806,26 @@ impl LatchMulti {
                 }
                 None
             }
+            // `Sachen_148.h:12-16`, 32 KiB pages.
+            LatchKind::M148 => {
+                self.banks.map_prg_32k((r0 >> 3) & 0x01);
+                self.banks.map_chr_8k(r0 & 0x07);
+                None
+            }
+            // `Kaiser7058.h:10-22`: 32 KiB of PRG, two 4 KiB CHR registers at `$F000`/`$F080`.
+            LatchKind::M171 => {
+                self.banks.map_prg_32k(0);
+                self.banks.map_chr_4k(0, r0);
+                self.banks.map_chr_4k(4, r1);
+                None
+            }
+            // `Kaiser7013B.h:10-24`: `$6000-$7FFF` banks `$8000`, the last 16 KiB fixed, `$8000+`
+            // the mirroring (power-on vertical).
+            LatchKind::M312 => {
+                self.prg_16k(r0, -1);
+                self.banks.map_chr_8k(0);
+                Some(pick(r1 & 0x01 != 0, H, V))
+            }
             // `Bmc255.h:14-21`.
             LatchKind::M255 => {
                 let bit = i32::from(a & 0x1000 == 0);
@@ -916,7 +958,24 @@ impl LatchMulti {
             }
             // No register reached through here: 60 has none, the others' are below `$8000`.
             LatchKind::M60 | LatchKind::M120 | LatchKind::M125 | LatchKind::M170 => {}
-            LatchKind::M203 | LatchKind::M240 | LatchKind::M241 => self.regs[0] = value,
+            // `Kaiser7058.h:17-21`, registers `$F000-$FFFF` under mask `$F080`.
+            LatchKind::M171 => match address & 0xF080 {
+                0xF000 => self.regs[0] = value,
+                0xF080 => self.regs[1] = value,
+                _ => {}
+            },
+            LatchKind::M312 => {
+                if address < 0x8000 {
+                    self.regs[0] = value;
+                } else {
+                    self.regs[1] = value;
+                }
+            }
+            LatchKind::M39
+            | LatchKind::M148
+            | LatchKind::M203
+            | LatchKind::M240
+            | LatchKind::M241 => self.regs[0] = value,
             _ => {
                 self.addr = address;
                 self.flag = true;
@@ -1030,7 +1089,8 @@ impl Mapper for LatchMulti {
             }
             // `Bmc51.h:10` (registers from `$6000`), `Nina03_06.h:12,20` (`$4100-$5FFF` under
             // `$E100`) and `Henggedianzi179.h:13` (`$5000-$5FFF`) go through `latch`.
-            LatchKind::M51 => (0x6000..=0x7FFF).contains(&address),
+            // and `Kaiser7013B.h:8` (registers from `$6000`).
+            LatchKind::M51 | LatchKind::M312 => (0x6000..=0x7FFF).contains(&address),
             LatchKind::M113 => (0x4100..=0x5FFF).contains(&address) && address & 0xE100 == 0x4100,
             LatchKind::M179 => (0x5000..=0x5FFF).contains(&address),
             // `Mapper120.h:9` (`$41FF`) and `Lh32.h:12` (`$6000`): the register is the bank of
@@ -1096,6 +1156,7 @@ impl Mapper for LatchMulti {
             self.kind,
             LatchKind::M46
                 | LatchKind::M212
+                | LatchKind::M312
                 | LatchKind::M51
                 | LatchKind::M108
                 | LatchKind::M120
