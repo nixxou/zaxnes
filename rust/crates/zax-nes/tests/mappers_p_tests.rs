@@ -1348,3 +1348,57 @@ fn mappers_p_398_banks_from_the_address_and_the_fetched_window() {
     core.mapper_write(0x8000, 0x02);
     assert_eq!([2, 1, 14, 15], core.prg_windows());
 }
+
+/// `mapper_359.c`: `$9000` the outer PRG bank, `$9001` the masks, `$9003` the outer CHR bank;
+/// the IRQ counts CPU cycles from `$C000`/`$C001`, or in its A12 mode filtered A12 rises.
+#[cfg(feature = "board-359")]
+#[test]
+fn mappers_p_359_banks_and_counts_both_ways() {
+    let mut core = MapperRom::new(359).prg(64).chr(256).load();
+    assert_eq!([60, 61, 63, 63], core.prg_windows());
+    assert_eq!(0, core.read_memory(0x6000));
+    core.mapper_write(0x9000, 0x08);
+    core.mapper_write(0x9001, 0x03);
+    assert_eq!([28, 29, 31, 31], core.prg_windows());
+    core.mapper_write(0xA000, 0x85);
+    assert_eq!(5, core.chr_windows()[0]);
+    core.mapper_write(0x9003, 0x01);
+    assert_eq!(0x85, core.chr_windows()[0]);
+
+    core.mapper_write(0xC000, 0x10);
+    core.mapper_write(0xC001, 0x00);
+    core.mapper_write(0xC002, 0x01);
+    for _ in 0..20 {
+        core.bus_mut().tick();
+    }
+    assert!(core.cartridge().unwrap().irq_asserted());
+
+    // The A12 mode first, disabled, so that the CPU-cycle counter stops before the reload.
+    core.mapper_write(0xC002, 0x02);
+    core.mapper_write(0xC001, 0x02);
+    core.mapper_write(0xC003, 0x01);
+    for rise in 0..3 {
+        assert!(!core.cartridge().unwrap().irq_asserted(), "rise {rise}");
+        for _ in 0..8 {
+            core.bus_mut().tick();
+        }
+        let cartridge = core.cartridge_mut().unwrap();
+        cartridge.on_ppu_address_bus(0x0000, 0);
+        cartridge.on_ppu_address_bus(0x1000, 0);
+    }
+    assert!(core.cartridge().unwrap().irq_asserted());
+}
+
+/// `mapper_359.c` as 540: four 2 KiB CHR banks from registers 0, 1, 6 and 7.
+#[cfg(feature = "board-540")]
+#[test]
+fn mappers_p_540_has_2_kib_chr_banks() {
+    let mut core = MapperRom::new(540).prg(64).chr(256).load();
+    core.mapper_write(0xA000, 3);
+    core.mapper_write(0xB002, 5);
+    let windows = core.chr_windows();
+    assert_eq!(
+        [6, 7, 10, 11],
+        [windows[0], windows[1], windows[4], windows[5]]
+    );
+}

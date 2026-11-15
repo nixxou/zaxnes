@@ -64,7 +64,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 356 | `mapper_356.c` | 106 | 1 | 0 | done (batch 25, `Mmc3P`) |
 | 357 | `mapper_357.c` | 118 | 1 | 0 | done (batch 18, `IrqP`) |
 | 358 | `mapper_358.c` | 76 | 4 | 0 | done (batch 3, `JyCompany` + `JyMulticart`) |
-| 359 | `mapper_359.c` | 293 | 3 | 0 | todo |
+| 359 | `mapper_359.c` | 293 | 3 | 0 | done (batch 42, `IrqP`) |
 | 360 | `mapper_360.c` | 54 | 1 | 0 | done (batch 2, `MultiP`) |
 | 361 | `mapper_361.c` | 85 | 5 | 0 | done (batch 12, `Mmc3P`) |
 | 362 | `mapper_362.c` | 99 | 2 | 0 | done (batch 41, `VrcP`) |
@@ -140,7 +140,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 536 | `mapper_195.c` | 148 | 0 | 0 | done (batch 20, alias, `registry::board_number`) |
 | 538 | `mapper_538.c` | 64 | 2 | 0 | done (batch 9, `MultiP`) |
 | 539 | `mapper_539.c` | 113 | 1 | 0 | done (batch 35, `MultiP`) |
-| 540 | `mapper_359.c` | 293 | 1 | 0 | todo |
+| 540 | `mapper_359.c` | 293 | 1 | 0 | done (batch 42, `IrqP`) |
 | 541 | `mapper_541.c` | 70 | 1 | 0 | done (batch 9, `MultiP`) |
 | 543 | `mapper_543.c` | 87 | 0 | 0 | done (batch 22, `Mmc1Outer`) |
 | 547 | `mapper_547.c` | 241 | 8 | 4 | todo |
@@ -310,3 +310,10 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   `rom_windows` answers `NO_ROM_WINDOW`, now reached through the `IrqBoard` forward. 362 toggles
   to its second game on a reset of an image above 512 KiB (`soft_reset`); 398 latches the low
   address byte of every write.
+* Batch 42: `IrqP` 359 and 540 (BS-400R; 540 with 2 KiB CHR banks): outer PRG/CHR banks and
+  masks, PRG register 3 at `$6000`, and the IRQ in either mode: CPU cycles on a 16-bit counter,
+  or A12 rises past puNES's own five-CPU-cycle filter (`ext_359[6]`, counted down in
+  `on_cpu_cycle`), raw rises seen in `on_ppu_address_bus` (both PPU-bus lists, the mf_3b sweep,
+  `clocks_on_cpu_cycle`). puNES's `map_init_359` sets `prg[2]` twice and leaves `prg[3]` 0;
+  kept. The mf_3b list's comments were regrouped (rustfmt had moved them onto the previous
+  numbers).
