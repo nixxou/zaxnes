@@ -434,3 +434,22 @@ fn mappers_n_17_ports_and_irq() {
     }
     assert!(core.cartridge().unwrap().irq_asserted());
 }
+
+/// `Fk23C.h`: `$5000`/`$5001` give the PRG mode and outer bank; `$A001` bit 5 banks 32 KiB of
+/// WRAM over `$6000` and the next bank over `$4000-$5FFF`.
+#[cfg(feature = "board-176")]
+#[test]
+fn mappers_n_176_outer_bank_and_banked_wram() {
+    let mut core = MapperRom::new(176).prg(64).chr(256).load();
+    assert_eq!([0, 1, 62, 63], core.prg_windows());
+    core.mapper_write(0x5010, 0x01);
+    core.mapper_write(0x5011, 0x10);
+    assert_eq!([0x20, 0x21, 0x3E, 0x3F], core.prg_windows());
+    core.mapper_write(0xA001, 0x21);
+    core.mapper_write(0x6000, 0x55);
+    core.mapper_write(0x4100, 0x66);
+    assert_eq!(0x55, core.read_memory(0x6000));
+    assert_eq!(0x66, core.read_memory(0x4100));
+    core.mapper_write(0xA001, 0x22);
+    assert_eq!(0x66, core.read_memory(0x6100));
+}

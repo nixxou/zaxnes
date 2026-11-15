@@ -639,6 +639,7 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 191
             | 117
             | 222
+            | 176
     )
 }
 
@@ -718,6 +719,7 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 191
             | 117
             | 222
+            | 176
     )
 }
 
@@ -921,6 +923,8 @@ impl Cartridge {
                     | 6
                     | 8
                     | 17
+                    // MAPPERS-N: the FK23C raises its IRQ two CPU cycles late (Mesen2 `Fk23C.h`).
+                    | 176
                     | 40
                     | 42
                     | 43
@@ -1965,8 +1969,8 @@ mod tests {
         // MAPPERS-N: the MMC3 clones hold an `Mmc3`, so each moves for 114's reason, twice. They
         // are appended here and the list is sorted below, since the sweep runs in number order.
         for number in [
-            44, 45, 49, 52, 117, 126, 134, 191, 196, 197, 205, 222, 224, 238, 245, 249, 250, 259,
-            287, 313, 325,
+            44, 45, 49, 52, 117, 176, 126, 134, 191, 196, 197, 205, 222, 224, 238, 245, 249, 250,
+            259, 287, 313, 325,
         ] {
             if Cartridge::is_supported(number) {
                 expected.extend_from_slice(&[number, number]);

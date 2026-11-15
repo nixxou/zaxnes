@@ -41,6 +41,8 @@ mod discrete;
 mod eeprom24c0x;
 #[cfg(feature = "board-164")]
 mod eeprom93c66;
+#[cfg(feature = "board-176")]
+mod fk23c;
 mod fme7;
 #[cfg(feature = "board-246")]
 mod g0151;
@@ -184,6 +186,8 @@ pub use discrete::{
 pub use eeprom24c0x::{Eeprom24C0X, EepromKind, EepromPort};
 #[cfg(feature = "board-164")]
 pub use eeprom93c66::Eeprom93C66;
+#[cfg(feature = "board-176")]
+pub use fk23c::Fk23c;
 pub use fme7::Fme7;
 #[cfg(feature = "board-246")]
 pub use g0151::G0151;

@@ -1,5 +1,7 @@
 #[cfg(feature = "board-cony")]
 use super::Cony;
+#[cfg(feature = "board-176")]
+use super::Fk23c;
 #[cfg(feature = "board-huang1")]
 use super::Huang1;
 #[cfg(feature = "board-irq-latch")]
@@ -347,6 +349,9 @@ pub enum IrqBoard {
     /// MAPPERS-N).
     #[cfg(feature = "board-irq-latch")]
     IrqLatch(Box<IrqLatch>),
+    /// Mapper 176, the FK23C (lot MAPPERS-N).
+    #[cfg(feature = "board-176")]
+    Fk23c(Box<Fk23c>),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as `Board`'s own `dispatch!` does.
@@ -403,6 +408,8 @@ macro_rules! inner {
             IrqBoard::Waixing253($b) => $body,
             #[cfg(feature = "board-irq-latch")]
             IrqBoard::IrqLatch($b) => $body,
+            #[cfg(feature = "board-176")]
+            IrqBoard::Fk23c($b) => $body,
         }
     };
 }
@@ -480,6 +487,7 @@ impl Mapper for IrqBoard {
         feature = "board-huang1",
         feature = "board-jy-asic",
         feature = "board-irq-latch",
+        feature = "board-176",
     ))]
     fn prg_ram_enabled(&self) -> bool {
         inner!(self, b => b.prg_ram_enabled())
@@ -502,7 +510,7 @@ impl Mapper for IrqBoard {
     /// **Behaviour-neutral for the other boards of this enum**: no other variant overrides
     /// `prg_ram_window`, and `Mmc3ChrRamBoard`'s own body answers the trait default for 74, 192
     /// and 194, so every one of them gets the answer the un-forwarded dispatch gave it.
-    #[cfg(feature = "board-195-prg-ram-5000")]
+    #[cfg(any(feature = "board-195-prg-ram-5000", feature = "board-176"))]
     fn prg_ram_window(&self, memory: &CartridgeMemory) -> (usize, usize) {
         inner!(self, b => b.prg_ram_window(memory))
     }
@@ -522,7 +530,8 @@ impl Mapper for IrqBoard {
         feature = "board-119",
         feature = "board-268",
         feature = "board-huang1",
-        feature = "board-mmc3-clones"
+        feature = "board-mmc3-clones",
+        feature = "board-176",
     ))]
     fn prg_ram_writable(&self) -> bool {
         inner!(self, b => b.prg_ram_writable())
@@ -539,6 +548,7 @@ impl Mapper for IrqBoard {
         feature = "board-268",
         feature = "board-mmc3-clones",
         feature = "board-irq-latch",
+        feature = "board-176",
     ))]
     fn intercept_cpu_write(
         &mut self,
@@ -629,6 +639,7 @@ impl Mapper for IrqBoard {
         feature = "board-jy-asic",
         feature = "board-mmc3-clones",
         feature = "board-irq-latch",
+        feature = "board-176",
     ))]
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
         inner!(self, b => b.try_read_prg(memory, address))

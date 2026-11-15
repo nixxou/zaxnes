@@ -14,6 +14,8 @@ use super::mappers::Cony;
 use super::mappers::DecodeBoard;
 #[cfg(feature = "board-eeprom")]
 use super::mappers::EepromPort;
+#[cfg(feature = "board-176")]
+use super::mappers::Fk23c;
 #[cfg(feature = "board-huang1")]
 use super::mappers::Huang1;
 #[cfg(feature = "board-77")]
@@ -382,6 +384,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     173,
     #[cfg(feature = "board-174")]
     174,
+    #[cfg(feature = "board-176")]
+    176,
     #[cfg(feature = "board-177")]
     177,
     #[cfg(feature = "board-178")]
@@ -813,6 +817,14 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         #[cfg(feature = "board-irq-latch")]
         6 | 8 | 17 if header.chr_rom_size == 0 => BoardMemorySizes {
             chr_ram: Some(0x8000),
+            ..BoardMemorySizes::default()
+        },
+        // MAPPERS-N: the FK23C's iNES 1.0 defaults, "only used for iNES 1.0 files w/ no DB entry"
+        // (Mesen2 `Fk23C.h`, `GetChrRamSize` 256 KiB and `GetWorkRamSize` 32 KiB).
+        #[cfg(feature = "board-176")]
+        176 if !header.is_nes20 => BoardMemorySizes {
+            prg_ram: Some(Fk23c::INES1_WORK_RAM),
+            chr_ram: Some(Fk23c::INES1_CHR_RAM),
             ..BoardMemorySizes::default()
         },
         #[cfg(feature = "board-125")]
@@ -2195,6 +2207,8 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
             memory,
             IrqLatchKind::of(mapper)?,
         )))),
+        #[cfg(feature = "board-176")]
+        176 => Board::IrqBoard(IrqBoard::Fk23c(Box::new(Fk23c::new(memory)))),
         _ => return None,
     })
 }
