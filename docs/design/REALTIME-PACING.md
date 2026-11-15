@@ -183,3 +183,24 @@ tester, community USB descriptors): 100-250 Hz for most pads over Bluetooth, don
 pads, about 200 Hz for an Xbox 360 wireless dongle, 250 Hz for the DualShock 4 / DualSense over USB;
 Bluetooth LE allows at most ~133 reports/s at its 7.5 ms minimum interval. Reading at 1 kHz asks
 nothing of the pad: it only stops adding delay on top of the pad's own.
+## B5 step 4: the real-time pad, on by default (2026-11-16)
+
+Owner decision (2026-11-16): read the pads more often through SDL, behind an option on by default.
+`emu.realtime_input` now defaults to **on** and covers both B3 (slices of real time, the pads read
+at the game's strobe) and this step:
+
+- `Application::run_the_realtime_pad` runs just before `swap`. While the frame would wait for the
+  refresh, it sleeps 1 ms, pumps SDL's events, samples the two players (`sample_players`: buttons
+  only, no command edge, no capture, no pointer) and runs the machine up to the present
+  (`EmulationHost::realtime_slice`, which keeps the displayed frame's hotkey bits). It stops 2.5 ms
+  before the refresh is due (last swap + paced budget) so the swap is not missed.
+- The frames finished during that wait are counted with the next displayed frame (`carried_frames`);
+  a quit seen by the inner pump is acted on at the next frame (`close_requested`).
+- Nothing happens without a refresh to wait for (no vsync and no cap), with run-ahead, during a
+  movie, or when the game is not running. The same code runs on Windows, Linux and Android: all
+  three read the pads through SDL.
+
+The game therefore reads a pad at most about 1 ms old (plus the pad's own report interval) instead
+of one sampled once a refresh: about 9 ms sooner on average, 16 at worst at 60 Hz. The run-ahead
+tests turn the option off: they compare whole frames across N, and the real-time pad changes, by
+design, the instant the input reaches the game at N = 0.

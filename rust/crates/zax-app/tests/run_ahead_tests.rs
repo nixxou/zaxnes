@@ -33,9 +33,12 @@ use run_ahead_rom as rom;
 /// A harness playing the vector ROM at `run_ahead`, past the ROM's warm-up.
 fn playing(run_ahead: i32) -> LoopHarness {
     let mut harness = LoopHarness::create();
-    harness
-        .host
-        .update_settings(|model| model.set(SettingId::EmuRunAhead, SettingValue::Int(run_ahead)));
+    // The real-time pad (on by default) reads the pads inside the frame at N = 0 only; these
+    // tests compare whole frames across N, so they run without it.
+    harness.host.update_settings(|model| {
+        model.set(SettingId::EmuRunAhead, SettingValue::Int(run_ahead));
+        model.set(SettingId::EmuRealtimeInput, SettingValue::Bool(false));
+    });
     harness.launch_rom_with_script("vector", &rom::build(), None);
     for _ in 0..8 {
         harness.tick_frame();

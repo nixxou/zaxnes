@@ -198,6 +198,26 @@ impl DesktopInputSource {
         }
     }
 
+    /// The two players' buttons as they stand now, for the real-time pad's reads between two
+    /// displayed frames (lot FIDPLUS-B step 5, `emu.realtime_input`). Unlike [`Self::sample`] it
+    /// moves nothing: no command edge, no capture, no pointer; the hotkeys and the commands stay
+    /// with the displayed frame's sample.
+    pub fn sample_players(
+        &mut self,
+        keyboard: Option<&dyn KeyboardDevice>,
+        hub: &mut dyn GamepadHub,
+    ) -> (InputAction, InputAction) {
+        hub.poll();
+        if self.rebinding.suppresses_actions() {
+            return (InputAction::NONE, InputAction::NONE);
+        }
+        let hub: &dyn GamepadHub = hub;
+        (
+            self.sample_player(0, keyboard, hub),
+            self.sample_player(1, keyboard, hub),
+        )
+    }
+
     /// Ends the sample: a capture no longer suppresses the actions.
     pub fn end_sample(&mut self) {
         self.rebinding.end_sample();

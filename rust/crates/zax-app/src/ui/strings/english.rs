@@ -1254,7 +1254,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.realtime_input",
-        "Runs the console in slices of real time instead of a whole image at once, so the game reads the pad at the moment it asks for it, as on the console: a fidelity setting, for games and test programs that read the pad several times an image. It does not lower the input lag for now: the pad is still read once per screen refresh and the finished image can be shown a refresh later; for the lowest lag keep it off and use run-ahead. Not used with run-ahead or while a movie is recorded or played: those keep whole images. Takes effect at once. Default: off.",
+        "Reads the pad about every millisecond and runs the console in slices of real time between two screen refreshes, instead of reading the pad once a refresh and running a whole image at once: the game sees a button about 9 ms sooner on average (up to 16 ms), and reads it at the moment it asks for it, as on the console. Not used with run-ahead or while a movie is recorded or played: those keep whole images. Takes effect at once. Default: on."
     ),
     (
         "detail.emu.fidelity_plus",

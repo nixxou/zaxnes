@@ -503,7 +503,7 @@ impl Running {
         let frame_begin = self.clock.start();
         let busy_begin = Instant::now();
         let mark = self.clock.start();
-        if self.pump_events() {
+        if self.pump_events() || self.state.close_requested {
             return Ok(false);
         }
         self.state.frame_time = self.host.pacer.elapsed_seconds();
@@ -532,7 +532,8 @@ impl Running {
         let pipelined = self.next_frame_pipelined();
         self.host.defer_conversion = pipelined;
         let mark = self.clock.start();
-        let emulated = self.host.tick(real, &snapshot);
+        // The frames the real-time pad finished during the last wait are this frame's too.
+        let emulated = self.host.tick(real, &snapshot) + std::mem::take(&mut self.state.carried_frames);
         self.log_rates(emulated);
         self.state.emulated_now = emulated;
         self.source.end_sample();
@@ -591,9 +592,11 @@ impl Running {
             }
             return Ok(false);
         }
+        self.run_the_realtime_pad();
         let mark = self.clock.start();
         self.window.swap();
         self.clock.stop(Stage::Swap, mark);
+        self.state.last_swap = Some(Instant::now());
         let mark = self.clock.start();
         self.window.pace();
         self.clock.stop(Stage::Pacer, mark);
@@ -640,6 +643,39 @@ impl Running {
         self.audio_logged_at = now;
         if let Some(line) = self.host.audio_report() {
             log(&format!("audio  {line}"));
+        }
+    }
+
+    /// Lot FIDPLUS-B step 5 (`emu.realtime_input`, `docs/design/REALTIME-PACING.md`): the time
+    /// the frame would spend waiting for its swap is spent instead reading the pads about every
+    /// millisecond and running the machine up to the present, so that it follows the clock and
+    /// the game reads a pad at most a millisecond old instead of one sampled once a refresh
+    /// (9.3 ms on average, 16 at worst, measured with `padbench`). Stops 2.5 ms before the
+    /// refresh is due, so the swap is not missed; nothing to do without a refresh to wait for
+    /// (no vsync and no frame cap), when the setting is off or the game is not running.
+    fn run_the_realtime_pad(&mut self) {
+        const STEP: Duration = Duration::from_millis(1);
+        const MARGIN: Duration = Duration::from_micros(2500);
+        if !self.host.realtime_slices_active() {
+            return;
+        }
+        let (Some(period), Some(last_swap)) = (self.paced_budget(), self.state.last_swap) else {
+            return;
+        };
+        let Some(deadline) = (last_swap + period).checked_sub(MARGIN) else {
+            return;
+        };
+        while Instant::now() + STEP < deadline {
+            std::thread::sleep(STEP);
+            if self.pump_events() {
+                self.state.close_requested = true;
+                return;
+            }
+            let keyboard = (!self.ui.wants_keyboard())
+                .then_some(&self.input.keyboard as &dyn zax_platform::input::KeyboardDevice);
+            let (player_one, player_two) =
+                self.source.sample_players(keyboard, &mut self.input.gamepads);
+            self.state.carried_frames += self.host.realtime_slice(player_one, player_two);
         }
     }
 
@@ -2104,6 +2140,7 @@ struct ViewPlan {
     skip: bool,
 }
 
+#[allow(clippy::struct_excessive_bools)] // independent loop flags, not a state machine
 struct RunState {
     rendered_frames: u64,
     scene_frames: u64,
@@ -2139,6 +2176,14 @@ struct RunState {
     /// When this display frame began, on the frame pacer's clock.
     frame_time: f64,
     scroll_log: Option<std::fs::File>,
+    /// Lot FIDPLUS-B step 5: the frames the real-time pad finished while the last displayed frame
+    /// waited for its swap, which the next one shows.
+    carried_frames: u32,
+    /// A quit the real-time pad's event pump saw, acted on at the next frame.
+    close_requested: bool,
+    /// When the last swap returned: the display's refresh, the start of the wait the real-time
+    /// pad fills.
+    last_swap: Option<Instant>,
 }
 
 impl RunState {
@@ -2165,6 +2210,9 @@ impl RunState {
             frame_time: 0.0,
             scroll_log: std::env::var_os("ZAXNES_SCROLL_LOG")
                 .and_then(|path| std::fs::File::create(path).ok()),
+            carried_frames: 0,
+            close_requested: false,
+            last_swap: None,
         }
     }
 }
