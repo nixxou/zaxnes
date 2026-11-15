@@ -841,18 +841,21 @@ They use this build's MMC3 filter (`A12Watcher::MMC3_FILTER_DOTS`), as Mesen2 us
 `roms-owner/Excitebike_1_/… vs._excitebike_fds_conversion_b1.nes`: 144 KiB of PRG whose last 16 KiB
 are zeros and whose vectors point there; no emulator can run it. The board is tested by unit tests.
 
-### J8. Mapper 198 and 199 left out
+### J8. Mapper 198 and 199 left out — superseded by J20 and J21
 Mesen2's own comment on `MMC3_198.h` is "Most likely incorrect/incomplete"; 199 needs per-window
-CHR-RAM selection by page number. Neither was taken in this lot.
+CHR-RAM selection by page number. Neither was taken at first; both were later implemented from
+nesdev and puNES instead of Mesen2 (J20, J21).
 
 ### J9. Mapper 217's NROM mode is held
 `MMC3_217.h:46-55` maps the `$5000` bit-7 page pair once, so Mesen2 drops it at the chip's next PRG
 update; this build holds it until `$5000` is written again. Which one the BMC-SPC009 does is open.
 
-### J10. Mapper 303 left out
+### J10. Mapper 303 left out — superseded by J25
 `Kaiser7017.h` acknowledges its IRQ on a **read** of `$4030`. That needs `Mapper::cpu_read_override`
 in `IrqBoard`, the hook whose body cost `mmc5exram` +1.098 % in MF-UNL-12 (`board-292` parked), so the
-board was not taken.
+board was not taken at first. It was later taken (J25): the `IrqBoard` forward is `#[inline(never)]`
+and reached only for reads the cached ROM windows do not serve, so `mmc5exram` (an MMC5, not an
+`IrqBoard`) does not cross it; the final callgrind run of the lot measures it.
 
 ### J11. Mapper 108 follows nesdev's submappers, not Mesen2
 Mesen2 `Bb.h` takes one register at every `$8000-$FFFF` address of `(addr & $9000) == $8000` plus
