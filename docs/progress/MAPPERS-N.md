@@ -162,3 +162,34 @@ Owner's request (2026-11-15): implement the mappers missing compared with the ot
   with one more arm in each of `Board`'s six MMC5 methods; PCM channels as expansion audio
   (J34). No dump. Next: 682 Rainbow without Wi-Fi, then its Wi-Fi behind an emulation option off
   by default (owner, 2026-11-15), then callgrind and the merge request.
+
+## Mapper 682, Rainbow (Broke Studio) — plan (owner, 2026-11-15: all of it, Wi-Fi behind an option)
+
+Sources: Mesen2 `Homebrew/Rainbow.{h,cpp}`, `RainbowAudio.h`, `FlashS29.h` (mainline: everything
+but Wi-Fi, `$4190-$4194` are flags only); Broke Studio's `rainbow-net/NES/mapper-doc.md` and
+`rainbow-net.md` (the ESP message protocol, ~80 commands). The Broke Studio Mesen fork (with the
+ESP) is not local: downloading it needs the owner's consent; otherwise the protocol doc is the
+source.
+
+Mapping onto Zaxnes's hooks (no `ppu/` change):
+* CPU: every read `$4100-$FFFF` through `cpu_read_override` (all windows `NO_ROM_WINDOW`): 4 KiB
+  high banks (5 modes) and 4/8 KiB low banks mixing PRG-ROM, PRG-RAM and FPGA-RAM, FPGA-RAM at
+  `$4800-$4FFF` (last 2 KiB) and `$5000-$5FFF` (4 KiB bank), registers, `$415F` auto-increment
+  port, `$4280-$47FF` generated OAM code, NMI/IRQ vector override at `$FFFA/$FFFE`.
+* PPU: `on_ppu_address_bus` (every rendered fetch) runs Mesen2's counters (`DetectScanlineStart`,
+  in-frame, idle counter on the CPU clock, NT fetch counter, scanline IRQ at offset), computes
+  the window flag and the ext data; `read_nametable_from_vram` serves the four nametable sources
+  (CIRAM / CHR-RAM / FPGA-RAM / CHR-ROM), fill mode, attribute ext mode and the window;
+  `ppu_read` substitutes background ext tiles, window tiles and sprite ext tiles; the 3D capture
+  through `position_captured_background_tile` (the Drip's arms in `board.rs`).
+* Bus additions (`nes_bus.rs`, allowed): `$2003`/`$2004` writes to the cartridge (sprite ext's OAM
+  Y copy), `$4011` read (audio level / IRQ ack); `$2000` via `on_ppu_control`.
+* Audio: two VRC6 pulses and a saw (reuse `vrc6` audio if it splits), volume `$41AA`.
+* Flash: `FlashS29` (S29GL) self-programming of PRG and CHR, saved as a ROM patch (Mesen2
+  `SaveRom`); phase 4.
+* Wi-Fi: an ESP model answering the protocol, behind an emulation option **off by default**;
+  sockets on a worker thread, files in a per-ROM folder; savestates/rewind/replay marked
+  offline while it is on. Phase 3.
+
+Phases: 1 CPU side + nametable sources/fill/attr ext + IRQs + audio + vectors; 2 window, bg/sprite
+ext, capture path, bus hooks; 3 Wi-Fi option; 4 flash. Each phase committed on its own.
