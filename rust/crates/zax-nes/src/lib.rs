@@ -5,6 +5,7 @@
 pub mod apu;
 pub mod builtin_patches;
 pub mod cartridges;
+pub mod composite;
 pub mod cpu;
 pub mod fidplus;
 mod engine_impl;

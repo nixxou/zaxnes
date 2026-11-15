@@ -952,6 +952,21 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 - Zaxnes: librashader slang shaders (branch feat/librashader). These are generic shaders, not a
   signal model. Candidate shaders/palettes to port; not a core item.
 
+### H2. The 2C02's composite signal — generator and reference decoder done (FIDPLUS-D2a, 2026-11-15)
+- nesdev "NTSC video": per pixel, 8 half-clock samples of a square wave at the colour subcarrier
+  (12 phases per cycle), high or low level of the pixel's row; hue 0 always high, 13 always low,
+  `$xE`/`$xF` row 1's low (black); emphasis bits attenuate the samples in their colour's half
+  cycle. Levels used (volts): low 0.228 0.312 0.552 0.880, high 0.616 0.840 1.100 1.100,
+  attenuated low 0.192 0.256 0.448 0.712, high 0.484 0.668 0.896 0.896. **To check against the
+  page and the 2C02 netlist's video pins** (written from the page's figures; a mistake would show as
+  a palette shift).
+- `zax-nes/src/composite.rs`: `signal`, `pixel_samples`, the phase per dot (+8) and per line (+4,
+  +8 on the odd frame's short line), `decode_uniform` (YIQ over a subcarrier cycle, FCC matrix).
+  Tests: grey rows carry no chroma, every hue is high half a cycle, decoded white / black / red /
+  green / blue are what their names say, emphasis darkens.
+- Next (D2b): the picture through the generator and a line decoder (colour artefacts, dot crawl),
+  Fidélité+ only; D2c the PAL 2C07 (its phase alternation).
+
 ---
 
 ## I. Open questions from tests and comparisons
