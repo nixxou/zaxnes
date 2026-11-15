@@ -1147,7 +1147,11 @@ impl NesCore {
         self.bus.defer_ppu();
         // Lot MAPPERS-P: mapper 532's overlay reads CPU RAM as it stood at the pre-render line.
         #[cfg(feature = "board-532")]
-        let ersan2_ram = self.ersan2_active().then(|| self.run_to_pre_render());
+        let ersan2_ram = if self.ersan2_active() {
+            Some(self.run_to_pre_render())
+        } else {
+            None
+        };
         // The frame's path (lot CORE-2, `docs/design/CORE-TIERS.md`): the board is looked at once
         // here, and the frame runs through the code compiled for it, or for every board when it
         // is not in the table. `run_frame` checked that a cartridge is loaded.
@@ -1216,7 +1220,9 @@ impl NesCore {
     /// Steps the CPU, the PPU in step, until the PPU reaches the pre-render line (puNES copies
     /// RAM there, `ppu.c`), and returns CPU RAM `$00-$FF`. Only a 532 image runs this.
     #[cfg(feature = "board-532")]
-    fn run_to_pre_render(&mut self) -> [u8; 256] {
+    #[cold]
+    #[inline(never)]
+    fn run_to_pre_render(&mut self) -> Box<[u8; 256]> {
         loop {
             self.bus.sync_ppu();
             let ppu = self.bus.ppu();
@@ -1228,13 +1234,15 @@ impl NesCore {
                     &mut self.bus,
                 ));
         }
-        let mut ram = [0u8; 256];
+        let mut ram = Box::new([0u8; 256]);
         ram.copy_from_slice(&self.bus.ram()[..256]);
         ram
     }
 
     /// Paints mapper 532's glyphs on the finished picture ([`crate::ersan2_overlay`]).
     #[cfg(feature = "board-532")]
+    #[cold]
+    #[inline(never)]
     fn paint_ersan2(&mut self, ram: &[u8; 256]) {
         let mut pixels = self.bus.ppu_mut().take_pixels();
         if let Some(cartridge) = self.bus.cartridge() {
