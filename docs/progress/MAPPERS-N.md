@@ -210,3 +210,22 @@ ext, capture path, bus hooks; 3 Wi-Fi option; 4 flash. Each phase committed on i
   behind the setting `emu.rainbow_network` (Emulation page, off by default, NES and app strings
   in English and French). Test `mappers_n_682_talks_to_its_esp`. Leads J36.
 * Rainbow is complete as planned; no dump tested (none local, downloading needs consent).
+
+### Callgrind (level 1, clean builds from `git archive`, mm2 and zelda2, 300 frames)
+`core` against the base e2b7fced:
+
+| commit | mm2 core | zelda2 core |
+| --- | ---: | ---: |
+| 3d513439 (the ~60 boards before 284) | +0.001 % | +0.001 % |
+| 2eb5cd03 (284) | +0.045 % | +0.044 % |
+| c8d5c9af (682 phase 1) | +0.045 % | +0.044 % |
+| bc828851 (682 phase 2) | +0.046 % | +0.046 % |
+| 274ff3e9 (682 complete) | +0.046 % | +0.046 % |
+| 3e7e6570 (284 off, 682 on) | +0.025 % | +0.025 % |
+
+Both are over the +0.02 % per board of the mapper rule, on MMC1 games that use neither: the cost
+is code layout in the MMC5 ext-attr dispatches (`Board::read_nametable_from_vram` and its
+siblings) that each board widens. So `board-284` and `board-682` are **off by default** (parked,
+not deleted; `--features board-284,board-682` builds and passes the suite and clippy). The
+setting `emu.rainbow_network` stays in the app and does nothing without `board-682`. Making them
+free (one shared arm for every cartridge-served board in those dispatches) is a lot of its own.
