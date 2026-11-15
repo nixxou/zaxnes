@@ -139,3 +139,19 @@ Owner's request (2026-11-15): implement the mappers missing compared with the ot
   328 682.
 * 328 (`MiscN` M328), no dump. Remaining: 260 284 682.
 * 260 (`Mmc3Clone` M260), no dump. Remaining: 284 (Drip, with its sound chip), 682 (Rainbow).
+
+## Not implemented, with the reason (owner's call to reopen)
+
+* **284, the Drip homebrew board** (Mesen2 `Homebrew/UnlDripGame.h`). Its banking, IRQ and two
+  FIFO PCM channels fit the existing hooks (`expansion_audio_output`), but its *extended
+  attributes* replace the attribute byte of **rendering fetches only**, per tile, from 2 KiB of
+  board memory: that needs the PPU's fetch path to tell a rendering read from a `$2007` read and
+  to hand the board the tile being fetched. Today only the MMC5 has such a path
+  (`Board::read_nametable_from_vram` / `position_captured_background_tile`, behind
+  `board-mmc5-exattr-split`, measured on every fetch), and this lot may not touch `ppu/`. A board
+  without the attributes would show the demo in the wrong colours, so it is left out rather than
+  half-done. Reopening it means widening that MMC5 path to a second board, with a perf check.
+* **682, Rainbow** (Mesen2 `Homebrew/Rainbow.cpp`, 1 300+ lines): an ESP32 Wi-Fi co-processor
+  with its own message protocol and network access, self-flashing PRG/CHR, its own audio and
+  several nametable/attribute extension modes. A board of its own size, with a network side this
+  core has nowhere to put; out of this lot's scope.
