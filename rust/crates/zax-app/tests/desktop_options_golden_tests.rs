@@ -507,7 +507,7 @@ fn ro_3_every_console_setting_is_a_row_the_console_can_step() {
     // `emu.power_on_ram`. Lot FIDELITY step 28 adds `emu.cpu_ppu_alignment`, step 32
     // `emu.palette_corruption`. Lot FIDPLUS-A adds `emu.fidelity_plus`, FIDPLUS-B
     // `emu.exact_rate` and `emu.realtime_input`.
-    assert_eq!(83, advanced::ROW_SETTINGS.len());
+    assert_eq!(84, advanced::ROW_SETTINGS.len());
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::EmuEngine));
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::AudioClassicOutput));
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::EmuSmoothScrollAhead));

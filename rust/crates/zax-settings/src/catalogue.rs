@@ -225,6 +225,7 @@ setting_ids! {
     VideoOverscanMode => "video.overscan_mode",
     VideoNesPalette => "video.nes_palette",
     VideoCompositeSignal => "video.composite_signal",
+    VideoEmphasis3d => "video.emphasis_3d",
     EmuBuiltinPatches => "emu.builtin_patches",
     EmuForcedPatch => "emu.forced_patch",
     EmuHackOptions => "emu.hack_options",

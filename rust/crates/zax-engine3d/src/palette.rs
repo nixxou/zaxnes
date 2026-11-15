@@ -285,6 +285,26 @@ pub const fn nes_color_in(palette: NesPalette, index: usize) -> Rgb24 {
     Rgb24::from_packed(palette.table()[index & 0x3F])
 }
 
+/// The colour emphasis the 3D scene is shown with (`video.emphasis_3d`, lot FIDPLUS-D2b): 0 for
+/// none, the default; the host sets the displayed frame's dominant emphasis before building its
+/// draw list. One for the whole process, as [`SELECTED`].
+static SCENE_EMPHASIS: AtomicU8 = AtomicU8::new(0);
+
+/// Shows the 3D scene's colours with the emphasis bits `emphasis` (0 to 7) from now on.
+pub fn set_scene_emphasis(emphasis: u8) {
+    SCENE_EMPHASIS.store(emphasis & 7, Ordering::Relaxed);
+}
+
+/// The colour of NES colour index `index` in the 3D scene: [`nes_color`], with the scene's
+/// emphasis when one is set ([`set_scene_emphasis`]).
+#[must_use]
+pub fn scene_color(index: usize) -> Rgb24 {
+    match SCENE_EMPHASIS.load(Ordering::Relaxed) {
+        0 => nes_color(index),
+        emphasis => nes_color_emphasized(index, emphasis),
+    }
+}
+
 /// The RGB colour of NES colour index `index` shown with the colour emphasis bits `emphasis`
 /// (PPUMASK bits 5-7 as 0 to 7: red, green, blue on NTSC), in the palette chosen (lot
 /// FIDPLUS-D2b). Emphasis 0 is [`nes_color`] itself.
@@ -375,13 +395,13 @@ impl FramePalette {
     /// The RGB colour of entry `entry` (REQ-E3D-251), or `None` outside 0..63.
     #[must_use]
     pub fn color(&self, entry: usize) -> Option<Rgb24> {
-        self.get(entry).map(|index| nes_color(usize::from(index)))
+        self.get(entry).map(|index| scene_color(usize::from(index)))
     }
 
     /// The RGB colour of entry 0, the universal background colour (REQ-E3D-254).
     #[must_use]
     pub fn universal_color(&self) -> Rgb24 {
-        nes_color(self.entries[0] as usize)
+        scene_color(self.entries[0] as usize)
     }
 
     /// Rebuilds the 64 entries from the 32 palette bytes of a frame batch.
@@ -419,7 +439,7 @@ impl FramePalette {
     /// Writes the 64 resolved RGB colours of the frame (SPEC-04B REQ-E3D-641).
     pub fn copy_colors_to(&self, destination: &mut [Rgb24; Self::ENTRY_COUNT]) {
         for (color, &entry) in destination.iter_mut().zip(&self.entries) {
-            *color = nes_color(usize::from(entry));
+            *color = scene_color(usize::from(entry));
         }
     }
 

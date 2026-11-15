@@ -2661,6 +2661,27 @@ fn widescreen_margin(choice: i32, extra: i32, size: (i32, i32)) -> (i32, i32) {
     )
 }
 
+/// `video.emphasis_3d` (lot FIDPLUS-D2b): the 3D scene's colours take the displayed frame's most
+/// common colour emphasis; off, or in 2D (whose picture carries its own), none.
+fn tint_scene(host: &AppHost, state: &mut RunState, two_dimensional: bool) {
+    let wanted = !two_dimensional && host.settings().get(SettingId::VideoEmphasis3d).as_bool();
+    let mut emphasis = 0;
+    if let (true, Some(session)) = (wanted, host.session()) {
+        session.copy_nes_emphasis(&mut state.picture_emphasis);
+        let mut counts = [0usize; 8];
+        for &bits in &state.picture_emphasis {
+            counts[usize::from(bits & 7)] += 1;
+        }
+        // An empty plane is a frame without emphasis; ties go to the lower value.
+        emphasis = (0..8u8)
+            .rev()
+            .max_by_key(|&bits| counts[usize::from(bits)])
+            .filter(|_| !state.picture_emphasis.is_empty())
+            .unwrap_or(0);
+    }
+    zax_engine3d::palette::set_scene_emphasis(emphasis);
+}
+
 /// Whether `video.composite_signal` is on.
 fn composite_on(host: &AppHost) -> bool {
     host.settings()
@@ -2712,6 +2733,7 @@ fn decode_composite(state: &mut RunState, width: usize, video_phase: Option<usiz
 fn update_scene(host: &mut AppHost, state: &mut RunState) {
     let two_dimensional = host.showing_two_dimensional();
     let composite = composite_on(host);
+    tint_scene(host, state, two_dimensional);
     // How far into the emulated frame the display is, for the experimental 120 Hz scrolling.
     let phase = host.pacer.phase_at(state.frame_time);
     let show_band = host

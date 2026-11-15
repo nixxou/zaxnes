@@ -96,6 +96,8 @@ video.shader_resolution
 video.frame_rate
 video.max_queued_frames
 video.nes_palette
+video.composite_signal
+video.emphasis_3d
 video.overscan_mode
 video.overscan_ntsc_bottom
 video.overscan_ntsc_left

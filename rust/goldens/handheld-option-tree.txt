@@ -91,6 +91,8 @@ options
     page.nes_picture
       video.remove_sprite_limit
       video.widescreen_strict_edges
+      video.composite_signal
+      video.emphasis_3d
     page.camera
       row.camera
       camera.fov

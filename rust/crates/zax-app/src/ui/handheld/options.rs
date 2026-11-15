@@ -379,9 +379,12 @@ pub const LIGHT_SHADOWS_ROWS: [OptionRow; 9] = [
 
 /// *Advanced options › NES picture*. The palette is the main page's row and the overscan its own
 /// screen, so what is left is what the console puts out beyond them.
-pub const NES_PICTURE_ROWS: [OptionRow; 2] = [
+pub const NES_PICTURE_ROWS: [OptionRow; 4] = [
     OptionRow::Setting(SettingId::VideoRemoveSpriteLimit),
     OptionRow::Setting(SettingId::VideoWidescreenStrictEdges),
+    // Lot FIDPLUS-D2b: the composite signal (Fidélité+) and the emphasis in 3D.
+    OptionRow::Setting(SettingId::VideoCompositeSignal),
+    OptionRow::Setting(SettingId::VideoEmphasis3d),
 ];
 
 /// *Advanced options › Camera*: the preset row that left the main page, and the field of view.

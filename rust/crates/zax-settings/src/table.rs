@@ -2638,6 +2638,21 @@ fn video_nes_palette(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("Composite signal"),
     );
+    // Lot FIDPLUS-D2b (owner request, 2026-11-15): the 3D scene tinted with the colour emphasis
+    // of the displayed frame (its most common value), the way the console's signal tints the
+    // whole picture. Off: the 3D view as it always was. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoEmphasis3d,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Colour emphasis in 3D"),
+    );
 }
 
 fn achievements(out: &mut Vec<SettingDescriptor>) {

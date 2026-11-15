@@ -606,6 +606,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.video.overscan_mode", "Overscan: fit (edges hidden) or resize (enlarged)"),
     ("setting.video.nes_palette", "NES colour palette"),
     ("setting.video.composite_signal", "Composite signal"),
+    ("setting.video.emphasis_3d", "Colour emphasis in 3D"),
     ("setting.emu.builtin_patches", "Built-in ROM patches (at the next ROM load)"),
     ("setting.audio.volume", "Master volume"),
     ("setting.audio.bg_music", "Menu music"),
@@ -837,6 +838,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ),
 
     // --------------------------------------------------------- NES picture tab
+    (
+        "detail.video.emphasis_3d",
+        "Some games tint or darken the whole screen through the console's colour emphasis (a pause, a fade, a flash, an underwater level): the console weakens its video signal on two of the three colours. The flat picture always shows it; this shows it in the 3D view too, the whole scene taking the tint the game asks for. A game that changes the emphasis in the middle of the screen gets its most common tint for the whole scene. Default: off.",
+    ),
     (
         "detail.video.composite_signal",
         "Fidelity+: the flat picture made the way a television made it from the console's composite signal, generated pixel by pixel as the video chip generates it, then decoded: the colours bleed a little at the edges of objects and the fringes crawl from frame to frame, as on a set plugged in with the yellow cable. The colours of large areas are the console's own signal, not the palette's. Costs some processor time per frame. The 3D view is not affected. Default: off.",

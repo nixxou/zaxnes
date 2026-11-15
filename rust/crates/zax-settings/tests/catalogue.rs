@@ -173,6 +173,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "video.backend",
             "video.composite_signal",
             "video.dynamic_resolution",
+            "video.emphasis_3d",
             "video.half_rate_3d",
             "video.nes_palette",
             "video.overscan_bottom",

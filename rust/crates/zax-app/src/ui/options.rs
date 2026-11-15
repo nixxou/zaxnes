@@ -221,6 +221,7 @@ const DISPLAY: &[LayoutEntry] = &[
 const NES_PICTURE: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::VideoNesPalette),
     LayoutEntry::Row(SettingId::VideoCompositeSignal),
+    LayoutEntry::Row(SettingId::VideoEmphasis3d),
     LayoutEntry::Row(SettingId::VideoRemoveSpriteLimit),
     LayoutEntry::Group(OptionsGroup::Overscan),
     LayoutEntry::Row(SettingId::VideoOverscanMode),
