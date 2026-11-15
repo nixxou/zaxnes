@@ -286,6 +286,7 @@ default = [
     "board-434",
     "board-433",
     "board-421",
+    "board-394",
     "board-431",
     "board-429",
     "board-428",
@@ -503,6 +504,7 @@ board-437 = ["board-multi-p"]
 board-434 = ["board-multi-p"]
 board-433 = ["board-multi-p"]
 board-421 = ["board-jy-asic"]
+board-394 = ["board-jy-asic"]
 board-431 = ["board-multi-p"]
 board-429 = ["board-multi-p"]
 board-428 = ["board-multi-p"]

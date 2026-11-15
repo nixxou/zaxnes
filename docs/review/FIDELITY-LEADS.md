@@ -1067,6 +1067,11 @@ places where puNES itself is incomplete are copied, not invented around:
   step with the cartridge as for expansion audio. The VT09/VT369 extras (GPIO at `$4140`, the
   `$3000` window, the relative bank of `$4160`) and the iNES-only VT09 detection are absent;
   submapper 2 and 4 detection by PRG CRC on iNES 1.0 images is puNES's.
+* 394 (`mapper_394.c`): the MMC3 is this core's `Mmc3`, whose power-on banks (R6 = R7 = 0) are
+  not puNES's; a switch from the ASIC back to the MMC3 re-applies the last `$A000` value written
+  to it for the mirroring, where puNES's `extcl_after_mapper_init_MMC3` re-applies its own
+  `mmc3.mirroring`, which is the same value. The outer CHR bank is ORed over the chip's bank as
+  puNES does (`base | (value & mask)`), not masked into it.
 
 ### J36. Mapper 682 (Rainbow): the ESP is modelled from the protocol document
 The ESP (`rainbow_esp.rs`) follows Broke Studio's `rainbow-net.md` and `mapper-doc.md`; no

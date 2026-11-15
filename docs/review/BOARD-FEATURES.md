@@ -787,6 +787,7 @@ dispatch is the generic path of the exotic ones only.
 | `board-388` | 388 | `JyCompany` with `JyMulticart::M388`: J.Y. ASIC multicart, nametable jumper as 90 (puNES; MAPPERS-P). Requires `board-jy-asic` | — | — (unit test) | **on** |
 | `board-397` | 397 | `JyCompany` with `JyMulticart::M397`: J.Y. ASIC multicart (puNES; MAPPERS-P). Requires `board-jy-asic` | — | — (unit test) | **on** |
 | `board-421` | 421 | `JyCompany` with `JyMulticart::M421`: J.Y. ASIC multicart, 512 KiB inner CHR (puNES; MAPPERS-P). Requires `board-jy-asic` | — | — (unit test) | **on** |
+| `board-394` | 394 | `JyCompany` with a `Jy394` board: the J.Y. ASIC or an MMC3 by `$5001` D4, both through its outer bank (puNES; MAPPERS-P). Requires `board-jy-asic` | — | — (unit test) | **on** |
 | `board-267` | 267 | `Mmc3P` kind M267 (IrqBoard): JY-119, lockable outer bank at $6000 (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
 | `board-291` | 291 | `Mmc3P` kind M291 (IrqBoard): Kasheng 2-in-1, NROM mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
 | `board-315` | 315 | `Mmc3P` kind M315 (IrqBoard): 820732C, GNROM mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |

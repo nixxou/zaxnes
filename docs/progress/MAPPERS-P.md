@@ -85,7 +85,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 389 | `mapper_389.c` | 90 | 1 | 1 | done (batch 1, `MultiP`) |
 | 390 | `mapper_390.c` | 93 | 0 | 0 | done (batch 5, `MultiP`) |
 | 393 | `mapper_393.c` | 123 | 1 | 0 | done (batch 15, `Mmc3P`) |
-| 394 | `mapper_394.c` | 193 | 0 | 0 | todo |
+| 394 | `mapper_394.c` | 193 | 0 | 0 | done (batch 54, `JyCompany` + `Jy394`) |
 | 395 | `mapper_395.c` | 88 | 4 | 0 | done (batch 13, `Mmc3P`) |
 | 396 | `mapper_396.c` | 68 | 5 | 0 | done (batch 6, `MultiP`) |
 | 397 | `mapper_397.c` | 69 | 1 | 0 | done (batch 6, `JyCompany` + `JyMulticart`) |
@@ -385,3 +385,12 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   `Mapper::apu_status`, and treats the board as an expansion-audio one so that
   `push_expansion_audio` hands the APU the PCM's `$4011` byte (`Mapper::take_dac_write`). New
   `irq_p_a12_board` list (471, 413, 256, 436, 359, 540) shared by both PPU-bus lists.
+* Batch 54: 394 in `JyCompany` with a boxed `Jy394` board (behind `board-394`): `$5000-$5003`
+  (A0-A1) hold the outer PRG/CHR bank and the chip select; `$5001` D4 clear hands every `Mapper`
+  method `JyCompany` answers (banks, IRQ, PRG reads and RAM, PPU bus, nametable page, CHR writes,
+  register writes) to an embedded `Mmc3`, whose windows go through the outer bank and the NROM
+  mode (`Mmc3::refresh_banks` widened to `board-394`); with D4 set the ASIC's own `prg_bank`,
+  `chr_bank` and ROM-nametable decodes take the outer bank. In the four latch lists and the mf_3b
+  sweep with 209.
+* Perf after batch 53 (ab6a49fb, the OneBus bus hooks) against e4596884: mm2 core +0.003 %,
+  zelda2 core +0.002 %, smb3 core +0.002 % and total +0.002 %.

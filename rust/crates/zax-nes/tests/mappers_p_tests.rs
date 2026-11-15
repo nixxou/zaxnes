@@ -1786,3 +1786,28 @@ fn mappers_p_436_places_the_onebus_in_an_outer_bank() {
     core.mapper_write(0x410A, 0x40);
     assert_eq!([0x40, 0x41, 0x7E, 0x7F], core.prg_windows());
 }
+
+/// `mapper_394.c`: `$5001` D4 clear runs the MMC3 (power-on), set the J.Y. ASIC; both through
+/// the outer PRG bank of `$5001` D0-D1 and `$5003` D3, the MMC3's also through `$5001` D3's NROM
+/// mode (a 32 KiB bank from `$5003` D0-D2).
+#[cfg(feature = "board-394")]
+#[test]
+fn mappers_p_394_switches_between_the_mmc3_and_the_jy_asic() {
+    let mut core = MapperRom::new(394).prg(64).chr(256).load();
+    // `$5001` = `$0F`: outer bank `$60` (wrapped to 512 KiB), the MMC3's power-on banks (R6 and
+    // R7 at 0) inside it.
+    assert_eq!([32, 32, 62, 63], core.prg_windows());
+    core.mapper_write(0x5001, 0x08);
+    assert_eq!([0, 0, 30, 31], core.prg_windows());
+    core.mapper_write(0x5003, 0x92);
+    core.mapper_write(0x5001, 0x00);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+
+    core.mapper_write(0x5001, 0x18);
+    assert_eq!([28, 29, 30, 31], core.prg_windows());
+    core.mapper_write(0xD000, 0x02);
+    core.mapper_write(0x8000, 0x05);
+    assert_eq!([5, 0, 0, 31], core.prg_windows());
+    core.mapper_write(0x5001, 0x08);
+    assert_eq!([0, 0, 30, 31], core.prg_windows());
+}

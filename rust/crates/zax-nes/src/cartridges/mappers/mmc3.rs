@@ -702,7 +702,8 @@ impl<
         feature = "board-219",
         feature = "board-262",
         feature = "board-292",
-        feature = "board-chip-switch"
+        feature = "board-chip-switch",
+        feature = "board-394"
     ))]
     pub(crate) fn refresh_banks(&mut self) {
         self.update_banks();

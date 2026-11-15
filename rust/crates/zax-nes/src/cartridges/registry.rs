@@ -836,6 +836,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     390,
     #[cfg(feature = "board-393")]
     393,
+    #[cfg(feature = "board-394")]
+    394,
     #[cfg(feature = "board-395")]
     395,
     #[cfg(feature = "board-396")]
@@ -2534,6 +2536,10 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         )))),
         #[cfg(feature = "board-421")]
         421 => Board::IrqBoard(IrqBoard::JyCompany(Box::new(JyCompany::new(
+            memory, mapper,
+        )))),
+        #[cfg(feature = "board-394")]
+        394 => Board::IrqBoard(IrqBoard::JyCompany(Box::new(JyCompany::new(
             memory, mapper,
         )))),
         #[cfg(feature = "board-44")]
