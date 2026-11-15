@@ -84,11 +84,22 @@ fn req_core_015_noise_and_dmc_period_tables_are_pal_only_for_pal() {
 
 #[test]
 fn fidplus_g2_only_famiclone_regions_swap_pulse_duty() {
-    for region in [NesRegion::Ntsc, NesRegion::Pal, NesRegion::Multi, NesRegion::Dendy] {
-        assert!(!RegionTiming::for_region(region).swaps_pulse_duty, "{region:?}");
+    for region in [
+        NesRegion::Ntsc,
+        NesRegion::Pal,
+        NesRegion::Multi,
+        NesRegion::Dendy,
+    ] {
+        assert!(
+            !RegionTiming::for_region(region).swaps_pulse_duty,
+            "{region:?}"
+        );
     }
     for region in [NesRegion::PalM, NesRegion::PalN] {
-        assert!(RegionTiming::for_region(region).swaps_pulse_duty, "{region:?}");
+        assert!(
+            RegionTiming::for_region(region).swaps_pulse_duty,
+            "{region:?}"
+        );
         assert_eq!(Some(region), NesRegion::from_u8(region as u8));
     }
     assert_eq!(None, NesRegion::from_u8(6));

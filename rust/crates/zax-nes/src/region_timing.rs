@@ -34,7 +34,7 @@ pub struct RegionTiming {
     /// [`NesRegion::Pal`] only; MULTI and DENDY use the NTSC tables (REQ-CORE-015).
     pub uses_pal_noise_and_dmc_periods: bool,
     /// Whether the pulse channels' duty sequences 1 (25 %) and 2 (50 %) are swapped, as on the
-    /// famiclone APUs of [`NesRegion::PalM`] and [`NesRegion::PalN`] (BeesNES, `_bSwapDuty`).
+    /// famiclone APUs of [`NesRegion::PalM`] and [`NesRegion::PalN`] (`BeesNES`, `_bSwapDuty`).
     pub swaps_pulse_duty: bool,
 }
 
@@ -45,9 +45,42 @@ impl RegionTiming {
     /// PPU dots in one scanline on every region.
     pub const DOTS_PER_SCANLINE: i32 = 341;
 
-    const NTSC: Self = Self::make(NesRegion::Ntsc, 1_789_773, 3, 1, 262, 241, true, 60, false, false);
-    const PAL: Self = Self::make(NesRegion::Pal, 1_662_607, 16, 5, 312, 241, false, 50, true, false);
-    const MULTI: Self = Self::make(NesRegion::Multi, 1_789_773, 3, 1, 262, 241, true, 60, false, false);
+    const NTSC: Self = Self::make(
+        NesRegion::Ntsc,
+        1_789_773,
+        3,
+        1,
+        262,
+        241,
+        true,
+        60,
+        false,
+        false,
+    );
+    const PAL: Self = Self::make(
+        NesRegion::Pal,
+        1_662_607,
+        16,
+        5,
+        312,
+        241,
+        false,
+        50,
+        true,
+        false,
+    );
+    const MULTI: Self = Self::make(
+        NesRegion::Multi,
+        1_789_773,
+        3,
+        1,
+        262,
+        241,
+        true,
+        60,
+        false,
+        false,
+    );
     const DENDY: Self = Self::make(
         NesRegion::Dendy,
         1_773_448,
@@ -60,7 +93,7 @@ impl RegionTiming {
         false,
         false,
     );
-    /// PAL-M, BeesNES (MIT): master 3 067 875 000 / 143 Hz, CPU / 12, PPU / 4, NTSC geometry,
+    /// PAL-M, `BeesNES` (MIT): master 3 067 875 000 / 143 Hz, CPU / 12, PPU / 4, NTSC geometry,
     /// no odd-frame dot skip (`CPalMPpu`), NTSC frame counter and noise/DMC tables, swapped
     /// duties.
     const PAL_M: Self = Self::make(
@@ -75,7 +108,7 @@ impl RegionTiming {
         false,
         true,
     );
-    /// PAL-N, BeesNES (MIT): master 42 984 675 / 2 Hz, CPU / 12, PPU / 4, 312 lines with the
+    /// PAL-N, `BeesNES` (MIT): master 42 984 675 / 2 Hz, CPU / 12, PPU / 4, 312 lines with the
     /// Dendy's 50 post-render lines (vblank on 291), NTSC frame counter and noise/DMC tables,
     /// swapped duties.
     const PAL_N: Self = Self::make(

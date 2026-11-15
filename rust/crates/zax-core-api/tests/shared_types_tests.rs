@@ -101,11 +101,13 @@ fn the_region_keeps_its_persisted_numbers() {
         (1, NesRegion::Pal),
         (2, NesRegion::Multi),
         (3, NesRegion::Dendy),
+        (4, NesRegion::PalM),
+        (5, NesRegion::PalN),
     ] {
         assert_eq!(NesRegion::from_u8(value), Some(region));
         assert_eq!(region as u8, value);
     }
-    assert_eq!(NesRegion::from_u8(4), None);
+    assert_eq!(NesRegion::from_u8(6), None);
     assert_eq!(NesRegion::default(), NesRegion::Ntsc);
 }
 
