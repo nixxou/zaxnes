@@ -2,7 +2,7 @@ use crate::apu::{Apu2A03, AudioError, AudioReader};
 use crate::cartridges::{with_board_kind, AnyBoard, BoardKind, Cartridge};
 use crate::cpu::{Cpu6502, CpuBus};
 use crate::input::{ControllerPortType, InputPorts, InvalidPort, ZapperPosition};
-use crate::nes_bus::KindBus;
+use crate::nes_bus::{FidelityBus, KindBus};
 use crate::ppu::{Ppu2C02, MAX_TILE_RECORD_STATE_SIZE, OAM_SIZE, PALETTE_SIZE, VRAM_SIZE};
 use crate::rom::{InesHeader, RomImage, RomLoadResult};
 use crate::state::{CoreState, InvalidState, StateLoadFailure, StateReader, StateWriter};
@@ -104,6 +104,9 @@ pub struct NesCore {
     /// Lot CORE-2: every frame through the path of every board, even for a specialised board
     /// (the equivalence test's reference). Not a setting, not in the state.
     generic_path: bool,
+    /// Fidélité+ (`docs/design/HALF-CYCLE.md`): every frame through its own loop
+    /// ([`NesCore::run_fidelity_plus_steps`]). Off by default; not in the state (step 4).
+    fidelity_plus: bool,
     /// The margin decoder of the ROM loaded, found by [`NesCore::find_margin_decoder`] when the
     /// ROM, the pack or `emu.builtin_patches` changes, and read by `end_frame` every frame.
     decoder: Option<&'static dyn crate::wide_decode::MarginDecoder>,
@@ -165,6 +168,7 @@ impl NesCore {
             smooth_scroll_live: false,
             idle_loop: None,
             generic_path: false,
+            fidelity_plus: false,
             decoder: None,
             steady_sprites: Vec::new(),
             steady_places: Vec::new(),
@@ -995,6 +999,30 @@ impl NesCore {
         let idle_loop = self.idle_loop.filter(|_| self.bus.ppu().wide().unlocked());
 
         self.bus.ppu_mut().clear_frame_boundary();
+        if self.fidelity_plus {
+            // Fidélité+: no batching, its own loop (one test a frame on the standard path).
+            loop {
+                let done = match self.bus.cartridge().filter(|_| !self.generic_path) {
+                    Some(cartridge) => with_board_kind!(cartridge.board(), K => {
+                        self.run_fidelity_plus_steps::<K>(idle_loop)
+                    }),
+                    None => self.run_fidelity_plus_steps::<AnyBoard>(idle_loop),
+                };
+                if done {
+                    break;
+                }
+            }
+        } else {
+            self.run_standard_frame(idle_loop);
+        }
+        if let Some(decoder) = decoder {
+            self.decode_margins(decoder);
+        }
+        self.finish_frame(decoder, start_cycle)
+    }
+
+    /// The standard frame: the PPU and the APU batched, the board's path (lot CORE-2).
+    fn run_standard_frame(&mut self, idle_loop: Option<(u16, u16)>) {
         self.bus.defer_ppu();
         // The frame's path (lot CORE-2, `docs/design/CORE-TIERS.md`): the board is looked at once
         // here, and the frame runs through the code compiled for it, or for every board when it
@@ -1011,9 +1039,15 @@ impl NesCore {
             }
         }
         self.bus.end_deferred_ppu();
-        if let Some(decoder) = decoder {
-            self.decode_margins(decoder);
-        }
+    }
+
+    /// What follows a frame's instructions on every path: smooth scrolling, the frame count, the
+    /// video callback. Returns the cycles the frame took.
+    fn finish_frame(
+        &mut self,
+        decoder: Option<&'static dyn crate::wide_decode::MarginDecoder>,
+        start_cycle: i64,
+    ) -> i64 {
         // **One `or` of three booleans per frame for every game that wants none of this**, and
         // the whole of the smooth scrolling behind it (lot KIRBY-MERGE step 4). The branch asked
         // the question per frame instead, and the question was expensive: `hack_option_on`
@@ -1042,6 +1076,43 @@ impl NesCore {
     #[doc(hidden)]
     pub const fn set_generic_path(&mut self, generic: bool) {
         self.generic_path = generic;
+    }
+
+    /// Runs every frame through the Fidélité+ loop (`docs/design/HALF-CYCLE.md`), off by
+    /// default. Takes effect at the next frame.
+    pub const fn set_fidelity_plus(&mut self, enabled: bool) {
+        self.fidelity_plus = enabled;
+    }
+
+    /// Whether the Fidélité+ loop runs the frames.
+    #[must_use]
+    pub const fn fidelity_plus(&self) -> bool {
+        self.fidelity_plus
+    }
+
+    /// The instructions of one Fidélité+ frame on the board kind `K`: the CPU steps a
+    /// [`FidelityBus`], the PPU runs on every cycle. Same returns as
+    /// [`NesCore::run_frame_steps`].
+    fn run_fidelity_plus_steps<K: BoardKind>(&mut self, idle_loop: Option<(u16, u16)>) -> bool {
+        loop {
+            self.cpu.step(&mut FidelityBus::<K>::new(&mut self.bus));
+            if let Some((first, last)) = idle_loop {
+                if (first..=last).contains(&self.cpu.pc) && self.bus.ppu().wide().stalling() {
+                    self.bus.ppu_mut().wide_mut().end_stall();
+                }
+            }
+            if self.bus.ppu().vblank_just_started() {
+                return true;
+            }
+            if K::SWITCHES
+                && !self
+                    .bus
+                    .cartridge()
+                    .is_some_and(|cartridge| K::matches(cartridge.board()))
+            {
+                return false;
+            }
+        }
     }
 
     /// The instructions of one frame, on the board kind `K` (lot CORE-2): the bus is lent to the

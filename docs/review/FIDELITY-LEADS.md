@@ -368,6 +368,14 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 
 ---
 
+### A6. M2 duty and edge placement outside NTSC — open, Fidélité+ (2026-11-15)
+- Fidélité+ places every access on the M2 and /CS edges (`fidplus::MasterClock`): M2 low for 9/24
+  of the CPU cycle, high for 15/24 (2A03G, nesdev "CPU pin out"; BeesNES's phi1/phi2 slots use the
+  same split). The 2A07 (PAL, 16 master clocks a cycle) and the Dendy clone (15) are given the
+  same duty for lack of a measurement; their netlist or a scope capture would settle it.
+- Earlier 2A03 letters are reported with a different duty (to check against nesdev before use:
+  the 2A03E and earlier); part C's console model should carry it per revision.
+
 ## B. Power-on and reset
 
 ### B1. PPU position at power-on — open (no perf cost; moves every game)
