@@ -1,5 +1,27 @@
 # HALF-CYCLE — the Fidélité+ stepper (design, lot FIDPLUS-2 step 3, 2026-11-15)
 
+## The goal (owner, 2026-11-15)
+
+"In Fidélité+ we must be the most faithful of all emulators, beyond everything done today. No
+compromise." Fidélité+ is therefore not one stepper but a mode with five parts, each measured:
+
+| Part | What | Reference it must meet |
+|---|---|---|
+| A. Half-cycle machine | this note: one master clock, CPU and PPU on φ1/φ2 slots (BeesNES's scheduler model), register accesses on their /CS and M2 edges, AD bus and latches as state | the transistor netlist per dot, A5 corpus, all four alignments, **no calibrated rule** |
+| B. Real-time pacing | the machine advanced by host time converted to master clocks (BeesNES `CSystem::Tick`), the picture leaving at the console's 60.0988 Hz, the pad sampled when the game strobes `$4016` (FIDELITY-LEADS A2) | console frame rate exactly; input latency below one frame |
+| C. Console model | every hardware variant selectable and consistent: 2C02 letter revisions, RP2A03 letter revisions, MMC3 rev A/B and MMC6, power-on state (random CPU/PPU alignment, RAM, palette), PAL 2C07 measured as the 2C02 was | each test ROM passes under the console model it was written for, including today's four fails (`power_up_palette`, `5.MMC3_rev_A`, `6-MMC6`, `6-MMC3_alt`, which exclude each other in a single model) |
+| D. Analog output | audio from the APU at the CPU rate through the measured console chain (E1 profiles, no output-rate approximation of the low-pass); video as the composite signal (H1), not a palette lookup | BeesNES's measured filters; console recordings |
+| E. Proof | every claim backed by a measurement: netlist differential, TriCNES/AccuracyCoin, console videos the owner provides; every residual approximation listed in FIDELITY-LEADS | AccuracyCoin 147 in all four alignments; every suite any other emulator passes |
+
+Run-ahead, rewind, 3D, widescreen and the hack packs must keep working in Fidélité+ (they rebuild
+from savestates and per-frame records): part B paces the machine but the frame records and the
+savestate format stay the boundary they use. Where a feature cannot follow (run-ahead changes
+input timing by definition), Fidélité+ says so in the interface instead of silently degrading.
+
+Limits stated up front: effects decided by analogue charge (OAM corruption copy, the AD bus
+floating value of A5) are not settled by the netlist; for those the reference is a console
+measurement, and without one the mode keeps the best measured rule and lists it.
+
 ## Why, and what it is not
 
 The standard core steps one CPU cycle at a time, runs the PPU's dots in batches and places every
@@ -67,7 +89,7 @@ and 3 first (0 and 1 carry the switch-on race of step 33). Then AccuracyCoin 147
 Not bound by the release budget (opt-in), but measured: target under 2x the standard core on the
 PR-1 set; the standard path must stay within +0.02 % (the per-frame choice only).
 
-## Plan
+## Plan (part A; parts B to E follow in their own lots)
 
 | Step | What | Estimate |
 |---|---|---|
