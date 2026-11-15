@@ -559,3 +559,91 @@ fn mappers_p_550_switches_from_its_latch_to_the_mmc1() {
     assert_eq!([48, 49, 62, 63], core.prg_windows());
     assert_eq!(96, core.chr_bank(0x0000));
 }
+
+/// Sets R6 and R7 of an MMC3 and enables its work RAM, the common start of the MMC3 tests.
+#[allow(dead_code)]
+fn mmc3_start(core: &mut zax_nes::NesCore, r6: u8, r7: u8) {
+    core.mapper_write(0xA001, 0x80);
+    core.mmc3_bank(6, r6);
+    core.mmc3_bank(7, r7);
+}
+
+/// `mapper_267.c`: `$6000` D1-D2 and D5 the outer 256 KiB bank, D7 locks it.
+#[cfg(feature = "board-267")]
+#[test]
+fn mappers_p_267_locks_its_outer_bank() {
+    let mut core = MapperRom::new(267).prg(64).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    core.mapper_write(0x6000, 0x82);
+    assert_eq!([33, 34, 62, 63], core.prg_windows());
+    core.mapper_write(0x6000, 0x00);
+    assert_eq!([33, 34, 62, 63], core.prg_windows());
+}
+
+/// `mapper_322.c`: with A5 clear the latched address is an NROM bank, A0-A1 picking NROM-256.
+#[cfg(feature = "board-322")]
+#[test]
+fn mappers_p_322_has_an_nrom_mode() {
+    let mut core = MapperRom::new(322).prg(64).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    core.mapper_write(0x6003, 0);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+}
+
+/// `mapper_334.c`: `$6000` even addresses the 32 KiB bank; `$6002` reads the DIP bit.
+#[cfg(feature = "board-334")]
+#[test]
+fn mappers_p_334_maps_32k_banks() {
+    let mut core = MapperRom::new(334).prg(32).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    core.mapper_write(0x6000, 0x05);
+    assert_eq!([8, 9, 10, 11], core.prg_windows());
+    core.mapper_write(0x6001, 0x02);
+    assert_eq!([8, 9, 10, 11], core.prg_windows());
+}
+
+/// `mapper_345.c`: D2-D3 clear is the `AxROM` mode.
+#[cfg(feature = "board-345")]
+#[test]
+fn mappers_p_345_has_an_axrom_mode() {
+    let mut core = MapperRom::new(345).prg(64).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    core.mapper_write(0x6000, 0x01);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    core.mapper_write(0x6000, 0x44);
+    assert_eq!([17, 18, 30, 31], core.prg_windows());
+}
+
+/// `mapper_361.c`: `$7000-$7FFF` D4-D7 the outer 128 KiB bank.
+#[cfg(feature = "board-361")]
+#[test]
+fn mappers_p_361_takes_its_outer_bank_at_7000() {
+    let mut core = MapperRom::new(361).prg(64).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    core.mapper_write(0x6000, 0x20);
+    assert_eq!([1, 2, 14, 15], core.prg_windows());
+    core.mapper_write(0x7000, 0x20);
+    assert_eq!([33, 34, 46, 47], core.prg_windows());
+}
+
+/// `mapper_372.c`: mapper 45's four registers in turn: CHR offset, PRG offset, CHR mask, PRG mask.
+#[cfg(feature = "board-372")]
+#[test]
+fn mappers_p_372_writes_its_registers_in_turn() {
+    let mut core = MapperRom::new(372).prg(64).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    for value in [0x00, 0x10, 0x0F, 0x30] {
+        core.mapper_write(0x6000, value);
+    }
+    assert_eq!([17, 18, 30, 31], core.prg_windows());
+}
+
+/// `mapper_377.c`: `$6000-$6FFF` D1-D2 and D5 the outer 128 KiB bank.
+#[cfg(feature = "board-377")]
+#[test]
+fn mappers_p_377_takes_its_outer_bank_at_6000() {
+    let mut core = MapperRom::new(377).prg(64).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    core.mapper_write(0x6000, 0x02);
+    assert_eq!([17, 18, 30, 31], core.prg_windows());
+}

@@ -113,6 +113,8 @@ mod mmc3_gouder208;
 mod mmc3_kof97;
 #[cfg(feature = "board-268")]
 mod mmc3_outer;
+#[cfg(feature = "board-mmc3-p")]
+mod mmc3_p;
 #[cfg(feature = "board-mmc3-scramble")]
 mod mmc3_scramble;
 #[cfg(feature = "board-262")]
@@ -300,6 +302,8 @@ pub use mmc3_gouder208::Mmc3Gouder208;
 pub use mmc3_kof97::Mmc3Kof97;
 #[cfg(feature = "board-268")]
 pub use mmc3_outer::Mmc3Outer;
+#[cfg(feature = "board-mmc3-p")]
+pub use mmc3_p::{Mmc3P, Mmc3PKind};
 #[cfg(feature = "board-mmc3-scramble")]
 pub use mmc3_scramble::Mmc3Scramble;
 #[cfg(feature = "board-262")]

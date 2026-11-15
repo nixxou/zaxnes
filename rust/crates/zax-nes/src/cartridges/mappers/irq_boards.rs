@@ -34,6 +34,8 @@ use super::Mmc3Kof97;
 use super::Mmc3Multicart;
 #[cfg(feature = "board-268")]
 use super::Mmc3Outer;
+#[cfg(feature = "board-mmc3-p")]
+use super::Mmc3P;
 #[cfg(feature = "board-mmc3-scramble")]
 use super::Mmc3Scramble;
 #[cfg(feature = "board-262")]
@@ -358,6 +360,9 @@ pub enum IrqBoard {
     /// for [`IrqBoard::Mmc3Outer`]'s reason: it holds a whole [`super::Mmc3`].
     #[cfg(feature = "board-mmc3-clones")]
     Mmc3Clone(Box<Mmc3Clone>),
+    /// Lot MAPPERS-P's MMC3 multicarts ([`Mmc3P`]), boxed for [`IrqBoard::Mmc3Clone`]'s reason.
+    #[cfg(feature = "board-mmc3-p")]
+    Mmc3P(Box<Mmc3P>),
     /// Mapper 253, the Waixing VRC4-like board with 2 KiB of CHR-RAM (lot MAPPERS-N).
     /// Mapper 252, the Waixing VRC4 clone with CHR-RAM chosen by mask/compare (lot MAPPERS-N).
     /// Mapper 168, RacerMate Challenge II (lot MAPPERS-N).
@@ -444,6 +449,8 @@ macro_rules! inner {
             IrqBoard::Mapper091($b) => $body,
             #[cfg(feature = "board-mmc3-clones")]
             IrqBoard::Mmc3Clone($b) => $body,
+            #[cfg(feature = "board-mmc3-p")]
+            IrqBoard::Mmc3P($b) => $body,
             #[cfg(feature = "board-168")]
             IrqBoard::Racermate($b) => $body,
             #[cfg(feature = "board-303")]
@@ -559,6 +566,7 @@ impl Mapper for IrqBoard {
         feature = "board-119",
         feature = "board-268",
         feature = "board-mmc3-clones",
+        feature = "board-mmc3-p",
         feature = "board-68",
         feature = "board-91",
         feature = "board-cony",
@@ -610,6 +618,7 @@ impl Mapper for IrqBoard {
         feature = "board-268",
         feature = "board-huang1",
         feature = "board-mmc3-clones",
+        feature = "board-mmc3-p",
         feature = "board-176",
         feature = "board-284",
     ))]
@@ -627,6 +636,7 @@ impl Mapper for IrqBoard {
         feature = "board-mmc3-multicart",
         feature = "board-268",
         feature = "board-mmc3-clones",
+        feature = "board-mmc3-p",
         feature = "board-irq-latch",
         feature = "board-176",
         feature = "board-682",
@@ -725,6 +735,7 @@ impl Mapper for IrqBoard {
         feature = "board-huang1",
         feature = "board-jy-asic",
         feature = "board-mmc3-clones",
+        feature = "board-mmc3-p",
         feature = "board-irq-latch",
         feature = "board-176",
     ))]

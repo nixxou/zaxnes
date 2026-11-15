@@ -29,31 +29,31 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 237 | `mapper_237.c` | 98 | 1 | 0 | done (batch 1, `MultiP`) |
 | 248 | `mapper_115.c` | 115 | 0 | 0 | todo |
 | 256 | `mapper_256.c` | 123 | 241 | 0 | todo |
-| 267 | `mapper_267.c` | 87 | 1 | 0 | todo |
+| 267 | `mapper_267.c` | 87 | 1 | 0 | done (batch 12, `Mmc3P`) |
 | 269 | `mapper_269.c` | 130 | 3 | 0 | todo |
 | 271 | `mapper_271.c` | 69 | 1 | 0 | done (batch 2, `MultiP`) |
 | 272 | `mapper_272.c` | 160 | 1 | 0 | todo |
 | 281 | `mapper_281.c` | 69 | 11 | 0 | done (batch 2, `JyCompany` + `JyMulticart`) |
 | 282 | `mapper_282.c` | 76 | 13 | 0 | done (batch 2, `JyCompany` + `JyMulticart`) |
-| 291 | `mapper_291.c` | 90 | 1 | 0 | todo |
+| 291 | `mapper_291.c` | 90 | 1 | 0 | done (batch 12, `Mmc3P`) |
 | 295 | `mapper_295.c` | 69 | 12 | 0 | done (batch 2, `JyCompany` + `JyMulticart`) |
 | 297 | `mapper_297.c` | 119 | 1 | 0 | done (batch 11, `Mmc1Outer`) |
 | 308 | `mapper_308.c` | 90 | 1 | 0 | todo |
 | 311 | `mapper_311.c` | 97 | 1 | 0 | todo |
-| 315 | `mapper_315.c` | 92 | 1 | 0 | todo |
-| 322 | `mapper_322.c` | 101 | 1 | 0 | todo |
-| 327 | `mapper_327.c` | 89 | 0 | 0 | todo |
-| 334 | `mapper_334.c` | 95 | 1 | 0 | todo |
+| 315 | `mapper_315.c` | 92 | 1 | 0 | done (batch 12, `Mmc3P`) |
+| 322 | `mapper_322.c` | 101 | 1 | 0 | done (batch 12, `Mmc3P`) |
+| 327 | `mapper_327.c` | 89 | 0 | 0 | done (batch 12, `Mmc3P`) |
+| 334 | `mapper_334.c` | 95 | 1 | 0 | done (batch 12, `Mmc3P`) |
 | 335 | `mapper_335.c` | 85 | 1 | 0 | done (batch 2, `MultiP`) |
 | 337 | `mapper_337.c` | 92 | 0 | 0 | done (batch 3, `MultiP`) |
 | 338 | `mapper_338.c` | 86 | 1 | 0 | done (batch 2, `MultiP`) |
-| 339 | `mapper_339.c` | 97 | 1 | 0 | todo |
+| 339 | `mapper_339.c` | 97 | 1 | 0 | done (batch 12, `Mmc3P`) |
 | 340 | `mapper_340.c` | 79 | 1 | 0 | todo |
 | 341 | `mapper_341.c` | 67 | 1 | 0 | done (batch 2, `MultiP`) |
 | 342 | `mapper_342.c` | 2381 | 9 | 0 | todo |
 | 343 | `mapper_343.c` | 71 | 0 | 0 | done (batch 2, `MultiP`) |
 | 344 | `mapper_344.c` | 125 | 3 | 0 | todo |
-| 345 | `mapper_345.c` | 102 | 0 | 0 | todo |
+| 345 | `mapper_345.c` | 102 | 0 | 0 | done (batch 12, `Mmc3P`) |
 | 347 | `mapper_347.c` | 122 | 2 | 0 | todo |
 | 350 | `mapper_350.c` | 99 | 0 | 0 | done (batch 3, `MultiP`) |
 | 351 | `mapper_351.c` | 305 | 0 | 0 | todo |
@@ -66,15 +66,15 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 358 | `mapper_358.c` | 76 | 4 | 0 | done (batch 3, `JyCompany` + `JyMulticart`) |
 | 359 | `mapper_359.c` | 293 | 3 | 0 | todo |
 | 360 | `mapper_360.c` | 54 | 1 | 0 | done (batch 2, `MultiP`) |
-| 361 | `mapper_361.c` | 85 | 5 | 0 | todo |
+| 361 | `mapper_361.c` | 85 | 5 | 0 | done (batch 12, `Mmc3P`) |
 | 362 | `mapper_362.c` | 99 | 2 | 0 | todo |
 | 368 | `mapper_368.c` | 106 | 2 | 0 | todo |
 | 369 | `mapper_369.c` | 221 | 1 | 0 | todo |
 | 370 | `mapper_370.c` | 117 | 1 | 0 | todo |
-| 372 | `mapper_372.c` | 96 | 1 | 0 | todo |
+| 372 | `mapper_372.c` | 96 | 1 | 0 | done (batch 12, `Mmc3P`) |
 | 374 | `mapper_374.c` | 56 | 4 | 0 | done (batch 11, `Mmc1Outer`) |
 | 375 | `mapper_375.c` | 77 | 1 | 0 | done (batch 3, `MultiP`) |
-| 377 | `mapper_377.c` | 86 | 3 | 0 | todo |
+| 377 | `mapper_377.c` | 86 | 3 | 0 | done (batch 12, `Mmc3P`) |
 | 380 | `mapper_380.c` | 89 | 9 | 0 | done (batch 4, `MultiP`) |
 | 381 | `mapper_381.c` | 60 | 0 | 0 | done (batch 2, `MultiP`) |
 | 382 | `mapper_382.c` | 70 | 1 | 0 | done (batch 5, `MultiP`) |
@@ -204,3 +204,9 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   (`Mmc1::refresh_banks`) and narrowed after every change. 297 and 550 also have a latch mode
   that bypasses the chip; 374 counts resets. 543 (MMC1 with a serial outer register and banked
   WRAM) is still to do.
+* Batch 12: `mmc3_p.rs` (`Mmc3P`, a boxed `IrqBoard` variant, umbrella `board-mmc3-p`), the
+  `Mmc3Clone` shape with puNES's `prg_swap`/`chr_swap` hooks as `prg_page`/`chr_page`. puNES
+  writes the RAM before the board (`cpu_inline.h`), so `$6000-$7FFF` outer registers leave the RAM
+  its byte. The cfg lists naming `board-mmc3-clones` in `irq_boards.rs` and `mmc3.rs` now name
+  `board-mmc3-p` too; the numbers join the two PPU-bus latch lists and the mf_3b sweep. 11 boards:
+  267, 291, 315, 322, 327, 334, 339, 345, 361, 372, 377.

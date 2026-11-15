@@ -781,6 +781,17 @@ dispatch is the generic path of the exotic ones only.
 | `board-388` | 388 | `JyCompany` with `JyMulticart::M388`: J.Y. ASIC multicart, nametable jumper as 90 (puNES; MAPPERS-P). Requires `board-jy-asic` | — | — (unit test) | **on** |
 | `board-397` | 397 | `JyCompany` with `JyMulticart::M397`: J.Y. ASIC multicart (puNES; MAPPERS-P). Requires `board-jy-asic` | — | — (unit test) | **on** |
 | `board-421` | 421 | `JyCompany` with `JyMulticart::M421`: J.Y. ASIC multicart, 512 KiB inner CHR (puNES; MAPPERS-P). Requires `board-jy-asic` | — | — (unit test) | **on** |
+| `board-267` | 267 | `Mmc3P` kind M267 (IrqBoard): JY-119, lockable outer bank at $6000 (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-291` | 291 | `Mmc3P` kind M291 (IrqBoard): Kasheng 2-in-1, NROM mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-315` | 315 | `Mmc3P` kind M315 (IrqBoard): 820732C, GNROM mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-322` | 322 | `Mmc3P` kind M322 (IrqBoard): K-3033, address outer bank, NROM mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-327` | 327 | `Mmc3P` kind M327 (IrqBoard): 10-24-C-A1, lockable outer bank, CHR-RAM mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-334` | 334 | `Mmc3P` kind M334 (IrqBoard): 5/20-in-1, 32 KiB banks, DIP read (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-339` | 339 | `Mmc3P` kind M339 (IrqBoard): K-3006, NROM modes (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-345` | 345 | `Mmc3P` kind M345 (IrqBoard): L6IN1, AxROM mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-361` | 361 | `Mmc3P` kind M361 (IrqBoard): YY841101C, outer bank at $7000 (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-372` | 372 | `Mmc3P` kind M372 (IrqBoard): SFC-12, four outer registers (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-377` | 377 | `Mmc3P` kind M377 (IrqBoard): JY-111/112 (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
 | `board-53` | 53 | `MiscN` M53: Supervision 16-in-1, outer register at `$6000`, ROM at `$6000-$7FFF`, optional EPROM by CRC (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-487` | 487 | `MiscN` M487: NINA-03 and outer registers at `$4100`/`$4180`, Color Dreams register in the second half (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-518` | 518 | `MiscN` M518: Dance 2000, `$5000`/`$5200`, open bus over `$8000-$FFFF`, CHR page 0 from the nametable address (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |

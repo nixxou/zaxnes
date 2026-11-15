@@ -145,6 +145,8 @@ use super::mappers::{MiscKind, MiscN};
 use super::mappers::{Mmc1Outer, Mmc1OuterKind};
 #[cfg(feature = "board-mmc3-clones")]
 use super::mappers::{Mmc3Clone, Mmc3CloneKind};
+#[cfg(feature = "board-mmc3-p")]
+use super::mappers::{Mmc3P, Mmc3PKind};
 #[cfg(feature = "board-multi-p")]
 use super::mappers::{MultiP, MultiPKind};
 #[cfg(feature = "board-taito-x1")]
@@ -617,6 +619,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     265,
     #[cfg(feature = "board-266")]
     266,
+    #[cfg(feature = "board-267")]
+    267,
     #[cfg(feature = "board-268")]
     268,
     #[cfg(feature = "board-271")]
@@ -645,6 +649,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     290,
     // The BMW8544 / UNL-DRAGONFIGHTER, an MMC3 clone whose CHR banking is XORed with two
     // registers a read of $6000-$7FFF fills (MF-UNL-12 step 2).
+    #[cfg(feature = "board-291")]
+    291,
     #[cfg(feature = "board-292")]
     292,
     #[cfg(feature = "board-295")]
@@ -679,16 +685,22 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     313,
     #[cfg(feature = "board-314")]
     314,
+    #[cfg(feature = "board-315")]
+    315,
     #[cfg(feature = "board-319")]
     319,
     #[cfg(feature = "board-320")]
     320,
+    #[cfg(feature = "board-322")]
+    322,
     #[cfg(feature = "board-323")]
     323,
     #[cfg(feature = "board-324")]
     324,
     #[cfg(feature = "board-325")]
     325,
+    #[cfg(feature = "board-327")]
+    327,
     #[cfg(feature = "board-328")]
     328,
     #[cfg(feature = "board-329")]
@@ -699,6 +711,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     332,
     #[cfg(feature = "board-333")]
     333,
+    #[cfg(feature = "board-334")]
+    334,
     #[cfg(feature = "board-335")]
     335,
     #[cfg(feature = "board-336")]
@@ -707,10 +721,14 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     337,
     #[cfg(feature = "board-338")]
     338,
+    #[cfg(feature = "board-339")]
+    339,
     #[cfg(feature = "board-341")]
     341,
     #[cfg(feature = "board-343")]
     343,
+    #[cfg(feature = "board-345")]
+    345,
     #[cfg(feature = "board-346")]
     346,
     #[cfg(feature = "board-348")]
@@ -727,12 +745,18 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     358,
     #[cfg(feature = "board-360")]
     360,
+    #[cfg(feature = "board-361")]
+    361,
     #[cfg(feature = "board-366")]
     366,
+    #[cfg(feature = "board-372")]
+    372,
     #[cfg(feature = "board-374")]
     374,
     #[cfg(feature = "board-375")]
     375,
+    #[cfg(feature = "board-377")]
+    377,
     #[cfg(feature = "board-380")]
     380,
     #[cfg(feature = "board-381")]
@@ -3072,6 +3096,61 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         550 => Board::DecodeBoard(DecodeBoard::Mmc1Outer(Box::new(Mmc1Outer::new(
             memory,
             Mmc1OuterKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-267")]
+        267 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
+            memory,
+            Mmc3PKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-291")]
+        291 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
+            memory,
+            Mmc3PKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-315")]
+        315 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
+            memory,
+            Mmc3PKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-322")]
+        322 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
+            memory,
+            Mmc3PKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-327")]
+        327 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
+            memory,
+            Mmc3PKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-334")]
+        334 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
+            memory,
+            Mmc3PKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-339")]
+        339 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
+            memory,
+            Mmc3PKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-345")]
+        345 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
+            memory,
+            Mmc3PKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-361")]
+        361 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
+            memory,
+            Mmc3PKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-372")]
+        372 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
+            memory,
+            Mmc3PKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-377")]
+        377 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
+            memory,
+            Mmc3PKind::of(mapper)?,
         )))),
         #[cfg(feature = "board-299")]
         299 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(

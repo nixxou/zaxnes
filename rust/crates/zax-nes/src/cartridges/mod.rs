@@ -798,6 +798,17 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 199
             | 513
             | 260
+            | 377
+            | 372
+            | 361
+            | 345
+            | 339
+            | 334
+            | 327
+            | 322
+            | 315
+            | 291
+            | 267
             | 258
             | 333
             | 348
@@ -905,6 +916,17 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 199
             | 513
             | 260
+            | 377
+            | 372
+            | 361
+            | 345
+            | 339
+            | 334
+            | 327
+            | 322
+            | 315
+            | 291
+            | 267
             | 258
             | 333
             | 348
@@ -2173,7 +2195,8 @@ mod tests {
         // are appended here and the list is sorted below, since the sweep runs in number order.
         for number in [
             44, 45, 49, 52, 117, 165, 176, 198, 199, 217, 254, 258, 333, 348, 366, 126, 134, 191,
-            196, 197, 205, 222, 224, 238, 245, 249, 250, 259, 287, 313, 325, 513, 260,
+            196, 197, 205, 222, 224, 238, 245, 249, 250, 259, 287, 313, 325, 513, 260, 267, 291,
+            315, 322, 327, 334, 339, 345, 361, 372, 377,
         ] {
             if Cartridge::is_supported(number) {
                 expected.extend_from_slice(&[number, number]);
