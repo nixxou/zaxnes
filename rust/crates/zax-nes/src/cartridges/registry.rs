@@ -75,6 +75,8 @@ use super::mappers::Tengen800037;
 use super::mappers::Tqrom;
 #[cfg(feature = "board-vs-system")]
 use super::mappers::VsBoard;
+#[cfg(feature = "board-253")]
+use super::mappers::Waixing253;
 #[cfg(feature = "board-178")]
 use super::mappers::WaixingFs305;
 #[cfg(feature = "board-246")]
@@ -393,6 +395,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     249,
     #[cfg(feature = "board-250")]
     250,
+    #[cfg(feature = "board-253")]
+    253,
     // The Sachen UNL-SHERO, an MMC3 clone with 8 KiB of CHR-RAM, four CHR A18 lines at $4100 and
     // four-screen mirroring (MF-UNL-12 step 1).
     #[cfg(feature = "board-262")]
@@ -668,6 +672,13 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // board is **not** here: it is the console's own nametable RAM, `ppu::VRAM_SIZE` being
         // 4 KiB, which is mapper 77's arm's reading of the same shape.
         #[cfg(feature = "board-262")]
+        // MAPPERS-N: "GetChrRamSize() { return 0x800; }" (Mesen2 `Mapper253.h:21`).
+        // A CHR-RAM-only image keeps the header's size: the 2 KiB is the chip beside the CHR-ROM.
+        #[cfg(feature = "board-253")]
+        253 if header.chr_rom_size != 0 => BoardMemorySizes {
+            chr_ram: Some(Waixing253::CHR_RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
         262 => BoardMemorySizes {
             chr_ram: Some(Mmc3Shero::CHR_RAM_SIZE),
             ..BoardMemorySizes::default()
@@ -1727,6 +1738,8 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
             memory,
             Mmc3CloneKind::of(mapper)?,
         )))),
+        #[cfg(feature = "board-253")]
+        253 => Board::IrqBoard(IrqBoard::Waixing253(Box::new(Waixing253::new(memory)))),
         _ => return None,
     })
 }

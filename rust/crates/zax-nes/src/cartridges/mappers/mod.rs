@@ -152,6 +152,8 @@ mod vrc7;
 mod vrc_irq;
 #[cfg(feature = "board-vs-system")]
 mod vs_system;
+#[cfg(feature = "board-253")]
+mod waixing253;
 #[cfg(feature = "board-178")]
 mod waixing_fs305;
 
@@ -300,6 +302,8 @@ pub use vrc6::Vrc6;
 pub use vrc7::Vrc7;
 #[cfg(feature = "board-vs-system")]
 pub use vs_system::VsBoard;
+#[cfg(feature = "board-253")]
+pub use waixing253::Waixing253;
 #[cfg(feature = "board-178")]
 pub use waixing_fs305::WaixingFs305;
 

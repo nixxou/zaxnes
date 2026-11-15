@@ -897,6 +897,8 @@ impl Cartridge {
                     // MF-UNL-8 step 4: mapper 91's submapper 1 counts M2, "counting down by five
                     // every fourth M2 cycle" (nesdev, "INES Mapper 091").
                     | 91
+                    // MAPPERS-N: mapper 253's IRQ counts CPU cycles (Mesen2 `Mapper253.h:71`).
+                    | 253
                     | 105
                     | 153
                     | 157

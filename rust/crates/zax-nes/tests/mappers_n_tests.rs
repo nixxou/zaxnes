@@ -136,3 +136,41 @@ fn mappers_n_238_reads_back_its_protection_latch() {
     core.mapper_write(0x4100, 0x03);
     assert_eq!(0x03, core.read_memory(0x5000));
 }
+
+/// `Mapper253.h:87-139`: PRG at exactly `$8010`/`$A010`, the CHR registers a nibble at a time,
+/// and banks 4/5 reading the 2 KiB CHR-RAM until `$88` is written to the first register.
+#[cfg(feature = "board-253")]
+#[test]
+fn mappers_n_253_banks_prg_and_maps_chr_ram_on_banks_4_and_5() {
+    let mut core = MapperRom::new(253).prg(32).chr(512).load();
+    core.mapper_write(0x8010, 5);
+    core.mapper_write(0xA010, 7);
+    assert_eq!([5, 7, 30, 31], core.prg_windows());
+    // $B000/$B004: window 0, low nibble then high nibble (and CHR A12+ from value >> 4).
+    core.mapper_write(0xB000, 0x09);
+    core.mapper_write(0xB004, 0x10);
+    assert_eq!(0x09, core.chr_windows()[0]);
+    // Bank 4 is CHR-RAM: a PPU write reads back.
+    core.mapper_write(0xB000, 0x04);
+    core.mapper_write(0xB004, 0x00);
+    core.cartridge_mut().unwrap().ppu_write(0x0010, 0xA5);
+    assert_eq!(0xA5, core.chr_bank(0x0010));
+    // $88 in the first register forces CHR-ROM.
+    core.mapper_write(0xB000, 0x08);
+    core.mapper_write(0xB004, 0x08);
+    assert_ne!(0xA5, core.chr_bank(0x0010));
+}
+
+/// `Mapper253.h:71-85`: the counter steps every 114 CPU cycles and fires on wrapping to zero.
+#[cfg(feature = "board-253")]
+#[test]
+fn mappers_n_253_irq_fires_after_the_counter_wraps() {
+    let mut core = MapperRom::new(253).prg(32).chr(512).load();
+    core.mapper_write(0xF000, 0x0E);
+    core.mapper_write(0xF004, 0x0F); // reload $FE: two steps to wrap
+    core.mapper_write(0xF008, 0x02);
+    for _ in 0..(114 * 2 + 10) {
+        core.bus_mut().tick();
+    }
+    assert!(core.cartridge().unwrap().irq_asserted());
+}

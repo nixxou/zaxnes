@@ -40,6 +40,8 @@ use super::Sunsoft4;
 use super::Tengen800037;
 #[cfg(feature = "board-119")]
 use super::Tqrom;
+#[cfg(feature = "board-253")]
+use super::Waixing253;
 use super::{IremH3001, Mapper, Sunsoft3, TaitoTc0690, Vrc3};
 use crate::cartridges::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
@@ -336,6 +338,9 @@ pub enum IrqBoard {
     /// for [`IrqBoard::Mmc3Outer`]'s reason: it holds a whole [`super::Mmc3`].
     #[cfg(feature = "board-mmc3-clones")]
     Mmc3Clone(Box<Mmc3Clone>),
+    /// Mapper 253, the Waixing VRC4-like board with 2 KiB of CHR-RAM (lot MAPPERS-N).
+    #[cfg(feature = "board-253")]
+    Waixing253(Box<Waixing253>),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as `Board`'s own `dispatch!` does.
@@ -388,6 +393,8 @@ macro_rules! inner {
             IrqBoard::Mapper091($b) => $body,
             #[cfg(feature = "board-mmc3-clones")]
             IrqBoard::Mmc3Clone($b) => $body,
+            #[cfg(feature = "board-253")]
+            IrqBoard::Waixing253($b) => $body,
         }
     };
 }

@@ -103,6 +103,7 @@ default = [
     "board-245",
     "board-249",
     "board-250",
+    "board-253",
 ]
 
 # MAPPERS-N umbrella (docs/progress/MAPPERS-N.md).
@@ -131,6 +132,7 @@ board-245 = ["board-mmc3-clones"]
 board-249 = ["board-mmc3-clones"]
 
 board-250 = ["board-mmc3-clones"]
+board-253 = []
 # MAPPERS-N end
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
