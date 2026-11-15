@@ -503,6 +503,69 @@ pub struct Cartridge {
     clocks_on_cpu_cycle: bool,
 }
 
+/// Whether `mapper`'s board moves on every CPU cycle; the numbers and the lot that added each are
+/// in the comment on the field in `Cartridge::create`.
+///
+/// **Extracted from `Cartridge::create` by MAPPERS-N** (mapper 168), which took that function past
+/// `clippy::too_many_lines`, as MF-UNL-2 step 3 did for [`watches_ppu_reads`].
+const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
+    matches!(
+        mapper,
+        5 | 16
+            | 18
+            | 19
+            | 21
+            | 22
+            | 23
+            | 24
+            | 25
+            | 26
+            | 27
+            | 35
+            | 48
+            | 64
+            | 65
+            | 67
+            | 69
+            | 73
+            | 83
+            | 85
+            | 90
+            // MF-UNL-8 step 4: mapper 91's submapper 1 counts M2, "counting down by five
+            // every fourth M2 cycle" (nesdev, "INES Mapper 091").
+            | 91
+            // MAPPERS-N: mapper 253's IRQ counts CPU cycles (Mesen2 `Mapper253.h:71`).
+            | 253
+            // MAPPERS-N: mapper 252's VRC IRQ (Mesen2 `Waixing252.h`, `ProcessCpuClock`).
+            | 252
+            // MAPPERS-N: mapper 168's counter runs from power-on (nesdev "INES Mapper 168").
+            | 168
+            // MAPPERS-N: the CPU-clocked counters of `IrqLatch`.
+            | 56
+            | 142
+            | 304
+            | 6
+            | 8
+            | 17
+            // MAPPERS-N: the FK23C raises its IRQ two CPU cycles late (Mesen2 `Fk23C.h`).
+            | 176
+            | 40
+            | 42
+            | 43
+            | 50
+            | 106
+            | 183
+            | 105
+            | 153
+            | 157
+            | 159
+            | 209
+            | 211
+            | 264
+            | 298
+    )
+}
+
 /// Whether `mapper`'s board moves when the PPU puts an address on its bus during a read
 /// ([`Cartridge::watches_ppu_reads`]).
 ///
@@ -910,59 +973,7 @@ impl Cartridge {
             // MF-UNL-8 step 3 adds 83 and 264, the Cony / Yoko ASIC, whose $8318 default value
             // "$00 selects CPU M2 cycles as the source of the IRQ counter" -- this clock, and the
             // board's power-on setting (nesdev, "INES Mapper 083").
-            clocks_on_cpu_cycle: matches!(
-                mapper,
-                5 | 16
-                    | 18
-                    | 19
-                    | 21
-                    | 22
-                    | 23
-                    | 24
-                    | 25
-                    | 26
-                    | 27
-                    | 35
-                    | 48
-                    | 64
-                    | 65
-                    | 67
-                    | 69
-                    | 73
-                    | 83
-                    | 85
-                    | 90
-                    // MF-UNL-8 step 4: mapper 91's submapper 1 counts M2, "counting down by five
-                    // every fourth M2 cycle" (nesdev, "INES Mapper 091").
-                    | 91
-                    // MAPPERS-N: mapper 253's IRQ counts CPU cycles (Mesen2 `Mapper253.h:71`).
-                    | 253
-                    // MAPPERS-N: mapper 252's VRC IRQ (Mesen2 `Waixing252.h`, `ProcessCpuClock`).
-                    | 252
-                    // MAPPERS-N: the CPU-clocked counters of `IrqLatch`.
-                    | 56
-                    | 142
-                    | 304
-                    | 6
-                    | 8
-                    | 17
-                    // MAPPERS-N: the FK23C raises its IRQ two CPU cycles late (Mesen2 `Fk23C.h`).
-                    | 176
-                    | 40
-                    | 42
-                    | 43
-                    | 50
-                    | 106
-                    | 183
-                    | 105
-                    | 153
-                    | 157
-                    | 159
-                    | 209
-                    | 211
-                    | 264
-                    | 298
-            ),
+            clocks_on_cpu_cycle: clocks_on_cpu_cycle(mapper),
         };
         cartridge.reset();
         Ok(cartridge)
@@ -2061,6 +2072,10 @@ mod tests {
         // MAPPERS-N: mapper 183's 114-cycle prescaler runs from power-on whether or not its
         // counter is enabled (Mesen2 `Mapper183.h`, `ProcessCpuClock`), so it moves here too.
         let mut expected = vec![5, 5, 19, 19, 69, 69, 85, 85];
+        // MAPPERS-N: mapper 168's IRQ counter counts from power-on until a game freezes it.
+        if Cartridge::is_supported(168) {
+            expected.extend_from_slice(&[168, 168]);
+        }
         if Cartridge::is_supported(183) {
             expected.extend_from_slice(&[183, 183]);
         }

@@ -937,6 +937,21 @@ CHR-RAM) and puNES (`mapper_198.c`, banks from `$50` folding onto `$40-$4F`). Th
 password screen cleanly; the later `[T+ChSFIX2]` and `[T+ChTFIX2]` patches show stray glyphs on
 the password screen, not investigated (translation hacks; their CHR use may differ).
 
+### J22. Mapper 168: nesdev/puNES board, two of three versions stuck in the core
+The board follows nesdev ("INES Mapper 168") and puNES (`mapper_168.c`): CHR banks
+`(reg & $0F) ^ 8` (the page allows either convention), the control bit taken from A7 or D2,
+the free-running M2 counter whose bit 10 drives the IRQ, and the protection of U2 (banks 8-15)
+cleared on a 1-to-0 edge of the control bit. A protected CHR read returns 0, where the hardware
+leaves the PPU's open bus. Mesen2 (`Racermate.h`) and FCEUX (`boards/168.cpp`) are simpler: no
+XOR, no IRQ, no protection, and FCEUX decodes `$B000` alone.
+RacerMate Challenge II v3.12 (`041553C3`) reaches the race screen. v3.11 (`74920C13`) and v5.01
+(`AAEF2264`) run in FCEUX but not here: the screen stays on the backdrop, and the decompressor at
+`$FCA1-$FCF4` keeps rebuilding the same list from `$FB29`, eventually reading code at `$DFxx`.
+This is **not the board**: replacing it with FCEUX's model (no XOR, no IRQ, no protection) gives
+the same result. The two cores start one frame apart (`$00CE` 8F/80 at frame 5, power-on
+phase), so `movie-sync` reports that first divergence and not the real one. The cause is in the
+core (CPU, PPU or timing during long writes to `$2007` with rendering off) and remains to be found.
+
 ### J21. Mapper 199: implemented from nesdev and puNES, **not verified**
 nesdev ("INES Mapper 199", Waixing FS309): 8 KiB of unbanked CHR-RAM and 32 KiB of battery PRG-RAM
 of which 12 KiB are mapped at `$5000-$7FFF`; puNES (`mapper_199.c`) places `$5000-$5FFF` on 4 KiB

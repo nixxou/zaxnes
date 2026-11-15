@@ -36,6 +36,8 @@ use super::Mmc3Txc189;
 use super::Mmc3Unl8237;
 #[cfg(feature = "board-105")]
 use super::NesEvent;
+#[cfg(feature = "board-168")]
+use super::Racermate;
 #[cfg(feature = "board-116")]
 use super::Somari;
 #[cfg(feature = "board-68")]
@@ -346,6 +348,9 @@ pub enum IrqBoard {
     Mmc3Clone(Box<Mmc3Clone>),
     /// Mapper 253, the Waixing VRC4-like board with 2 KiB of CHR-RAM (lot MAPPERS-N).
     /// Mapper 252, the Waixing VRC4 clone with CHR-RAM chosen by mask/compare (lot MAPPERS-N).
+    /// Mapper 168, RacerMate Challenge II (lot MAPPERS-N).
+    #[cfg(feature = "board-168")]
+    Racermate(Box<Racermate>),
     #[cfg(feature = "board-252")]
     Waixing252(Box<Waixing252>),
     #[cfg(feature = "board-253")]
@@ -409,6 +414,8 @@ macro_rules! inner {
             IrqBoard::Mapper091($b) => $body,
             #[cfg(feature = "board-mmc3-clones")]
             IrqBoard::Mmc3Clone($b) => $body,
+            #[cfg(feature = "board-168")]
+            IrqBoard::Racermate($b) => $body,
             #[cfg(feature = "board-252")]
             IrqBoard::Waixing252($b) => $body,
             #[cfg(feature = "board-253")]

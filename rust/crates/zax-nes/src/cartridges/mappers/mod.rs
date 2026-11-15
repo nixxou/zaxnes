@@ -119,6 +119,8 @@ mod nrom;
 mod oeka_kids;
 #[cfg(feature = "board-164")]
 mod pec9588;
+#[cfg(feature = "board-168")]
+mod racermate;
 mod rambo1;
 #[cfg(feature = "board-133")]
 mod sachen_72008;
@@ -284,6 +286,8 @@ pub use nrom::Nrom;
 pub use oeka_kids::OekaKids;
 #[cfg(feature = "board-164")]
 pub use pec9588::Pec9588;
+#[cfg(feature = "board-168")]
+pub use racermate::Racermate;
 #[cfg(feature = "board-158")]
 pub use rambo1::Tengen800037;
 pub use rambo1::{Rambo1, Rambo1Board};

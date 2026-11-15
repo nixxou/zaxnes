@@ -707,3 +707,28 @@ fn mappers_n_199_has_unbanked_chr_ram_and_ram_at_5000() {
     assert_eq!(0x33, core.read_memory(0x5010));
     assert_eq!(0x33, core.cartridge().unwrap().battery_ram()[0x2010]);
 }
+
+/// nesdev "INES Mapper 168" and puNES `mapper_168.c`: PRG bank from bits 7-6, CHR bank
+/// `(reg & $0F) ^ 8`, U2 (banks 8-15) protected until the control bit falls, and the IRQ on bit
+/// 10 of a free-running M2 counter.
+#[cfg(feature = "board-168")]
+#[test]
+fn mappers_n_168_banks_protects_u2_and_counts() {
+    let mut core = MapperRom::new(168).prg(8).chr(0).load();
+    assert_eq!([0, 1, 6, 7], core.prg_windows());
+    core.mapper_write(0xB000, 0x83); // PRG bank 2, CHR bank 3 ^ 8 = 11, in U2
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    core.cartridge_mut().unwrap().ppu_write(0x1000, 0x55);
+    assert_eq!(0, core.chr_bank(0x1000), "U2 protected at power-on");
+    core.mapper_write(0xF080, 0xFF); // control bit high: frozen
+    core.mapper_write(0xF000, 0x00); // 1 -> 0: protection off, counter runs
+    core.cartridge_mut().unwrap().ppu_write(0x1000, 0x55);
+    assert_eq!(0x55, core.chr_bank(0x1000));
+    assert!(!core.cartridge().unwrap().irq_asserted());
+    for _ in 0..1100 {
+        core.bus_mut().tick();
+    }
+    assert!(core.cartridge().unwrap().irq_asserted());
+    core.mapper_write(0xF080, 0xFF);
+    assert!(!core.cartridge().unwrap().irq_asserted());
+}

@@ -109,3 +109,6 @@ Owner's request (2026-11-15): implement the mappers missing compared with the ot
 * Hackset-verifiable remainder: 234 (1654f521, Maxi 15 x3), 252 (7246ef17, Sangokushi Chinese;
   its state reload refresh fixed in the next commit), 165 (Fire Emblem Gaiden Chinese x3). Left:
   198, 199, 168, 188. AMD-MAPPERS-N-200 accepted and applied (6e10b0ef).
+* 168 RacerMate Challenge II (nesdev + puNES): v3.12 reaches the race screen; v3.11 and v5.01
+  stay on the backdrop in Zaxnes but run in FCEUX, with FCEUX's board model as well, so the
+  cause is in the core (FIDELITY-LEADS J22). Next: cartdb whitelist 199->176 / 74->176, then 188.

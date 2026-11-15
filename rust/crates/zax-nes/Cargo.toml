@@ -104,6 +104,7 @@ default = [
     "board-249",
     "board-250",
     "board-252",
+    "board-168",
     "board-253",
     "board-57",
     "board-58",
@@ -244,6 +245,8 @@ board-250 = ["board-mmc3-clones"]
 board-253 = []
 # MAPPERS-N: the Waixing VRC4 clone with CHR-RAM selected by mask/compare (`Waixing252`).
 board-252 = []
+# MAPPERS-N: RacerMate Challenge II (`Racermate`).
+board-168 = []
 
 # MAPPERS-N umbrella.
 board-latch-multi = ["board-decode-boards"]

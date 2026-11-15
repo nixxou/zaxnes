@@ -65,6 +65,8 @@ use super::mappers::Nrom;
 use super::mappers::OekaKids;
 #[cfg(feature = "board-164")]
 use super::mappers::Pec9588;
+#[cfg(feature = "board-168")]
+use super::mappers::Racermate;
 #[cfg(feature = "board-133")]
 use super::mappers::Sachen72008;
 #[cfg(feature = "board-sachen8259")]
@@ -400,6 +402,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     166,
     #[cfg(feature = "board-167")]
     167,
+    #[cfg(feature = "board-168")]
+    168,
     #[cfg(feature = "board-170")]
     170,
     #[cfg(feature = "board-171")]
@@ -977,6 +981,13 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         #[cfg(feature = "board-165")]
         165 => BoardMemorySizes {
             chr_ram: Some(0x1000),
+            ..BoardMemorySizes::default()
+        },
+        // MAPPERS-N: nesdev ("INES Mapper 168"): 64 KiB of CHR-RAM, "There is no PRG RAM".
+        #[cfg(feature = "board-168")]
+        168 => BoardMemorySizes {
+            prg_ram: Some(0),
+            chr_ram: Some(Racermate::CHR_RAM_SIZE),
             ..BoardMemorySizes::default()
         },
         #[cfg(feature = "board-252")]
@@ -2080,6 +2091,8 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
             memory,
             Mmc3CloneKind::of(mapper)?,
         )))),
+        #[cfg(feature = "board-168")]
+        168 => Board::IrqBoard(IrqBoard::Racermate(Box::new(Racermate::new(memory)))),
         #[cfg(feature = "board-252")]
         252 => Board::IrqBoard(IrqBoard::Waixing252(Box::new(Waixing252::new(memory)))),
         #[cfg(feature = "board-253")]
