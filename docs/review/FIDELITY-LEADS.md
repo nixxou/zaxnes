@@ -985,6 +985,10 @@ places where puNES itself is incomplete are copied, not invented around:
 * 344: puNES picks a second chip order for one dump by its PRG CRC (`0xAB2ACA46`); this board
   keeps order 0 for all.
 * 344 and 432 read 0 for the DIP switches / solder pad.
+* 353, game 0: puNES picks the two-table or four-table CIRAM layout from **R0** D7
+  (`mmc3.reg[0] & 0x80`), where its 370 and the `TxSROM` use the `$8000` CHR-inversion bit; this
+  board follows the `TxSROM` convention. R0 D7 is kept where puNES uses it for PRG A17 and the
+  CHR-RAM mode of game 2. No dump in the Hackset.
 * 281/282/295 apply puNES's outer bank to ROM nametables too (`mirroring_swap_jyasic_28x`); with
   no dump in the Hackset this is untested on a real image.
 

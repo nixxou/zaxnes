@@ -1046,3 +1046,15 @@ fn mappers_p_527_pages_ciram_from_chr() {
         [0, 1, 2, 3].map(|table| cartridge.nametable_page(table))
     );
 }
+
+/// `mapper_353.c`: `$A080` selects game 1; `$E080` game 3, whose `$C000`/`$E000` are R6/R7.
+#[cfg(feature = "board-353")]
+#[test]
+fn mappers_p_353_selects_games_from_x080() {
+    let mut core = MapperRom::new(353).prg(128).chr(512).load();
+    mmc3_start(&mut core, 1, 2);
+    core.mapper_write(0xA080, 0);
+    assert_eq!([33, 34, 62, 63], core.prg_windows());
+    core.mapper_write(0xE080, 0);
+    assert_eq!([97, 98, 113, 114], core.prg_windows());
+}

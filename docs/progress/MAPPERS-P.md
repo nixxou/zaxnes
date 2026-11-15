@@ -58,7 +58,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 350 | `mapper_350.c` | 99 | 0 | 0 | done (batch 3, `MultiP`) |
 | 351 | `mapper_351.c` | 305 | 0 | 0 | todo |
 | 352 | `mapper_352.c` | 66 | 0 | 0 | done (batch 2, `MultiP`) |
-| 353 | `mapper_353.c` | 149 | 1 | 0 | todo |
+| 353 | `mapper_353.c` | 149 | 1 | 0 | done (batch 28, `Mmc3P`) |
 | 354 | `mapper_354.c` | 111 | 0 | 0 | done (batch 4, `MultiP`) |
 | 355 | `mapper_355.c` | 258 | 4 | 1 | todo |
 | 356 | `mapper_356.c` | 106 | 1 | 0 | done (batch 25, `Mmc3P`) |
@@ -243,3 +243,4 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 * Batch 25: `Mmc3P` 356 (410's registers, CHR-RAM while `reg[2]` D5 is clear, four-screen from D6; `Mmc3P::a000` keeps the chip's last `$A000` to return to, in the save state).
 * Batch 26: `Mmc3P` 269. Without CHR-ROM its CHR is the PRG-ROM with the data lines permuted; the copy lives in the board (`Mmc3P::chr_269`, derived at load) because the core clears the CHR-RAM after a board's power-on, and `ppu_peek`/`ppu_write` serve it as ROM. The CHR-RAM is sized to the PRG-ROM (`board_memory_sizes`) so that the windows wrap on it. `020-FFF` registers moved to `Mmc3P::write_5000`.
 * Batch 27: `VrcP` 527 (VRC2b, CIRAM page from D7 of CHR registers 0/1 through the new `Vrc2Vrc4::chr_register`; `IrqBoard::nametable_page` names `board-vrc-p`).
+* Batch 28: `Mmc3P` 353 (four games selected by a chip write to `$x080`).

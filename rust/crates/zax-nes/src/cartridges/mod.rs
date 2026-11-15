@@ -556,6 +556,8 @@ const fn nametable_pages_vary(mapper: i32) -> bool {
             | 370
             // MAPPERS-P: 527, a CIRAM page from D7 of CHR registers 0 and 1.
             | 527
+            // MAPPERS-P: 353, game 0 pages CIRAM from the CHR registers' D7.
+            | 353
             // MAPPERS-N: 284 serves every table while its extended attributes are on.
             | 284
             // MAPPERS-N: 682 serves every table.
@@ -973,6 +975,7 @@ const fn mmc3_p_board(mapper: i32) -> bool {
             | 432
             | 356
             | 269
+            | 353
     )
 }
 
@@ -2245,7 +2248,7 @@ mod tests {
             315, 322, 327, 334, 339, 345, 361, 372, 377, 395, 399, 401, 410, 411, 420, 455, 456,
             457, 516, 393, 412,
             // MAPPERS-P: 248 and 536 run the boards of 115 and 195 (`registry::board_number`).
-            248, 536, 422, 534, 370, 344, 432, 356, 269,
+            248, 536, 422, 534, 370, 344, 432, 356, 269, 353,
         ] {
             if Cartridge::is_supported(number) {
                 expected.extend_from_slice(&[number, number]);

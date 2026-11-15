@@ -99,6 +99,10 @@ pub enum Mmc3PKind {
     /// `$5000-$5FFF` (CHR offset, PRG offset, CHR mask, PRG mask and lock); an image without
     /// CHR-ROM reads its CHR from the PRG-ROM with the data lines permuted.
     M269,
+    /// 353, `mapper_353.c` (81-03-05-C, *Super Mario Family*): a chip write to `$x080` selects one
+    /// of four 256 KiB games from A13-A14; game 0 pages CIRAM like the `TxSROM`, game 2 has a
+    /// CHR-RAM mode and game 3 its own `$C000`/`$E000` banks.
+    M353,
 }
 
 impl Mmc3PKind {
@@ -136,6 +140,7 @@ impl Mmc3PKind {
             432 => Self::M432,
             356 => Self::M356,
             269 => Self::M269,
+            353 => Self::M353,
             _ => return None,
         })
     }
@@ -172,6 +177,7 @@ impl Mmc3PKind {
             Self::M432 => 432,
             Self::M356 => 356,
             Self::M269 => 269,
+            Self::M353 => 353,
         }
     }
 }
@@ -430,6 +436,7 @@ impl Mmc3P {
             Mmc3PKind::M422 | Mmc3PKind::M534 => self.prg_page_126(slot, page),
             Mmc3PKind::M370 => ((o[0] & 0x38) << 1) | (page & (0x1F >> ((o[0] & 0x20) >> 5))),
             Mmc3PKind::M269 => o[1] | (page & (o[3] & 0x3F)),
+            Mmc3PKind::M353 => self.prg_page_353(slot, page),
             Mmc3PKind::M344 | Mmc3PKind::M432 => self.prg_page_dip(slot, page),
             _ => page,
         }
@@ -526,6 +533,27 @@ impl Mmc3P {
             }
             _ => false,
         }
+    }
+
+    /// `prg_swap_mmc3_353`: game 2 halves the inner bank, R0 D7 its A17; game 3 with R0 D7 clear
+    /// shows R6/R7 at `$C000`/`$E000` from bank `$70` up.
+    fn prg_page_353(&self, slot: usize, page: i32) -> i32 {
+        let game = i32::from(self.outer[0]);
+        let r0 = self.mmc3.bank_register(0);
+        let mut base = game << 5;
+        let mut mask = 0x1F;
+        let mut value = page;
+        if game == 2 {
+            if r0 & 0x80 != 0 {
+                base |= 0x10;
+            }
+            mask >>= 1;
+        } else if game == 3 && r0 & 0x80 == 0 && slot >= 2 {
+            base = 0x70;
+            mask = 0x0F;
+            value = i32::from(self.mmc3.bank_register(4 + slot));
+        }
+        (base & !mask) | (value & mask)
     }
 
     /// `chr_swap_mmc3_370`.
@@ -677,6 +705,7 @@ impl Mmc3P {
                 Mmc3PKind::M410 => self.outer[2] & 0x40 != 0,
                 // `chr_swap_mmc3_356`: the RAM while D5 is **clear**.
                 Mmc3PKind::M356 => self.outer[2] & 0x20 == 0,
+                Mmc3PKind::M353 => self.outer[0] == 2 && self.mmc3.bank_register(0) & 0x80 != 0,
                 Mmc3PKind::M393 => self.outer[0] & 0x08 != 0,
                 _ => false,
             }
@@ -699,6 +728,9 @@ impl Mmc3P {
         } else if self.kind == Mmc3PKind::M269 {
             let (offset, mask) = (i32::from(self.outer[0]), i32::from(self.outer[2]));
             std::array::from_fn(|slot| offset | (raw_chr[slot] & mask))
+        } else if self.kind == Mmc3PKind::M353 {
+            let base = i32::from(self.outer[0]) << 7;
+            std::array::from_fn(|slot| base | (raw_chr[slot] & 0x7F))
         } else if self.kind == Mmc3PKind::M370 {
             std::array::from_fn(|slot| self.chr_page_370(raw_chr[slot]))
         } else if matches!(self.kind, Mmc3PKind::M422 | Mmc3PKind::M534) {
@@ -1045,6 +1077,10 @@ impl Mapper for Mmc3P {
         if address & 0xE001 == 0xA000 {
             self.a000 = value;
         }
+        // `extcl_cpu_wr_mem_353`: `$x080` selects the game from A13-A14.
+        if self.kind == Mmc3PKind::M353 && address & 0x0FFF == 0x0080 {
+            self.outer[0] = (address >> 13) & 0x03;
+        }
         // `extcl_cpu_wr_mem_516`: a write with A4 set also latches A0-A3.
         if self.kind == Mmc3PKind::M516 && address & 0x0010 != 0 {
             self.outer[0] = address & 0x0F;
@@ -1134,7 +1170,9 @@ impl Mapper for Mmc3P {
     }
 
     fn nametable_page(&self, table: i32) -> i32 {
-        if self.kind == Mmc3PKind::M370 && self.outer[0] & 0x07 == 0x01 {
+        if (self.kind == Mmc3PKind::M370 && self.outer[0] & 0x07 == 0x01)
+            || (self.kind == Mmc3PKind::M353 && self.outer[0] == 0)
+        {
             return self.page_370(usize::try_from(table & 0x03).unwrap_or(0));
         }
         self.mmc3.nametable_page(table)
