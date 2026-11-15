@@ -221,7 +221,7 @@ impl Ppu2C02 {
         cart: Cart<'_, '_, K>,
     ) {
         while count > 0 {
-            if self.edge_count == 0 && !self.tracing() {
+            if self.edge_count == 0 && self.fetch_pending == 0 && !self.tracing() {
                 // Nothing pending: the standard core's stretches (idle dots, visible spans), which
                 // post nothing; a dot that may (256, a register's edge) goes through `step_dot`.
                 count -= self.run_dot_stretch(count, cart);
@@ -230,6 +230,12 @@ impl Ppu2C02 {
             #[cfg(feature = "ppu-dot-trace")]
             self.dot_trace_bus.set(0xFFFF);
             self.step_dot_out_of_line(cart);
+            // The address latch as state (step 3): the read half of a fetch after its ALE half.
+            if self.dot & 1 == 0 {
+                self.settle_fetch_read(cart.as_deref());
+            } else {
+                self.note_fetch_ale();
+            }
             // Only the edges pending before this dot: one an edge posts counts from the next.
             let mut index = 0;
             let mut pending = usize::from(self.edge_count);
@@ -249,6 +255,65 @@ impl Ppu2C02 {
             #[cfg(feature = "ppu-dot-trace")]
             self.record_traced_dot();
             count -= 1;
+        }
+    }
+
+    /// The address the background fetch `slot` puts on the bus from the current state.
+    fn background_fetch_address(&self, slot: u8) -> u16 {
+        match slot {
+            1 => 0x2000 | (self.v & 0x0FFF),
+            2 => self.attribute_address(),
+            3 => self.pattern_address(0),
+            _ => self.pattern_address(8),
+        }
+    }
+
+    /// After an odd dot's work: the ALE half of a background fetch. The external octal latch takes
+    /// the address's low byte; the read comes on the next dot. (This core reads on the odd dot
+    /// itself; [`Self::settle_fetch_read`] corrects the byte when the bus says otherwise.)
+    fn note_fetch_ale(&mut self) {
+        let dot = self.dot;
+        if !self.rendering_now() || !matches!(dot, 3..=255 | 321..=336) {
+            // Dot 1 fetches nothing in this core; dot 257's copy of `v` follows its fetch, left
+            // as the standard core has it.
+            return;
+        }
+        let slot = match (dot - 1) & 0x07 {
+            0 => 1,
+            2 => 2,
+            4 => 3,
+            6 => 4,
+            _ => return,
+        };
+        let address = self.background_fetch_address(slot);
+        self.fetch_pending = slot;
+        self.fetch_address = address;
+        self.ale_low = address.to_le_bytes()[0];
+    }
+
+    /// After an even dot's work: the read half. The PPU drives the high address lines of this
+    /// moment and the latch gives the low byte: when `v` moved between the halves (a `$2006`
+    /// load, `AccuracyCoin`'s `Hybrid Addresses`) or the latch took another byte (a `$2007` read
+    /// latching on the ALE half, `ALE + Read`), the byte read is the one at that address.
+    fn settle_fetch_read(&mut self, cartridge: Option<&super::Cartridge>) {
+        let slot = std::mem::take(&mut self.fetch_pending);
+        if slot == 0 || !self.rendering_now() {
+            return;
+        }
+        let address = (self.background_fetch_address(slot) & 0xFF00) | u16::from(self.ale_low);
+        if address == self.fetch_address {
+            return;
+        }
+        let byte =
+            self.peek_vram::<crate::cartridges::AnyBoard>(address, ChrFetch::Background, cartridge);
+        match slot {
+            1 => self.nametable_latch = byte,
+            2 => {
+                let shift = ((self.v >> 4) & 0x04) | (self.v & 0x02);
+                self.attribute_latch = (byte >> shift) & 0x03;
+            }
+            3 => self.pattern_low_latch = byte,
+            _ => self.pattern_high_latch = byte,
         }
     }
 
@@ -348,7 +413,9 @@ impl Ppu2C02 {
                     } else {
                         self.increment_vram_address(cart);
                     }
-                    self.post_edge_now(1, EdgeKind::RefetchLow);
+                    // The read latched on a cadence ALE half: the octal latch took the byte it
+                    // read, which the next dot's fetch then reads with (step 3).
+                    self.ale_low = self.read_buffer;
                 } else {
                     self.increment_vram_address(cart);
                 }
@@ -382,30 +449,8 @@ impl Ppu2C02 {
         if self.glitch_2006 {
             self.address_load_collision();
         }
-        // The read of a nametable or attribute fetch whose address the old `v` set up on this
-        // dot: high lines from the new `v`, low byte from the latch (`AccuracyCoin`, `Hybrid
-        // Addresses`). Step 3 holds the address latch as state; until then, the same patch as the
-        // standard core's `delay_address_load`.
-        let next = self.dot + 1;
-        if self.fetching() && matches!(next, 2..=256 | 322..=336) {
-            let hybrid = |address: u16, old: u16| (address & 0xFF00) | (old & 0x00FF);
-            match (next - 1) & 0x07 {
-                1 => {
-                    let address = hybrid(0x2000 | (self.t & 0x0FFF), self.v);
-                    self.nametable_latch =
-                        self.peek_vram::<K>(address, ChrFetch::Background, cart.as_deref());
-                }
-                3 => {
-                    let address = hybrid(0x23C0 | (self.t & 0x0C00), self.attribute_address());
-                    let shift = ((self.v >> 4) & 0x04) | (self.v & 0x02);
-                    self.attribute_latch =
-                        (self.peek_vram::<K>(address, ChrFetch::Background, cart.as_deref())
-                            >> shift)
-                            & 0x03;
-                }
-                _ => {}
-            }
-        }
+        // The read of a fetch whose address the old `v` set up: the address latch does it
+        // (`settle_fetch_read`, step 3).
         let previous = self.v;
         self.v = self.t;
         if is_palette_address(previous) {

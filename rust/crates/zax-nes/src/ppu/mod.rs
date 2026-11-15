@@ -245,6 +245,11 @@ pub struct Ppu2C02 {
     edge_count: u8,
     /// The PPU's data latch of a `$2007` write (`edges`): the byte the store takes when it comes.
     data_latch: u8,
+    /// Fidélité+ step 3 (`edges`): the background fetch whose address an odd dot set up and whose
+    /// read the next dot makes (0 none, 1 nametable, 2 attribute, 3 and 4 the pattern planes), and
+    /// the address this core read it at. Not part of the state: it never outlives a dot pair.
+    fetch_pending: u8,
+    fetch_address: u16,
     /// Per-dot trace (feature `ppu-dot-trace`): on, the PPU runs every dot through
     /// [`Self::step_dot`] (no span, no idle skip) and records it. Not part of the state.
     #[cfg(feature = "ppu-dot-trace")]
@@ -656,6 +661,8 @@ impl Ppu2C02 {
             edges: [edges::Edge::NONE; edges::EDGE_SLOTS],
             edge_count: 0,
             data_latch: 0,
+            fetch_pending: 0,
+            fetch_address: 0,
             #[cfg(feature = "ppu-dot-trace")]
             dot_trace: None,
             #[cfg(feature = "ppu-dot-trace")]
@@ -2317,6 +2324,10 @@ impl Ppu2C02 {
         self.odd_frame = !self.odd_frame;
     }
 
+    /// **Inlined into `run_dots`**: lot FIDPLUS-A gave it a Fidélité+ caller, LLVM outlined it
+    /// from the standard loop (callgrind, `smb3` +0.57 %), so it is pinned as `step_dot` is.
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
     fn process_dot<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {
         if self.dot == SKIP_DECISION_DOT && self.scanline == self.pre_render_scanline() {
             self.skip_latch = self.rendering_enabled();
