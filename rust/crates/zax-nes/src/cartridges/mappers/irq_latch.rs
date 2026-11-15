@@ -72,6 +72,7 @@ impl IrqLatchKind {
             Self::M8 => 8,
             Self::M17 => 17,
             Self::M40 => 40,
+            Self::M304 => 304,
             Self::M56 => 56,
             Self::M142 => 142,
             Self::M42 => 42,
@@ -153,6 +154,11 @@ impl IrqLatch {
         let prg: [i32; 4] = match self.kind {
             // `Mapper40.h:13-18,39`.
             IrqLatchKind::M40 => [4, 5, p(0), 7],
+            // `Smb2j.h:13-14,40-43`: the first or second 32 KiB.
+            IrqLatchKind::M304 => {
+                let base = p(0) << 2;
+                [base, base + 1, base + 2, base + 3]
+            }
             // `Mapper42.h:15-18`.
             IrqLatchKind::M42 => [-4, -3, -2, -1],
             // `Mapper43.h:35-38`, `:21-22`.
@@ -329,6 +335,16 @@ impl IrqLatch {
                     }
                 }
             }
+            // `Smb2j.h:38-48`: `$4022` (on 64 KiB images and up) and `$4122`.
+            IrqLatchKind::M304 => match address {
+                0x4022 if memory.rom().prg_rom().len() >= 0x10000 => self.prg[0] = value & 0x01,
+                0x4122 => {
+                    self.enabled = value & 0x03 != 0;
+                    self.counter = 0;
+                    self.pending = false;
+                }
+                _ => return false,
+            },
             // `Mapper40.h:29-41`.
             IrqLatchKind::M40 => match address & 0xE000 {
                 0x8000 => {
@@ -594,7 +610,7 @@ impl Mapper for IrqLatch {
             return false;
         }
         match self.kind {
-            IrqLatchKind::M43 | IrqLatchKind::M50 | IrqLatchKind::M183 => {
+            IrqLatchKind::M43 | IrqLatchKind::M50 | IrqLatchKind::M183 | IrqLatchKind::M304 => {
                 self.write(memory, address, value)
             }
             // `FrontFareast.h:13-14`: the register window is `$42FE-$4517`.
@@ -617,6 +633,15 @@ impl Mapper for IrqLatch {
         if (0x6000..=0x7FFF).contains(&address) && self.rom_6000_now() {
             return Self::rom_byte(memory, self.page_6000(), address & 0x1FFF);
         }
+        // `Smb2j.h:16-18`: `$5000-$7FFF` are the last three 4 KiB pages.
+        if self.kind == IrqLatchKind::M304 && (0x5000..=0x7FFF).contains(&address) {
+            let rom = memory.rom().prg_rom();
+            let pages = rom.len() / 0x1000;
+            let page = (pages + usize::from((address - 0x5000) >> 12)).checked_sub(3)?;
+            return rom
+                .get(page * 0x1000 + usize::from(address & 0x0FFF))
+                .copied();
+        }
         // `Mapper43.h:20`: `$5000-$5FFF` is the first 4 KiB of PRG-ROM page 8.
         if self.kind == IrqLatchKind::M43 && (0x5000..=0x5FFF).contains(&address) {
             return Self::rom_byte(memory, 8, address & 0x0FFF);
@@ -634,6 +659,16 @@ impl Mapper for IrqLatch {
                     self.counter = self.counter.wrapping_add(1);
                     if self.counter == 0xFFFF {
                         self.counter = self.scaler;
+                        self.enabled = false;
+                        self.pending = true;
+                    }
+                }
+            }
+            // `Smb2j.h:27-36`: a 12-bit counter.
+            IrqLatchKind::M304 => {
+                if self.enabled {
+                    self.counter = (self.counter + 1) & 0x0FFF;
+                    if self.counter == 0 {
                         self.enabled = false;
                         self.pending = true;
                     }
