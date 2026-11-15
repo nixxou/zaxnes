@@ -545,6 +545,18 @@ impl Mapper for IrqBoard {
         inner!(self, b => b.soft_reset(memory));
     }
 
+    /// Forwarded since lot MAPPERS-P, for the boards of this enum whose `$8000-$FFFF` reads are
+    /// not always ROM: [`super::Mmc3P`]'s DIP / solder-pad reads (344, 432) and [`super::VrcP`]'s
+    /// PRG banks that follow the CHR fetches (362, 398). Without it `Mapper`'s default answered
+    /// from the windows and the CPU's cached path read ROM where those boards answer otherwise.
+    /// Asked after a CPU write to the cartridge, not per read; out of line for the reason
+    /// [`IrqBoard::on_ppu_address_bus`] gives.
+    #[cfg(any(feature = "board-mmc3-p", feature = "board-vrc-p"))]
+    #[inline(never)]
+    fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {
+        inner!(self, b => b.rom_windows(memory))
+    }
+
     /// **`#[inline(never)]`, and it is the whole performance story of this lot.**
     ///
     /// Inlined, this one body is the thirteenth in the dispatch `Cpu6502::branch` folds

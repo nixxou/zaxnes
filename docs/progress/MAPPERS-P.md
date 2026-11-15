@@ -298,3 +298,8 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 * Batch 40: `MultiP` 452 (DS-9-27): a write to ROM latches address and data (438's arm); the
   8 KiB work RAM covers one or two `$8000-$FFFF` windows (`ram_windows_452`), which leave the ROM
   cache and take writes as RAM; submapper 1's top-nibble decode as puNES has it.
+* Fix (after batch 40): `IrqBoard` did not forward `Mapper::rom_windows`, so `Mmc3P`'s override
+  (batch 24) was never reached and the CPU's cached path (`Cartridge::read_rom_window`) read ROM
+  where 344 and 432 answer their DIP / solder-pad read; the tests read through `peek`, which
+  goes to `try_read_prg`, and missed it. The forward is now there behind
+  `board-mmc3-p`/`board-vrc-p`, out of line, and both tests check `read_rom_window` too.

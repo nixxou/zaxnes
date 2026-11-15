@@ -986,7 +986,8 @@ fn mappers_p_344_has_nrom_and_a_dip_read() {
     core.mapper_write(0x6005, 0);
     assert_eq!([20, 21, 22, 23], core.prg_windows());
     core.mapper_write(0x6008, 0);
-    assert_eq!(0, core.read_memory(0x8001));
+    assert_eq!(0, core.read_memory(0x8001));    // The CPU's cached path must not answer ROM there (`Mapper::rom_windows`).
+    assert_eq!(None, core.cartridge().unwrap().read_rom_window(0x8001));
 }
 
 /// `mapper_432.c` (nesdev "NES 2.0 Mapper 432"): `$6001` D6 is NROM-128 from R6/R7; `$6000` D0
@@ -1001,7 +1002,8 @@ fn mappers_p_432_has_nrom_128_and_a_pad_read() {
     core.mapper_write(0x6001, 0x50);
     assert_eq!([37, 38, 37, 38], core.prg_windows());
     core.mapper_write(0x6000, 0x01);
-    assert_eq!(0, core.read_memory(0x8001));
+    assert_eq!(0, core.read_memory(0x8001));    // The CPU's cached path must not answer ROM there (`Mapper::rom_windows`).
+    assert_eq!(None, core.cartridge().unwrap().read_rom_window(0x8001));
 }
 
 /// `mapper_356.c`: four registers in turn; `reg[2]` D6 is four-screen.
