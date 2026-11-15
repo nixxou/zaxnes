@@ -220,6 +220,7 @@ const DISPLAY: &[LayoutEntry] = &[
 /// The rows of the **NES picture** tab: what the console puts out, before any 3D.
 const NES_PICTURE: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::VideoNesPalette),
+    LayoutEntry::Row(SettingId::VideoCompositeSignal),
     LayoutEntry::Row(SettingId::VideoRemoveSpriteLimit),
     LayoutEntry::Group(OptionsGroup::Overscan),
     LayoutEntry::Row(SettingId::VideoOverscanMode),

@@ -236,7 +236,7 @@ impl Residency for MeshTable {
     fn picture(
         &mut self,
         _picture: &[u8],
-        _emphasis: &[u8],
+        _colours: crate::scene::PictureColours<'_>,
         _height: usize,
     ) -> Result<Option<usize>, Self::Error> {
         Ok(Some(0))

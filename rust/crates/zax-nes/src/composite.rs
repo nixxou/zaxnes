@@ -115,9 +115,147 @@ pub fn decode_uniform(pixel: u8, emphasis: u8, hue_degrees: f32) -> [f32; 3] {
     ]
 }
 
+/// Samples a television's luma filter averages: one subcarrier cycle, which removes the chroma
+/// of a flat colour entirely and leaves the colour artefacts of its edges.
+const LUMA_WINDOW: usize = PHASES;
+
+/// Samples its chroma filter averages: two cycles, the narrower chroma band of a set.
+const CHROMA_WINDOW: usize = 2 * PHASES;
+
+/// The demodulation angle of subcarrier phase `phase`, the one [`decode_uniform`] uses.
+fn phase_angle(phase: usize) -> f32 {
+    #[allow(clippy::cast_precision_loss)] // phase < 12
+    let phase = phase as f32;
+    std::f32::consts::PI * ((phase - 0.5) / 6.0 + 0.5)
+}
+
+/// Working buffers of [`decode_row`], kept by the caller from row to row.
+#[derive(Debug, Default)]
+pub struct RowDecoder {
+    luma: Vec<f32>,
+    in_phase: Vec<f32>,
+    quadrature: Vec<f32>,
+}
+
+impl RowDecoder {
+    /// Decodes one row of the picture as a television would see the 2C02's signal (lot
+    /// FIDPLUS-D2b step 2): `pixels` colour indices (6 bits used), `emphasis` the emphasis of
+    /// each (0 to 7; empty for none), `phase` the subcarrier phase of the row's first sample.
+    /// Writes R, G, B (0 to 255) per pixel into `out` (three bytes a pixel).
+    ///
+    /// The signal is generated 8 samples a pixel ([`pixel_samples`]); luma is its mean over one
+    /// subcarrier cycle around each pixel's centre, I and Q its products with the subcarrier over
+    /// two cycles, then the matrix of [`decode_uniform`]. A flat colour decodes exactly as
+    /// `decode_uniform` does; where colours meet, luma and chroma leak into each other as on a
+    /// set (the colour fringes), and since the phase moves by 4 a line and by 4 or 8 a frame the
+    /// fringes move with it (the dot crawl).
+    pub fn decode_row(&mut self, pixels: &[u8], emphasis: &[u8], phase: usize, out: &mut [u8]) {
+        let samples = pixels.len() * SAMPLES_PER_PIXEL;
+        let span = WHITE - BLACK;
+        // Running sums: entry k is the sum of the first k samples.
+        for sums in [&mut self.luma, &mut self.in_phase, &mut self.quadrature] {
+            sums.clear();
+            sums.reserve(samples + 1);
+            sums.push(0.0);
+        }
+        let mut block = [0.0_f32; SAMPLES_PER_PIXEL];
+        let (mut y, mut i, mut q) = (0.0_f32, 0.0_f32, 0.0_f32);
+        for (x, &pixel) in pixels.iter().enumerate() {
+            let bits = emphasis.get(x).copied().unwrap_or(0);
+            let start = phase + x * SAMPLES_PER_PIXEL;
+            pixel_samples(pixel & 0x3F, bits, start, &mut block);
+            for (offset, &volts) in block.iter().enumerate() {
+                let level = (volts - BLACK) / span;
+                let angle = phase_angle((start + offset) % PHASES);
+                y += level;
+                i += level * angle.cos();
+                q += level * angle.sin();
+                self.luma.push(y);
+                self.in_phase.push(i);
+                self.quadrature.push(q);
+            }
+        }
+        let window = |sums: &[f32], centre: usize, width: usize| -> f32 {
+            let from = centre.saturating_sub(width / 2);
+            let to = (from + width).min(samples);
+            let from = to.saturating_sub(width);
+            #[allow(clippy::cast_precision_loss)] // at most 24
+            let count = (to - from) as f32;
+            (sums[to] - sums[from]) / count
+        };
+        for (x, rgb) in out.chunks_exact_mut(3).take(pixels.len()).enumerate() {
+            let centre = x * SAMPLES_PER_PIXEL + SAMPLES_PER_PIXEL / 2;
+            let y = window(&self.luma, centre, LUMA_WINDOW);
+            let i = 2.0 * window(&self.in_phase, centre, CHROMA_WINDOW);
+            let q = 2.0 * window(&self.quadrature, centre, CHROMA_WINDOW);
+            let channels = [
+                y + 0.956 * i + 0.621 * q,
+                y - 0.272 * i - 0.647 * q,
+                y - 1.106 * i + 1.703 * q,
+            ];
+            for (byte, value) in rgb.iter_mut().zip(channels) {
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0 to 255
+                let value = (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+                *byte = value;
+            }
+        }
+    }
+}
+
+/// The phase the next frame's first line starts at: a frame of 262 lines of 341 dots advances
+/// the subcarrier by 4 half-clocks (mod 12), 8 fewer when the odd frame skips its first dot.
+#[must_use]
+pub const fn next_frame_phase(frame_phase: usize, skipped_dot: bool) -> usize {
+    let advance = if skipped_dot { PHASES - 4 } else { 4 };
+    (frame_phase + advance) % PHASES
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fidplus_d2b_a_flat_row_decodes_as_its_uniform_colour() {
+        let mut decoder = RowDecoder::default();
+        for pixel in [0x16_u8, 0x2A, 0x12, 0x30, 0x0F] {
+            for phase in [0, 4, 8] {
+                let row = [pixel; 64];
+                let mut out = [0u8; 64 * 3];
+                decoder.decode_row(&row, &[], phase, &mut out);
+                let expected = decode_uniform(pixel, 0, 0.0);
+                for (channel, &value) in expected.iter().enumerate() {
+                    let got = f32::from(out[32 * 3 + channel]) / 255.0;
+                    assert!(
+                        (got - value).abs() < 0.01,
+                        "{pixel:#x} phase {phase}: {got} {value}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fidplus_d2b_an_edge_fringes_and_the_fringe_moves_with_the_phase() {
+        let mut decoder = RowDecoder::default();
+        let mut row = [0x0F_u8; 64];
+        row[32..].fill(0x30);
+        let decode = |decoder: &mut RowDecoder, phase| {
+            let mut out = [0u8; 64 * 3];
+            decoder.decode_row(&row, &[], phase, &mut out);
+            out
+        };
+        let a = decode(&mut decoder, 0);
+        let b = decode(&mut decoder, 4);
+        // Black to white: the pixels at the edge are coloured (not grey), and differently on two
+        // phases; far from it, black and white.
+        let edge = &a[32 * 3..33 * 3];
+        assert!(
+            edge.iter().max().unwrap() - edge.iter().min().unwrap() > 8,
+            "{edge:?}"
+        );
+        assert_ne!(&a[31 * 3..34 * 3], &b[31 * 3..34 * 3]);
+        assert!(a[..3].iter().all(|&c| c < 3) && a[60 * 3..61 * 3].iter().all(|&c| c > 240));
+    }
 
     #[test]
     fn grey_rows_have_no_chroma() {

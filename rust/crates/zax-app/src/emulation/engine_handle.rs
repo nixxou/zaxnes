@@ -507,6 +507,13 @@ impl EngineHandle {
         }
     }
 
+    /// The colour subcarrier's phase at the start of the frame just drawn (0 to 11; 0 on an
+    /// engine that does not report it), for the composite decoder (lot FIDPLUS-D2b).
+    #[must_use]
+    pub fn video_phase(&self) -> usize {
+        self.zaxnes().map_or(0, NesCore::video_phase)
+    }
+
     /// The frame's experimental smooth-scrolling shift; `None` on an engine that has none.
     #[must_use]
     pub fn picture_shift(&self) -> Option<(f32, i32, i32)> {

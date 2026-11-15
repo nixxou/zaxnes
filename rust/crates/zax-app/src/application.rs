@@ -1530,6 +1530,7 @@ impl Running {
                     nes_picture: &[],
                     nes_picture_height: 0,
                     nes_picture_emphasis: &[],
+                    nes_picture_rgb: &[],
                 };
                 draw_scene(graphics, view, &scene, &frame, shadow_reported, clock)
             };
@@ -2125,6 +2126,10 @@ struct RunState {
     picture_height: usize,
     /// Its colour emphasis, empty without any (lot FIDPLUS-D2b).
     picture_emphasis: Vec<u8>,
+    /// It decoded from the composite signal (`video.composite_signal`), three bytes a pixel;
+    /// empty with the option off.
+    picture_rgb: Vec<u8>,
+    composite: zax_nes::composite::RowDecoder,
     /// Whether its playfield is drawn between two frames (the experimental 120 Hz scrolling):
     /// every display frame is then drawn, a new emulated frame or not.
     picture_between: bool,
@@ -2153,6 +2158,8 @@ impl RunState {
             picture: Vec::new(),
             picture_height: 0,
             picture_emphasis: Vec::new(),
+            picture_rgb: Vec::new(),
+            composite: zax_nes::composite::RowDecoder::default(),
             picture_between: false,
             emulated_now: 0,
             frame_time: 0.0,
@@ -2654,9 +2661,57 @@ fn widescreen_margin(choice: i32, extra: i32, size: (i32, i32)) -> (i32, i32) {
     )
 }
 
+/// Whether `video.composite_signal` is on.
+fn composite_on(host: &AppHost) -> bool {
+    host.settings()
+        .get(SettingId::VideoCompositeSignal)
+        .as_bool()
+}
+
+/// The 2D picture's colours beside its indices (lot FIDPLUS-D2b): its emphasis, and with
+/// `composite` the whole picture decoded from the composite signal.
+fn colour_picture(state: &mut RunState, session: &GameSession, width: usize, composite: bool) {
+    session.copy_nes_emphasis(&mut state.picture_emphasis);
+    decode_composite(state, width, composite.then(|| session.nes_video_phase()));
+}
+
+/// `video.composite_signal` (lot FIDPLUS-D2b step 2): the 2D picture decoded from the 2C02's
+/// composite signal, row by row, into `state.picture_rgb`. Row `r` of the screen starts its
+/// subcarrier 4 half-clocks after row `r - 1`; a widescreen margin column `c` before the screen is
+/// `8 c` half-clocks earlier. A pixel the overscan leaves out decodes as black and stays hidden.
+fn decode_composite(state: &mut RunState, width: usize, video_phase: Option<usize>) {
+    use zax_nes::composite::PHASES;
+    state.picture_rgb.clear();
+    let Some(video_phase) = video_phase else {
+        return;
+    };
+    let rows = state.picture_height;
+    if width == 0 || rows == 0 || state.picture.len() < width * rows {
+        return;
+    }
+    let margin = width.saturating_sub(256) / 2;
+    let margin_y = rows.saturating_sub(240) / 2;
+    state.picture_rgb.resize(width * rows * 3, 0);
+    let emphasis_ok = state.picture_emphasis.len() == state.picture.len();
+    for row in 0..rows {
+        // Phases mod 12, the margins counted backwards from the screen's first row and column.
+        let line = (row + PHASES * 60 - margin_y % PHASES) % PHASES;
+        let phase = (video_phase + 4 * line + PHASES * 1000 - (margin * 8) % PHASES) % PHASES;
+        let pixels = &state.picture[row * width..(row + 1) * width];
+        let emphasis = if emphasis_ok {
+            &state.picture_emphasis[row * width..(row + 1) * width]
+        } else {
+            &[]
+        };
+        let out = &mut state.picture_rgb[row * width * 3..(row + 1) * width * 3];
+        state.composite.decode_row(pixels, emphasis, phase, out);
+    }
+}
+
 #[allow(clippy::too_many_lines)] // The scene of a frame, each source of motion in its order.
 fn update_scene(host: &mut AppHost, state: &mut RunState) {
     let two_dimensional = host.showing_two_dimensional();
+    let composite = composite_on(host);
     // How far into the emulated frame the display is, for the experimental 120 Hz scrolling.
     let phase = host.pacer.phase_at(state.frame_time);
     let show_band = host
@@ -2749,7 +2804,6 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     if two_dimensional {
         state.picture_height =
             session.copy_nes_picture_layers(&mut state.picture, &mut scene.picture_overlay);
-        session.copy_nes_emphasis(&mut state.picture_emphasis);
         scene.picture_shift = session.nes_picture_shift();
         // Experimental (owner request): on a display faster than the game, the playfield drawn
         // between two frames, along the camera's motion to the next one.
@@ -2796,6 +2850,7 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         }
         let in_force = overscan.in_force(i32::try_from(width).map_or(0, |width| (width - 256) / 2));
         in_force.leave_out(&mut state.picture, state.picture_height);
+        colour_picture(state, session, width, composite);
         scene.picture_crop = zax_profiles::values::Vec4F::new(
             in_force.crop()[0],
             in_force.crop()[1],
@@ -2854,6 +2909,11 @@ fn render_scene(
             &[]
         } else {
             &state.picture_emphasis
+        },
+        nes_picture_rgb: if picture.is_empty() {
+            &[]
+        } else {
+            &state.picture_rgb
         },
     };
     draw_scene(

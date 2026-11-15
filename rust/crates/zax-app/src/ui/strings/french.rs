@@ -514,6 +514,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.video.overscan_right", "Overscan : droite"),
     ("setting.video.overscan_mode", "Overscan : fit (bords masqués) ou resize (agrandi)"),
     ("setting.video.nes_palette", "Palette de couleurs NES"),
+    ("setting.video.composite_signal", "Signal composite"),
     ("setting.emu.builtin_patches", "Patchs de ROM intégrés (au prochain chargement)"),
     ("setting.emu.tv_mode", "Région vidéo"),
     ("setting.emu.core", "Cœur d'émulation"),
@@ -787,6 +788,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ),
 
     // ----------------------------------------------------- onglet Image NES
+    (
+        "detail.video.composite_signal",
+        "Fidélité+ : l'image plate faite comme une télévision la faisait à partir du signal composite de la console, généré pixel par pixel comme la puce vidéo le génère, puis décodé : les couleurs bavent un peu au bord des objets et les franges ondulent d'une image à l'autre, comme sur un téléviseur branché avec le câble jaune. Les couleurs des grandes surfaces sont celles du signal de la console, pas celles de la palette. Coûte un peu de temps processeur par image. La vue 3D n'est pas concernée. Par défaut : désactivé.",
+    ),
     (
         "detail.video.nes_palette",
         "Dans quelle table de couleurs RVB les 64 couleurs de la console sont montrées, aussi bien \

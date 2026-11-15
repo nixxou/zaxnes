@@ -621,6 +621,10 @@ pub struct Ppu2C02 {
     /// like the picture they go with. Here at the cold end for the reason `frame_palette` gives.
     emphasis_start: u8,
     emphasis_log: Vec<(u32, u8)>,
+    /// The colour subcarrier's phase (0-11, in half master clocks) at the start of the frame
+    /// being drawn, for the composite decoder (`crate::composite`, lot FIDPLUS-D2b). Not saved:
+    /// a picture property, and the phase a console starts at is arbitrary.
+    video_phase: u8,
 }
 
 impl Default for Ppu2C02 {
@@ -782,6 +786,7 @@ impl Ppu2C02 {
             frame_mask: 0,
             emphasis_start: 0,
             emphasis_log: Vec::new(),
+            video_phase: 0,
         }
     }
 
@@ -2325,6 +2330,10 @@ impl Ppu2C02 {
         }
 
         self.odd_frame = !self.odd_frame;
+        // The frame just begun starts on dot 1 when the odd frame skipped dot 0.
+        let phase =
+            crate::composite::next_frame_phase(usize::from(self.video_phase), self.dot == 1);
+        self.video_phase = u8::try_from(phase).unwrap_or(0);
     }
 
     fn process_dot<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {

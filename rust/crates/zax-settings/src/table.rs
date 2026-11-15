@@ -2623,6 +2623,21 @@ fn video_nes_palette(out: &mut Vec<SettingDescriptor>) {
         ]))
         .with_label("NES colour palette"),
     );
+    // Lot FIDPLUS-D2b step 2 (Fidélité+, a cost per pixel): the 2D picture decoded from the
+    // 2C02's composite signal as a television does (`zax_nes::composite::RowDecoder`): colour
+    // fringes at the edges and the dot crawl. Off: the palette. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoCompositeSignal,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Composite signal"),
+    );
 }
 
 fn achievements(out: &mut Vec<SettingDescriptor>) {

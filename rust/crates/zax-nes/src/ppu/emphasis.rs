@@ -41,6 +41,14 @@ impl Ppu2C02 {
         self.emphasis_log.clear();
     }
 
+    /// The colour subcarrier's phase at the start of the frame just drawn (0 to 11), for
+    /// [`crate::composite::RowDecoder`]: picture row `r` starts at `phase + 4 r` (mod 12) plus a
+    /// constant, a constant that does not change the decoded colours.
+    #[must_use]
+    pub const fn video_phase(&self) -> usize {
+        self.video_phase as usize
+    }
+
     /// Whether the frame just drawn showed any emphasis.
     #[must_use]
     pub fn frame_has_emphasis(&self) -> bool {

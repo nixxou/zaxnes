@@ -64,6 +64,7 @@ impl SyntheticScene {
             nes_picture: &self.nes_picture,
             nes_picture_height: self.nes_picture_height,
             nes_picture_emphasis: &self.nes_picture_emphasis,
+            nes_picture_rgb: &[],
             ..SceneFrame::with_draw_list(&self.draw_list)
         }
     }

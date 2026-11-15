@@ -2025,6 +2025,13 @@ impl NesCore {
         self.bus.ppu().wide_picture_into(out)
     }
 
+    /// The colour subcarrier's phase at the start of the frame just drawn (0 to 11), for the
+    /// composite decoder ([`crate::composite::RowDecoder`], lot FIDPLUS-D2b).
+    #[must_use]
+    pub fn video_phase(&self) -> usize {
+        self.bus.ppu().video_phase()
+    }
+
     /// The colour emphasis of each pixel of [`NesCore::wide_picture_into`]'s picture (PPUMASK
     /// bits 5-7 as 0 to 7), into `out`; `false` and empty `out` for a frame without emphasis
     /// (lot FIDPLUS-D2b).

@@ -336,6 +336,8 @@ struct FramePipeline {
     picture_height: usize,
     /// Its colour emphasis, empty without any (lot FIDPLUS-D2b).
     picture_emphasis: Vec<u8>,
+    /// Its subcarrier phase ([`NesCore::video_phase`]).
+    video_phase: usize,
     /// Its experimental smooth scrolling shift ([`NesCore::picture_shift`]).
     picture_shift: Option<(f32, i32, i32)>,
     /// Its camera motion to the next frame ([`NesCore::picture_motion`]).
@@ -881,6 +883,7 @@ impl GameSession {
         self.pipeline.picture_height = self.core.wide_picture_into(&mut self.pipeline.picture);
         self.core
             .wide_emphasis_into(&mut self.pipeline.picture_emphasis);
+        self.pipeline.video_phase = self.core.video_phase();
         self.pipeline.picture_shift = self.core.picture_shift();
         self.pipeline.picture_motion = self.core.picture_motion();
         self.core
@@ -924,6 +927,7 @@ impl GameSession {
                     self.core.wide_picture_into(&mut self.pipeline.picture);
                 self.core
                     .wide_emphasis_into(&mut self.pipeline.picture_emphasis);
+                self.pipeline.video_phase = self.core.video_phase();
                 self.pipeline.picture_shift = self.core.picture_shift();
                 self.pipeline.picture_motion = self.core.picture_motion();
                 self.core
@@ -1412,6 +1416,7 @@ impl GameSession {
             self.pipeline.picture_height = self.core.wide_picture_into(&mut self.pipeline.picture);
             self.core
                 .wide_emphasis_into(&mut self.pipeline.picture_emphasis);
+            self.pipeline.video_phase = self.core.video_phase();
             self.pipeline.picture_shift = self.core.picture_shift();
             self.pipeline.picture_motion = self.core.picture_motion();
             self.core
@@ -1781,6 +1786,16 @@ impl GameSession {
             destination.extend_from_slice(&self.pipeline.picture_emphasis);
         } else {
             self.core.wide_emphasis_into(destination);
+        }
+    }
+
+    /// The subcarrier phase of the picture [`GameSession::copy_nes_picture`] copies.
+    #[must_use]
+    pub fn nes_video_phase(&self) -> usize {
+        if self.pipeline.in_flight || self.pipeline.pending.is_some() {
+            self.pipeline.video_phase
+        } else {
+            self.core.video_phase()
         }
     }
 

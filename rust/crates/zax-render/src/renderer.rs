@@ -89,10 +89,10 @@ impl Residency for GlResidency<'_> {
     fn picture(
         &mut self,
         picture: &[u8],
-        emphasis: &[u8],
+        colours: crate::scene::PictureColours<'_>,
         height: usize,
     ) -> Result<Option<Texture>, GlError> {
-        self.picture.upload_with_emphasis(picture, emphasis, height)
+        self.picture.upload_with_colours(picture, colours, height)
     }
 
     fn overlay(&mut self, picture: &[u8], height: usize) -> Result<Option<Texture>, GlError> {
