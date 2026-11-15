@@ -52,6 +52,8 @@ use super::LatchMulti;
 #[cfg(feature = "board-218")]
 use super::MagicFloor;
 use super::Mapper;
+#[cfg(feature = "board-111")]
+use super::Mmc1Parallel;
 #[cfg(feature = "board-nina03")]
 use super::Nina03;
 #[cfg(feature = "board-96")]
@@ -149,6 +151,10 @@ pub enum DecodeBoard {
     /// Mapper 111, the Membler Industries GTROM / Cheapocabra board.
     #[cfg(feature = "board-111")]
     Cheapocabra(Cheapocabra),
+    /// Mapper 111 with CHR-ROM: the non-serialized MMC1 of the Chinese *Ninja Ryukenden*
+    /// ([`Mmc1Parallel`]).
+    #[cfg(feature = "board-111")]
+    Mmc1Parallel(Mmc1Parallel),
     // Appended by MF-VS step 4, the lot's one board: the register is a `$4016` write and not a
     // cartridge write, which is the only thing that makes it unusual here.
     /// Mapper 99, the Nintendo VS. System board.
@@ -247,6 +253,8 @@ macro_rules! inner {
             DecodeBoard::OekaKids($b) => $body,
             #[cfg(feature = "board-111")]
             DecodeBoard::Cheapocabra($b) => $body,
+            #[cfg(feature = "board-111")]
+            DecodeBoard::Mmc1Parallel($b) => $body,
             #[cfg(feature = "board-vs-system")]
             DecodeBoard::VsBoard($b) => $body,
             #[cfg(feature = "board-jv001")]
@@ -405,7 +413,11 @@ impl Mapper for DecodeBoard {
     /// Forwarded for lot MAPPERS-N's `LatchMulti` alone, whose kinds 46, 51, 108, 120, 125 and
     /// 170 put PRG-ROM or a register — never work RAM — at `$6000-$7FFF`. Asked once per CPU write,
     /// through `cpu_read_windows`, and not once per read, as `prg_ram_window` above.
-    #[cfg(any(feature = "board-latch-multi", feature = "board-fine-rom"))]
+    #[cfg(any(
+        feature = "board-111",
+        feature = "board-latch-multi",
+        feature = "board-fine-rom"
+    ))]
     fn prg_ram_enabled(&self) -> bool {
         inner!(self, b => b.prg_ram_enabled())
     }

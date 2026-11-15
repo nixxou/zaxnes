@@ -28,6 +28,8 @@ use super::mappers::JyCompany;
 use super::mappers::MagicFloor;
 #[cfg(feature = "board-91")]
 use super::mappers::Mapper091;
+#[cfg(feature = "board-111")]
+use super::mappers::Mmc1Parallel;
 #[cfg(feature = "board-219")]
 use super::mappers::Mmc3A9461;
 #[cfg(feature = "board-mmc3-chrram")]
@@ -1026,7 +1028,7 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // PRG-RAM: the register is at $5000-$5FFF and $7000-$7FFF, so that window is the
         // register and Mesen 2 gives the board neither work nor save RAM (MF-6c step 9).
         #[cfg(feature = "board-111")]
-        111 => BoardMemorySizes {
+        111 if header.chr_rom_size == 0 => BoardMemorySizes {
             prg_ram: Some(0),
             chr_ram: Some(Cheapocabra::CHR_RAM_SIZE),
             // nesdev ("GTROM"): "a Microchip SST39SF040 flash chip as the PRG ROM storage
@@ -1682,6 +1684,12 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // MF-6c step 9: the GTROM / Cheapocabra, whose two 8 KiB nametable banks are the
         // fourth distinct body of the `Mapper::read_nametable` dispatch (4.5, Q-123) and
         // whose PRG-ROM is an SST39SF040 the game writes into (Q-117, MR-30-4).
+        // nesdev ("INES Mapper 111"): an image with CHR-ROM is the Chinese Ninja Ryukenden's
+        // non-serialized MMC1 (MAPPERS-N), one without is GTROM.
+        #[cfg(feature = "board-111")]
+        111 if !memory.rom().chr_rom().is_empty() => {
+            Board::DecodeBoard(DecodeBoard::Mmc1Parallel(Mmc1Parallel::new(memory)))
+        }
         #[cfg(feature = "board-111")]
         111 => Board::DecodeBoard(DecodeBoard::Cheapocabra(Cheapocabra::new(memory))),
         // MF-UNL-1 step 1: the TXC 05-00002-010 / Sachen JV001 protection ASIC, one chip on six

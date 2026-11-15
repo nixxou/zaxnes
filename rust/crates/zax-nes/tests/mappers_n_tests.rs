@@ -590,3 +590,18 @@ fn mappers_n_15_hack_images_do_not_write_protect_chr_ram() {
         assert_eq!(value, core.chr_bank(0x0000), "mode {mode}");
     }
 }
+
+/// nesdev ("INES Mapper 111") and puNES `mapper_111.c`: with CHR-ROM, mapper 111 is a
+/// non-serialized MMC1 — one write loads a whole register, A13-A14 picking it — whose 6-bit CHR
+/// banks reach 256 KiB. Without CHR-ROM it stays GTROM.
+#[cfg(feature = "board-111")]
+#[test]
+fn mappers_n_111_with_chr_rom_is_a_parallel_mmc1() {
+    let mut core = MapperRom::new(111).prg(16).chr(256).load();
+    core.mapper_write(0x8000, 0x1C); // PRG mode 3, 4 KiB CHR
+    core.mapper_write(0xA000, 0x3F); // CHR 0: the last 4 KiB of 256 KiB
+    core.mapper_write(0xC000, 0x01);
+    core.mapper_write(0xE000, 0x05);
+    assert_eq!([252, 253, 254, 255, 4, 5, 6, 7], core.chr_windows());
+    assert_eq!([10, 11, 14, 15], core.prg_windows());
+}

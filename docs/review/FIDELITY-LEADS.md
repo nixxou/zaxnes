@@ -903,6 +903,13 @@ its acknowledge. The size now reaches byte 10's non-volatile nibble and counts a
 its own. Only mapper 157 reads it (`EepromPort::new`); the other 52 entries (16, 80, 159, 164, 529,
 558) now get NES 2.0 headers from the database too, which the final golden comparison checks.
 
+### J17. Mapper 111 with CHR-ROM is the parallel MMC1 (puNES only)
+nesdev ("INES Mapper 111") gives the number to the Chinese *Ninja Ryukenden* translation, a
+"non-serialized version of MMC1" with 256 KiB of CHR-ROM, coexisting with GTROM when the image has
+CHR-ROM. Mesen2 and FCEUX implement only GTROM under 111; the behaviour (`Mmc1Parallel`) is
+puNES's (`mapper_111.c`), the only source, and the Hackset dump (`15E688C0`) now plays its intro.
+The page also mentions a later MMC3 version of the translation, not handled.
+
 ### J15. Mapper 15: CHR-RAM write protection only on the K-1029
 MR-15-1 (from nesdev: "CHR-RAM is write-protected in PRG banking modes 0 and 3") write-protected
 every mapper-15 image. The same nesdev page says the K-1029 multicarts are the only genuine
