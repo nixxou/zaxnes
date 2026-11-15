@@ -825,7 +825,11 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   sample box applies HPF0 inside its windowed-sinc resampler, ours after our own resampler (same
   one-pole formula, a few samples of phase apart); (4) the expansion audio (VRC6, MMC5, N163...)
   is added after the gains and is not weighted per console, while BeesNES lets the mapper
-  post-process between HPF1 and HPF2 (`PostHpf`, `LSNApu2A0X.h:1919-1931`); (5) filter state is
+  post-process between HPF1 and HPF2 (`PostHpf`, `LSNApu2A0X.h:1919-1931`) — **done 2026-11-15
+  (owner, an exception to AMD-061 §6.2 inside the profile option, FIDPLUS-D1a)**: with a profile,
+  the expansion level is a band-limited signal of its own (`expansion_ring`), added between the
+  second and the third high-pass; without one, the clip of AMD-061 is unchanged (golden identical,
+  audio included); (5) filter state is
   not in the savestate (a load restarts it at rest: inaudible click at most); (6) the
   N20914398 profile was measured with a Sunsoft 5B cartridge and has no low-pass and no
   inversion — kept as BeesNES lists it.

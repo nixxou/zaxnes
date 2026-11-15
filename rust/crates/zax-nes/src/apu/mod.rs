@@ -417,6 +417,12 @@ impl Apu2A03 {
     /// the comparison is on a per-cycle path (see [`Self::current_level`]).
     pub fn set_expansion_level(&mut self, level: i32) {
         if level != self.expansion_level {
+            if self.console_profile.is_some() {
+                // The profile's chain takes the expansion audio apart (owner, 2026-11-15).
+                self.resampler.add_expansion_step(
+                    mixer::to_float(-level) - mixer::to_float(-self.expansion_level),
+                );
+            }
             self.expansion_level = level;
             self.level_dirty = true;
             self.level_key = NO_LEVEL_KEY;
@@ -1208,7 +1214,13 @@ impl Apu2A03 {
             None => mixer::mix(pulse1, pulse2, triangle, noise, dmc),
             Some(profile) => profile_mix(profile, [pulse1, pulse2, triangle, noise, dmc]),
         };
-        self.mixer_output = mixer::clip(self.mixer_apu, self.expansion_level);
+        // With a console profile the expansion audio takes its own path (`set_expansion_level`).
+        let expansion = if self.console_profile.is_some() {
+            0
+        } else {
+            self.expansion_level
+        };
+        self.mixer_output = mixer::clip(self.mixer_apu, expansion);
         self.level = mixer::to_float(self.mixer_output);
         self.level
     }

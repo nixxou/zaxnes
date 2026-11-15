@@ -270,7 +270,15 @@ impl ProfileFilter {
     }
 
     /// One output sample through the low-pass, the three high-passes and the sign.
+    #[cfg(test)]
     pub(crate) fn process(&mut self, sample: f64) -> f64 {
+        self.process_with_expansion(sample, 0.0)
+    }
+
+    /// One output sample: the console's own mix through the low-pass and the first two
+    /// high-passes, the cartridge's expansion audio added, then the third high-pass and the sign
+    /// (`BeesNES`'s order: the mapper's `PostProcessAudioSample` between HPF1 and HPF2).
+    pub(crate) fn process_with_expansion(&mut self, sample: f64, expansion: f64) -> f64 {
         let mut value = sample;
         if let Some((b0, a1)) = self.low_pass {
             let output = b0.mul_add(value + self.low_pass_input, -(a1 * self.low_pass_output));
@@ -279,6 +287,9 @@ impl ProfileFilter {
             value = output;
         }
         for stage in 0..3 {
+            if stage == 2 {
+                value += expansion;
+            }
             if let Some(alpha) = self.high_pass[stage] {
                 let output =
                     alpha * (self.high_pass_output[stage] + value - self.high_pass_input[stage]);
