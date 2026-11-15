@@ -52,6 +52,30 @@ the `$4010` write and the first output cycle.
   both, then the DMA's own cycles (halt, dummy, fetch addresses) traced on the Zaxnes side, before
   anything is called a difference of the model.
 
+## DMC, step 3: the load's halt (2026-11-15)
+
+Programs `dmc0` / `dmc1` (`docs/progress/cpu-diag/`, built by `mkdmc.py`): the same DMC start with
+the `$4015` write on one CPU cycle or the next (a page-crossing `LDA abs,X` costs one more), so both
+parities are judged. Cycles counted from the write (W = 0):
+
+| | netlist | Zaxnes |
+|---|---|---|
+| `dmc0` | +1 `801C`, +2 `801D`, +3 `801E`, **+4 `0200` halt**, +5 `0200` dummy, +6 `C000` fetch, +7 `0200`, +8 `801F` | +1, +2, **+3 halt (`801E`)**, +4, +5 fetch, +6 `801E`, +7 `0200`, +8 `801F` |
+| `dmc1` | +1, +2, **+3 `801E` halt**, +4 dummy, +5 `C000`, +6 `801E`, +7 `0200`, +8 `801F` | +1, +2, +3 `801E`, **+4 halt (`0200`)**, +5, +6 fetch, +7 `0200`, +8 `801F` |
+
+Both make the load DMA 3 cycles and resume on the same cycle; the halt lands one read apart, the
+other way round for each parity. Zaxnes's delay rule (`DmcChannel::set_enabled`: 2 cycles when
+`apu_cycle`, 3 otherwise, the Mesen 2 rule) is the inverse of the netlist's for this core's
+parity. Inverting it alone makes Zaxnes's halt land where the netlist's does but adds an alignment
+cycle (4-cycle DMA): this core takes the get / put parity from the bus's cycle count and the delay
+from `apu_cycle`, and against the netlist one of the two relations is the other way round. A longer
+netlist reset (+24, +48 half-steps) changes nothing: the netlist's APU parity is set by the end of
+reset, not free. Open: trace the DMA's own cycles in Zaxnes (halt, dummy, alignment, fetch
+addresses) and the OAM DMA's get / put parity against the netlist, then decide which relation to
+correct; validate with blargg's `sync_dmc`, `sprdma_and_dmc_dma`, `dmc_dma_during_read4` and
+`AccuracyCoin`. Bus-visible effect today: which address the stall repeats (open bus and
+side-effect reads such as `$2007` / `$4016`), not the cycle count.
+
 ## Meaning for A-bis
 
 Nothing measured needs the CPU on half-cycles: where the CPU differs, it is a timing value of the

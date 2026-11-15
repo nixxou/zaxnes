@@ -19,7 +19,7 @@ use zax_nes::NesCore;
 use crate::HarnessError;
 
 /// The command's usage line.
-pub const USAGE: &str = "  zax-harness cpu-bus-trace <program.bin> --cycles <n> [--alignment <0-3>] [--phase <dots>] [--dmc <timer>,<bits>] [--fidelity-plus] --out <file>
+pub const USAGE: &str = "  zax-harness cpu-bus-trace <program.bin> --cycles <n> [--alignment <0-3>] [--phase <dots>] [--dmc <timer>,<bits>] [--flip-apu-parity] [--fidelity-plus] --out <file>
       (per CPU cycle: address, R/W, data; the program at $8000 as the 2A03 netlist bench loads it)";
 
 struct Options {
@@ -28,6 +28,7 @@ struct Options {
     alignment: Option<u8>,
     phase: i32,
     dmc: Option<(i32, i32)>,
+    flip_parity: bool,
     fidelity_plus: bool,
     out: PathBuf,
 }
@@ -40,6 +41,7 @@ fn parse(args: &[String]) -> Result<Options, HarnessError> {
     let mut alignment = None;
     let mut phase = 0;
     let mut dmc = None;
+    let mut flip_parity = false;
     let mut fidelity_plus = false;
     let mut out = None;
     while let Some(flag) = rest.next() {
@@ -75,6 +77,7 @@ fn parse(args: &[String]) -> Result<Options, HarnessError> {
                     bits.parse().map_err(|_| usage())?,
                 ));
             }
+            "--flip-apu-parity" => flip_parity = true,
             "--fidelity-plus" => fidelity_plus = true,
             "--out" => out = Some(PathBuf::from(rest.next().ok_or_else(usage)?)),
             _ => return Err(usage()),
@@ -86,6 +89,7 @@ fn parse(args: &[String]) -> Result<Options, HarnessError> {
         alignment,
         phase,
         dmc,
+        flip_parity,
         fidelity_plus,
         out: out.ok_or_else(usage)?,
     })
@@ -183,6 +187,9 @@ pub fn command(args: &[String]) -> Result<(), HarnessError> {
     let (cpu, bus) = core.cpu_and_bus_mut();
     if let Some((timer, bits)) = options.dmc {
         bus.apu_mut().diagnostic_set_dmc_phase(timer, bits);
+    }
+    if options.flip_parity {
+        bus.apu_mut().diagnostic_flip_parity();
     }
     let mut recorder = Recorder {
         bus,

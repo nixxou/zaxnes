@@ -1156,6 +1156,12 @@ impl Apu2A03 {
         self.level_dirty = true;
     }
 
+    /// Diagnostic: the APU's get / put parity against the CPU, random at power-on on a console.
+    #[doc(hidden)]
+    pub fn diagnostic_flip_parity(&mut self) {
+        self.apu_cycle = !self.apu_cycle;
+    }
+
     /// The console model's CPU (lot FIDPLUS-C, FIDELITY-LEADS G4): a letterless RP2A03 chosen
     /// by itself, whatever the audio profile. The noise channel takes the letterless chip when
     /// either says so.
