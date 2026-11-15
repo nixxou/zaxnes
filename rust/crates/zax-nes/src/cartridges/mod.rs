@@ -556,6 +556,8 @@ const fn nametable_pages_vary(mapper: i32) -> bool {
             | 370
             // MAPPERS-P: 527, a CIRAM page from D7 of CHR registers 0 and 1.
             | 527
+            // MAPPERS-P: 559, a 1 KiB nametable register per table.
+            | 559
             // MAPPERS-P: 353, game 0 pages CIRAM from the CHR registers' D7.
             | 353
             // MAPPERS-N: 284 serves every table while its extended attributes are on.
@@ -610,6 +612,8 @@ const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
             | 529
             // MAPPERS-N: mapper 266's VRC4 IRQ (nesdev "NES 2.0 Mapper 266").
             | 266
+            // MAPPERS-P: mapper 559, `VrcP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
+            | 559
             // MAPPERS-P: mapper 527, `VrcP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
             | 527
             // MAPPERS-P: mapper 417, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).

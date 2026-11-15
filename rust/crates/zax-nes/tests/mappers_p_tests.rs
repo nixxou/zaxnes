@@ -1078,3 +1078,22 @@ fn mappers_p_100_loads_raw_bank_registers() {
     assert_eq!([0, 1, 2, 33, 20, 21, 6, 7], core.chr_windows());
 }
 
+/// `mapper_559.c`: the chip's index lines are A10/A11, so `$8000` is PRG register 0 and
+/// `$9C00` the board's `$C000` bank; `$9C04-$9C07` are the nametable registers; `$B400` (A10)
+/// takes the data's high nibble.
+#[cfg(feature = "board-559")]
+#[test]
+fn mappers_p_559_indexes_by_a10_a11() {
+    let mut core = MapperRom::new(559).prg(64).chr(256).load();
+    assert_eq!([0, 1, 62, 31], core.prg_windows());
+    core.mapper_write(0x8000, 0x25);
+    core.mapper_write(0x9C00, 0x07);
+    assert_eq!([5, 1, 7, 31], core.prg_windows());
+    core.mapper_write(0xB000, 0x03);
+    core.mapper_write(0xB400, 0x10);
+    assert_eq!(0x13, core.chr_windows()[0]);
+    core.mapper_write(0x9C05, 0xE1);
+    let cartridge = core.cartridge().unwrap();
+    assert_eq!(0, cartridge.nametable_page(0));
+    assert_eq!(1, cartridge.nametable_page(1));
+}

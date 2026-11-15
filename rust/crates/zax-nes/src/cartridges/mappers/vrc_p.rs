@@ -28,6 +28,10 @@ pub enum VrcPKind {
     /// 527, `mapper_527.c` (AX-40G, *Fudou Myouou Den* pirate): a VRC2b whose CIRAM page is D7
     /// of CHR register 0 for `$2000`/`$2400` and of register 1 for `$2800`/`$2C00`.
     M527,
+    /// 559, `mapper_559.c` (Subor-made *Contra* clone board): a VRC4 indexed by A10/A11, with
+    /// `$9C00-$9FFF` holding the `$C000` bank (A2 clear) or four 1 KiB nametable pages (A2 set),
+    /// and the high-nibble registers of `$B000-$FFFF` taking the data's high nibble.
+    M559,
 }
 
 impl VrcPKind {
@@ -40,6 +44,7 @@ impl VrcPKind {
             447 => Self::M447,
             524 => Self::M524,
             527 => Self::M527,
+            559 => Self::M559,
             _ => return None,
         })
     }
@@ -51,6 +56,7 @@ impl VrcPKind {
             Self::M447 => 447,
             Self::M524 => 524,
             Self::M527 => 527,
+            Self::M559 => 559,
         }
     }
 }
@@ -67,6 +73,9 @@ pub struct VrcP {
     irq_low: u16,
     irq_high: u16,
     irq_pending: bool,
+    /// 559's four nametable registers (`m559.mir`), saved for that kind only; its `$C000` bank
+    /// (`m559.prg`) is [`VrcP::outer`].
+    pages: [u8; 4],
 }
 
 impl VrcP {
@@ -75,15 +84,29 @@ impl VrcP {
         let vrc = match kind {
             VrcPKind::M308 | VrcPKind::M524 | VrcPKind::M527 => Vrc2Vrc4::new_vrc2b(memory, number),
             VrcPKind::M384 | VrcPKind::M447 => Vrc2Vrc4::new_vrc4e(memory, number),
+            VrcPKind::M559 => Vrc2Vrc4::new_vrc4_lines(memory, number, [10, 11]),
         };
         Self {
             vrc,
             kind,
-            outer: 0,
+            outer: Self::outer_power_on(kind),
             irq_enabled: false,
             irq_low: 0,
             irq_high: 0,
             irq_pending: false,
+            pages: Self::PAGES_559,
+        }
+    }
+
+    /// `map_init_559`: nametables 0, 0, 1, 1.
+    const PAGES_559: [u8; 4] = [0xE0, 0xE0, 0xE1, 0xE1];
+
+    /// `map_init_559`: the `$C000` bank powers on as `$FE`; the other kinds' outer register 0.
+    const fn outer_power_on(kind: VrcPKind) -> u8 {
+        if matches!(kind, VrcPKind::M559) {
+            0xFE
+        } else {
+            0
         }
     }
 
@@ -117,6 +140,12 @@ impl VrcP {
                 }
                 b.remap_chr_banks(0x7F, r << 7);
             }
+            // `prg_swap_vrc2and4_559`: every window masked to `$1F`, `$C000` the board's own
+            // 8-bit register; `chr_swap_vrc2and4_559` masks the chip's CHR to `$1FF`, its width.
+            VrcPKind::M559 => {
+                b.remap_prg_banks(0x1F, 0);
+                b.map_prg_8k(2, r);
+            }
             VrcPKind::M308 | VrcPKind::M524 | VrcPKind::M527 => {}
         }
     }
@@ -142,6 +171,9 @@ impl Mapper for VrcP {
         writer.write_u16(self.irq_low);
         writer.write_u16(self.irq_high);
         writer.write_bool(self.irq_pending);
+        if self.kind == VrcPKind::M559 {
+            writer.write_raw(&self.pages);
+        }
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -151,23 +183,30 @@ impl Mapper for VrcP {
         self.irq_low = reader.read_u16()?;
         self.irq_high = reader.read_u16()?;
         self.irq_pending = reader.read_bool()?;
+        if self.kind == VrcPKind::M559 {
+            reader.read_into(&mut self.pages)?;
+        }
+        self.apply();
         Ok(())
     }
 
     fn reset(&mut self, memory: &mut CartridgeMemory) {
         self.vrc.reset(memory);
-        self.outer = 0;
         self.irq_enabled = false;
         self.irq_low = 0;
         self.irq_high = 0;
         self.irq_pending = false;
+        self.pages = Self::PAGES_559;
+        self.outer = Self::outer_power_on(self.kind);
         self.apply();
     }
 
     fn irq_asserted(&self) -> bool {
         match self.kind {
             VrcPKind::M308 | VrcPKind::M524 => self.irq_pending,
-            VrcPKind::M384 | VrcPKind::M447 | VrcPKind::M527 => self.vrc.irq_asserted(),
+            VrcPKind::M384 | VrcPKind::M447 | VrcPKind::M527 | VrcPKind::M559 => {
+                self.vrc.irq_asserted()
+            }
         }
     }
 
@@ -195,7 +234,9 @@ impl Mapper for VrcP {
                     }
                 }
             }
-            VrcPKind::M384 | VrcPKind::M447 | VrcPKind::M527 => self.vrc.on_cpu_cycle(memory),
+            VrcPKind::M384 | VrcPKind::M447 | VrcPKind::M527 | VrcPKind::M559 => {
+                self.vrc.on_cpu_cycle(memory);
+            }
         }
     }
 
@@ -237,6 +278,10 @@ impl Mapper for VrcP {
             let register = usize::try_from((table >> 1) & 0x01).unwrap_or(0);
             return (self.vrc.chr_register(register) >> 7) & 0x01;
         }
+        // `mirroring_fix_vrc2and4_559`: one register per table (CIRAM page from D0).
+        if self.kind == VrcPKind::M559 {
+            return i32::from(self.pages[usize::try_from(table & 0x03).unwrap_or(0)] & 0x01);
+        }
         self.vrc.nametable_page(table)
     }
 
@@ -255,6 +300,20 @@ impl Mapper for VrcP {
                 self.irq_pending = false;
             }
             (VrcPKind::M308, _, 0xF003) => self.irq_high = u16::from(value >> 4),
+            // `misc_03_vrc2and4_559`: the chip's index 3 at `$9000` (A10 and A11 set).
+            (VrcPKind::M559, _, _) if address & 0xFC00 == 0x9C00 => {
+                if address & 0x0004 != 0 {
+                    self.pages[usize::from(address & 0x03)] = value;
+                } else {
+                    self.outer = value;
+                    self.apply();
+                }
+            }
+            // `extcl_cpu_wr_mem_559`: `$B000-$FFFF` with A10 set take the high nibble.
+            (VrcPKind::M559, _, _) if address >= 0xB000 && address & 0x0400 != 0 => {
+                self.vrc.write_register(memory, address, value >> 4);
+                self.apply();
+            }
             _ => {
                 self.vrc.write_register(memory, address, value);
                 self.apply();

@@ -994,6 +994,9 @@ places where puNES itself is incomplete are copied, not invented around:
 * 100 (`mapper_100.c`): puNES's `irqA12_delay = 1` for this board and its jump to a trainer's
   `$7000` on power-up are not modelled; the chip's IRQ is the standard MMC3's and the trainer is
   loaded where the core loads it. puNES's select value `$47` loads `prg[1]`, as written.
+* 559 (`mapper_559.c`): puNES maps its four nametable registers with `memmap_nmt_1k`, whose
+  values (`$E0`/`$E1` at power-on) are read here as a CIRAM page from D0; what the upper bits
+  select on the board is not documented anywhere this lot can read.
 
 ### J36. Mapper 682 (Rainbow): the ESP is modelled from the protocol document
 The ESP (`rainbow_esp.rs`) follows Broke Studio's `rainbow-net.md` and `mapper-doc.md`; no

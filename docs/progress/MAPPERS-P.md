@@ -151,7 +151,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 556 | `mapper_556.c` | 178 | 1 | 0 | todo |
 | 557 | `mapper_557.c` | 58 | 1 | 0 | todo |
 | 558 | `mapper_558.c` | 135 | 14 | 0 | todo |
-| 559 | `mapper_559.c` | 108 | 1 | 0 | todo |
+| 559 | `mapper_559.c` | 108 | 1 | 0 | done (batch 30, `VrcP`) |
 | 560 | `mapper_560.c` | 83 | 1 | 0 | todo |
 | 561 | `mapper_561.c` | 276 | 203 | 0 | todo |
 | 562 | `mapper_562.c` | 538 | 290 | 0 | todo |
@@ -252,3 +252,6 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   AMD-MAPPERS-N-200 say it stays refused although FCEUX and puNES run it). Left for the owner to
   decide; puNES's model (registers `$4200-$4203`, `$4202` reads `$40`, RAM at `$4400-$4FFF` and a
   banked 8 KiB at `$6000`) is in the session notes if the decision changes.
+* Batch 30: `VrcP` 559 (a VRC4 indexed by A10/A11 through the new `Vrc2Vrc4::new_vrc4_lines`;
+  `$9C00` the `$C000` bank, `$9C04-$9C07` four nametable registers in `VrcP::pages`, saved for
+  that kind only, and in `nametable_pages_vary`; high-nibble registers take D4-D7).
