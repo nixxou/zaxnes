@@ -154,6 +154,14 @@ default = [
     "board-313",
     "board-325",
     "board-191",
+    "board-40",
+    "board-42",
+    "board-43",
+    "board-50",
+    "board-106",
+    "board-183",
+    "board-117",
+    "board-222",
 ]
 
 # MAPPERS-N umbrella (docs/progress/MAPPERS-N.md).
@@ -240,6 +248,17 @@ board-287 = ["board-mmc3-clones"]
 board-313 = ["board-mmc3-clones"]
 board-325 = ["board-mmc3-clones"]
 board-191 = ["board-mmc3-chrram"]
+
+# MAPPERS-N umbrella.
+board-irq-latch = []
+board-40 = ["board-irq-latch"]
+board-42 = ["board-irq-latch"]
+board-43 = ["board-irq-latch"]
+board-50 = ["board-irq-latch"]
+board-106 = ["board-irq-latch"]
+board-183 = ["board-irq-latch"]
+board-117 = ["board-irq-latch"]
+board-222 = ["board-irq-latch"]
 # MAPPERS-N end
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four

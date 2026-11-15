@@ -637,6 +637,8 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 313
             | 325
             | 191
+            | 117
+            | 222
     )
 }
 
@@ -714,6 +716,8 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 313
             | 325
             | 191
+            | 117
+            | 222
     )
 }
 
@@ -913,6 +917,13 @@ impl Cartridge {
                     | 91
                     // MAPPERS-N: mapper 253's IRQ counts CPU cycles (Mesen2 `Mapper253.h:71`).
                     | 253
+                    // MAPPERS-N: the CPU-clocked counters of `IrqLatch`.
+                    | 40
+                    | 42
+                    | 43
+                    | 50
+                    | 106
+                    | 183
                     | 105
                     | 153
                     | 157
@@ -1951,8 +1962,8 @@ mod tests {
         // MAPPERS-N: the MMC3 clones hold an `Mmc3`, so each moves for 114's reason, twice. They
         // are appended here and the list is sorted below, since the sweep runs in number order.
         for number in [
-            44, 45, 49, 52, 126, 134, 191, 196, 197, 205, 224, 238, 245, 249, 250, 259, 287, 313,
-            325,
+            44, 45, 49, 52, 117, 126, 134, 191, 196, 197, 205, 222, 224, 238, 245, 249, 250, 259,
+            287, 313, 325,
         ] {
             if Cartridge::is_supported(number) {
                 expected.extend_from_slice(&[number, number]);
@@ -2017,9 +2028,15 @@ mod tests {
         // **Mapper 210 is absent and that is the point of its own guard**: the Namcot 175 and
         // 340 are the 163 with the IRQ counter and the sound cut out, so `Namco163::on_cpu_cycle`
         // returns at once for them and they are rightly not latched.
+        // MAPPERS-N: mapper 183's 114-cycle prescaler runs from power-on whether or not its
+        // counter is enabled (Mesen2 `Mapper183.h`, `ProcessCpuClock`), so it moves here too.
+        let mut expected = vec![5, 5, 19, 19, 69, 69, 85, 85];
+        if Cartridge::is_supported(183) {
+            expected.extend_from_slice(&[183, 183]);
+        }
         assert_eq!(
             moved,
-            [5, 5, 19, 19, 69, 69, 85, 85],
+            expected,
             "expected the MMC5's idle counter, the Namco 163's sound multiplexer, the FME-7's              5B prescaler and the VRC7's sample divider to move on a bare CPU cycle, and the              sweep to reach them"
         );
     }

@@ -2,6 +2,8 @@
 use super::Cony;
 #[cfg(feature = "board-huang1")]
 use super::Huang1;
+#[cfg(feature = "board-irq-latch")]
+use super::IrqLatch;
 #[cfg(feature = "board-jy-asic")]
 use super::JyCompany;
 #[cfg(feature = "board-91")]
@@ -341,6 +343,10 @@ pub enum IrqBoard {
     /// Mapper 253, the Waixing VRC4-like board with 2 KiB of CHR-RAM (lot MAPPERS-N).
     #[cfg(feature = "board-253")]
     Waixing253(Box<Waixing253>),
+    /// Mappers 40, 42, 43, 50, 106, 117, 183 and 222, the small boards with an IRQ counter (lot
+    /// MAPPERS-N).
+    #[cfg(feature = "board-irq-latch")]
+    IrqLatch(Box<IrqLatch>),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as `Board`'s own `dispatch!` does.
@@ -395,6 +401,8 @@ macro_rules! inner {
             IrqBoard::Mmc3Clone($b) => $body,
             #[cfg(feature = "board-253")]
             IrqBoard::Waixing253($b) => $body,
+            #[cfg(feature = "board-irq-latch")]
+            IrqBoard::IrqLatch($b) => $body,
         }
     };
 }
@@ -470,7 +478,8 @@ impl Mapper for IrqBoard {
         feature = "board-91",
         feature = "board-cony",
         feature = "board-huang1",
-        feature = "board-jy-asic"
+        feature = "board-jy-asic",
+        feature = "board-irq-latch",
     ))]
     fn prg_ram_enabled(&self) -> bool {
         inner!(self, b => b.prg_ram_enabled())
@@ -528,7 +537,8 @@ impl Mapper for IrqBoard {
     #[cfg(any(
         feature = "board-mmc3-multicart",
         feature = "board-268",
-        feature = "board-mmc3-clones"
+        feature = "board-mmc3-clones",
+        feature = "board-irq-latch",
     ))]
     fn intercept_cpu_write(
         &mut self,
@@ -617,7 +627,8 @@ impl Mapper for IrqBoard {
         feature = "board-cony",
         feature = "board-huang1",
         feature = "board-jy-asic",
-        feature = "board-mmc3-clones"
+        feature = "board-mmc3-clones",
+        feature = "board-irq-latch",
     ))]
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
         inner!(self, b => b.try_read_prg(memory, address))

@@ -366,3 +366,41 @@ fn mappers_n_287_offsets_prg_from_the_written_address() {
     core.mapper_write(0x6008 | 0x10, 0);
     assert_eq!([0x34, 0x35, 0x36, 0x37], core.prg_windows());
 }
+
+/// `Mapper40.h:20-41`: `$A000` arms 4096 CPU cycles, `$8000` acknowledges.
+#[cfg(feature = "board-40")]
+#[test]
+fn mappers_n_40_fires_after_4096_cycles() {
+    let mut core = MapperRom::new(40).prg(8).load();
+    assert_eq!([4, 5, 0, 7], core.prg_windows());
+    assert_eq!(6, core.read_memory(0x6100));
+    core.mapper_write(0xA000, 0);
+    for _ in 0..4100 {
+        core.bus_mut().tick();
+    }
+    assert!(core.cartridge().unwrap().irq_asserted());
+    core.mapper_write(0x8000, 0);
+    assert!(!core.cartridge().unwrap().irq_asserted());
+}
+
+/// `Mapper42.h:15-60`: the last 32 KiB fixed, `$E000` banks `$6000`.
+#[cfg(feature = "board-42")]
+#[test]
+fn mappers_n_42_banks_6000() {
+    let mut core = MapperRom::new(42).prg(16).chr(64).load();
+    assert_eq!([12, 13, 14, 15], core.prg_windows());
+    core.mapper_write(0xE000, 3);
+    assert_eq!(3, core.read_memory(0x6100));
+}
+
+/// `Mapper106.h:31-49`: sixteen ports under mask `$000F`.
+#[cfg(feature = "board-106")]
+#[test]
+fn mappers_n_106_maps_its_sixteen_ports() {
+    let mut core = MapperRom::new(106).prg(64).chr(256).load();
+    core.mapper_write(0x8008, 0x02);
+    core.mapper_write(0x8009, 0x05);
+    assert_eq!([0x12, 0x05], [core.prg_windows()[0], core.prg_windows()[1]]);
+    core.mapper_write(0x8004, 0x21);
+    assert_eq!(0x21, core.chr_windows()[4]);
+}

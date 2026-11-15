@@ -256,7 +256,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let sachen8259 = cfg!(feature = "board-sachen8259");
     let huang1 = cfg!(feature = "board-huang1");
     let cony = cfg!(feature = "board-cony");
-    let additions: [(i32, bool); 177] = [
+    let additions: [(i32, bool); 185] = [
         (12, huang1),
         (14, huang1),
         (19, true),
@@ -268,12 +268,16 @@ fn req_core_100_every_required_mapper_is_registered() {
         (36, jv001),
         (37, multicart),
         (38, cfg!(feature = "board-38")),
+        (40, cfg!(feature = "board-40")),
+        (42, cfg!(feature = "board-42")),
+        (43, cfg!(feature = "board-43")),
         (44, cfg!(feature = "board-44")),
         (45, cfg!(feature = "board-45")),
         (46, cfg!(feature = "board-46")),
         (47, multicart),
         (48, true),
         (49, cfg!(feature = "board-49")),
+        (50, cfg!(feature = "board-50")),
         (51, cfg!(feature = "board-51")),
         (52, cfg!(feature = "board-52")),
         (57, cfg!(feature = "board-57")),
@@ -316,6 +320,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (99, cfg!(feature = "board-vs-system")),
         (104, cfg!(feature = "board-104")),
         (105, cfg!(feature = "board-105")),
+        (106, cfg!(feature = "board-106")),
         (107, cfg!(feature = "board-107")),
         (108, cfg!(feature = "board-108")),
         (111, cfg!(feature = "board-111")),
@@ -324,6 +329,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (114, scramble),
         (115, scramble),
         (116, cfg!(feature = "board-116")),
+        (117, cfg!(feature = "board-117")),
         (118, true),
         (119, cfg!(feature = "board-119")),
         (120, cfg!(feature = "board-120")),
@@ -368,6 +374,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (179, cfg!(feature = "board-179")),
         (180, true),
         (182, scramble),
+        (183, cfg!(feature = "board-183")),
         (184, small),
         (185, small),
         (187, scramble),
@@ -400,6 +407,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (218, cfg!(feature = "board-218")),
         (219, cfg!(feature = "board-219")),
         (221, cfg!(feature = "board-221")),
+        (222, cfg!(feature = "board-222")),
         (224, cfg!(feature = "board-224")),
         (226, cfg!(feature = "board-226")),
         (227, cfg!(feature = "board-227")),

@@ -94,6 +94,8 @@ use super::mappers::{
 };
 #[cfg(any(feature = "board-162", feature = "board-163"))]
 use super::mappers::{ChrWindowBoard, ChrWindowKind};
+#[cfg(feature = "board-irq-latch")]
+use super::mappers::{IrqLatch, IrqLatchKind};
 #[cfg(feature = "board-jaleco-72-92-86")]
 use super::mappers::{JalecoJf13, JalecoJf17};
 #[cfg(any(
@@ -172,7 +174,13 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     37,
     #[cfg(feature = "board-38")]
     38,
+    #[cfg(feature = "board-40")]
+    40,
     41,
+    #[cfg(feature = "board-42")]
+    42,
+    #[cfg(feature = "board-43")]
+    43,
     #[cfg(feature = "board-44")]
     44,
     #[cfg(feature = "board-45")]
@@ -184,6 +192,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     48,
     #[cfg(feature = "board-49")]
     49,
+    #[cfg(feature = "board-50")]
+    50,
     #[cfg(feature = "board-51")]
     51,
     #[cfg(feature = "board-52")]
@@ -265,6 +275,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     104,
     #[cfg(feature = "board-105")]
     105,
+    #[cfg(feature = "board-106")]
+    106,
     #[cfg(feature = "board-107")]
     107,
     #[cfg(feature = "board-108")]
@@ -281,6 +293,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     115,
     #[cfg(feature = "board-116")]
     116,
+    #[cfg(feature = "board-117")]
+    117,
     118,
     #[cfg(feature = "board-119")]
     119,
@@ -371,6 +385,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     180,
     #[cfg(feature = "board-mmc3-scramble")]
     182,
+    #[cfg(feature = "board-183")]
+    183,
     #[cfg(feature = "board-small-boards")]
     184,
     #[cfg(feature = "board-small-boards")]
@@ -439,6 +455,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     219,
     #[cfg(feature = "board-221")]
     221,
+    #[cfg(feature = "board-222")]
+    222,
     #[cfg(feature = "board-224")]
     224,
     225,
@@ -2109,6 +2127,46 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         191 => Board::IrqBoard(IrqBoard::Mmc3ChrRam(Box::new(Mmc3ChrRamBoard::new(
             memory, mapper,
         )?))),
+        #[cfg(feature = "board-40")]
+        40 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-42")]
+        42 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-43")]
+        43 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-50")]
+        50 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-106")]
+        106 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-183")]
+        183 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-117")]
+        117 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-222")]
+        222 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
         _ => return None,
     })
 }
