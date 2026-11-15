@@ -64,6 +64,10 @@ pub enum Mmc3CloneKind {
     M313,
     /// Mapper 325, Mesen2 `MMC3_MaliSB.h` (UNL-MALISB).
     M325,
+    /// Mapper 217, Mesen2 `MMC3_217.h` (BMC-SPC009: a scrambled MMC3 with an outer bank).
+    M217,
+    /// Mapper 254, Mesen2 `MMC3_254.h` (*Pokémon* hacks: work RAM read through an XOR).
+    M254,
 }
 
 impl Mmc3CloneKind {
@@ -89,6 +93,8 @@ impl Mmc3CloneKind {
             287 => Self::M287,
             313 => Self::M313,
             325 => Self::M325,
+            217 => Self::M217,
+            254 => Self::M254,
             _ => return None,
         })
     }
@@ -113,6 +119,8 @@ impl Mmc3CloneKind {
             Self::M287 => 287,
             Self::M313 => 313,
             Self::M325 => 325,
+            Self::M217 => 217,
+            Self::M254 => 254,
         }
     }
 }
@@ -159,6 +167,10 @@ impl Mmc3Clone {
     fn power_on(&mut self, memory: &mut CartridgeMemory) {
         self.outer = [0; 4];
         self.index = 0;
+        // `MMC3_217.h:15-18`: "_exRegs[1] = 0xFF; _exRegs[2] = 0x03".
+        if self.kind == Mmc3CloneKind::M217 {
+            self.outer = [0, 0xFF, 0x03, 0];
+        }
         // `MMC3_45.h:43`: "_reg[2] = 0x0F", the CHR mask fully open.
         if self.kind == Mmc3CloneKind::M45 {
             self.outer[2] = 0x0F;
@@ -239,6 +251,16 @@ impl Mmc3Clone {
             Mmc3CloneKind::M313 => (i32::from(r[0]) << 4) | (page & 0x0F),
             // `MMC3_MaliSB.h:13-16`: PRG A15 and A16 swapped.
             Mmc3CloneKind::M325 => (page & 0x03) | ((page & 0x08) >> 1) | ((page & 0x04) << 1),
+            // `MMC3_217.h:31-38`.
+            Mmc3CloneKind::M217 => {
+                let ex1 = i32::from(r[1]);
+                let page = if ex1 & 0x08 != 0 {
+                    page & 0x1F
+                } else {
+                    (page & 0x0F) | (ex1 & 0x10)
+                };
+                ((ex1 << 5) & 0x60) | page
+            }
             _ => page,
         }
     }
@@ -296,6 +318,16 @@ impl Mmc3Clone {
             Mmc3CloneKind::M313 => (i32::from(r[0]) << 7) | (page & 0x7F),
             // `MMC3_MaliSB.h:8-11`: CHR A11 and A15 swapped.
             Mmc3CloneKind::M325 => (page & 0xDD) | ((page & 0x20) >> 4) | ((page & 0x02) << 4),
+            // `MMC3_217.h:24-29`.
+            Mmc3CloneKind::M217 => {
+                let ex1 = i32::from(r[1]);
+                let page = if ex1 & 0x08 == 0 {
+                    ((ex1 << 3) & 0x80) | (page & 0x7F)
+                } else {
+                    page
+                };
+                ((ex1 << 8) & 0x0300) | page
+            }
             _ => page,
         }
     }
@@ -386,6 +418,19 @@ impl Mmc3Clone {
                 let low = (bank & !mode) << 1;
                 let high = ((bank & !mode) | mode) << 1;
                 prg = [low, low + 1, high, high + 1];
+            }
+            // `MMC3_217.h:46-55`: `$5000` bit 7 selects one 32 KiB-style page pair, through the
+            // same translation. Mesen2 loses it at the chip's next PRG update; here it holds until
+            // `$5000` is written again (FIDELITY-LEADS J9).
+            Mmc3CloneKind::M217 if self.outer[0] & 0x80 != 0 => {
+                let value = i32::from(self.outer[0]);
+                let base = ((value & 0x0F) | ((i32::from(self.outer[1]) << 4) & 0x30)) << 1;
+                prg = [
+                    self.prg_page(0, base),
+                    self.prg_page(1, base + 1),
+                    self.prg_page(2, base),
+                    self.prg_page(3, base + 1),
+                ];
             }
             Mmc3CloneKind::M245 => {
                 let or = if self.mmc3.bank_register(0) & 0x02 != 0 {
@@ -537,10 +582,51 @@ impl Mmc3Clone {
                     self.outer[0] = value & 0x0F;
                 }
             }
+            // `MMC3_217.h:57-75`.
+            Mmc3CloneKind::M217 => match address {
+                0x5000 => self.outer[0] = value,
+                0x5001 => self.outer[1] = value,
+                0x5007 => self.outer[2] = value,
+                _ => return None,
+            },
             _ => return None,
         }
         self.refresh();
         Some(true)
+    }
+}
+
+impl Mmc3Clone {
+    /// `MMC3_217.h:77-110`: with `$5007` non-zero the chip's ports are scrambled — `$8000` is
+    /// `$C000`, `$8001` writes a permuted index to `$8000`, `$A000` carries the data and `$A001`
+    /// the mirroring.
+    fn write_217(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        const LUT: [u8; 8] = [0, 6, 3, 7, 5, 2, 4, 1];
+        let mirroring = |value: u8| {
+            if value & 0x01 != 0 {
+                crate::NametableMirroring::Horizontal
+            } else {
+                crate::NametableMirroring::Vertical
+            }
+        };
+        match address & 0xE001 {
+            0x8000 => self.mmc3.write_register(memory, 0xC000, value),
+            0x8001 => {
+                self.outer[3] = 1;
+                let value = (value & 0xC0) | LUT[usize::from(value & 0x07)];
+                self.mmc3.write_register(memory, 0x8000, value);
+            }
+            0xA000 => {
+                if self.outer[3] != 0
+                    && (self.outer[0] & 0x80 == 0 || self.mmc3.select() & 0x07 < 6)
+                {
+                    self.outer[3] = 0;
+                    self.mmc3.write_register(memory, 0x8001, value);
+                }
+            }
+            0xA001 => memory.set_mirroring(mirroring(value)),
+            _ => self.mmc3.write_register(memory, address, value),
+        }
     }
 }
 
@@ -603,7 +689,8 @@ impl Mapper for Mmc3Clone {
     /// Mapper 238's latch answers the whole of `$4020-$7FFF` (`MMC3_238.h:15-16`), so there is no
     /// RAM window there.
     fn prg_ram_enabled(&self) -> bool {
-        self.kind != Mmc3CloneKind::M238 && self.mmc3.prg_ram_enabled()
+        !matches!(self.kind, Mmc3CloneKind::M238 | Mmc3CloneKind::M254)
+            && self.mmc3.prg_ram_enabled()
     }
 
     fn prg_ram_writable(&self) -> bool {
@@ -630,6 +717,17 @@ impl Mapper for Mmc3Clone {
         if self.kind == Mmc3CloneKind::M44 && address & 0xE001 == 0xA001 {
             self.outer[0] = (value & 0x07).min(6);
         }
+        match self.kind {
+            Mmc3CloneKind::M217 if self.outer[2] != 0 => {
+                self.write_217(memory, address, value);
+                self.refresh();
+                return;
+            }
+            // `MMC3_254.h:24-28`.
+            Mmc3CloneKind::M254 if address == 0x8000 => self.outer[0] = 0xFF,
+            Mmc3CloneKind::M254 if address == 0xA001 => self.outer[1] = value,
+            _ => {}
+        }
         let (port, value) = self.chip_port(address, value);
         self.mmc3.write_register(memory, port, value);
         self.refresh();
@@ -638,6 +736,20 @@ impl Mapper for Mmc3Clone {
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
         if self.kind == Mmc3CloneKind::M238 && (0x4020..=0x7FFF).contains(&address) {
             return Some(self.outer[0]);
+        }
+        // `MMC3_254.h:15-22`: the work RAM, XORed with `$A001`'s last value until `$8000` has
+        // been written.
+        if self.kind == Mmc3CloneKind::M254 && (0x6000..=0x7FFF).contains(&address) {
+            let ram = memory.prg_ram();
+            if ram.is_empty() || !self.mmc3.prg_ram_enabled() {
+                return None;
+            }
+            let value = ram[usize::from(address - 0x6000) % ram.len()];
+            return Some(if self.outer[0] != 0 {
+                value
+            } else {
+                value ^ self.outer[1]
+            });
         }
         self.mmc3.try_read_prg(memory, address)
     }

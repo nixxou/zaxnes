@@ -844,3 +844,12 @@ are zeros and whose vectors point there; no emulator can run it. The board is te
 ### J8. Mapper 198 and 199 left out
 Mesen2's own comment on `MMC3_198.h` is "Most likely incorrect/incomplete"; 199 needs per-window
 CHR-RAM selection by page number. Neither was taken in this lot.
+
+### J9. Mapper 217's NROM mode is held
+`MMC3_217.h:46-55` maps the `$5000` bit-7 page pair once, so Mesen2 drops it at the chip's next PRG
+update; this build holds it until `$5000` is written again. Which one the BMC-SPC009 does is open.
+
+### J10. Mapper 303 left out
+`Kaiser7017.h` acknowledges its IRQ on a **read** of `$4030`. That needs `Mapper::cpu_read_override`
+in `IrqBoard`, the hook whose body cost `mmc5exram` +1.098 % in MF-UNL-12 (`board-292` parked), so the
+board was not taken.

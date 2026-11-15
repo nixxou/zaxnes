@@ -486,3 +486,15 @@ fn mappers_n_305_maps_2_kib_pages() {
     core.mapper_write(0x8800, 9); // register 1: $6800-$6FFF, page 9 in bank 2
     assert_eq!(2, core.read_memory(0x6900));
 }
+
+/// `MMC3_254.h:15-28`: work RAM reads are XORed with `$A001` until `$8000` is written.
+#[cfg(feature = "board-254")]
+#[test]
+fn mappers_n_254_xors_work_ram_reads() {
+    let mut core = MapperRom::new(254).prg(16).chr(64).load();
+    core.mapper_write(0xA001, 0x80);
+    core.mapper_write(0x6000, 0x0F);
+    assert_eq!(0x0F ^ 0x80, core.read_memory(0x6000));
+    core.mapper_write(0x8000, 0x00);
+    assert_eq!(0x0F, core.read_memory(0x6000));
+}

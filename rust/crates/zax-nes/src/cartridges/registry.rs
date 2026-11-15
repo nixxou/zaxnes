@@ -472,6 +472,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     215,
     #[cfg(feature = "board-216")]
     216,
+    #[cfg(feature = "board-217")]
+    217,
     #[cfg(feature = "board-218")]
     218,
     // The Kasheng A9461, an MMC3 clone with an extended banking mode (MF-UNL-11 step 3).
@@ -527,6 +529,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     250,
     #[cfg(feature = "board-253")]
     253,
+    #[cfg(feature = "board-254")]
+    254,
     #[cfg(feature = "board-255")]
     255,
     #[cfg(feature = "board-259")]
@@ -2285,6 +2289,16 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
             memory,
             LatchKind::of(mapper)?,
         ))),
+        #[cfg(feature = "board-217")]
+        217 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-254")]
+        254 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
         _ => return None,
     })
 }
