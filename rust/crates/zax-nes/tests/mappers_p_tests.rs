@@ -821,3 +821,14 @@ fn mappers_p_308_is_a_vrc2b() {
     core.mapper_write(0xF001, 0x00);
     assert_eq!([0, 5, 14, 15], core.prg_windows());
 }
+
+/// `mapper_340.c`: A5 clear is UNROM from A0-A4 and A7; A5 with A0 clear NROM-256.
+#[cfg(feature = "board-340")]
+#[test]
+fn mappers_p_340_switches_unrom_and_nrom() {
+    let mut core = MapperRom::new(340).prg(64).load();
+    core.mapper_write(0x8003, 0);
+    assert_eq!([6, 7, 14, 15], core.prg_windows());
+    core.mapper_write(0x8024, 0);
+    assert_eq!([8, 9, 10, 11], core.prg_windows());
+}

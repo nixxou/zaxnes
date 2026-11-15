@@ -48,7 +48,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 337 | `mapper_337.c` | 92 | 0 | 0 | done (batch 3, `MultiP`) |
 | 338 | `mapper_338.c` | 86 | 1 | 0 | done (batch 2, `MultiP`) |
 | 339 | `mapper_339.c` | 97 | 1 | 0 | done (batch 12, `Mmc3P`) |
-| 340 | `mapper_340.c` | 79 | 1 | 0 | todo |
+| 340 | `mapper_340.c` | 79 | 1 | 0 | done (batch 17, `MultiP`) |
 | 341 | `mapper_341.c` | 67 | 1 | 0 | done (batch 2, `MultiP`) |
 | 342 | `mapper_342.c` | 2381 | 9 | 0 | todo |
 | 343 | `mapper_343.c` | 71 | 0 | 0 | done (batch 2, `MultiP`) |
@@ -222,3 +222,4 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   with its NROM mode through the new `Vrc2Vrc4::prg_registers`) or with its own CPU-cycle IRQ
   (308, 524). The four numbers join `clocks_on_cpu_cycle`. 362 and 398 (PRG switched by CHR
   fetches), 527 (CIRAM pages from CHR bit 7), 528 and 559 remain.
+* Batch 17: `MultiP` 340 (CHR-RAM write protection in its NROM modes); `map_b9` split off.

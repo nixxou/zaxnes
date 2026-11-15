@@ -114,6 +114,8 @@ pub enum MultiPKind {
     /// addresses in `$CAB6-$CAD7`, `$EBE2`, `$EE32` and `$FFFC` latch the CHR bank and the 8 KiB
     /// bank at `$6000` from A2-A5.
     M554,
+    /// 340, `mapper_340.c` (K-3036): address latch, NROM/UNROM modes, CHR-RAM write protection.
+    M340,
 }
 
 impl MultiPKind {
@@ -161,6 +163,7 @@ impl MultiPKind {
             564 => Self::M564,
             525 => Self::M525,
             554 => Self::M554,
+            340 => Self::M340,
             _ => return None,
         })
     }
@@ -207,6 +210,7 @@ impl MultiPKind {
             Self::M564 => 564,
             Self::M525 => 525,
             Self::M554 => 554,
+            Self::M340 => 340,
         }
     }
 
@@ -404,6 +408,7 @@ impl MultiP {
                     r[0] = address;
                 }
             }
+            MultiPKind::M340 => r[0] = address,
             // `extcl_cpu_wr_mem_564`: with D5 set only D0-D2 and D4 move (D0-D1 and D4 when D3
             // is clear too).
             // `extcl_cpu_wr_mem_525`: by the top address nibble.
@@ -909,6 +914,22 @@ impl MultiP {
                 b.map_prg_16k(2, bank | 0x07);
                 None
             }
+            _ => self.map_b9(),
+        }
+    }
+
+    /// [`MultiP::map`] for the kinds of batches 9 and 10 (`docs/progress/MAPPERS-P.md`).
+    fn map_b9(&mut self) -> Option<NametableMirroring> {
+        let r = self.regs.map(i32::from);
+        let b = &mut self.banks;
+        let mirror = |vertical: bool| {
+            Some(if vertical {
+                NametableMirroring::Vertical
+            } else {
+                NametableMirroring::Horizontal
+            })
+        };
+        match self.kind {
             // `prg_fix_538`: D0 set with D3 clear shows bank `$0A` at `$8000`.
             MultiPKind::M538 => {
                 let low = if r[0] & 0x01 != 0 && r[0] & 0x08 == 0 {
@@ -950,6 +971,21 @@ impl MultiP {
                 b.map_chr_8k(r[0]);
                 None
             }
+            // `prg_fix_340`: A5 the NROM modes (A0 picks NROM-128), A7 the outer A20.
+            MultiPKind::M340 => {
+                let a = r[0];
+                let bank = ((a & 0x80) >> 2) | (a & 0x1F);
+                if a & 0x20 == 0 {
+                    b.map_prg_16k(0, bank);
+                    b.map_prg_16k(2, bank | 0x07);
+                } else if a & 0x01 == 0 {
+                    b.map_prg_32k(((a & 0x80) >> 3) | ((a & 0x1E) >> 1));
+                } else {
+                    b.map_prg_16k(0, bank);
+                    b.map_prg_16k(2, bank);
+                }
+                mirror(!((a & 0x25) == 0x25 || a & 0x40 != 0))
+            }
             MultiPKind::M564 => {
                 b.map_prg_32k(r[0]);
                 Some(match r[0] & 0x30 {
@@ -972,6 +1008,8 @@ impl MultiP {
     const fn chr_write_protected(&self) -> bool {
         match self.kind {
             MultiPKind::M375 | MultiPKind::M380 => self.regs[0] & 0x80 != 0,
+            // `chr_fix_340`: the NROM modes (A5) write-protect the CHR-RAM.
+            MultiPKind::M340 => self.regs[0] & 0x20 != 0,
             MultiPKind::M354 => self.regs[0] & 0x08 != 0,
             // `chr_fix_433`: D7 is the write enable.
             MultiPKind::M433 => self.regs[0] & 0x80 == 0,
