@@ -138,10 +138,10 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 532 | `mapper_532.c` | 411 | 0 | 0 | todo |
 | 534 | `mapper_126.c` | 153 | 10 | 0 | todo |
 | 536 | `mapper_195.c` | 148 | 0 | 0 | todo |
-| 538 | `mapper_538.c` | 64 | 2 | 0 | todo |
+| 538 | `mapper_538.c` | 64 | 2 | 0 | done (batch 9, `MultiP`) |
 | 539 | `mapper_539.c` | 113 | 1 | 0 | todo |
 | 540 | `mapper_359.c` | 293 | 1 | 0 | todo |
-| 541 | `mapper_541.c` | 70 | 1 | 0 | todo |
+| 541 | `mapper_541.c` | 70 | 1 | 0 | done (batch 9, `MultiP`) |
 | 543 | `mapper_543.c` | 87 | 0 | 0 | todo |
 | 547 | `mapper_547.c` | 241 | 8 | 4 | todo |
 | 550 | `mapper_550.c` | 86 | 1 | 0 | todo |
@@ -155,7 +155,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 560 | `mapper_560.c` | 83 | 1 | 0 | todo |
 | 561 | `mapper_561.c` | 276 | 203 | 0 | todo |
 | 562 | `mapper_562.c` | 538 | 290 | 0 | todo |
-| 564 | `mapper_564.c` | 77 | 0 | 0 | todo |
+| 564 | `mapper_564.c` | 77 | 0 | 0 | done (batch 9, `MultiP`) |
 
 ## Plan
 
@@ -191,3 +191,6 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   at `$6000`), 429; `JyMulticart::M421`. `MultiP::latch` split (`latch_late`) for clippy.
 * Batch 8: `MultiP` 433 (CHR-RAM write enable), 434 and 437 (outer bank below `$8000`, bus
   conflicts above), 438, 481 (`latch_b8`, `map_b8`).
+* Batch 9: `MultiP` 538 (FDS conversion, PRG-ROM at `$6000`), 541, 564. Deferred to their
+  families: 557 (a Namcot 118 variant, with the MMC3-like boards) and 560 (CHR fetched through
+  the nametable address, needs a PPU read hook).

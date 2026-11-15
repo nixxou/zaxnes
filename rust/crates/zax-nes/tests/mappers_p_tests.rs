@@ -451,3 +451,38 @@ fn mappers_p_481_has_an_outer_bank_in_d7() {
     core.mapper_write(0x8000, 0x82);
     assert_eq!([20, 21, 30, 31], core.prg_windows());
 }
+
+/// `mapper_538.c`: the upper 24 KiB fixed to banks `$0D-$0F`; `$C000` D0 with D3 clear shows
+/// bank `$0A` at `$8000`; `$6000` shows bank `latch | 1`.
+#[cfg(feature = "board-538")]
+#[test]
+fn mappers_p_538_has_a_bank_at_6000_and_a_special_8000() {
+    let mut core = MapperRom::new(538).prg(16).load();
+    core.mapper_write(0xC000, 0x04);
+    assert_eq!([4, 13, 14, 15], core.prg_windows());
+    assert_eq!(5, core.read_memory(0x6000));
+    core.mapper_write(0xC000, 0x03);
+    assert_eq!([10, 13, 14, 15], core.prg_windows());
+}
+
+/// `mapper_541.c`: `$C000-$FFFF` writes; A1 picks NROM-128.
+#[cfg(feature = "board-541")]
+#[test]
+fn mappers_p_541_banks_from_c000_addresses() {
+    let mut core = MapperRom::new(541).prg(64).load();
+    core.mapper_write(0xC018, 0);
+    assert_eq!([12, 13, 14, 15], core.prg_windows());
+    core.mapper_write(0xC016, 0);
+    assert_eq!([10, 11, 10, 11], core.prg_windows());
+}
+
+/// `mapper_564.c`: once D5 is set only D0-D1 and D4 move (D3 clear).
+#[cfg(feature = "board-564")]
+#[test]
+fn mappers_p_564_shrinks_its_latch() {
+    let mut core = MapperRom::new(564).prg(64).load();
+    core.mapper_write(0x8000, 0x21);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    core.mapper_write(0x8000, 0x06);
+    assert_eq!([8, 9, 10, 11], core.prg_windows());
+}

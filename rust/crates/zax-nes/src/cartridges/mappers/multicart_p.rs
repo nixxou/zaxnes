@@ -99,6 +99,14 @@ pub enum MultiPKind {
     M438,
     /// 481, `mapper_481.c` (045N): UNROM with D7 the outer 128 KiB bank.
     M481,
+    /// 538, `mapper_538.c` (60-1064-16L, an FDS conversion): `$C000-$DFFF` latch, fixed upper
+    /// 24 KiB, a switchable 8 KiB at `$8000` and at `$6000`.
+    M538,
+    /// 541, `mapper_541.c` (LittleCom 160-in-1): `$C000-$FFFF` the address is the register.
+    M541,
+    /// 564, `mapper_564.c`: a data latch whose writable bits shrink once its D5 is set, four
+    /// mirrorings.
+    M564,
 }
 
 impl MultiPKind {
@@ -141,6 +149,9 @@ impl MultiPKind {
             437 => Self::M437,
             438 => Self::M438,
             481 => Self::M481,
+            538 => Self::M538,
+            541 => Self::M541,
+            564 => Self::M564,
             _ => return None,
         })
     }
@@ -182,6 +193,9 @@ impl MultiPKind {
             Self::M437 => 437,
             Self::M438 => 438,
             Self::M481 => 481,
+            Self::M538 => 538,
+            Self::M541 => 541,
+            Self::M564 => 564,
         }
     }
 
@@ -203,6 +217,7 @@ impl MultiPKind {
             Self::M55
                 | Self::M122
                 | Self::M434
+                | Self::M538
                 | Self::M517
                 | Self::M337
                 | Self::M350
@@ -363,6 +378,28 @@ impl MultiP {
             MultiPKind::M438 => {
                 r[0] = address;
                 r[1] = u16::from(value);
+            }
+            MultiPKind::M538 => {
+                if (0xC000..=0xDFFF).contains(&address) {
+                    r[0] = u16::from(value);
+                }
+            }
+            MultiPKind::M541 => {
+                if address >= 0xC000 {
+                    r[0] = address;
+                }
+            }
+            // `extcl_cpu_wr_mem_564`: with D5 set only D0-D2 and D4 move (D0-D1 and D4 when D3
+            // is clear too).
+            MultiPKind::M564 => {
+                let v = u16::from(value);
+                r[0] = if r[0] & 0x20 == 0 {
+                    v
+                } else if r[0] & 0x08 != 0 {
+                    (r[0] & 0xE8) | (v & 0x17)
+                } else {
+                    (r[0] & 0xEC) | (v & 0x13)
+                };
             }
             _ => {}
         }
@@ -850,6 +887,38 @@ impl MultiP {
                 b.map_prg_16k(2, bank | 0x07);
                 None
             }
+            // `prg_fix_538`: D0 set with D3 clear shows bank `$0A` at `$8000`.
+            MultiPKind::M538 => {
+                let low = if r[0] & 0x01 != 0 && r[0] & 0x08 == 0 {
+                    0x0A
+                } else {
+                    r[0] & 0xFE
+                };
+                b.map_prg_8k(0, low);
+                b.map_prg_8k(1, 0x0D);
+                b.map_prg_8k(2, 0x0E);
+                b.map_prg_8k(3, 0x0F);
+                None
+            }
+            MultiPKind::M541 => {
+                if r[0] & 0x02 != 0 {
+                    let bank = (r[0] & 0xFF) >> 2;
+                    b.map_prg_16k(0, bank);
+                    b.map_prg_16k(2, bank);
+                } else {
+                    b.map_prg_32k((r[0] & 0xFF) >> 3);
+                }
+                mirror(r[0] & 0x01 != 0)
+            }
+            MultiPKind::M564 => {
+                b.map_prg_32k(r[0]);
+                Some(match r[0] & 0x30 {
+                    0x00 => NametableMirroring::Vertical,
+                    0x10 => NametableMirroring::Horizontal,
+                    0x20 => NametableMirroring::SingleScreenA,
+                    _ => NametableMirroring::SingleScreenB,
+                })
+            }
             _ => None,
         }
     }
@@ -933,6 +1002,18 @@ impl MultiP {
                     return Some(None);
                 }
                 let bank = usize::try_from((Self::bank_354(a, d) << 1) | (d >> 7)).unwrap_or(0);
+                Some(
+                    rom.get((bank * 0x2000 + usize::from(address & 0x1FFF)) % rom.len())
+                        .copied(),
+                )
+            }
+            // `wram_fix_538`: `$6000-$7FFF` PRG-ROM 8 KiB bank `latch | 1`.
+            MultiPKind::M538 => {
+                let rom = memory.rom().prg_rom();
+                if rom.is_empty() {
+                    return Some(None);
+                }
+                let bank = usize::from(self.regs[0] | 0x01);
                 Some(
                     rom.get((bank * 0x2000 + usize::from(address & 0x1FFF)) % rom.len())
                         .copied(),
