@@ -728,6 +728,11 @@ dispatch is the generic path of the exotic ones only.
 | `board-266` | 266 | `CityFighter` (IrqBoard): a `Vrc2Vrc4` (VRC4e) behind CPU A13/A14 crossed, `$900C` PRG A16-A15 over the chip's inner banks; the `$980C` DAC not emulated (nesdev; J31) | ~100 | — (no dump) | **on** |
 | `board-284` | 284 | `Drip` (IrqBoard): 16 KiB PRG, 2 KiB CHR banks, 15-bit CPU IRQ, two FIFO PCM channels as expansion audio, extended attributes on the MMC5's `board-mmc5-exattr-split` path (one more arm in each of `Board`'s six MMC5 methods) (Mesen2; J34). Requires `board-mmc5-exattr-split` | ~300 | — (no dump) | **on** |
 | `board-682` | 682 | `Rainbow` (IrqBoard): Broke Studio's FPGA board, 16-bit PRG/CHR banks over ROM, RAM and 8 KiB FPGA RAM, four nametable sources with fill / attribute / background extended modes and a window on the MMC5's `board-mmc5-exattr-split` path (two more `Board` arms), scanline and CPU IRQs, vector override, OAM code generator, VRC6 audio (`Vrc6Audio`); S29 flash, ESP Wi-Fi model with the host network behind `emu.rainbow_network` (off by default; J36) (Mesen2, mapper doc; J35). Requires `board-mmc5-exattr-split` | ~1100 | — (no dump) | **on** |
+| `board-431` | 431 | `MultiP` kind M431 (DecodeBoard): Realtec GN-91B, bus conflicts (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-429` | 429 | `MultiP` kind M429 (DecodeBoard): LIKO BBG-235-8-1B (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-428` | 428 | `MultiP` kind M428 (DecodeBoard): TU-01, registers at $6000 (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-415` | 415 | `MultiP` kind M415 (DecodeBoard): Lucky Rabbit 0353, 8 KiB at $6000 (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-414` | 414 | `MultiP` kind M414 (DecodeBoard): 9999999-in-1, bus conflicts (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
 | `board-409` | 409 | `MultiP` kind M409 (DecodeBoard): retroUSB DPCMcart (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
 | `board-403` | 403 | `MultiP` kind M403 (DecodeBoard): 89433, registers at $4100 (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
 | `board-400` | 400 | `MultiP` kind M400 (DecodeBoard): 8-BIT XMAS 2017, bus conflicts (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
@@ -761,6 +766,7 @@ dispatch is the generic path of the exotic ones only.
 | `board-387` | 387 | `JyCompany` with `JyMulticart::M387`: J.Y. ASIC multicart, 128 KiB inner PRG (puNES; MAPPERS-P). Requires `board-jy-asic` | — | — (unit test) | **on** |
 | `board-388` | 388 | `JyCompany` with `JyMulticart::M388`: J.Y. ASIC multicart, nametable jumper as 90 (puNES; MAPPERS-P). Requires `board-jy-asic` | — | — (unit test) | **on** |
 | `board-397` | 397 | `JyCompany` with `JyMulticart::M397`: J.Y. ASIC multicart (puNES; MAPPERS-P). Requires `board-jy-asic` | — | — (unit test) | **on** |
+| `board-421` | 421 | `JyCompany` with `JyMulticart::M421`: J.Y. ASIC multicart, 512 KiB inner CHR (puNES; MAPPERS-P). Requires `board-jy-asic` | — | — (unit test) | **on** |
 | `board-53` | 53 | `MiscN` M53: Supervision 16-in-1, outer register at `$6000`, ROM at `$6000-$7FFF`, optional EPROM by CRC (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-487` | 487 | `MiscN` M487: NINA-03 and outer registers at `$4100`/`$4180`, Color Dreams register in the second half (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-518` | 518 | `MiscN` M518: Dance 2000, `$5000`/`$5200`, open bus over `$8000-$FFFF`, CHR page 0 from the nametable address (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |

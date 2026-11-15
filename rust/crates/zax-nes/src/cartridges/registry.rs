@@ -753,6 +753,18 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     403,
     #[cfg(feature = "board-409")]
     409,
+    #[cfg(feature = "board-414")]
+    414,
+    #[cfg(feature = "board-415")]
+    415,
+    #[cfg(feature = "board-421")]
+    421,
+    #[cfg(feature = "board-428")]
+    428,
+    #[cfg(feature = "board-429")]
+    429,
+    #[cfg(feature = "board-431")]
+    431,
     #[cfg(feature = "board-487")]
     487,
     #[cfg(feature = "board-513")]
@@ -837,13 +849,13 @@ fn datach_has_external_eeprom(header: &InesHeader) -> bool {
 /// The MAPPERS-N boards whose iNES 1.0 CHR-RAM is Mesen2's 8 KiB default (see
 /// [`board_memory_sizes`]).
 const MAPPERS_N_CHR_RAM_8K: &[i32] = &[
-    409, 396, 382, 380, 354, 375, 350, 337, 381, 237, 39, 40, 42, 43, 44, 45, 46, 49, 50, 51, 52,
-    54, 56, 57, 58, 59, 60, 61, 53, 62, 63, 103, 104, 106, 108, 113, 117, 120, 125, 126, 134, 142,
-    148, 166, 167, 170, 171, 174, 177, 179, 183, 196, 197, 200, 201, 202, 203, 204, 205, 212, 213,
-    214, 216, 217, 221, 222, 224, 226, 227, 229, 230, 231, 233, 235, 236, 238, 240, 241, 242, 244,
-    245, 249, 250, 254, 255, 258, 259, 261, 265, 274, 283, 285, 286, 287, 288, 289, 290, 299, 300,
-    301, 302, 303, 304, 305, 306, 307, 309, 312, 313, 314, 319, 320, 324, 325, 329, 331, 332, 333,
-    336, 346, 348, 349, 366, 518, 521, 522,
+    431, 415, 409, 396, 382, 380, 354, 375, 350, 337, 381, 237, 39, 40, 42, 43, 44, 45, 46, 49, 50,
+    51, 52, 54, 56, 57, 58, 59, 60, 61, 53, 62, 63, 103, 104, 106, 108, 113, 117, 120, 125, 126,
+    134, 142, 148, 166, 167, 170, 171, 174, 177, 179, 183, 196, 197, 200, 201, 202, 203, 204, 205,
+    212, 213, 214, 216, 217, 221, 222, 224, 226, 227, 229, 230, 231, 233, 235, 236, 238, 240, 241,
+    242, 244, 245, 249, 250, 254, 255, 258, 259, 261, 265, 274, 283, 285, 286, 287, 288, 289, 290,
+    299, 300, 301, 302, 303, 304, 305, 306, 307, 309, 312, 313, 314, 319, 320, 324, 325, 329, 331,
+    332, 333, 336, 346, 348, 349, 366, 518, 521, 522,
 ];
 
 /// The volatile-memory sizes of `mapper`'s board for `header`.
@@ -1699,6 +1711,11 @@ pub(crate) fn has_bus_conflicts(mapper: i32, header: &InesHeader) -> bool {
         // MAPPERS-P: `mapper_400.c` ANDs its `$C000-$FFFF` latch with the PRG byte.
         #[cfg(feature = "board-400")]
         400 => true,
+        // MAPPERS-P: `mapper_414.c` and `mapper_431.c` AND their data latch with the PRG byte.
+        #[cfg(feature = "board-414")]
+        414 => true,
+        #[cfg(feature = "board-431")]
+        431 => true,
         // *INES Mapper 096* says "Bus conflicts: **partly**", and this build has one bool per
         // cartridge (MR-BUS-1), so "partly" has to become yes or no. **Yes**, which is Mesen
         // 2's reading (`OekaKids.h:14`, `HasBusConflicts` true); Q-135 holds the two readings
@@ -2245,6 +2262,10 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         )))),
         #[cfg(feature = "board-397")]
         397 => Board::IrqBoard(IrqBoard::JyCompany(Box::new(JyCompany::new(
+            memory, mapper,
+        )))),
+        #[cfg(feature = "board-421")]
+        421 => Board::IrqBoard(IrqBoard::JyCompany(Box::new(JyCompany::new(
             memory, mapper,
         )))),
         #[cfg(feature = "board-44")]
@@ -2919,6 +2940,31 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         ))),
         #[cfg(feature = "board-409")]
         409 => Board::DecodeBoard(DecodeBoard::MultiP(MultiP::new(
+            memory,
+            MultiPKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-414")]
+        414 => Board::DecodeBoard(DecodeBoard::MultiP(MultiP::new(
+            memory,
+            MultiPKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-415")]
+        415 => Board::DecodeBoard(DecodeBoard::MultiP(MultiP::new(
+            memory,
+            MultiPKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-428")]
+        428 => Board::DecodeBoard(DecodeBoard::MultiP(MultiP::new(
+            memory,
+            MultiPKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-429")]
+        429 => Board::DecodeBoard(DecodeBoard::MultiP(MultiP::new(
+            memory,
+            MultiPKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-431")]
+        431 => Board::DecodeBoard(DecodeBoard::MultiP(MultiP::new(
             memory,
             MultiPKind::of(mapper)?,
         ))),

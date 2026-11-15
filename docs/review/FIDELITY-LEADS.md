@@ -960,6 +960,9 @@ places where puNES itself is incomplete are copied, not invented around:
   a choice by switch shows its first one.
 * 400's `$8000-$BFFF` register drives an LED on the cartridge; puNES stores it and draws nothing,
   Zaxnes does not store it.
+* 428 reads `(open bus & $FC) | DIP` at `$6000-$7FFF`; this core's open bus is a whole byte, so
+  the read is plain open bus and its two low bits are the bus's rather than the switches' 0.
+* 414 disables `$C000-$FFFF` when the latched address ANDs with the DIP value; at 0 it never does.
 * 281/282/295 apply puNES's outer bank to ROM nametables too (`mirroring_swap_jyasic_28x`); with
   no dump in the Hackset this is untested on a real image.
 

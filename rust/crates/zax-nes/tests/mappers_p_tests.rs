@@ -311,7 +311,7 @@ fn mappers_p_396_has_an_outer_bank_at_a000() {
     assert_eq!([20, 21, 30, 31], core.prg_windows());
 }
 
-/// `mapper_400.c`: `$7800` the outer bank, `$C000` the inner bank (bank 0's zeros ANDed in).
+/// `mapper_400.c`: `$7800` the outer bank, `$C000` the inner bank (bank 0's zeros masking the data).
 #[cfg(feature = "board-400")]
 #[test]
 fn mappers_p_400_takes_its_outer_bank_at_7800() {
@@ -342,4 +342,64 @@ fn mappers_p_409_banks_from_c000_addresses() {
     assert_eq!([6, 7, 62, 63], core.prg_windows());
     core.mapper_write(0x8005, 0);
     assert_eq!([6, 7, 62, 63], core.prg_windows());
+}
+
+/// `mapper_414.c`: A13 picks NROM-256 over NROM-128, A1 up the bank, A0 the mirroring.
+#[cfg(feature = "board-414")]
+#[test]
+fn mappers_p_414_banks_from_the_address() {
+    let mut core = MapperRom::new(414).prg(64).chr(32).load();
+    core.mapper_write(0x8006, 0);
+    assert_eq!([6, 7, 6, 7], core.prg_windows());
+    core.mapper_write(0xA004, 0);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+}
+
+/// `mapper_415.c`: the last 32 KiB fixed, D0-D3 the 8 KiB bank at `$6000`.
+#[cfg(feature = "board-415")]
+#[test]
+fn mappers_p_415_maps_an_8k_bank_at_6000() {
+    let mut core = MapperRom::new(415).prg(16).load();
+    assert_eq!([12, 13, 14, 15], core.prg_windows());
+    core.mapper_write(0x8000, 0x05);
+    assert_eq!(5, core.read_memory(0x6000));
+}
+
+/// `mapper_428.c`: `$6001` D5-D7 the PRG bank, D4 NROM-256; `$6002` D6-D7 hand CHR bits to the
+/// `$8000` latch.
+#[cfg(feature = "board-428")]
+#[test]
+fn mappers_p_428_mixes_its_chr_latch() {
+    let mut core = MapperRom::new(428).prg(32).chr(64).load();
+    core.mapper_write(0x6001, 0x41);
+    assert_eq!([4, 5, 4, 5], core.prg_windows());
+    assert_eq!(8, core.chr_windows()[0]);
+    core.mapper_write(0x6002, 0xC0);
+    core.mapper_write(0x8000, 0x02);
+    // `($6001 & 7) & !3 | ($8000 & 3)`: 8 KiB bank 2.
+    assert_eq!(16, core.chr_windows()[0]);
+}
+
+/// `mapper_429.c`: powers on at 32 KiB bank 1; D2-D5 the 32 KiB bank, D0-D1 the CHR bank.
+#[cfg(feature = "board-429")]
+#[test]
+fn mappers_p_429_powers_on_at_bank_1() {
+    let mut core = MapperRom::new(429).prg(32).chr(32).load();
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    core.mapper_write(0x8000, 0x0B);
+    assert_eq!([8, 9, 10, 11], core.prg_windows());
+    assert_eq!(24, core.chr_windows()[0]);
+}
+
+/// `mapper_421.c`: `$D003` bit 6 widens the inner PRG mask to 512 KiB.
+#[cfg(feature = "board-421")]
+#[test]
+fn mappers_p_421_widens_its_inner_prg_mask() {
+    let mut core = MapperRom::new(421).prg(128).chr(256).load();
+    core.mapper_write(0xD000, 0x02);
+    core.mapper_write(0x8000, 0x21);
+    core.mapper_write(0xD003, 0x02);
+    assert_eq!([33, 32, 32, 63], core.prg_windows());
+    core.mapper_write(0xD003, 0x40);
+    assert_eq!([33, 0, 0, 63], core.prg_windows());
 }

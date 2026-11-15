@@ -1055,6 +1055,9 @@ pub(crate) enum JyMulticart {
     M388,
     /// `mapper_397.c`: 282's PRG decode and 295's CHR decode.
     M397,
+    /// `mapper_421.c`: PRG from `$D003` A18 up with a 512 KiB inner mask when bit 6 is set; CHR
+    /// A18-A19 from bits 0-1 over a 512 KiB inner bank.
+    M421,
 }
 
 impl JyMulticart {
@@ -1068,6 +1071,7 @@ impl JyMulticart {
             387 => Some(Self::M387),
             388 => Some(Self::M388),
             397 => Some(Self::M397),
+            421 => Some(Self::M421),
             _ => None,
         }
     }
@@ -1082,6 +1086,10 @@ impl JyMulticart {
             Self::M386 => ((outer & 0x02) << 4) | ((outer & 0x08) << 3) | (bank_8k & 0x1F),
             Self::M387 => ((outer & 0x02) << 3) | ((outer & 0x08) << 2) | (bank_8k & 0x0F),
             Self::M388 => ((outer & 0x0C) << 3) | (bank_8k & 0x1F),
+            Self::M421 => {
+                let mask = if outer & 0x40 != 0 { 0x3F } else { 0x1F };
+                ((outer << 4) & !mask) | (bank_8k & mask)
+            }
         }
     }
 
@@ -1111,6 +1119,7 @@ impl JyMulticart {
                 }
             }
             Self::M295 | Self::M397 => (outer << 7) | (bank_1k & 0x7F),
+            Self::M421 => ((outer & 0x03) << 8) | (bank_1k & 0x1FF),
         }
     }
 }

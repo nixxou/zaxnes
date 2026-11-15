@@ -78,6 +78,16 @@ pub enum MultiPKind {
     M403,
     /// 409, `mapper_409.c` (retroUSB DPCMcart): `$C000-$CFFF` the address is the 16 KiB bank.
     M409,
+    /// 414, `mapper_414.c` (9999999-in-1): address latch and a CHR data latch with bus conflicts.
+    M414,
+    /// 415, `mapper_415.c` (Lucky Rabbit 0353): fixed 32 KiB, a switchable 8 KiB at `$6000`.
+    M415,
+    /// 428, `mapper_428.c` (TU-01): four registers at `$6000-$7FFF`, a CHR latch at `$8000`.
+    M428,
+    /// 429, `mapper_429.c` (LIKO BBG-235-8-1B): one data latch, 32 KiB and 8 KiB banks.
+    M429,
+    /// 431, `mapper_431.c` (Realtec GN-91B): two data registers with bus conflicts.
+    M431,
 }
 
 impl MultiPKind {
@@ -110,6 +120,11 @@ impl MultiPKind {
             400 => Self::M400,
             403 => Self::M403,
             409 => Self::M409,
+            414 => Self::M414,
+            415 => Self::M415,
+            428 => Self::M428,
+            429 => Self::M429,
+            431 => Self::M431,
             _ => return None,
         })
     }
@@ -141,13 +156,18 @@ impl MultiPKind {
             Self::M400 => 400,
             Self::M403 => 403,
             Self::M409 => 409,
+            Self::M414 => 414,
+            Self::M415 => 415,
+            Self::M428 => 428,
+            Self::M429 => 429,
+            Self::M431 => 431,
         }
     }
 
     /// Whether the board takes writes below `$8000` (puNES `extend_wr`), and where.
     const fn decodes_low(self, address: u16) -> bool {
         match self {
-            Self::M122 => address >= 0x6000,
+            Self::M122 | Self::M428 => address >= 0x6000,
             Self::M400 => address >= 0x7800,
             Self::M403 => address < 0x6000 && address & 0x0100 != 0,
             _ => false,
@@ -158,7 +178,14 @@ impl MultiPKind {
     const fn owns_6000(self) -> bool {
         matches!(
             self,
-            Self::M55 | Self::M122 | Self::M517 | Self::M337 | Self::M350 | Self::M354
+            Self::M55
+                | Self::M122
+                | Self::M517
+                | Self::M337
+                | Self::M350
+                | Self::M354
+                | Self::M415
+                | Self::M428
         )
     }
 }
@@ -190,6 +217,8 @@ impl MultiP {
                 MultiPKind::M343 => [0xFF, 0, 0, 0],
                 // `map_init_350` and `map_init_400`: register 0 powers on as `$80`.
                 MultiPKind::M350 | MultiPKind::M400 => [0x80, 0, 0, 0],
+                // `map_init_429`: the latch powers on as 4 (32 KiB bank 1).
+                MultiPKind::M429 => [0x04, 0, 0, 0],
                 _ => [0; 4],
             },
             adc: [0; 3],
@@ -240,7 +269,11 @@ impl MultiP {
                 }
                 r[0] = u16::from(value);
             }
-            MultiPKind::M122 | MultiPKind::M271 | MultiPKind::M381 => r[0] = u16::from(value),
+            MultiPKind::M122
+            | MultiPKind::M271
+            | MultiPKind::M381
+            | MultiPKind::M415
+            | MultiPKind::M429 => r[0] = u16::from(value),
             // `extcl_cpu_wr_mem_335`: by A13-A14.
             MultiPKind::M335 => match address & 0xE000 {
                 0x8000 | 0xA000 => r[0] = u16::from(value),
@@ -257,30 +290,6 @@ impl MultiP {
                 r[1] = u16::from(value);
             }
             MultiPKind::M390 => r[usize::from((address >> 14) & 0x01)] = address & 0xFF,
-            MultiPKind::M396 => {
-                r[usize::from((0xA000..=0xBFFF).contains(&address))] = u16::from(value);
-            }
-            // `extcl_cpu_wr_mem_400`: the data latch's value is already ANDed with the ROM
-            // (`has_bus_conflicts`); the LED (`$8000-$BFFF`) is not modelled.
-            MultiPKind::M400 => match address & 0xF000 {
-                0x7000 => r[0] = u16::from(value),
-                0xC000..=0xF000 => r[1] = u16::from(value),
-                _ => {}
-            },
-            // `extcl_cpu_wr_mem_403`: `$4100-$4103` the registers, `$8000-$FFFF` the CHR bank
-            // while `$4102` bit 2 allows it.
-            MultiPKind::M403 => {
-                if address < 0x8000 {
-                    r[usize::from(address & 0x03)] = u16::from(value);
-                } else if r[2] & 0x04 != 0 {
-                    r[1] = u16::from(value);
-                }
-            }
-            MultiPKind::M409 => {
-                if (0xC000..=0xCFFF).contains(&address) {
-                    r[0] = address;
-                }
-            }
             MultiPKind::M354 => {
                 let start = if self.submapper == 1 { 0xE000 } else { 0xF000 };
                 if address >= start {
@@ -309,6 +318,55 @@ impl MultiP {
                 r[1] = u16::from(value);
             }
             MultiPKind::M55 | MultiPKind::M352 | MultiPKind::M360 => {}
+            _ => self.latch_late(address, value),
+        }
+    }
+
+    /// [`MultiP::latch`] for the kinds of batches 6 and 7.
+    fn latch_late(&mut self, address: u16, value: u8) {
+        let r = &mut self.regs;
+        match self.kind {
+            MultiPKind::M396 => {
+                r[usize::from((0xA000..=0xBFFF).contains(&address))] = u16::from(value);
+            }
+            // `extcl_cpu_wr_mem_400`: the data latch's value is already ANDed with the ROM
+            // (`has_bus_conflicts`); the LED (`$8000-$BFFF`) is not modelled.
+            MultiPKind::M400 => match address & 0xF000 {
+                0x7000 => r[0] = u16::from(value),
+                0xC000..=0xF000 => r[1] = u16::from(value),
+                _ => {}
+            },
+            // `extcl_cpu_wr_mem_403`: `$4100-$4103` the registers, `$8000-$FFFF` the CHR bank
+            // while `$4102` bit 2 allows it.
+            MultiPKind::M403 => {
+                if address < 0x8000 {
+                    r[usize::from(address & 0x03)] = u16::from(value);
+                } else if r[2] & 0x04 != 0 {
+                    r[1] = u16::from(value);
+                }
+            }
+            MultiPKind::M409 => {
+                if (0xC000..=0xCFFF).contains(&address) {
+                    r[0] = address;
+                }
+            }
+            // `extcl_cpu_wr_mem_414`: the data latch is ANDed with the ROM (`has_bus_conflicts`).
+            MultiPKind::M414 => {
+                r[0] = address;
+                r[1] = u16::from(value);
+            }
+            // `extcl_cpu_wr_mem_428`: `$6000-$6003` four registers of which the fixes read `$6001`
+            // and `$6002` (kept in slots 1-2); the `$8000` latch takes slot 3.
+            MultiPKind::M428 => {
+                if address >= 0x8000 {
+                    r[3] = u16::from(value);
+                } else if matches!(address & 0x03, 1 | 2) {
+                    r[usize::from(address & 0x03)] = u16::from(value);
+                }
+            }
+            // `extcl_cpu_wr_mem_431`: `$8000-$BFFF` and `$C000-$FFFF`, with bus conflicts.
+            MultiPKind::M431 => r[usize::from(address >= 0xC000)] = u16::from(value),
+            _ => {}
         }
     }
 
@@ -639,6 +697,62 @@ impl MultiP {
                 b.map_prg_16k(2, -1);
                 None
             }
+            _ => self.map_b7(),
+        }
+    }
+
+    /// [`MultiP::map`] for the kinds of batch 7 (`docs/progress/MAPPERS-P.md`).
+    fn map_b7(&mut self) -> Option<NametableMirroring> {
+        let r = self.regs.map(i32::from);
+        let b = &mut self.banks;
+        let mirror = |vertical: bool| {
+            Some(if vertical {
+                NametableMirroring::Vertical
+            } else {
+                NametableMirroring::Horizontal
+            })
+        };
+        match self.kind {
+            // `prg_fix_414` with the DIP switch at 0, so its `$C000` disable never applies (J37).
+            MultiPKind::M414 => {
+                let bank = r[0] >> 1;
+                if r[0] & 0x2000 != 0 {
+                    b.map_prg_32k(bank >> 1);
+                } else {
+                    b.map_prg_16k(0, bank);
+                    b.map_prg_16k(2, bank);
+                }
+                b.map_chr_8k(r[1]);
+                mirror(r[0] & 0x01 == 0)
+            }
+            MultiPKind::M415 => {
+                b.map_prg_32k(-1);
+                mirror(r[0] & 0x10 == 0)
+            }
+            // `chr_fix_428`: `$6002` bits 6-7 pick which CHR bits come from the `$8000` latch.
+            MultiPKind::M428 => {
+                let bank = r[1] >> 5;
+                if r[1] & 0x10 != 0 {
+                    b.map_prg_32k(bank >> 1);
+                } else {
+                    b.map_prg_16k(0, bank);
+                    b.map_prg_16k(2, bank);
+                }
+                let latch_bits = r[2] >> 6;
+                b.map_chr_8k(((r[1] & 0x07) & !latch_bits) | (r[3] & latch_bits));
+                mirror(r[1] & 0x08 == 0)
+            }
+            MultiPKind::M429 => {
+                b.map_prg_32k((r[0] & 0x3C) >> 2);
+                b.map_chr_8k(r[0] & 0x03);
+                None
+            }
+            MultiPKind::M431 => {
+                let base = (r[0] & 0x20) >> 2;
+                b.map_prg_16k(0, base | (r[1] & 0x07));
+                b.map_prg_16k(2, base | 0x07);
+                mirror(r[0] & 0x01 == 0)
+            }
             _ => None,
         }
     }
@@ -694,7 +808,21 @@ impl MultiP {
                 let ram = memory.prg_ram();
                 (!ram.is_empty()).then(|| Some(ram[usize::from(address & 0x0FFF) % ram.len()]))
             }
-            MultiPKind::M122 => Some(None),
+            // `extcl_cpu_rd_mem_428`: open bus with the two DIP bits (0) below; this core's open
+            // bus is whole, so the read is open bus (J37).
+            MultiPKind::M122 | MultiPKind::M428 => Some(None),
+            // `wram_fix_415`: `$6000-$7FFF` an 8 KiB PRG-ROM bank from D0-D3.
+            MultiPKind::M415 => {
+                let rom = memory.rom().prg_rom();
+                if rom.is_empty() {
+                    return Some(None);
+                }
+                let bank = usize::from(self.regs[0] & 0x0F);
+                Some(
+                    rom.get((bank * 0x2000 + usize::from(address & 0x1FFF)) % rom.len())
+                        .copied(),
+                )
+            }
             // `wram_fix_354`: mode 5 shows the 8 KiB half bank, every other mode disables it.
             MultiPKind::M354 => {
                 let (a, d) = (i32::from(self.regs[0]), i32::from(self.regs[1]));
