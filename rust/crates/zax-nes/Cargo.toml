@@ -196,6 +196,7 @@ default = [
     "board-266",
     "board-284",
     "board-682",
+    "board-355",
     "board-562",
     "board-342",
     "board-446",
@@ -396,6 +397,7 @@ board-534 = ["board-mmc3-p"]
 board-422 = ["board-mmc3-p"]
 # MAPPERS-P umbrella: the CPU-cycle IRQ boards of `irq_p.rs`.
 board-irq-p = []
+board-355 = ["board-irq-p"]
 board-562 = ["board-irq-p"]
 board-342 = ["board-irq-p"]
 board-436 = ["board-irq-p"]

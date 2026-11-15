@@ -60,7 +60,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 352 | `mapper_352.c` | 66 | 0 | 0 | done (batch 2, `MultiP`) |
 | 353 | `mapper_353.c` | 149 | 1 | 0 | done (batch 28, `Mmc3P`) |
 | 354 | `mapper_354.c` | 111 | 0 | 0 | done (batch 4, `MultiP`) |
-| 355 | `mapper_355.c` | 258 | 4 | 1 | blocked (needs a PIC16C5x core, see batch 38) |
+| 355 | `mapper_355.c` | 258 | 4 | 1 | done (batch 58, `IrqP` + `pic16c54.rs`, EPROMs embedded by owner decision) |
 | 356 | `mapper_356.c` | 106 | 1 | 0 | done (batch 25, `Mmc3P`) |
 | 357 | `mapper_357.c` | 118 | 1 | 0 | done (batch 18, `IrqP`) |
 | 358 | `mapper_358.c` | 76 | 4 | 0 | done (batch 3, `JyCompany` + `JyMulticart`) |
@@ -434,3 +434,16 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   (owner decision, option A): `data/vtgd_bios.bin`, the 2 KiB `bios[]` holds (puNES declares
   4 KiB and reads it through `& $7FF`). In both PPU-bus lists (the CHR window latch), the mf_3b
   and mf_5a sweeps.
+* Batch 58: 355 (Hwang Shinwei *3D Block*, *Block Force*) as an `IrqP` kind: NROM-256 with a
+  PIC16C54 in a new `pic16c54.rs`, a port of MAME's PIC16C5x core (BSD-3, ver 1.16, as puNES
+  carries it; notice in `THIRD-PARTY-NOTICES.md`) limited to that model. The PIC runs one
+  instruction cycle per four CPU cycles and reads the last CPU address (`$4020+`, reads and
+  writes) on its ports: A6-A4 on port A D1-D3, A12/A7/A10/A11/A9/A8/A13/A14 on port B. Port A
+  writes drive the IRQ (`pic16c5x_wr`: D0 or a `tris` write releases it). The program is the
+  image's single 1 KiB NES 2.0 misc ROM, else the EPROM puNES carries for the PRG CRC
+  (owner decision, option A: `data/pic355_3d_block.bin`, `data/pic355_block_force.bin`). 355's
+  ROM windows are off the read cache, or the PIC would miss the CPU's fetches: the game runs its
+  wait loops at `$E180-$E1FF`, which the PIC recognises (port B `$E2`) before raising the IRQ
+  that splits the screen. Checked on the Hackset `[!]` dump (its misc ROM equals puNES's
+  EPROM): the 3D well and the falling pieces draw, where the same PRG as mapper 0 repeats the
+  top half of the screen.

@@ -1945,3 +1945,41 @@ fn mappers_p_562_runs_the_game_doctor_copier() {
     cartridge.step_cpu_cycle();
     assert!(cartridge.irq_asserted());
 }
+
+/// `mapper_355.c`: a 1 KiB NES 2.0 misc ROM is the PIC16C54's program; the PIC reads the CPU's
+/// last address (A12 on port B D0) and its port A D0 drives the IRQ (`pic16c5x_wr`). The program
+/// here: `tris A` with W = 0 (a `tris` write releases the line), wait for A12, `clrf PORTA`
+/// (D0 low asserts it).
+#[cfg(feature = "board-355")]
+#[test]
+fn mappers_p_355_runs_its_pic_on_the_cpu_address_bus() {
+    let mut image = MapperRom::new(355).prg(4).chr(8).image();
+    image[14] = 1;
+    let mut program = vec![0u8; 0x400];
+    let words: [(usize, u16); 7] = [
+        (0, 0xC00),     // movlw 0
+        (1, 0x005),     // tris PORTA
+        (2, 0x706),     // btfss PORTB, 0
+        (3, 0xA02),     // goto 2
+        (4, 0x065),     // clrf PORTA
+        (5, 0xA05),     // goto 5
+        (0x1FF, 0xA00), // reset vector: goto 0
+    ];
+    for (word, opcode) in words {
+        program[word * 2..word * 2 + 2].copy_from_slice(&opcode.to_le_bytes());
+    }
+    image.extend_from_slice(&program);
+    let mut core = zax_nes::NesCore::new();
+    assert!(core.load_rom(&image, "Mapper355.nes").success);
+    let cartridge = core.cartridge_mut().unwrap();
+    cartridge.try_cpu_read(0x8000);
+    for _ in 0..80 {
+        cartridge.step_cpu_cycle();
+    }
+    assert!(!cartridge.irq_asserted());
+    cartridge.try_cpu_read(0x9000);
+    for _ in 0..40 {
+        cartridge.step_cpu_cycle();
+    }
+    assert!(cartridge.irq_asserted());
+}

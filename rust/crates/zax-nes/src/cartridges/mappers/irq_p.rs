@@ -12,6 +12,8 @@ use super::cool_girl::CoolGirl;
 use super::game_doctor::GameDoctor;
 #[cfg(any(feature = "board-256", feature = "board-436"))]
 use super::one_bus::OneBus;
+#[cfg(feature = "board-355")]
+use super::pic16c54::{Pic16C54, PortWrite};
 use super::vrc_irq::VrcIrq;
 use super::{windows_for, BootProgram, Eeprom93C66, Mapper};
 use crate::cartridges::{A12Watcher, BankWindows, CartridgeMemory, ChrFetch, ChrView};
@@ -113,6 +115,9 @@ pub enum IrqPKind {
     /// 562, `mapper_562.c` (Venus Turbo Game Doctor): a copier whose DRAM holds the game and
     /// whose BIOS shows at `$4800-$4FFF` ([`super::game_doctor`]); the misc ROM boots as 561's.
     M562,
+    /// 355, `mapper_355.c` (Hwang Shinwei *3D Block*, *Block Force*): NROM-256 with a PIC16C54
+    /// watching the CPU's address bus, its port A D0 the IRQ line ([`super::pic16c54`]).
+    M355,
 }
 
 impl IrqPKind {
@@ -141,6 +146,7 @@ impl IrqPKind {
             436 => Self::M436,
             342 => Self::M342,
             562 => Self::M562,
+            355 => Self::M355,
             _ => return None,
         })
     }
@@ -168,6 +174,7 @@ impl IrqPKind {
             Self::M436 => 436,
             Self::M342 => 342,
             Self::M562 => 562,
+            Self::M355 => 355,
         }
     }
 }
@@ -227,6 +234,10 @@ pub struct IrqP {
     /// 562's copier, `None` for the other kinds; saved for that kind.
     #[cfg(feature = "board-562")]
     game_doctor: Option<Box<GameDoctor>>,
+    /// 355's PIC, `None` for the other kinds and for a 355 image without its program; saved
+    /// for that kind. `serial_413` holds the last CPU address it sees (`m355.address`).
+    #[cfg(feature = "board-355")]
+    pic: Option<Box<Pic16C54>>,
     /// 528's VRC7 IRQ (`init_VRC7(0x01, 0x00)`), saved for that kind only.
     vrc_irq: VrcIrq,
     /// Whether the image has CHR-ROM, which 359's CHR banking needs (`chrrom_size()`).
@@ -276,6 +287,12 @@ impl IrqP {
             cool_girl: (kind == IrqPKind::M342).then(|| Box::new(CoolGirl::new())),
             #[cfg(feature = "board-562")]
             game_doctor: (kind == IrqPKind::M562).then(|| Box::new(Self::power_on_562(memory))),
+            #[cfg(feature = "board-355")]
+            pic: if kind == IrqPKind::M355 {
+                Self::program_355(memory).map(|rom| Box::new(Pic16C54::new(&rom)))
+            } else {
+                None
+            },
             nt_560: match kind {
                 IrqPKind::M560 => vec![0; NT_560],
                 IrqPKind::M547 => vec![0; NT_547],
@@ -382,6 +399,8 @@ impl IrqP {
             // decodes its own windows (`CoolGirl`).
             IrqPKind::M561 | IrqPKind::M342 | IrqPKind::M562 => {}
             IrqPKind::M256 | IrqPKind::M436 => self.map_one_bus(),
+            // `prg_fix_355`: NROM-256.
+            IrqPKind::M355 => b.map_prg_32k(0),
             // `prg_fix_560`.
             IrqPKind::M560 => {
                 b.map_prg_32k(r[0]);
@@ -677,6 +696,70 @@ impl IrqP {
                 None => chip.read_low_rom(rom, address),
             }),
             _ => None,
+        }
+    }
+
+    /// `map_init_355`'s program: a single 1 KiB misc ROM, else the EPROM puNES carries for the
+    /// dump's PRG CRC (*3D Block* `$86DBA660`, *Block Force* `$3C43939D`/`$B655C53A`).
+    #[cfg(feature = "board-355")]
+    fn program_355(memory: &CartridgeMemory) -> Option<Vec<u8>> {
+        let rom = memory.rom();
+        let header = rom.header();
+        let misc = Self::misc_rom(memory);
+        let chips = rom.raw().get(14).map_or(0, |byte| byte & 0x03);
+        if header.is_nes20 && chips == 1 && misc.len() == 0x400 {
+            return Some(misc);
+        }
+        match crate::builtin_patches::crc32(rom.prg_rom()) {
+            0x86DB_A660 => Some(include_bytes!("data/pic355_3d_block.bin").to_vec()),
+            0x3C43_939D | 0xB655_C53A => {
+                Some(include_bytes!("data/pic355_block_force.bin").to_vec())
+            }
+            _ => None,
+        }
+    }
+
+    /// `extcl_cpu_every_cycle_355`: the PIC runs with the last CPU address on its ports
+    /// (`pic16c5x_rd`), and port A's writes drive the IRQ (`pic16c5x_wr`: D0 or a `tris` write
+    /// releases it, else asserts).
+    fn step_pic(&mut self) {
+        #[cfg(feature = "board-355")]
+        if let Some(chip) = &mut self.pic {
+            let address = u16::try_from(self.serial_413).unwrap_or(0);
+            let read = |port: u8| Self::pic_port_355(address, port);
+            let irq = &mut self.irq_pending;
+            chip.run(&read, &mut |write: PortWrite| {
+                if write.port == 0 {
+                    *irq = write.value & 0x1001 == 0;
+                }
+            });
+        }
+    }
+
+    /// `pic16c5x_rd`: port A reads 1 and A6, A5, A4 in D1-D3; port B A12, A7, A10, A11, A9, A8,
+    /// A13 and A14 in D0-D7.
+    #[cfg(feature = "board-355")]
+    fn pic_port_355(address: u16, port: u8) -> u8 {
+        let bit = |line: u16, to: u8| {
+            if address & (1 << line) != 0 {
+                1u8 << to
+            } else {
+                0
+            }
+        };
+        match port {
+            0 => 1 | bit(6, 1) | bit(5, 2) | bit(4, 3),
+            1 => {
+                bit(12, 0)
+                    | bit(7, 1)
+                    | bit(10, 2)
+                    | bit(11, 3)
+                    | bit(9, 4)
+                    | bit(8, 5)
+                    | bit(13, 6)
+                    | bit(14, 7)
+            }
+            _ => 0xFF,
         }
     }
 
@@ -1295,7 +1378,7 @@ impl IrqP {
             }
             // `extcl_cpu_wr_mem_558` decodes `$5000-$53FF` only ([`IrqP::write_558`]); 342's writes
             // go to its FPGA before this decode.
-            IrqPKind::M558 | IrqPKind::M342 | IrqPKind::M562 => {}
+            IrqPKind::M558 | IrqPKind::M342 | IrqPKind::M562 | IrqPKind::M355 => {}
         }
     }
 }
@@ -1357,6 +1440,11 @@ impl Mapper for IrqP {
         if let Some(chip) = &self.game_doctor {
             chip.save_state(writer);
         }
+        #[cfg(feature = "board-355")]
+        if let Some(chip) = &self.pic {
+            writer.write_u32(self.serial_413);
+            chip.save_state(writer);
+        }
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -1407,6 +1495,11 @@ impl Mapper for IrqP {
         }
         #[cfg(feature = "board-562")]
         if let Some(chip) = &mut self.game_doctor {
+            chip.load_state(reader)?;
+        }
+        #[cfg(feature = "board-355")]
+        if let Some(chip) = &mut self.pic {
+            self.serial_413 = reader.read_u32()?;
             chip.load_state(reader)?;
         }
         self.map();
@@ -1519,6 +1612,8 @@ impl Mapper for IrqP {
             IrqPKind::M342 => self.step_cool_girl(),
             // `extcl_cpu_every_cycle_562`.
             IrqPKind::M562 => self.step_game_doctor(),
+            // `extcl_cpu_every_cycle_355`: the PIC's clock.
+            IrqPKind::M355 => self.step_pic(),
             // `extcl_cpu_every_cycle_547`: a 16-bit up-counter, reloaded and asserting on its wrap.
             IrqPKind::M547 => {
                 if self.irq_enabled {
@@ -1703,6 +1798,11 @@ impl Mapper for IrqP {
             chip.write(address, value);
             self.settle(memory);
             return true;
+        }
+        // `extcl_cpu_wr_mem_355`: the PIC sees the address of every write.
+        if self.kind == IrqPKind::M355 {
+            self.serial_413 = u32::from(address);
+            return false;
         }
         #[cfg(feature = "board-562")]
         if let Some(chip) = &mut self.game_doctor {
@@ -1923,6 +2023,11 @@ impl Mapper for IrqP {
         if let Some(chip) = &mut self.game_doctor {
             chip.soft_reset();
         }
+        // `pic16c5x_reset(RESET)`.
+        #[cfg(feature = "board-355")]
+        if let Some(chip) = &mut self.pic {
+            chip.reset(false);
+        }
         #[cfg(any(feature = "board-256", feature = "board-436"))]
         if let Some(chip) = &mut self.one_bus {
             chip.reset_registers();
@@ -1978,6 +2083,11 @@ impl Mapper for IrqP {
     }
 
     fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+        // `extcl_cpu_rd_mem_355`: the PIC sees the address of every read.
+        if self.kind == IrqPKind::M355 {
+            self.serial_413 = u32::from(address);
+            return None;
+        }
         #[cfg(feature = "board-562")]
         if let Some(chip) = &self.game_doctor {
             return Self::read_game_doctor(chip, address);
@@ -2023,8 +2133,12 @@ impl Mapper for IrqP {
         if matches!(self.kind, IrqPKind::M413 | IrqPKind::M547) {
             windows[2] = super::NO_ROM_WINDOW;
         }
-        // 561's PRG is its own copier RAM; 342 reads through its own windows.
-        if matches!(self.kind, IrqPKind::M561 | IrqPKind::M342 | IrqPKind::M562) {
+        // 561's PRG is its own copier RAM; 342 and 562 read through their own windows; 355's
+        // PIC must see every CPU fetch (`extcl_cpu_rd_mem_355`), so no read takes the cache.
+        if matches!(
+            self.kind,
+            IrqPKind::M561 | IrqPKind::M342 | IrqPKind::M562 | IrqPKind::M355
+        ) {
             windows = [super::NO_ROM_WINDOW; 4];
         }
         windows

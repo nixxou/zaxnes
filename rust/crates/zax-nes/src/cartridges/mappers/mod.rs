@@ -147,6 +147,8 @@ mod nrom;
 mod oeka_kids;
 #[cfg(any(feature = "board-256", feature = "board-436"))]
 mod one_bus;
+#[cfg(feature = "board-355")]
+mod pic16c54;
 #[cfg(feature = "board-164")]
 mod pec9588;
 #[cfg(feature = "board-168")]

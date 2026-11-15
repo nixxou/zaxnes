@@ -1060,6 +1060,12 @@ places where puNES itself is incomplete are copied, not invented around:
   the last CHR write, as `extcl_rd_chr_562`/`extcl_wr_chr_562` do; a CHR write takes the
   permission mapped before it changes the lock, as puNES's `chr_wr` does. The copier DRAM is the
   image's PRG (wrapped to its size) and is saved in the state, not persisted.
+* 355 (`mapper_355.c`): the PIC16C54 is MAME's core as puNES runs it: configuration word 0 (no
+  watchdog), T0CKI never driven, one instruction cycle per four CPU cycles (a 1.79 MHz / 4 =
+  447 kHz instruction clock, where the board's real oscillator is not documented). The PIC sees
+  the CPU's address on reads and writes of `$4020-$FFFF` only, as puNES's `extcl_cpu_*_mem_355`
+  hooks; the board's real address bus also carries `$0000-$401F`. Port B reads take the address
+  as it was at the PIC's instruction, not at a precise cycle inside it.
 * 256, 436 (`OneBus.c`): as puNES, the VT02/VT03 are modelled in the console's ordinary 2 bpp
   rendering. In the 4 bpp modes (`$2010` D1/D2) the banks select the de-interleaved low planes
   puNES selects, but the PPU still draws two planes, so those games show what puNES shows, not

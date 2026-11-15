@@ -298,6 +298,31 @@ repli quand aucune police système n'est trouvée (AMD-024 REQ-PUB-006).
 Le format de profil `.3dn` est lu et écrit par un codec écrit pour ce projet
 (`rust/crates/zax-profiles/src/wire/`) ; aucune bibliothèque protobuf n'est livrée.
 
+### MAME — émulateur PIC16C5x — (c) Tony La Porta — licence BSD-3-Clause
+
+Le microcontrôleur PIC16C54 des cartes du mapper 355 (`rust/crates/zax-nes/src/cartridges/mappers/pic16c54.rs`,
+fonctionnalité `board-355`) est un portage en Rust de l'émulateur PIC16C5x écrit pour MAME
+(version 1.16), dans la version que puNES embarque (`src/c++/pic16c5x/`). En-tête d'origine :
+
+    license:BSD-3-Clause
+    copyright-holders:Tony La Porta
+    Microchip PIC16C5x Emulator — Copyright Tony La Porta — Originally written for the MAME project.
+
+### puNES — (c) Fabio Cavallo (FHorse) — GNU GPL v2 ou ultérieure
+
+Les cartes du lot MAPPERS-P sont écrites d'après les fichiers `src/core/mappers/mapper_NNN.c` de
+puNES 0.111, que chaque module cite. Trois tables de données sont reprises telles que puNES les
+porte, sur décision du propriétaire (2026-11-15) ; ce sont des dumps de micrologiciels des cartes
+d'origine, pas du code de puNES :
+
+* `cartridges/mappers/data/vtgd_bios.bin` : le BIOS de 2 Kio du copieur Venus Turbo Game Doctor
+  (mapper 562, `bios[]` de `mapper_562.c`) ;
+* `cartridges/mappers/data/pic355_3d_block.bin` et `pic355_block_force.bin` : les programmes
+  EPROM du PIC de *3D Block* et de *Block Force* (mapper 355, `mapper_355.c`), utilisés quand
+  l'image n'apporte pas le sien en misc ROM NES 2.0.
+
+puNES est distribué sous GNU GPL v2 ou ultérieure, compatible avec la GPL v3 de Zaxnes.
+
 ## FCEUX — second moteur d'émulation, en option (non livré par défaut)
 
 ### FCEUX — (c) les auteurs de FCEUX — GNU GPL v2 ou ultérieure
