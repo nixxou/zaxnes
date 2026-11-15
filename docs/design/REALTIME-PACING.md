@@ -154,3 +154,22 @@ Run `padbench.exe 60`, press and release one pad button a few dozen times; it pr
 delays against RawInput, then mean, median, 95th percentile and maximum per backend. The numbers
 decide B5's poll: the backend closest to RawInput, polled from its own thread into the slices of B3.
 Waiting for a run with the owner's pads (Xbox / XInput and a HID pad if possible).
+
+## B5 step 2: measured with the owner's pad (2026-11-15)
+
+Xbox 360 pad (XInput), 41 presses, padbench with a focused window, reference `XInputGetState`
+polled as fast as possible (RawInput sees nothing of an Xbox 360 pad):
+
+| Backend | Median | 95th percentile | Max |
+|---|---|---|---|
+| SDL events pumped continuously | +0.12 ms | 0.44 ms | 0.82 ms |
+| XInput at 1 kHz (connected slot only) | +0.24 ms | 0.96 ms | 0.98 ms |
+| gilrs 0.11 (Windows.Gaming.Input) | +4.5 ms | 8.4 ms | 8.8 ms |
+| SDL read once per 60 Hz frame (Zaxnes today) | +9.3 ms | 15.7 ms | 16.2 ms |
+
+* A first run without a window saw nothing in gilrs or SDL: both deliver pad input to a focused
+  application only. A first XInput run read all four slots and had 55-87 ms outliers: reading an
+  empty slot can block; read the connected ones only.
+* gilrs is the slowest of the fast backends (it appears to poll every ~8 ms). Choice for B5 left to
+  the owner: an XInput thread at 1 kHz (Windows, `unsafe` FFI behind `emu.realtime_input`), or SDL
+  pumped much more often on the main thread.
