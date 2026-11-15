@@ -1009,6 +1009,11 @@ impl NesCore {
         if self.bus.cartridge().is_none() {
             return 0;
         }
+        if self.slice.is_some() {
+            // Lot FIDPLUS-B: a frame begun in slices (the host has just stopped slicing) is
+            // finished, rather than a second frame begun on top of it.
+            return self.finish_sliced_frame(input_word);
+        }
 
         self.bus.input_mut().begin_frame(input_word);
 
@@ -1142,6 +1147,17 @@ impl NesCore {
             self.decode_margins(decoder);
         }
         Some(self.finish_frame(frame.decoder, frame.start_cycle))
+    }
+
+    /// The rest of a frame begun in slices, in one go; its cycles. Out of line: the whole-frame
+    /// path only tests that a slice is in progress.
+    #[inline(never)]
+    fn finish_sliced_frame(&mut self, input_word: u16) -> i64 {
+        loop {
+            if let Some(cycles) = self.run_frame_slice(input_word, i64::MAX) {
+                return cycles;
+            }
+        }
     }
 
     /// Whether a sliced run has a frame in progress ([`Self::run_frame_slice`]).
@@ -1342,7 +1358,8 @@ impl NesCore {
     /// # Panics
     /// Never: the capture can only fail with no ROM loaded, which is checked first.
     pub fn run_frame_ahead(&mut self, input_word: u16, ahead: u8) -> i64 {
-        if ahead == 0 {
+        // A frame begun in slices (lot FIDPLUS-B) is finished first, without run-ahead.
+        if ahead == 0 || self.slice.is_some() {
             return self.run_frame(input_word);
         }
 

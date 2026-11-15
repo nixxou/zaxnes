@@ -114,6 +114,7 @@ options
       emu.cpu_ppu_alignment
       emu.fidelity_plus
       emu.exact_rate
+      emu.realtime_input
       emu.run_ahead
       emu.smooth_scroll_ahead
       emu.game_speed

@@ -62,3 +62,27 @@ apart like the Fidélité+ kind (`Fid<K>`) so the standard loop is unchanged. Th
 | B2 | Core `run_until` / per-instruction exit and the pad cell read at the strobe; equality tests (whole frames vs slices give the same machine) |
 | B3 | Application slices, presentation of the last finished frame, input timestamping, UI (run-ahead interplay) |
 | B4 | Validation: rate, latency, audio, every existing test |
+
+## B3 as built (2026-11-15)
+
+* Option `emu.realtime_input` ("Real-time pad", off), its own switch beside `emu.exact_rate`.
+* Core: `NesCore::run_frame_slice` (B2). A whole frame (`run_frame`, `run_frame_ahead`) asked
+  while a sliced frame is in progress finishes that frame first, so the switch can go off at any
+  instant.
+* Session: `GameSession::run_frame_slice_timed`. A slice that starts a frame runs the first half
+  of a frame (the scripts' input hook, the movie word); the one that ends it runs the second half
+  (capture, conversion, frame hooks), so profiles, 3D and widescreen see whole frames as before.
+  The scripts' pad of the frame is kept for the slices in between, which merge it with the pads of
+  their own time.
+* Host: `EmulationHost::run_due_slices`. Each tick turns its real time into CPU cycles
+  (`FramePacer::slice_frames` x `RegionTiming::cycles_per_frame`, at most the catch-up backlog),
+  runs to that cycle with the pads of the tick, and finishes every frame that ends on the way; the
+  per-frame work (achievements, rollback and movie checkpoints, step-back copy) runs when a frame
+  starts. The slices run on the host's thread: the emulation thread runs whole frames.
+* Off, without a word, when run-ahead is on (it replays whole frames from a state, and is on by
+  default), when a movie is recorded or played (its word is per frame) and on an engine without
+  slices (FCEUX, NesHawk). The option's text says so.
+* Granularity: the pads are polled once per host tick (the display frame), so a frame spreads over
+  two ticks at most on a 60 Hz display; finer input needs a faster input poll (B4 measures it).
+* A savestate made mid-frame keeps the machine at that instruction; the slice's frame bookkeeping
+  is not in it, so the frame after a load ends at the next vblank as a whole frame would.

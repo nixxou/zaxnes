@@ -2274,6 +2274,20 @@ fn fidelity_plus(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("Console frame rate"),
     );
+    // Lot FIDPLUS-B step 3: the machine run in slices of real time, the pads read at the game's
+    // own strobe. Off: whole frames on the frame clock. Run-ahead and movies keep whole frames.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuRealtimeInput,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Real-time pad"),
+    );
 }
 
 fn video_rust_only(out: &mut Vec<SettingDescriptor>) {

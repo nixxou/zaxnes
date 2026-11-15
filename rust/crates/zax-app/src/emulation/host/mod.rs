@@ -282,6 +282,9 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     stage_clock: StageClock,
     /// The frame clock.
     pub pacer: FramePacer,
+    /// Lot FIDPLUS-B (B3): the core cycle the sliced run has to reach, real time turned into
+    /// cycles (fractional, so no cycle is lost to rounding).
+    slice_target: f64,
     /// The frames the display shows a second (its refresh over the swap interval, or the frame
     /// cap), told by the application each frame: the smooth scrolling from the run-ahead does
     /// nothing at 60 or less.
@@ -421,6 +424,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let mut legacy_slots = SaveSlotIndex::load(&paths, now());
         legacy_slots.reconcile(&paths, |game_id| games.exists(game_id));
         let mut host = Self {
+            slice_target: 0.0,
             pacer: FramePacer::new(
                 f64::from(RegionTiming::for_region(NesRegion::Ntsc).nominal_frames_per_second),
                 clock.unwrap_or_else(system_clock),
@@ -1135,6 +1139,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             .effective_catch_up()
             .frames_per_display(self.pacer.effective_rate(), displayed_rate)
             .max(frame_pacer::frames_for_speed(self.pacer.speed));
+        if self.slices_on() {
+            return self.run_due_slices(player_one, player_two);
+        }
         let due = self.pacer.due_frames();
         let ahead = self.runs_ahead();
         let last_3d =
@@ -1146,64 +1153,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             }
             // The frame of the previous round comes back first.
             self.take_core_back();
-            self.evaluate_achievements();
-            // AMD-041 REQ-LOOP-064: the setting is read again here, so a change made during the
-            // game applies at the next real frame and never in the middle of one. One `i32` read
-            // of the model per emulated frame, which is what the catch-up limit and the speed
-            // already cost above.
-            let run_ahead = self.settings.run_ahead();
-            let Some(session) = self.session.as_mut() else {
+            if !self.begin_emulated_frame(player_one, player_two) {
                 break;
-            };
-            // Q-103: and the guard-rail is applied here rather than in the setter — a profile
-            // whose scripts change the core from a frame hook runs at 0, the setting untouched
-            // for the next game. One `bool` test, the detection having been done at load.
-            session.apply_run_ahead_setting(run_ahead);
-            // REQ-LOOP-030: the snapshot is taken at the start of a frame whose core frame
-            // counter is a multiple of 60, so before that frame executes. AMD-042 REQ-LOOP-069:
-            // it carries the 64 `PData` values and the camera state as well, read as they stand
-            // at that instant and with no script hook involved.
-            // EDITOR-1: a movie being played keeps a checkpoint on those frames as well: one more
-            // `bool` read beside `rollback_enabled`, and nothing more unless the frame is one.
-            if (self.rollback_enabled || self.movie_timeline.is_some())
-                && RollbackHistory::is_snapshot_frame(session.core().frame_count())
-            {
-                if let Some(timeline) = self.movie_timeline.as_mut() {
-                    let frame_count = session.core().frame_count();
-                    if timeline.wants(frame_count) {
-                        if let Ok(state) = session.core().save_state(false) {
-                            let digest = super::movie_timeline::machine_digest(session.core());
-                            let verdict = timeline.record(frame_count, state, digest);
-                            if movies::explorer_verdict(verdict) {
-                                self.movie_explorer = None;
-                            }
-                        }
-                    }
-                }
-                if self.rollback_enabled {
-                    let started = self.stage_clock.start();
-                    let extras = SnapshotExtras {
-                        persistent_data: session.capture_rollback_data(),
-                        camera: Some(self.scene.camera.capture()),
-                        // AMD-063 REQ-LUA-119, the fourth element of REQ-LOOP-069.
-                        rot_override: self.scene.camera.rot_override(),
-                    };
-                    let core = session.core();
-                    // A failure (no ROM) leaves the history as it was, as before.
-                    let _ = self
-                        .rollback
-                        .capture_with(extras, |buffer| core.save_state_to(false, buffer));
-                    self.stage_clock.stop(Stage::Rollback, started);
-                }
-            }
-            let core = session.core();
-            // Every frame, for stepping back one at a time (J).
-            if self.rollback_enabled {
-                let _ = self.frame_steps.capture_with(
-                    |buffer| core.save_state_to(false, buffer),
-                    player_one,
-                    player_two,
-                );
             }
             if ahead {
                 // The accounting touches the core: it comes before the frame leaves. The frame
@@ -1232,6 +1183,155 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             self.dispatch_setting_changes();
         }
         due
+    }
+
+    /// The work that comes before an emulated frame, on its first instant: the achievements, the
+    /// run-ahead setting, the rollback and movie checkpoints and the step-back copy. `false`
+    /// without a session.
+    fn begin_emulated_frame(
+        &mut self,
+        player_one: crate::input::InputAction,
+        player_two: crate::input::InputAction,
+    ) -> bool {
+        self.evaluate_achievements();
+        // AMD-041 REQ-LOOP-064: the setting is read again here, so a change made during the
+        // game applies at the next real frame and never in the middle of one. One `i32` read
+        // of the model per emulated frame, which is what the catch-up limit and the speed
+        // already cost above.
+        let run_ahead = self.settings.run_ahead();
+        let Some(session) = self.session.as_mut() else {
+            return false;
+        };
+        // Q-103: and the guard-rail is applied here rather than in the setter — a profile
+        // whose scripts change the core from a frame hook runs at 0, the setting untouched
+        // for the next game. One `bool` test, the detection having been done at load.
+        session.apply_run_ahead_setting(run_ahead);
+        // REQ-LOOP-030: the snapshot is taken at the start of a frame whose core frame
+        // counter is a multiple of 60, so before that frame executes. AMD-042 REQ-LOOP-069:
+        // it carries the 64 `PData` values and the camera state as well, read as they stand
+        // at that instant and with no script hook involved.
+        // EDITOR-1: a movie being played keeps a checkpoint on those frames as well: one more
+        // `bool` read beside `rollback_enabled`, and nothing more unless the frame is one.
+        if (self.rollback_enabled || self.movie_timeline.is_some())
+            && RollbackHistory::is_snapshot_frame(session.core().frame_count())
+        {
+            if let Some(timeline) = self.movie_timeline.as_mut() {
+                let frame_count = session.core().frame_count();
+                if timeline.wants(frame_count) {
+                    if let Ok(state) = session.core().save_state(false) {
+                        let digest = super::movie_timeline::machine_digest(session.core());
+                        let verdict = timeline.record(frame_count, state, digest);
+                        if movies::explorer_verdict(verdict) {
+                            self.movie_explorer = None;
+                        }
+                    }
+                }
+            }
+            if self.rollback_enabled {
+                let started = self.stage_clock.start();
+                let extras = SnapshotExtras {
+                    persistent_data: session.capture_rollback_data(),
+                    camera: Some(self.scene.camera.capture()),
+                    // AMD-063 REQ-LUA-119, the fourth element of REQ-LOOP-069.
+                    rot_override: self.scene.camera.rot_override(),
+                };
+                let core = session.core();
+                // A failure (no ROM) leaves the history as it was, as before.
+                let _ = self
+                    .rollback
+                    .capture_with(extras, |buffer| core.save_state_to(false, buffer));
+                self.stage_clock.stop(Stage::Rollback, started);
+            }
+        }
+        let core = session.core();
+        // Every frame, for stepping back one at a time (J).
+        if self.rollback_enabled {
+            let _ = self.frame_steps.capture_with(
+                |buffer| core.save_state_to(false, buffer),
+                player_one,
+                player_two,
+            );
+        }
+        true
+    }
+
+    /// Whether this tick runs the machine in slices of real time (lot FIDPLUS-B step 3,
+    /// `emu.realtime_input`): on a Zaxnes core, with run-ahead off and no movie recorded or played,
+    /// which keep whole frames.
+    fn slices_on(&self) -> bool {
+        self.settings.get(SettingId::EmuRealtimeInput).as_bool()
+            && !self.runs_ahead()
+            && self.settings.run_ahead() == 0
+            && self.movie_timeline.is_none()
+            && self.session.as_ref().is_some_and(|session| {
+                session.core().kind() == zax_core_api::EngineKind::Zaxnes && !session.has_movie()
+            })
+    }
+
+    /// Lot FIDPLUS-B step 3 (`docs/design/REALTIME-PACING.md`): the real time since the last tick
+    /// turned into CPU cycles and run in one slice, the pads as they stand now; the frames that end
+    /// in it are finished (converted, their hooks run) as whole frames are. A frame not yet ended
+    /// goes on at the next tick with that tick's pads, which the game reads at its next strobe.
+    /// Returns how many frames ended.
+    fn run_due_slices(
+        &mut self,
+        player_one: crate::input::InputAction,
+        player_two: crate::input::InputAction,
+    ) -> u32 {
+        let frames = self.pacer.slice_frames();
+        let Some(session) = self.session.as_ref() else {
+            return 0;
+        };
+        #[allow(clippy::cast_precision_loss)] // Cycle counts stay far below 2^52.
+        let now = session.core().cycle_count() as f64;
+        let per_frame = session.core().timing().cycles_per_frame();
+        // Never behind the machine (a load, a reset, a restored state), and never more than the
+        // pacer's backlog ahead of it.
+        self.slice_target = self.slice_target.max(now) + frames * per_frame;
+        #[allow(clippy::cast_possible_truncation)] // Same.
+        let until = self.slice_target as i64;
+        let limit = self.pacer.max_backlog.max(1);
+        let mut ended = 0;
+        while ended < limit {
+            let starts = !self
+                .session
+                .as_ref()
+                .is_some_and(GameSession::frame_in_progress);
+            if starts && !self.begin_emulated_frame(player_one, player_two) {
+                break;
+            }
+            let begin = self.emu_stats.is_some().then(std::time::Instant::now);
+            let frame = SessionFrame {
+                player_one,
+                player_two,
+                zapper_byte: self.zapper.port_byte(),
+                zapper_position: self.zapper.position(),
+            };
+            let Some(session) = self.session.as_mut() else {
+                break;
+            };
+            if !session.run_frame_slice_timed(
+                &mut self.settings,
+                &mut self.scene,
+                frame,
+                until,
+                &mut self.stage_clock,
+            ) {
+                break;
+            }
+            ended += 1;
+            self.count_emulated_frame(begin);
+        }
+        if ended == limit {
+            // The backlog limit: the rest of the time is dropped, as whole frames drop it.
+            if let Some(session) = self.session.as_ref() {
+                #[allow(clippy::cast_precision_loss)]
+                let now = session.core().cycle_count() as f64;
+                self.slice_target = now;
+            }
+        }
+        self.dispatch_setting_changes();
+        ended
     }
 
     /// The accounting of one emulated frame: the count, the `-emustats` line, and the

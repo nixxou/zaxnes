@@ -520,6 +520,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.cpu_ppu_alignment", "CPU/PPU alignment"),
     ("setting.emu.fidelity_plus", "Fidelity+"),
     ("setting.emu.exact_rate", "Console frame rate"),
+    ("setting.emu.realtime_input", "Real-time pad"),
     ("option.Alignment 0", "Alignment 0"),
     ("option.Alignment 1", "Alignment 1"),
     ("option.Alignment 2", "Alignment 2"),
@@ -1233,6 +1234,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         "detail.emu.exact_rate",
         "Runs the games at the console's own frame rate, 60.0988 images a second on an NTSC console and 50.0070 on a PAL one, instead of a round 60 or 50, and the sound with it, at its true pitch. On a 60 Hz screen an image is shown twice about every ten seconds; a variable refresh rate screen shows every one. Takes effect at once. Default: off.",
+    ),
+    (
+        "detail.emu.realtime_input",
+        "Runs the console in slices of real time instead of a whole image at once, and gives the game the pad as it is at the moment the game reads it, as on the console. A button pressed while an image is being made can be seen in that same image. Not used with run-ahead or while a movie is recorded or played: those keep whole images. Takes effect at once. Default: off.",
     ),
     (
         "detail.emu.fidelity_plus",

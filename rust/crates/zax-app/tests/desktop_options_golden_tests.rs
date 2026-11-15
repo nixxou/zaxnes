@@ -506,8 +506,8 @@ fn ro_3_every_console_setting_is_a_row_the_console_can_step() {
     // move in the tree, never leave the console. Lot CARTDB adds `emu.cartridge_db` and
     // `emu.power_on_ram`. Lot FIDELITY step 28 adds `emu.cpu_ppu_alignment`, step 32
     // `emu.palette_corruption`. Lot FIDPLUS-A adds `emu.fidelity_plus`, FIDPLUS-B
-    // `emu.exact_rate`.
-    assert_eq!(79, advanced::ROW_SETTINGS.len());
+    // `emu.exact_rate` and `emu.realtime_input`.
+    assert_eq!(80, advanced::ROW_SETTINGS.len());
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::EmuEngine));
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::AudioClassicOutput));
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::EmuSmoothScrollAhead));

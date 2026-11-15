@@ -532,6 +532,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.cpu_ppu_alignment", "Alignement CPU/PPU"),
     ("setting.emu.fidelity_plus", "Fidélité+"),
     ("setting.emu.exact_rate", "Cadence de la console"),
+    ("setting.emu.realtime_input", "Manette en temps réel"),
     ("option.Alignment 0", "Alignement 0"),
     ("option.Alignment 1", "Alignement 1"),
     ("option.Alignment 2", "Alignement 2"),
@@ -1207,6 +1208,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (
         "detail.emu.exact_rate",
         "Fait tourner les jeux à la cadence propre de la console, 60,0988 images par seconde sur une console NTSC et 50,0070 sur une PAL, au lieu de 60 ou 50 tout rond, et le son avec, à sa vraie hauteur. Sur un écran 60 Hz, une image est montrée deux fois environ toutes les dix secondes ; un écran à fréquence variable les montre toutes. Prend effet tout de suite. Par défaut : désactivé.",
+    ),
+    (
+        "detail.emu.realtime_input",
+        "Fait avancer la console par tranches de temps réel au lieu d'une image entière d'un coup, et donne au jeu la manette telle qu'elle est au moment où il la lit, comme sur la console. Un bouton pressé pendant la fabrication d'une image peut être vu dans cette même image. Pas utilisé avec le run-ahead ni pendant l'enregistrement ou la lecture d'un film : ceux-ci gardent des images entières. Prend effet tout de suite. Par défaut : désactivé.",
     ),
     (
         "detail.emu.fidelity_plus",

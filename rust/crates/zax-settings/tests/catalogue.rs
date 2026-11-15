@@ -125,6 +125,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "emu.ppu_bus_conflicts",
             "emu.ppu_reset_line",
             "emu.ppu_revision",
+            "emu.realtime_input",
             "emu.smooth_scroll_ahead",
             "emu.smooth_scroll_view",
             "input.touch_extra",
