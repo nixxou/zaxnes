@@ -10,8 +10,9 @@ use zax_harness::dot_trace;
 #[cfg(feature = "vs-system")]
 use zax_harness::vs;
 use zax_harness::{
-    bench_core, cartdb_survey, classify, compare, exec_trace, frame_trace, golden_core, lua_api,
-    meshes, movie_sync, neshawk_tiles, packs, profile_tool, render, test_roms, HarnessError,
+    bench_core, cartdb_survey, classify, compare, cpu_bus_trace, exec_trace, frame_trace,
+    golden_core, lua_api, meshes, movie_sync, neshawk_tiles, packs, profile_tool, render,
+    test_roms, HarnessError,
 };
 #[cfg(feature = "fceux-core")]
 use zax_harness::{fceux_bench, fceux_compare, fceux_run, fceux_tiles};
@@ -118,6 +119,7 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
         [command, rest @ ..] if command == "movie-sync" => movie_sync::command(rest),
         [command, rest @ ..] if command == "frame-trace" => frame_trace::command(rest),
         [command, rest @ ..] if command == "exec-trace" => exec_trace::command(rest),
+        [command, rest @ ..] if command == "cpu-bus-trace" => cpu_bus_trace::command(rest),
         #[cfg(feature = "dot-trace")]
         [command, rest @ ..] if command == "dot-trace" => dot_trace::command(rest),
         [command, rest @ ..] if command == "cartdb-survey" => cartdb_survey::command(rest),

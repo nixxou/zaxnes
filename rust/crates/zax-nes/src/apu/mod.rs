@@ -1148,6 +1148,14 @@ impl Apu2A03 {
             .set_profile(self.console_profile, self.sample_rate);
     }
 
+    /// Diagnostic: the DMC output unit's timer and bit counter, whose power-on values the
+    /// console leaves undefined (the CPU differential against the 2A03 netlist aligns them).
+    #[doc(hidden)]
+    pub fn diagnostic_set_dmc_phase(&mut self, timer: i32, bits_remaining: i32) {
+        self.dmc.set_output_phase(timer, bits_remaining);
+        self.level_dirty = true;
+    }
+
     /// The console model's CPU (lot FIDPLUS-C, FIDELITY-LEADS G4): a letterless RP2A03 chosen
     /// by itself, whatever the audio profile. The noise channel takes the letterless chip when
     /// either says so.
