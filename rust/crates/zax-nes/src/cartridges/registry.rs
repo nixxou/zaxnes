@@ -650,6 +650,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     269,
     #[cfg(feature = "board-271")]
     271,
+    #[cfg(feature = "board-272")]
+    272,
     #[cfg(feature = "board-274")]
     274,
     #[cfg(feature = "board-281")]
@@ -3486,6 +3488,11 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         ))),
         #[cfg(feature = "board-558")]
         558 => Board::IrqBoard(IrqBoard::IrqP(Box::new(IrqP::new(
+            memory,
+            IrqPKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-272")]
+        272 => Board::IrqBoard(IrqBoard::IrqP(Box::new(IrqP::new(
             memory,
             IrqPKind::of(mapper)?,
         )))),

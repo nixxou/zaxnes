@@ -32,7 +32,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 267 | `mapper_267.c` | 87 | 1 | 0 | done (batch 12, `Mmc3P`) |
 | 269 | `mapper_269.c` | 130 | 3 | 0 | done (batch 26, `Mmc3P`) |
 | 271 | `mapper_271.c` | 69 | 1 | 0 | done (batch 2, `MultiP`) |
-| 272 | `mapper_272.c` | 160 | 1 | 0 | todo |
+| 272 | `mapper_272.c` | 160 | 1 | 0 | done (batch 37, `IrqP`) |
 | 281 | `mapper_281.c` | 69 | 11 | 0 | done (batch 2, `JyCompany` + `JyMulticart`) |
 | 282 | `mapper_282.c` | 76 | 13 | 0 | done (batch 2, `JyCompany` + `JyMulticart`) |
 | 291 | `mapper_291.c` | 90 | 1 | 0 | done (batch 12, `Mmc3P`) |
@@ -280,3 +280,8 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   (`board_memory_sizes`, `battery_offset`). Not in `clocks_on_cpu_cycle` (no IRQ).
   532 (*China Ersan 2*) is blocked: puNES runs mapper 19 plus a text overlay drawn from a font
   file the user supplies separately (`chinaersan2.font`), which no image carries.
+* Perf, batches 1-36 (54ebf500) against e4596884: mm2 core +0.000 %, total +0.000 %; zelda2 core
+  +0.000 %, total -0.004 %.
+* Batch 37: `IrqP` 272 (J.Y. *Akumajō Special* bootleg): two decodes per write, nibble CHR
+  registers, and an IRQ stepped by each low-plane pattern fetch (in `watches_ppu_reads` only;
+  absent from the mf_3b expectations, since its counter moves only once enabled).

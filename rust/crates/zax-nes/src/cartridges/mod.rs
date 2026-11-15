@@ -828,6 +828,8 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 222
             // MAPPERS-P: mapper 471's IRQ on every A12 rise (`IrqP`).
             | 471
+            // MAPPERS-P: mapper 272's IRQ counts the rendering's pattern fetches (`IrqP`).
+            | 272
             | 176
             | 217
             | 254
@@ -2273,6 +2275,8 @@ mod tests {
             248, 536, 422, 534, 370, 344, 432, 356, 269, 353, 100, 555,
             // MAPPERS-P: 471, an IRQ on every A12 rise (`IrqP`).
             471,
+            // MAPPERS-P: 272 is latched too but absent here: its counter only moves once a game
+            // enables it, and the sweep enables nothing.
         ] {
             if Cartridge::is_supported(number) {
                 expected.extend_from_slice(&[number, number]);

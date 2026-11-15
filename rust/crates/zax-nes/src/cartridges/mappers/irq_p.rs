@@ -41,6 +41,10 @@ pub enum IrqPKind {
     /// header declares 512 bytes of PRG-NVRAM, a 93C66 EEPROM on `$5200` read back at `$5000`.
     /// No IRQ: it sits here for the boxed variant, not for a counter.
     M558,
+    /// 272, `mapper_272.c` (J.Y. *Akumajō Special* bootleg): two 8 KiB PRG registers, VRC-style
+    /// nibble CHR registers, and an IRQ counting the rendering's tile slots, asserting at 84
+    /// (every second rendered line).
+    M272,
 }
 
 impl IrqPKind {
@@ -56,6 +60,7 @@ impl IrqPKind {
             471 => Self::M471,
             526 => Self::M526,
             558 => Self::M558,
+            272 => Self::M272,
             _ => return None,
         })
     }
@@ -70,6 +75,7 @@ impl IrqPKind {
             Self::M471 => 471,
             Self::M526 => 526,
             Self::M558 => 558,
+            Self::M272 => 272,
         }
     }
 }
@@ -175,6 +181,15 @@ impl IrqP {
                 }
                 b.map_chr_8k((r[1] & 0x06) >> 1);
             }
+            // `prg_fix_272`/`chr_fix_272`: two 8 KiB registers, the last 16 KiB fixed.
+            IrqPKind::M272 => {
+                b.map_prg_8k(0, r[0]);
+                b.map_prg_8k(1, r[1]);
+                b.map_prg_16k(2, -1);
+                for (slot, bank) in self.chr.iter().enumerate() {
+                    b.map_chr_1k(slot, i32::from(*bank));
+                }
+            }
             // `prg_fix_558`: `reg[1]` above, `reg[0]` D0-D3 below, D0-D1 forced on while
             // `reg[3]` D2 is clear.
             IrqPKind::M558 => {
@@ -229,12 +244,55 @@ impl IrqP {
         }
     }
 
+    /// `extcl_cpu_wr_mem_272`: two decodes on every write, by `A15-A14` and A2-A3 (mirroring,
+    /// the IRQ), then by `A15-A12` (PRG, mirroring, the CHR nibbles).
+    fn latch_272(&mut self, address: u16, value: u8) {
+        if address < 0x8000 {
+            return;
+        }
+        match (address & 0xC000, address & 0x000C) {
+            (0x8000, 0x0004) => self.regs[2] = value & 0x03,
+            (0x8000, 0x000C) => self.irq_pending = true,
+            (0xC000, 0x0004) => self.irq_pending = false,
+            (0xC000, 0x0008) => self.irq_enabled = true,
+            (0xC000, 0x000C) => {
+                self.irq_pending = false;
+                self.irq_enabled = false;
+                self.irq_counter = 0;
+            }
+            _ => {}
+        }
+        match address & 0xF000 {
+            0x8000 => self.regs[0] = value,
+            0x9000 => self.regs[3] = value & 0x01,
+            0xA000 => self.regs[1] = value,
+            0xF000 => {}
+            _ => {
+                let index =
+                    usize::from(((address - 0xB000) >> 11) | ((address & 0x02) >> 1)) & 0x07;
+                let old = self.chr[index];
+                self.chr[index] = if address & 0x0001 != 0 {
+                    (old & 0x0F) | ((value & 0x0F) << 4)
+                } else {
+                    (old & 0xF0) | (value & 0x0F)
+                };
+            }
+        }
+    }
+
     /// The mirroring a kind drives, if any (`mirroring_fix_357`: vertical with the DIP at 0;
     /// `mirroring_fix_416`: `$8000` D2).
     fn mirroring(&self) -> Option<NametableMirroring> {
         match self.kind {
             // `mirroring_fix_526`: vertical.
             IrqPKind::M357 | IrqPKind::M526 => Some(NametableMirroring::Vertical),
+            // `mirroring_fix_272`: `regs[2]` 2/3 single-screen, else `regs[3]` H/V.
+            IrqPKind::M272 => Some(match self.regs[2] {
+                2 => NametableMirroring::SingleScreenA,
+                3 => NametableMirroring::SingleScreenB,
+                _ if self.regs[3] != 0 => NametableMirroring::Horizontal,
+                _ => NametableMirroring::Vertical,
+            }),
             IrqPKind::M416 => Some(if self.regs[1] & 0x04 != 0 {
                 NametableMirroring::Horizontal
             } else {
@@ -349,6 +407,7 @@ impl IrqP {
                     self.irq_pending = false;
                 }
             }
+            IrqPKind::M272 => self.latch_272(address, value),
             // `extcl_cpu_wr_mem_558` decodes `$5000-$53FF` only ([`IrqP::write_558`]).
             IrqPKind::M558 => {}
         }
@@ -461,7 +520,7 @@ impl Mapper for IrqP {
                     self.irq_pending = true;
                 }
             }
-            IrqPKind::M471 | IrqPKind::M558 => {}
+            IrqPKind::M471 | IrqPKind::M558 | IrqPKind::M272 => {}
         }
     }
 
@@ -470,6 +529,20 @@ impl Mapper for IrqP {
     fn on_ppu_address_bus(&mut self, _memory: &mut CartridgeMemory, address: u16, clock: i64) {
         if self.kind == IrqPKind::M471 && self.a12.rose(address, clock) {
             self.irq_pending = true;
+        }
+        // `extcl_ppu_000_to_34x_272`: puNES steps every eighth dot of a rendered line, which are
+        // its 34 background tile slots and 8 sprite slots; here each slot's low-plane pattern
+        // fetch is one step (FIDELITY-LEADS J37).
+        if self.kind == IrqPKind::M272
+            && self.irq_enabled
+            && address < 0x2000
+            && address & 0x0008 == 0
+        {
+            self.irq_counter += 1;
+            if self.irq_counter == 84 {
+                self.irq_pending = true;
+                self.irq_counter = 0;
+            }
         }
     }
 

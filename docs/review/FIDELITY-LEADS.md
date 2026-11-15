@@ -1009,6 +1009,11 @@ places where puNES itself is incomplete are copied, not invented around:
 * 558 (`mapper_558.c`): the EEPROM is mounted only when the NES 2.0 header declares 512 bytes of
   PRG-NVRAM, as puNES decides; an iNES 1.0 dump of an EEPROM cartridge gets the bare port
   (`$5200` D2 read back) and cannot save.
+* 272 (`mapper_272.c`): puNES steps the counter on every eighth dot of a rendered line, from
+  dot 5 (42 steps a line, 84 = two lines). Zaxnes has no per-dot hook for a board, so a step is
+  a low-plane pattern fetch, of which a rendered line has the same 42 (34 background slots and 8
+  sprite slots). The phase inside the line differs by a few dots; the pre-render line's fetches,
+  which puNES's line test excludes, and `$2007` reads of the low planes also step it here.
 
 ### J36. Mapper 682 (Rainbow): the ESP is modelled from the protocol document
 The ESP (`rainbow_esp.rs`) follows Broke Studio's `rainbow-net.md` and `mapper-doc.md`; no

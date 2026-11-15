@@ -1227,3 +1227,33 @@ fn mappers_p_558_banks_and_reads_its_eeprom_port() {
     core.mapper_write(0x5200, 0x00);
     assert_eq!(0x04, core.read_memory(0x5000));
 }
+
+/// `mapper_272.c`: `$8000`/`$A000` the PRG banks, `$B000`/`$B001` a CHR register's nibbles,
+/// `$8004` the single-screen mirroring; `$C008` enables the counter, whose 84th low-plane
+/// pattern fetch asserts the IRQ, and `$C004` acknowledges.
+#[cfg(feature = "board-272")]
+#[test]
+fn mappers_p_272_counts_pattern_fetches() {
+    let mut core = MapperRom::new(272).prg(32).chr(256).load();
+    core.mapper_write(0x8000, 3);
+    core.mapper_write(0xA000, 4);
+    core.mapper_write(0xB000, 0x05);
+    core.mapper_write(0xB001, 0x02);
+    assert_eq!([3, 4, 30, 31], core.prg_windows());
+    assert_eq!(0x25, core.chr_windows()[0]);
+    core.mapper_write(0x8004, 0x03);
+    assert_eq!(
+        zax_nes::NametableMirroring::SingleScreenB,
+        core.cartridge().unwrap().mirroring()
+    );
+    core.mapper_write(0xC008, 0);
+    let cartridge = core.cartridge_mut().unwrap();
+    for fetch in 0..84 {
+        assert!(!cartridge.irq_asserted(), "fetch {fetch}");
+        cartridge.on_ppu_address_bus(0x0000, 0);
+        cartridge.on_ppu_address_bus(0x0008, 0);
+    }
+    assert!(cartridge.irq_asserted());
+    core.mapper_write(0xC004, 0);
+    assert!(!core.cartridge().unwrap().irq_asserted());
+}

@@ -835,6 +835,7 @@ dispatch is the generic path of the exotic ones only.
 | `board-471` | 471 | `IrqP` kind M471 (IrqBoard): Impact Soft IM1, IRQ on every A12 rise (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
 | `board-526` | 526 | `IrqP` kind M526 (IrqBoard): BJ-56, CPU-cycle IRQ on bit 12 (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
 | `board-558` | 558 | `IrqP` kind M558 (IrqBoard): Yancheng YC-03-09, 93C66 EEPROM (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-272` | 272 | `IrqP` kind M272 (IrqBoard): J.Y. Akumajou Special bootleg, IRQ on tile slots (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
 | `board-53` | 53 | `MiscN` M53: Supervision 16-in-1, outer register at `$6000`, ROM at `$6000-$7FFF`, optional EPROM by CRC (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-487` | 487 | `MiscN` M487: NINA-03 and outer registers at `$4100`/`$4180`, Color Dreams register in the second half (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-518` | 518 | `MiscN` M518: Dance 2000, `$5000`/`$5200`, open bus over `$8000-$FFFF`, CHR page 0 from the nametable address (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
