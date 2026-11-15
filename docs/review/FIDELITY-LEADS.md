@@ -376,6 +376,17 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 - Earlier 2A03 letters are reported with a different duty (to check against nesdev before use:
   the 2A03E and earlier); part C's console model should carry it per revision.
 
+### A8. A second `$2006` write on a copy dot takes the CPU's open bus in alignment 3 — done in Fidélité+, open for the standard core (2026-11-15)
+- Netlist, `g2006x` (`$2006` written alternately `$08` and `$D7` on dots 257 and 304), alignments
+  2 and 3: the copy of that dot (horizontal on 257, the last vertical one on the pre-render line's
+  304) takes, for the bits the write's low byte drives, the **written byte** in alignment 2 and
+  the **CPU data bus as it stood before the write** (`$20`, the high byte of `$2006`) in
+  alignment 3. The same open bus as the `$2005` write on these dots and the `$2000` glitch (A4).
+  (A first reading as "the old `t` AND the written byte" fitted dot 257 only.)
+- Fidélité+: `post_address_load`, under `emu.ppu_2000_glitch`; `g2006x` 0 dots in both
+  alignments. The standard core does not apply it yet: a cold rule on the write, a candidate for
+  the common base.
+
 ### A7. The coarse-Y wrap takes two phases — open, Fidélité+ step 3 (2026-11-15)
 - Netlist, `r2007`, alignments 2 and 3: when a Y increment wraps coarse Y from 29 (fine Y 7), `v`
   shows for **one dot** coarse Y 30 with the vertical nametable bit already flipped (`$7FAF` ->

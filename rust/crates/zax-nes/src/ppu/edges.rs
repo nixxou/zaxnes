@@ -520,16 +520,25 @@ impl Ppu2C02 {
     /// The second `$2006` write in Fidélité+: posted, every time (the load is never immediate on
     /// the chip; whether anything can see the three dots is the chip's business).
     pub(super) fn post_address_load(&mut self) {
-        if self.dot == 257 && self.fetching() {
-            // The write's low byte reaches `t`'s bus while the horizontal copy of this dot reads
-            // it (netlist, `g2006x`, both values of the corpus, `$08` after `$D7` and back): in
-            // alignment 2 the copy takes the written coarse X, in alignment 3, where the write
-            // and the copy overlap, the old `t`'s AND the written one. Alignments 0 and 1 are
-            // given the written value, as the `$2005` write on that dot measured (A4).
-            if self.alignment == 3 {
-                self.v &= self.t | !0x001F;
+        let horizontal = self.dot == 257;
+        let vertical = self.dot == 304 && self.scanline == self.pre_render_scanline();
+        if (horizontal || vertical) && self.fetching() {
+            // The write's low byte reaches `t` while the copy of this dot reads it (netlist,
+            // `g2006x`, both values of the corpus, `$08` after `$D7` and back, dots 257 and 304):
+            // in alignment 2 the copy takes the written byte; in alignment 3 it takes the CPU
+            // data bus as it stood before the write (`$20`, the address's high byte), the open
+            // bus of the `$2005` write on these dots and of the `$2000` glitch (A4), under the
+            // same switch. Alignments 0 and 1 are given the written byte, as A4 measured.
+            let source = if self.alignment == 3 && self.glitch_2000 {
+                self.cpu_open_bus
             } else {
-                self.v = (self.v & !0x001F) | (self.t & 0x001F);
+                self.t.to_le_bytes()[0]
+            };
+            if horizontal {
+                self.v = (self.v & !0x001F) | u16::from(source & 0x1F);
+            } else {
+                self.v = (self.v & !0x00E0) | u16::from(source & 0xE0);
+                self.v_row_start = self.v;
             }
             self.v_row_next = self.v;
         }
