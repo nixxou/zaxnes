@@ -223,6 +223,9 @@ ext, capture path, bus hooks; 3 Wi-Fi option; 4 flash. Each phase committed on i
 | 274ff3e9 (682 complete) | +0.046 % | +0.046 % |
 | 3e7e6570 (284 off, 682 on) | +0.025 % | +0.025 % |
 | a8eb1aab (both off, the default) | +0.001 % | +0.001 % |
+| b96b839b (both on, one out-of-line arm in `board.rs`) | +0.025 % | +0.025 % |
+| 692b3254 (`read_nametable_inner` generic over the board kind) | +0.046 % | +0.046 % |
+| ed2a619a (plus `BoardKind::SERVES_NAMETABLES`) | **-0.061 %** | **-0.060 %** |
 
 Both are over the +0.02 % per board of the mapper rule, on MMC1 games that use neither: the cost
 is code layout in the MMC5 ext-attr dispatches (`Board::read_nametable_from_vram` and its
@@ -230,3 +233,16 @@ siblings) that each board widens. So `board-284` and `board-682` are **off by de
 not deleted; `--features board-284,board-682` builds and passes the suite and clippy). The
 setting `emu.rainbow_network` stays in the app and does nothing without `board-682`. Making them
 free (one shared arm for every cartridge-served board in those dispatches) is a lot of its own.
+
+**Resolution (owner, 2026-11-15: "fait le et documente bien même dans la source"; `ppu/mod.rs`
+and `ppu/tiles.rs` opened for this).** The cost was never the arms themselves: it was a stack
+frame (`push`/`pop`) that any non-tail call in the served-nametable branch gives
+`Ppu2C02::read_nametable_inner` on every nametable fetch of every game. Fix:
+`read_nametable_inner` / `read_nametable_as` are generic over `BoardKind`, and
+`BoardKind::SERVES_NAMETABLES` (false for the six one-board kinds of `board_kind!`, true for the
+dispatch and the two MMC5 kinds) compiles that branch out of the specialised paths. Specialising
+alone (692b3254) did not help, because the `unreachable!` of `BoardKind::board` brought the same
+frame back. Both boards are on by default again, golden-core identical, and the specialised paths
+are 0.06 % faster than the base. The source notes on `read_nametable_inner`,
+`BoardKind::SERVES_NAMETABLES` and `Cartridge::read_nametable_from_vram_as` carry the figures for
+the backport.
