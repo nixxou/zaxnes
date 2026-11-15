@@ -1913,3 +1913,35 @@ fn mappers_p_342_runs_its_personalities_and_flashes_its_save_area() {
     }
     assert!(cartridge.irq_asserted());
 }
+
+/// `mapper_562.c` (Venus Turbo Game Doctor): the BIOS at `$4800-$4FFF`; power-on mode 0 with
+/// the latch on (16 KiB bank from the latch, `$C000` bank 7); `$42FC` with D1 clear turns the
+/// latch off and `$8000-$FFFF` writes then land in the DRAM; the 16-bit counter asserts on
+/// reaching its target.
+#[cfg(feature = "board-562")]
+#[test]
+fn mappers_p_562_runs_the_game_doctor_copier() {
+    let mut core = MapperRom::new(562).prg(32).chr(8).load();
+    // The BIOS's jump table at `$4FF1`.
+    assert_eq!(0x4C, core.read_memory(0x4FF1));
+    assert_eq!([0, 1, 14, 15], core.prg_windows());
+    core.mapper_write(0x8000, 0x05);
+    assert_eq!([10, 11, 14, 15], core.prg_windows());
+    // `$4408`: `prg[0] << 2` (`$05 >> 2`) with the latch's D0-D1.
+    assert_eq!(0x05, core.read_memory(0x4408));
+
+    core.mapper_write(0x42FD, 0x00);
+    core.mapper_write(0x8100, 0x77);
+    assert_eq!(0x77, core.read_memory(0x8100));
+
+    core.mapper_write(0x440C, 0x00);
+    core.mapper_write(0x440D, 0x10);
+    core.mapper_write(0x440C, 0x80);
+    let cartridge = core.cartridge_mut().unwrap();
+    for _ in 0..0x10 {
+        cartridge.step_cpu_cycle();
+    }
+    assert!(!cartridge.irq_asserted());
+    cartridge.step_cpu_cycle();
+    assert!(cartridge.irq_asserted());
+}

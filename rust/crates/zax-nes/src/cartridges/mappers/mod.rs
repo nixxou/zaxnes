@@ -62,6 +62,8 @@ mod fk23c;
 mod fme7;
 #[cfg(feature = "board-246")]
 mod g0151;
+#[cfg(feature = "board-562")]
+mod game_doctor;
 #[cfg(feature = "board-huang1")]
 mod huang1;
 mod irem_h3001;

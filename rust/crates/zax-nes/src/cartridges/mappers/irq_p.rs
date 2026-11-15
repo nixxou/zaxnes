@@ -8,6 +8,8 @@
 //! the work RAM disabled ([`Mapper::prg_ram_enabled`]).
 #[cfg(feature = "board-342")]
 use super::cool_girl::CoolGirl;
+#[cfg(feature = "board-562")]
+use super::game_doctor::GameDoctor;
 #[cfg(any(feature = "board-256", feature = "board-436"))]
 use super::one_bus::OneBus;
 use super::vrc_irq::VrcIrq;
@@ -108,6 +110,9 @@ pub enum IrqPKind {
     /// 342, `mapper_342.c` (COOLGIRL): an FPGA re-implementing some thirty mappers, its PRG a
     /// NOR flash with a save area ([`super::cool_girl`]).
     M342,
+    /// 562, `mapper_562.c` (Venus Turbo Game Doctor): a copier whose DRAM holds the game and
+    /// whose BIOS shows at `$4800-$4FFF` ([`super::game_doctor`]); the misc ROM boots as 561's.
+    M562,
 }
 
 impl IrqPKind {
@@ -135,6 +140,7 @@ impl IrqPKind {
             256 => Self::M256,
             436 => Self::M436,
             342 => Self::M342,
+            562 => Self::M562,
             _ => return None,
         })
     }
@@ -161,6 +167,7 @@ impl IrqPKind {
             Self::M256 => 256,
             Self::M436 => 436,
             Self::M342 => 342,
+            Self::M562 => 562,
         }
     }
 }
@@ -217,6 +224,9 @@ pub struct IrqP {
     /// 342's FPGA, `None` for the other kinds; saved for that kind.
     #[cfg(feature = "board-342")]
     cool_girl: Option<Box<CoolGirl>>,
+    /// 562's copier, `None` for the other kinds; saved for that kind.
+    #[cfg(feature = "board-562")]
+    game_doctor: Option<Box<GameDoctor>>,
     /// 528's VRC7 IRQ (`init_VRC7(0x01, 0x00)`), saved for that kind only.
     vrc_irq: VrcIrq,
     /// Whether the image has CHR-ROM, which 359's CHR banking needs (`chrrom_size()`).
@@ -264,6 +274,8 @@ impl IrqP {
             },
             #[cfg(feature = "board-342")]
             cool_girl: (kind == IrqPKind::M342).then(|| Box::new(CoolGirl::new())),
+            #[cfg(feature = "board-562")]
+            game_doctor: (kind == IrqPKind::M562).then(|| Box::new(Self::power_on_562(memory))),
             nt_560: match kind {
                 IrqPKind::M560 => vec![0; NT_560],
                 IrqPKind::M547 => vec![0; NT_547],
@@ -280,6 +292,10 @@ impl IrqP {
         }
         if kind == IrqPKind::M561 {
             board.power_on_561(memory);
+        }
+        // 562 boots from the misc ROM as 561 does.
+        if kind == IrqPKind::M562 {
+            board.misc_561 = Self::misc_rom(memory);
         }
         // `map_init_560`: `reg = 1`.
         if kind == IrqPKind::M560 {
@@ -364,7 +380,7 @@ impl IrqP {
             IrqPKind::M547 => self.map_547(),
             // `prg_fix_561`/`chr_fix_561` read the copier RAM in `try_read_prg`/`ppu_peek`; 342
             // decodes its own windows (`CoolGirl`).
-            IrqPKind::M561 | IrqPKind::M342 => {}
+            IrqPKind::M561 | IrqPKind::M342 | IrqPKind::M562 => {}
             IrqPKind::M256 | IrqPKind::M436 => self.map_one_bus(),
             // `prg_fix_560`.
             IrqPKind::M560 => {
@@ -662,6 +678,64 @@ impl IrqP {
             }),
             _ => None,
         }
+    }
+
+    /// `mirroring_fix_562`.
+    fn game_doctor_mirroring(&self) -> Option<NametableMirroring> {
+        #[cfg(feature = "board-562")]
+        if let Some(chip) = &self.game_doctor {
+            return Some(chip.mirroring());
+        }
+        None
+    }
+
+    /// `extcl_cpu_every_cycle_562`.
+    fn step_game_doctor(&mut self) {
+        #[cfg(feature = "board-562")]
+        if let Some(chip) = &mut self.game_doctor {
+            chip.step();
+        }
+    }
+
+    /// A Game Doctor read the board answers: `$4000-$4FFF` (registers and BIOS, open bus
+    /// elsewhere) and the DRAM at `$8000`; `None` lets the work RAM answer `$5000-$7FFF`.
+    #[cfg(feature = "board-562")]
+    #[allow(clippy::option_option)] // The `cpu_read_override` shape: outer None falls through.
+    fn read_game_doctor(chip: &GameDoctor, address: u16) -> Option<Option<u8>> {
+        match address {
+            0x8000.. => Some(Some(chip.read_prg(address))),
+            0x4000..=0x4FFF => Some(chip.read_register(address)),
+            _ => None,
+        }
+    }
+
+    /// The NES 2.0 misc ROM (the image past its announced ROMs), a copier's launch program.
+    fn misc_rom(memory: &CartridgeMemory) -> Vec<u8> {
+        let rom = memory.rom();
+        rom.raw()
+            .get(rom.header().announced_size()..)
+            .unwrap_or_default()
+            .to_vec()
+    }
+
+    /// `map_init_562` and `extcl_after_mapper_init_562` at power-on: the DRAM from the image,
+    /// `mode.m1` from the submapper and the header's mirroring.
+    #[cfg(feature = "board-562")]
+    fn power_on_562(memory: &CartridgeMemory) -> GameDoctor {
+        let rom = memory.rom();
+        let header = rom.header();
+        let submapper = if header.is_nes20 {
+            u8::try_from(header.submapper & 0x07).unwrap_or(0)
+        } else {
+            0
+        };
+        GameDoctor::new(
+            rom.prg_rom(),
+            rom.chr_rom(),
+            memory.chr_ram().len(),
+            submapper,
+            header.mirroring == NametableMirroring::Vertical,
+        )
     }
 
     /// `mirroring_fix_OneBus_base`.
@@ -1064,6 +1138,7 @@ impl IrqP {
             }),
             IrqPKind::M256 | IrqPKind::M436 => self.one_bus_mirroring(),
             IrqPKind::M342 => self.cool_girl_mirroring(),
+            IrqPKind::M562 => self.game_doctor_mirroring(),
             // `mirroring_fix_547`.
             IrqPKind::M547 => Some(if self.ext_547[10] & 0x02 != 0 {
                 NametableMirroring::Horizontal
@@ -1220,7 +1295,7 @@ impl IrqP {
             }
             // `extcl_cpu_wr_mem_558` decodes `$5000-$53FF` only ([`IrqP::write_558`]); 342's writes
             // go to its FPGA before this decode.
-            IrqPKind::M558 | IrqPKind::M342 => {}
+            IrqPKind::M558 | IrqPKind::M342 | IrqPKind::M562 => {}
         }
     }
 }
@@ -1278,6 +1353,10 @@ impl Mapper for IrqP {
         if let Some(chip) = &self.cool_girl {
             chip.save_state(writer);
         }
+        #[cfg(feature = "board-562")]
+        if let Some(chip) = &self.game_doctor {
+            chip.save_state(writer);
+        }
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -1326,6 +1405,10 @@ impl Mapper for IrqP {
         if let Some(chip) = &mut self.cool_girl {
             chip.load_state(reader)?;
         }
+        #[cfg(feature = "board-562")]
+        if let Some(chip) = &mut self.game_doctor {
+            chip.load_state(reader)?;
+        }
         self.map();
         Ok(())
     }
@@ -1345,6 +1428,10 @@ impl Mapper for IrqP {
     fn irq_asserted(&self) -> bool {
         #[cfg(feature = "board-342")]
         if let Some(chip) = &self.cool_girl {
+            return chip.irq;
+        }
+        #[cfg(feature = "board-562")]
+        if let Some(chip) = &self.game_doctor {
             return chip.irq;
         }
         #[cfg(any(feature = "board-256", feature = "board-436"))]
@@ -1430,6 +1517,8 @@ impl Mapper for IrqP {
             IrqPKind::M561 => self.step_561(),
             // `extcl_cpu_every_cycle_342`.
             IrqPKind::M342 => self.step_cool_girl(),
+            // `extcl_cpu_every_cycle_562`.
+            IrqPKind::M562 => self.step_game_doctor(),
             // `extcl_cpu_every_cycle_547`: a 16-bit up-counter, reloaded and asserting on its wrap.
             IrqPKind::M547 => {
                 if self.irq_enabled {
@@ -1455,6 +1544,11 @@ impl Mapper for IrqP {
         #[cfg(feature = "board-342")]
         if let Some(chip) = &mut self.cool_girl {
             chip.on_ppu_bus(address, clock);
+            return;
+        }
+        #[cfg(feature = "board-562")]
+        if let Some(chip) = &mut self.game_doctor {
+            chip.see_chr(address);
             return;
         }
         if self.kind == IrqPKind::M471 && self.a12.rose(address, clock) {
@@ -1534,8 +1628,10 @@ impl Mapper for IrqP {
 
     /// `memmap_prgrom_*(0, MMCPU(0x5000/0x6000), …)`: ROM where the work RAM would be.
     fn prg_ram_enabled(&self) -> bool {
-        matches!(self.kind, IrqPKind::M417 | IrqPKind::M558 | IrqPKind::M561)
-            || (self.kind == IrqPKind::M528 && self.regs[0] == 0x01)
+        matches!(
+            self.kind,
+            IrqPKind::M417 | IrqPKind::M558 | IrqPKind::M561 | IrqPKind::M562
+        ) || (self.kind == IrqPKind::M528 && self.regs[0] == 0x01)
     }
 
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
@@ -1608,6 +1704,15 @@ impl Mapper for IrqP {
             self.settle(memory);
             return true;
         }
+        #[cfg(feature = "board-562")]
+        if let Some(chip) = &mut self.game_doctor {
+            if address >= 0x5000 {
+                return false;
+            }
+            chip.write(address, value);
+            self.settle(memory);
+            return true;
+        }
         // 547's work RAM, in 4 KiB windows.
         if self.kind == IrqPKind::M547 && (0x6000..0x8000).contains(&address) {
             let offset = self.ram_offset_547(address);
@@ -1644,6 +1749,12 @@ impl Mapper for IrqP {
             self.settle(memory);
             return;
         }
+        #[cfg(feature = "board-562")]
+        if let Some(chip) = &mut self.game_doctor {
+            chip.write(address, value);
+            self.settle(memory);
+            return;
+        }
         // `memmap_auto_wp_8k(…, !(reg1m & 2))`: with the latch off the copier RAM takes the write.
         if self.kind == IrqPKind::M561 && self.ext_561[2] & 0x02 == 0 {
             let offset = self.prg_offset_561(address);
@@ -1667,6 +1778,7 @@ impl Mapper for IrqP {
                 | IrqPKind::M256
                 | IrqPKind::M436
                 | IrqPKind::M342
+                | IrqPKind::M562
         ) {
             return None;
         }
@@ -1684,6 +1796,12 @@ impl Mapper for IrqP {
     fn ppu_peek(&self, memory: &CartridgeMemory, address: u16, fetch: ChrFetch) -> u8 {
         if self.kind == IrqPKind::M547 && address < 0x2000 {
             return self.chr_547(memory, address, fetch);
+        }
+        #[cfg(feature = "board-562")]
+        if let Some(chip) = &self.game_doctor {
+            if address < 0x2000 {
+                return chip.chr_byte(address);
+            }
         }
         #[cfg(feature = "board-342")]
         if let Some(chip) = &self.cool_girl {
@@ -1761,6 +1879,11 @@ impl Mapper for IrqP {
             }
             return;
         }
+        #[cfg(feature = "board-562")]
+        if let Some(chip) = &mut self.game_doctor {
+            chip.write_chr(address, value);
+            return;
+        }
         // The OneBus patterns are ROM.
         if matches!(self.kind, IrqPKind::M256 | IrqPKind::M436) {
             return;
@@ -1796,6 +1919,10 @@ impl Mapper for IrqP {
     /// `map_init_256`/`_436` on RESET: `init_OneBus`'s registers again and the IRQ cleared
     /// (`memset(&nes[0].irqA12, …)`).
     fn soft_reset(&mut self, memory: &mut CartridgeMemory) {
+        #[cfg(feature = "board-562")]
+        if let Some(chip) = &mut self.game_doctor {
+            chip.soft_reset();
+        }
         #[cfg(any(feature = "board-256", feature = "board-436"))]
         if let Some(chip) = &mut self.one_bus {
             chip.reset_registers();
@@ -1832,7 +1959,7 @@ impl Mapper for IrqP {
     /// any other of at least 4 bytes starts with its load and init addresses.
     fn boot_program(&self, _memory: &CartridgeMemory) -> Option<BootProgram> {
         let misc = &self.misc_561;
-        if self.kind != IrqPKind::M561 || misc.len() < 4 {
+        if !matches!(self.kind, IrqPKind::M561 | IrqPKind::M562) || misc.len() < 4 {
             return None;
         }
         Some(if misc.len() == 512 {
@@ -1851,6 +1978,10 @@ impl Mapper for IrqP {
     }
 
     fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+        #[cfg(feature = "board-562")]
+        if let Some(chip) = &self.game_doctor {
+            return Self::read_game_doctor(chip, address);
+        }
         #[cfg(feature = "board-342")]
         if let Some(chip) = &mut self.cool_girl {
             if address < 0x6000 {
@@ -1869,6 +2000,10 @@ impl Mapper for IrqP {
     }
 
     fn cpu_peek_override(&self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+        #[cfg(feature = "board-562")]
+        if let Some(chip) = &self.game_doctor {
+            return Self::read_game_doctor(chip, address);
+        }
         #[cfg(feature = "board-342")]
         if let Some(chip) = &self.cool_girl {
             if address < 0x6000 {
@@ -1889,7 +2024,7 @@ impl Mapper for IrqP {
             windows[2] = super::NO_ROM_WINDOW;
         }
         // 561's PRG is its own copier RAM; 342 reads through its own windows.
-        if matches!(self.kind, IrqPKind::M561 | IrqPKind::M342) {
+        if matches!(self.kind, IrqPKind::M561 | IrqPKind::M342 | IrqPKind::M562) {
             windows = [super::NO_ROM_WINDOW; 4];
         }
         windows

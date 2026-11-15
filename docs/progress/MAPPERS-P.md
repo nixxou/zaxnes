@@ -154,7 +154,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 559 | `mapper_559.c` | 108 | 1 | 0 | done (batch 30, `VrcP`) |
 | 560 | `mapper_560.c` | 83 | 1 | 0 | done (batch 48, `IrqP`) |
 | 561 | `mapper_561.c` | 276 | 203 | 0 | done (batch 52, `IrqP`) |
-| 562 | `mapper_562.c` | 538 | 290 | 0 | blocked: needs the copier's 4 KiB BIOS dump (owner) |
+| 562 | `mapper_562.c` | 538 | 290 | 0 | done (batch 57, `IrqP` + `game_doctor.rs`, BIOS embedded by owner decision) |
 | 564 | `mapper_564.c` | 77 | 0 | 0 | done (batch 9, `MultiP`) |
 
 ## Plan
@@ -420,3 +420,17 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   core +0.002 %, total +0.003 %; smb3 core +0.002 %, total +0.014 %. smb3's `convert` (+0.150 %)
   and `lua_hooks` (+0.238 %) both grew by the same 2 020 920 instructions, outside any board
   code: a shared function's layout, to recheck if it persists.
+* Owner decisions (2026-11-15): 355 option A (the PIC's EPROM embedded as puNES does, with a
+  port of the PIC16C5x core, MAME code under BSD-3); 532 yes (a UNIF loader, the font read from
+  the image's `FONT` chunk); 562 option A (the copier's BIOS embedded as puNES does). 186: the
+  owner asked whether Mesen reads the tapes; it does (`.studybox`/`STBX` files, a user-supplied
+  `StudyBox.bin`), answer pending.
+* Batch 57: 562 (Venus Turbo Game Doctor) as an `IrqP` kind over a new `game_doctor.rs`: the
+  copier DRAM loaded from the image's PRG and CHR, the registers at `$4024/$4025` (FDS-style
+  timer), `$42FC-$42FF` (mode 1, mirroring, latch on/off, CHR lock), `$43FC-$43FF`, `$4400-$4407`
+  (1 KiB CHR), `$440C/$440D` (16-bit counter), `$4411` (TGD mode) and their read-backs (`$4420`
+  the last CHR window fetched), the eight latch PRG modes, DRAM writes at `$8000+` while the
+  latch is off, and the misc-ROM boot shared with 561. The BIOS is embedded as puNES carries it
+  (owner decision, option A): `data/vtgd_bios.bin`, the 2 KiB `bios[]` holds (puNES declares
+  4 KiB and reads it through `& $7FF`). In both PPU-bus lists (the CHR window latch), the mf_3b
+  and mf_5a sweeps.

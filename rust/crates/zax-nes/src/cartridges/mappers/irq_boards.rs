@@ -860,7 +860,7 @@ impl Mapper for IrqBoard {
     }
 
     /// Forwarded for the copier loaders (lot MAPPERS-P), asked once at power-on.
-    #[cfg(feature = "board-561")]
+    #[cfg(any(feature = "board-561", feature = "board-562"))]
     fn boot_program(&self, memory: &CartridgeMemory) -> Option<super::BootProgram> {
         inner!(self, b => b.boot_program(memory))
     }

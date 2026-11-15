@@ -1053,9 +1053,13 @@ places where puNES itself is incomplete are copied, not invented around:
   line at that point; the APU here has just been reset and both are already clear. The FDS-style
   timer is puNES's signed 16-bit counter, which wraps while `irq.reg` D7 is clear exactly as
   puNES's does. A soft reset keeps the copier RAM (puNES reloads it on power-up only).
-* 562 (`mapper_562.c`): not implemented. puNES embeds the Venus Turbo Game Doctor's 4 KiB BIOS
-  as a byte table and runs it; that table is a firmware dump, not puNES's own code, so it is
-  not copied here (owner decision pending, MAPPERS-P status table).
+* 562 (`mapper_562.c`): the Venus Turbo Game Doctor's BIOS is embedded as puNES carries it, by
+  the owner's decision (2026-11-15): the 2 KiB of `bios[]` (declared 4 KiB, read through
+  `& $7FF`) in `data/vtgd_bios.bin`, a firmware dump and not emulator code. The boot follows
+  561's notes above. The `$4420` read-back tracks the last pattern fetch on the board's bus and
+  the last CHR write, as `extcl_rd_chr_562`/`extcl_wr_chr_562` do; a CHR write takes the
+  permission mapped before it changes the lock, as puNES's `chr_wr` does. The copier DRAM is the
+  image's PRG (wrapped to its size) and is saved in the state, not persisted.
 * 256, 436 (`OneBus.c`): as puNES, the VT02/VT03 are modelled in the console's ordinary 2 bpp
   rendering. In the 4 bpp modes (`$2010` D1/D2) the banks select the de-interleaved low planes
   puNES selects, but the PPU still draws two planes, so those games show what puNES shows, not
