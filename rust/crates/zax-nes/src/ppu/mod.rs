@@ -231,6 +231,13 @@ pub struct Ppu2C02 {
     /// stored to (lot FIDPLUS-2, [`Self::rewrite_pending_vram_write`]). Not part of the state:
     /// the two writes it pairs belong to one instruction, and a state is never taken inside one.
     last_data_write: (i64, u16),
+    /// The rendering state the horizontal copy of the next dot 257 must use, when a `$2001`
+    /// switch landed on dot 256 (lot FIDPLUS-2, A5): the copy follows the state of one dot
+    /// earlier than the fetches and increments do. Consumed on dot 257; not part of the state
+    /// (a `$2001` write is the last access of its instruction, and the dot follows at once).
+    copy_257_renders: Option<bool>,
+    /// Set by [`Self::copy_257_late_switch`]: this dot 257 makes no horizontal copy.
+    copy_257_suppressed: bool,
     /// Per-dot trace (feature `ppu-dot-trace`): on, the PPU runs every dot through
     /// [`Self::step_dot`] (no span, no idle skip) and records it. Not part of the state.
     #[cfg(feature = "ppu-dot-trace")]
@@ -637,6 +644,8 @@ impl Ppu2C02 {
             oam_seed_row: 0,
             oamaddr_bug: true,
             last_data_write: (i64::MIN, 0),
+            copy_257_renders: None,
+            copy_257_suppressed: false,
             #[cfg(feature = "ppu-dot-trace")]
             dot_trace: None,
             #[cfg(feature = "ppu-dot-trace")]
@@ -923,6 +932,11 @@ impl Ppu2C02 {
         }
         let ran_ahead = renders && self.prepaid_dots == delay;
         let write_dot = self.dot - if ran_ahead { delay } else { 0 };
+        // A switch on dot 256 (written on 254): the horizontal copy of dot 257 still sees the
+        // old state — the netlist copies after a switch off and does not after a switch on, in
+        // alignments 2 and 3 (A5; alignments 0 and 1 hit the switch-on race of step 33).
+        self.copy_257_renders =
+            (ran_ahead && self.dot == 256 && self.alignment >= 2).then(|| self.rendering_enabled());
         self.mask = value;
         let on = (value & 0x18) != 0;
         self.rendering_switched(on);
@@ -3571,6 +3585,13 @@ impl Ppu2C02 {
         if let Some(last) = self.dot_trace.as_mut().and_then(|trace| trace.last_mut()) {
             last.access = access;
         }
+    }
+
+    /// Inverts the odd-frame parity (feature `ppu-dot-trace`): a console's power-on parity is
+    /// not chosen by the program, and the differential must match the netlist's.
+    #[cfg(feature = "ppu-dot-trace")]
+    pub fn flip_frame_parity(&mut self) {
+        self.odd_frame = !self.odd_frame;
     }
 
     /// Stops the per-dot trace and returns its records.
