@@ -10,6 +10,8 @@ mod banked;
 mod board;
 mod chr_fetch;
 mod flash;
+#[cfg(any(feature = "board-406", feature = "board-451", feature = "board-446"))]
+pub(crate) mod jedec_flash;
 pub mod mappers;
 pub mod registry;
 
@@ -573,6 +575,8 @@ const fn nametable_pages_vary(mapper: i32) -> bool {
             | 560
             // MAPPERS-P: 547 serves the console's tables and its QT RAM itself.
             | 547
+            // MAPPERS-P: 446's VRC6 and MMC3 arrange the tables themselves (`ChipSwitch`).
+            | 446
             // MAPPERS-P: 559, a 1 KiB nametable register per table.
             | 559
             // MAPPERS-P: 353, game 0 pages CIRAM from the CHR registers' D7.
@@ -629,6 +633,8 @@ const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
             | 529
             // MAPPERS-N: mapper 266's VRC4 IRQ (nesdev "NES 2.0 Mapper 266").
             | 266
+            // MAPPERS-P: mapper 446, `ChipSwitch` (its VRC4 IRQ, puNES `EXTCL_CPU_EVERY_CYCLE`).
+            | 446
             // MAPPERS-P: mapper 436, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
             | 436
             // MAPPERS-P: mapper 256, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
@@ -876,6 +882,8 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 556
             // MAPPERS-P: mapper 351's MMC3 counter while that chip is in use (`ChipSwitch`).
             | 351
+            // MAPPERS-P: mapper 446's MMC3 counter while that chip is in use (`ChipSwitch`).
+            | 446
             // MAPPERS-P: mapper 442 latches PPU A0/A9 on the rise of A13 (`IrqP`).
             | 442
             // MAPPERS-P: mapper 272's IRQ counts the rendering's pattern fetches (`IrqP`).
@@ -1009,6 +1017,8 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 556
             // MAPPERS-P: mapper 351's MMC3 counter while that chip is in use (`ChipSwitch`).
             | 351
+            // MAPPERS-P: mapper 446's MMC3 counter while that chip is in use (`ChipSwitch`).
+            | 446
             // MAPPERS-P: mapper 442 latches PPU A0/A9 on the rise of A13 (`IrqP`).
             | 442
             | 176

@@ -1811,3 +1811,47 @@ fn mappers_p_394_switches_between_the_mmc3_and_the_jy_asic() {
     core.mapper_write(0x5001, 0x08);
     assert_eq!([0, 0, 30, 31], core.prg_windows());
 }
+
+/// `mapper_446.c`: unlocked, `$8000` is the outer bank and `$A000-$FFFF` banks `$3D-$3F`, and
+/// the PRG-ROM is a flash chip (IDs `$01`/`$76`, unlock at chip `$0AAA`/`$0555`); `$5000` D7 locks
+/// a personality inside the outer bank: UNROM by its latch, the MMC3 (submapper 1; submapper 0
+/// turns mode 1 into the SNROM), the VRC6 with its sound.
+#[cfg(feature = "board-446")]
+#[test]
+fn mappers_p_446_flashes_its_menu_and_locks_a_personality() {
+    let mut core = MapperRom::new(446).prg(64).chr(64).load();
+    assert_eq!([0, 61, 62, 63], core.prg_windows());
+    core.mapper_write(0x5001, 0x08);
+    assert_eq!([8, 61, 62, 63], core.prg_windows());
+    core.mapper_write(0x5001, 0x00);
+    core.mapper_write(0x8AAA, 0xAA);
+    core.mapper_write(0x8555, 0x55);
+    core.mapper_write(0x8AAA, 0x90);
+    let cartridge = core.cartridge_mut().unwrap();
+    assert_eq!(Some(0x01), cartridge.try_cpu_read(0x8000));
+    assert_eq!(Some(0x76), cartridge.try_cpu_read(0x8001));
+    core.mapper_write(0x8000, 0xF0);
+    assert_eq!([0, 61, 62, 63], core.prg_windows());
+
+    core.mapper_write(0x5001, 0x08);
+    core.mapper_write(0x5000, 0x80);
+    assert_eq!([8, 9, 62, 63], core.prg_windows());
+    core.mapper_write(0x8000, 0x01);
+    assert_eq!([10, 11, 62, 63], core.prg_windows());
+    // Locked: `$5000-$5FFF` no longer moves anything.
+    core.mapper_write(0x5001, 0x00);
+    assert_eq!([10, 11, 62, 63], core.prg_windows());
+
+    let mut core = MapperRom::new(446).prg(64).chr(64).submapper(1).load();
+    core.mapper_write(0x5001, 0x10);
+    core.mapper_write(0x5003, 0xF0);
+    core.mapper_write(0x5000, 0x81);
+    assert_eq!([16, 17, 30, 31], core.prg_windows());
+
+    let mut core = MapperRom::new(446).prg(64).chr(64).load();
+    core.mapper_write(0x5001, 0x10);
+    core.mapper_write(0x5003, 0xF0);
+    core.mapper_write(0x5000, 0x8E);
+    assert_eq!([16, 17, 18, 31], core.prg_windows());
+    assert!(core.cartridge().unwrap().expansion_audio_output().is_some());
+}

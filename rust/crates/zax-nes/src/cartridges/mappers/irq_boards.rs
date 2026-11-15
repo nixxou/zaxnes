@@ -561,7 +561,8 @@ impl Mapper for IrqBoard {
     #[cfg(any(
         feature = "board-mmc3-p",
         feature = "board-vrc-p",
-        feature = "board-413"
+        feature = "board-413",
+        feature = "board-446"
     ))]
     #[inline(never)]
     fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {
@@ -894,7 +895,7 @@ impl Mapper for IrqBoard {
     /// Forwarded for mapper 284 alone (lot MAPPERS-N), the one board of this enum with expansion
     /// audio: every other one keeps `Mapper`'s `None`, which `Cartridge::has_expansion_audio`
     /// reads once at attach, so their bus never asks again.
-    #[cfg(any(feature = "board-284", feature = "board-682"))]
+    #[cfg(any(feature = "board-284", feature = "board-682", feature = "board-446"))]
     fn expansion_audio_output(&self) -> Option<i32> {
         inner!(self, b => b.expansion_audio_output())
     }

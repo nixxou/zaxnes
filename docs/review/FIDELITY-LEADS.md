@@ -1072,6 +1072,16 @@ places where puNES itself is incomplete are copied, not invented around:
   to it for the mirroring, where puNES's `extcl_after_mapper_init_MMC3` re-applies its own
   `mmc3.mirroring`, which is the same value. The outer CHR bank is ORed over the chip's bank as
   puNES does (`base | (value & mask)`), not masked into it.
+* 446 (`mapper_446.c`): the chips are this core's (`Mmc1`, `Mmc3`, `Vrc2Vrc4` wired as 22, 23 and
+  25, `Vrc6` wired as 24), reset on the `$5000` lock as puNES's `init_*(…, HARD)`; their windows go
+  through the outer bank by `BankWindows::remap_*_banks` over the chip's already-wrapped banks,
+  which equals puNES's `base | (value & mask)` on the bank before wrapping whenever the image
+  holds the whole outer bank. puNES's TLSROM personality is a plain MMC3 with a 7-bit CHR mask,
+  and so is this one (no TxSROM nametable control). SUROM, PNROM, HNROM and VRC1 have no
+  `fix_all` arm in puNES and leave the windows as they were here too. The VRC2's `$6000` latch
+  read (puNES `extcl_cpu_rd_mem_VRC2and4`) is whatever `Vrc2Vrc4` answers for mapper 22. The board
+  reports expansion audio always (0 unless the VRC6 runs), so the APU is stepped every cycle for
+  every 446 image. The flash chip uses the shared `JedecFlash` (`SST39SF040.c`, 128 KiB sectors).
 
 ### J36. Mapper 682 (Rainbow): the ESP is modelled from the protocol document
 The ESP (`rainbow_esp.rs`) follows Broke Studio's `rainbow-net.md` and `mapper-doc.md`; no

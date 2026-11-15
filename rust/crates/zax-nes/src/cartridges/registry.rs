@@ -902,6 +902,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     438,
     #[cfg(feature = "board-442")]
     442,
+    #[cfg(feature = "board-446")]
+    446,
     #[cfg(feature = "board-447")]
     447,
     #[cfg(feature = "board-451")]
@@ -1111,6 +1113,13 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         #[cfg(feature = "board-547")]
         547 if header.chr_rom_size != 0 => BoardMemorySizes {
             chr_ram: Some(0x2000),
+            ..BoardMemorySizes::default()
+        },
+        // MAPPERS-P: 446's PRG-ROM is a flash chip with 128 KiB sectors, its menu's save medium
+        // (puNES `sst39sf040_init(…, 131072)`, `force_battery_io`).
+        #[cfg(feature = "board-446")]
+        446 => BoardMemorySizes {
+            flash_sector: Some(0x2_0000),
             ..BoardMemorySizes::default()
         },
         #[cfg(feature = "board-555")]
@@ -3671,6 +3680,11 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         436 => Board::IrqBoard(IrqBoard::IrqP(Box::new(IrqP::new(
             memory,
             IrqPKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-446")]
+        446 => Board::IrqBoard(IrqBoard::ChipSwitch(Box::new(ChipSwitch::new(
+            memory,
+            ChipSwitchKind::of(mapper)?,
         )))),
         #[cfg(feature = "board-299")]
         299 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(

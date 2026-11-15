@@ -196,6 +196,7 @@ default = [
     "board-266",
     "board-284",
     "board-682",
+    "board-446",
     "board-436",
     "board-256",
     "board-561",
@@ -377,6 +378,7 @@ board-406 = ["board-mmc3-p"]
 board-512 = ["board-mmc3-p"]
 # MAPPERS-P umbrella: the chip-switching boards of `chip_switch.rs`.
 board-chip-switch = []
+board-446 = ["board-chip-switch"]
 board-351 = ["board-chip-switch"]
 board-556 = ["board-chip-switch"]
 board-369 = ["board-mmc3-p"]

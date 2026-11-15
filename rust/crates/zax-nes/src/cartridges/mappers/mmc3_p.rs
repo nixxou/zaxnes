@@ -254,14 +254,11 @@ pub struct Mmc3P {
     ram_banks: [u8; 8],
     /// 406's and 451's flash command sequence and busy countdown (`sst39sf040.sequence`,
     /// `.time_out`), saved for those kinds only.
-    flash_sequence: u8,
-    flash_busy: u32,
+    #[cfg(any(feature = "board-406", feature = "board-451"))]
+    flash: crate::cartridges::jedec_flash::JedecFlash,
 }
 
 impl Mmc3P {
-    /// The 64 KiB sectors of 406's and 451's chips (`sst39sf040_init(…, 65536)`).
-    const FLASH_SECTOR: u32 = 0x1_0000;
-
     pub(crate) fn new(memory: &CartridgeMemory, kind: Mmc3PKind) -> Self {
         Self {
             mmc3: Mmc3::new(memory, kind.number()),
@@ -276,8 +273,8 @@ impl Mmc3P {
             expired_555: false,
             ram_windows: 0,
             ram_banks: [0; 8],
-            flash_sequence: 0,
-            flash_busy: 0,
+            #[cfg(any(feature = "board-406", feature = "board-451"))]
+            flash: crate::cartridges::jedec_flash::JedecFlash::default(),
             chr_269: if kind == Mmc3PKind::M269 {
                 Self::chr_269(memory)
             } else {
@@ -296,78 +293,43 @@ impl Mmc3P {
 
     /// Whether the flash chip answers reads itself (software ID or an erase running), which takes
     /// the ROM windows off the cached path.
+    #[allow(clippy::unused_self)]
     const fn flash_answers(&self) -> bool {
-        matches!(self.kind, Mmc3PKind::M406 | Mmc3PKind::M451)
-            && (self.flash_sequence == 0x90 || self.flash_busy != 0)
+        #[cfg(any(feature = "board-406", feature = "board-451"))]
+        if matches!(self.kind, Mmc3PKind::M406 | Mmc3PKind::M451) {
+            return self.flash.answers();
+        }
+        false
     }
 
-    /// The chip's manufacturer and model IDs (`map_init_406`/`_451`).
-    const fn flash_ids(&self) -> (u8, u8) {
-        match self.kind {
-            Mmc3PKind::M451 => (0x37, 0x86),
-            _ if self.submapper == 0 => (0xC2, 0xA4),
-            _ => (0x01, 0xA4),
+    /// The chip of `map_init_406`/`_451`: IDs, unlock addresses, 64 KiB sectors.
+    #[cfg(any(feature = "board-406", feature = "board-451"))]
+    const fn flash_chip(&self) -> crate::cartridges::jedec_flash::JedecChip {
+        let (ids, unlock) = match self.kind {
+            Mmc3PKind::M451 => ((0x37, 0x86), (0x0555, 0x02AA)),
+            _ if self.submapper == 0 => ((0xC2, 0xA4), (0x5555, 0x2AAA)),
+            _ => ((0x01, 0xA4), (0x5555, 0x2AAA)),
+        };
+        crate::cartridges::jedec_flash::JedecChip {
+            ids,
+            unlock,
+            sector: 0x1_0000,
         }
     }
 
-    /// `sst39sf040_write`: the JEDEC command sequence, the unlock addresses taken from the chip
-    /// address (its PRG-ROM offset) `& $7FFF`. A program `AND`s the byte, as flash does (puNES
-    /// stores it; J37); erases are 64 KiB sectors, the countdown one CPU cycle per byte.
+    /// `sst39sf040_write` at the chip address (the PRG-ROM offset) the CPU address shows.
+    #[cfg(any(feature = "board-406", feature = "board-451"))]
     fn write_flash(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
-        let Some(chip) = self
+        let Some(offset) = self
             .mmc3
             .banks()
             .and_then(|banks| banks.prg_rom_offset(address))
         else {
             return;
         };
-        let (first, second) = if self.kind == Mmc3PKind::M451 {
-            (0x0555, 0x02AA)
-        } else {
-            (0x5555, 0x2AAA)
-        };
-        let command = chip & 0x7FFF;
-        match self.flash_sequence {
-            0x01 | 0x81 => {
-                if command == second && value == 0x55 {
-                    self.flash_sequence += 1;
-                }
-            }
-            0x02 => {
-                if command == first {
-                    self.flash_sequence = value;
-                }
-            }
-            0x82 => {
-                let size = self.prg_size;
-                if value == 0x30 {
-                    if chip < size {
-                        memory.flash_erase_sector(chip);
-                        self.flash_busy = Self::FLASH_SECTOR;
-                    }
-                } else if command == first && value == 0x10 {
-                    for sector in (0..size).step_by(Self::FLASH_SECTOR as usize) {
-                        memory.flash_erase_sector(sector);
-                    }
-                    self.flash_busy = u32::try_from(size).unwrap_or(u32::MAX);
-                }
-            }
-            0x90 => {
-                if value == 0xF0 {
-                    self.flash_sequence = 0;
-                }
-            }
-            0xA0 => {
-                memory.flash_program(chip, value);
-                self.flash_sequence = 0;
-            }
-            // `default`, `0x00` and `0x80`: the first unlock byte.
-            _ => {
-                if command == first && value == 0xAA {
-                    self.flash_sequence = self.flash_sequence.wrapping_add(1);
-                }
-            }
-        }
+        let chip = self.flash_chip();
+        self.flash
+            .write(memory, &chip, offset, value, self.prg_size);
     }
 
     /// `extcl_cpu_wr_mem_451`: the MMC3 fed from the address lines.
@@ -472,8 +434,10 @@ impl Mmc3P {
         self.raw_100 = Self::RAW_100_POWER_ON;
         self.timer_555 = 0;
         self.expired_555 = false;
-        self.flash_sequence = 0;
-        self.flash_busy = 0;
+        #[cfg(any(feature = "board-406", feature = "board-451"))]
+        {
+            self.flash = crate::cartridges::jedec_flash::JedecFlash::default();
+        }
         match self.kind {
             // `map_init_372`/`_401`/`_410`/`_420`: "reg[2] = 0x0F", the CHR mask fully open.
             Mmc3PKind::M356
@@ -1345,8 +1309,8 @@ impl Mapper for Mmc3P {
             writer.write_bool(self.expired_555);
         }
         if matches!(self.kind, Mmc3PKind::M406 | Mmc3PKind::M451) {
-            writer.write_u8(self.flash_sequence);
-            writer.write_u32(self.flash_busy);
+            #[cfg(any(feature = "board-406", feature = "board-451"))]
+            self.flash.save_state(writer);
         }
     }
 
@@ -1365,8 +1329,8 @@ impl Mapper for Mmc3P {
             self.expired_555 = reader.read_bool()?;
         }
         if matches!(self.kind, Mmc3PKind::M406 | Mmc3PKind::M451) {
-            self.flash_sequence = reader.read_u8()?;
-            self.flash_busy = reader.read_u32()?;
+            #[cfg(any(feature = "board-406", feature = "board-451"))]
+            self.flash.load_state(reader)?;
         }
         self.refresh();
         Ok(())
@@ -1494,13 +1458,10 @@ impl Mapper for Mmc3P {
         }
         // `sst39sf040_read`: the IDs in the software-ID mode (A0 the model), the toggle bit D6
         // and `& $77` while an erase runs.
+        #[cfg(any(feature = "board-406", feature = "board-451"))]
         if address >= 0x8000 && self.flash_answers() {
-            if self.flash_sequence == 0x90 {
-                let (maker, model) = self.flash_ids();
-                return Some(if address & 0x0001 != 0 { model } else { maker });
-            }
-            let byte = self.mmc3.try_read_prg(memory, address)?;
-            return Some((byte ^ (u8::from(self.flash_busy & 0x01 != 0) << 6)) & 0x77);
+            let byte = self.mmc3.try_read_prg(memory, address);
+            return self.flash.read(&self.flash_chip(), address, byte);
         }
         // `extcl_cpu_rd_mem_370`: `$5000-$5FFF` reads `DIP & $80 | open bus & $7F`; the DIP is 0
         // and the high address byte stands in for the bus (J33).
@@ -1582,11 +1543,8 @@ impl Mapper for Mmc3P {
     /// CPU cycles to `(DIP | $10) << 25`, the DIP being 0 here (J37), about five minutes.
     fn on_cpu_cycle(&mut self, _memory: &mut CartridgeMemory) {
         // `sst39sf040_tick`: the end of an erase ends the command.
-        if self.flash_busy != 0 {
-            self.flash_busy -= 1;
-            if self.flash_busy == 0 {
-                self.flash_sequence = 0;
-            }
+        #[cfg(any(feature = "board-406", feature = "board-451"))]
+        if self.flash.tick() {
             return;
         }
         // `extcl_cpu_every_cycle_369`: a 12-bit counter asserting on its wrap to 0.

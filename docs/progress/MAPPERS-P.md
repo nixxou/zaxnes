@@ -118,7 +118,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 437 | `mapper_437.c` | 74 | 1 | 0 | done (batch 8, `MultiP`) |
 | 438 | `mapper_438.c` | 71 | 2 | 0 | done (batch 8, `MultiP`) |
 | 442 | `mapper_442.c` | 127 | 1 | 0 | done (batch 39, `IrqP`) |
-| 446 | `mapper_446.c` | 746 | 4 | 0 | todo |
+| 446 | `mapper_446.c` | 746 | 4 | 0 | done (batch 55, `ChipSwitch`) |
 | 447 | `mapper_447.c` | 98 | 1 | 0 | done (batch 16, `VrcP`) |
 | 451 | `mapper_451.c` | 147 | 2 | 0 | done (batch 50, `Mmc3P`) |
 | 452 | `mapper_452.c` | 119 | 1 | 0 | done (batch 40, `MultiP`) |
@@ -394,3 +394,12 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   sweep with 209.
 * Perf after batch 53 (ab6a49fb, the OneBus bus hooks) against e4596884: mm2 core +0.003 %,
   zelda2 core +0.002 %, smb3 core +0.002 % and total +0.002 %.
+* Batch 55: 446 (Mindkids SMD172B) as a `ChipSwitch` kind with a boxed `Mindkids` board: the
+  eight `$5000-$5007` registers until `$5000` D7 locks a personality (submapper 0's mode-1
+  quirk), the discrete modes (UNROM, CNROM, ANROM, GNROM, NROM, the Bandai latch) in the board's
+  own windows, the MMC1/MMC3 (TLSROM, 189 through `$6000`)/VRC2/VRC4/VRC6 chips through the outer
+  bank, `$5005` D2's CHR write protect, and the flash chip of the unlocked menu. The JEDEC command
+  machine of 406/451 moved to `cartridges/jedec_flash.rs` (`JedecFlash`, `JedecChip`) and is shared;
+  `FlashRom`'s and `CartridgeMemory`'s flash `cfg`s take `board-446`. `IrqBoard` forwards
+  `rom_windows` and `expansion_audio_output` for it; 446 is in both PPU-bus lists (MMC3) and in
+  `nametable_pages_vary` (VRC6, MMC3).
