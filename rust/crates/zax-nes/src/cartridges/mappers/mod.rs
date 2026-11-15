@@ -31,6 +31,8 @@ mod bandai_karaoke;
 mod bf9096;
 #[cfg(feature = "board-111")]
 mod cheapocabra;
+#[cfg(feature = "board-chip-switch")]
+mod chip_switch;
 #[cfg(any(feature = "board-162", feature = "board-163"))]
 mod chr_window;
 #[cfg(feature = "board-266")]
@@ -214,6 +216,8 @@ pub use bandai_karaoke::BandaiKaraoke;
 pub use bf9096::Bf9096;
 #[cfg(feature = "board-111")]
 pub use cheapocabra::Cheapocabra;
+#[cfg(feature = "board-chip-switch")]
+pub use chip_switch::{ChipSwitch, ChipSwitchKind};
 #[cfg(any(feature = "board-162", feature = "board-163"))]
 pub use chr_window::{ChrWindowBoard, ChrWindowKind};
 #[cfg(feature = "board-266")]

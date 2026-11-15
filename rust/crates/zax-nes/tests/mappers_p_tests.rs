@@ -1456,3 +1456,22 @@ fn mappers_p_369_switches_between_its_games() {
     mmc3_start(&mut core, 1, 2);
     assert_eq!([17, 18, 30, 31], core.prg_windows());
 }
+
+/// `mapper_556.c`: four registers in turn at `$5000`; the outer PRG bank and mask apply to the
+/// MMC3, and `reg[2]` D7 hands the board to a VRC4 (A0|A2, A1|A3) with the same outer bank.
+#[cfg(feature = "board-556")]
+#[test]
+fn mappers_p_556_switches_from_mmc3_to_vrc4() {
+    let mut core = MapperRom::new(556).prg(128).chr(512).load();
+    mmc3_start(&mut core, 1, 2);
+    for value in [0x00, 0x20, 0x0F, 0x30] {
+        core.mapper_write(0x5000, value);
+    }
+    assert_eq!([33, 34, 46, 47], core.prg_windows());
+    for value in [0x00, 0x20, 0x8F, 0x30] {
+        core.mapper_write(0x5000, value);
+    }
+    core.mapper_write(0x8000, 0x05);
+    core.mapper_write(0xA000, 0x06);
+    assert_eq!([37, 38, 46, 47], core.prg_windows());
+}

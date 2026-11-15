@@ -1019,6 +1019,9 @@ places where puNES itself is incomplete are copied, not invented around:
   addresses at fixed dots instead, which agrees on ordinary layouts.
 * 528 (`mapper_528.c`): the IRQ is Zaxnes's `VrcIrq` (the VRC4/VRC6/VRC7 counter); puNES's VRC7
   asserts one CPU cycle after the overflow (`irq_delay = 1`), Zaxnes on the overflow itself.
+* 556 (`mapper_556.c`): on a switch of chip puNES re-runs the new chip's whole fix, mirroring
+  included; here the windows are rebuilt but the mirroring stays the last one either chip wrote
+  until the new chip writes its own.
 
 ### J36. Mapper 682 (Rainbow): the ESP is modelled from the protocol document
 The ESP (`rainbow_esp.rs`) follows Broke Studio's `rainbow-net.md` and `mapper-doc.md`; no

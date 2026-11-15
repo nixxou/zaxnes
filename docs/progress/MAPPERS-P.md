@@ -148,7 +148,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 551 | `mapper_178.c` | 109 | 4 | 0 | done (batch 19, `WaixingFs305`) |
 | 554 | `mapper_554.c` | 94 | 1 | 0 | done (batch 10, `MultiP`) |
 | 555 | `mapper_555.c` | 142 | 3 | 0 | done (batch 32, `Mmc3P`) |
-| 556 | `mapper_556.c` | 178 | 1 | 0 | todo |
+| 556 | `mapper_556.c` | 178 | 1 | 0 | done (batch 45, `ChipSwitch`) |
 | 557 | `mapper_557.c` | 58 | 1 | 0 | done (batch 31, `MultiP`) |
 | 558 | `mapper_558.c` | 135 | 14 | 0 | done (batch 36, `IrqP`) |
 | 559 | `mapper_559.c` | 108 | 1 | 0 | done (batch 30, `VrcP`) |
@@ -323,3 +323,10 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 * Batch 44: `Mmc3P` 369 (N-49): `$4100` picks NROM banks, the *SMB2J* layout (ROM `$0E` at
   `$6000`, a 12-bit CPU-cycle IRQ in `outer[2]`/`outer[3]`, the chip's A12 counter idle) or the
   MMC3 at `$10`/`$20`; in `clocks_on_cpu_cycle` and still in both PPU-bus lists.
+* Batch 45: `chip_switch.rs` (`ChipSwitch`, boxed `IrqBoard` variant, umbrella
+  `board-chip-switch`): boards that hold two whole chips and route writes, hooks and the IRQ
+  line to the one in use, narrowing its windows to the outer bank afterwards. 556: `Mmc3` or a
+  VRC4 indexed by A0|A2 and A1|A3 (the new `Vrc2Vrc4::new_vrc4_or_lines`), A2/A3 swapped above
+  A11. In `clocks_on_cpu_cycle` (VRC4), both PPU-bus lists and the mf_3b sweep (MMC3). The
+  `cfg` of `Vrc2Vrc4::new_vrc4_wired` had been left on `new_vrc4_lines` by batch 30's insertion;
+  restored.

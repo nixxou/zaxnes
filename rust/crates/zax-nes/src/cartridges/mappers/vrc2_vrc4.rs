@@ -308,12 +308,6 @@ impl Vrc2Vrc4 {
         Self::new_vrc4_wired(memory, mapper_number, VrcVariant::Vrc4e)
     }
 
-    #[cfg(any(
-        feature = "board-529",
-        feature = "board-530",
-        feature = "board-266",
-        feature = "board-vrc-p"
-    ))]
     /// A VRC4 whose register index comes from two CPU address lines no Konami variant uses:
     /// mapper 559 wires A10 and A11 (puNES `mapper_559.c`, `init_VRC2and4(VRC24_VRC4, 0x400,
     /// 0x800, …)`; lot MAPPERS-P).
@@ -330,6 +324,29 @@ impl Vrc2Vrc4 {
         }
     }
 
+    /// A VRC4 whose index bits are each the OR of two CPU address lines, `lines` and
+    /// `or_lines`: mapper 556's `init_VRC2and4(VRC24_VRC4, 0x05, 0x0A, …)` (lot MAPPERS-P).
+    #[cfg(feature = "board-chip-switch")]
+    pub(crate) fn new_vrc4_or_lines(
+        memory: &CartridgeMemory,
+        mapper_number: i32,
+        lines: [u32; 2],
+        or_lines: [u32; 2],
+    ) -> Self {
+        Self {
+            index_lines: lines,
+            index_or_lines: or_lines,
+            ..Self::new_vrc4_wired(memory, mapper_number, VrcVariant::Vrc4e)
+        }
+    }
+
+    #[cfg(any(
+        feature = "board-529",
+        feature = "board-530",
+        feature = "board-266",
+        feature = "board-vrc-p",
+        feature = "board-chip-switch"
+    ))]
     fn new_vrc4_wired(memory: &CartridgeMemory, mapper_number: i32, variant: VrcVariant) -> Self {
         let lines = variant.index_lines();
         Self {
@@ -372,7 +389,8 @@ impl Vrc2Vrc4 {
     #[cfg(any(
         feature = "board-116",
         feature = "board-huang1",
-        feature = "board-vrc-p"
+        feature = "board-vrc-p",
+        feature = "board-chip-switch"
     ))]
     pub(crate) fn refresh_banks(&mut self) {
         self.update_banks();

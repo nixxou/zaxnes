@@ -1,5 +1,7 @@
 #[cfg(feature = "board-530")]
 use super::Ax5705;
+#[cfg(feature = "board-chip-switch")]
+use super::ChipSwitch;
 #[cfg(feature = "board-266")]
 use super::CityFighter;
 #[cfg(feature = "board-cony")]
@@ -378,6 +380,9 @@ pub enum IrqBoard {
     /// Mapper 530, the AX5705 VRC4 board (lot MAPPERS-N).
     #[cfg(feature = "board-530")]
     Ax5705(Box<Ax5705>),
+    /// Lot MAPPERS-P's chip-switching boards ([`ChipSwitch`]), boxed for [`IrqBoard::Ax5705`]'s reason.
+    #[cfg(feature = "board-chip-switch")]
+    ChipSwitch(Box<ChipSwitch>),
     /// Lot MAPPERS-P's CPU-cycle IRQ boards ([`IrqP`]), boxed for [`IrqBoard::Ax5705`]'s reason.
     #[cfg(feature = "board-irq-p")]
     IrqP(Box<IrqP>),
@@ -467,6 +472,8 @@ macro_rules! inner {
             IrqBoard::Kaiser7017($b) => $body,
             #[cfg(feature = "board-530")]
             IrqBoard::Ax5705($b) => $body,
+            #[cfg(feature = "board-chip-switch")]
+            IrqBoard::ChipSwitch($b) => $body,
             #[cfg(feature = "board-irq-p")]
             IrqBoard::IrqP($b) => $body,
             #[cfg(feature = "board-vrc-p")]
@@ -666,6 +673,7 @@ impl Mapper for IrqBoard {
         feature = "board-mmc3-p",
         feature = "board-vrc-p",
         feature = "board-irq-p",
+        feature = "board-chip-switch",
         feature = "board-irq-latch",
         feature = "board-176",
         feature = "board-682",
@@ -698,6 +706,7 @@ impl Mapper for IrqBoard {
         feature = "board-284",
         feature = "board-682",
         feature = "board-irq-p",
+        feature = "board-chip-switch",
         feature = "board-mmc3-p",
         feature = "board-vrc-p"
     ))]

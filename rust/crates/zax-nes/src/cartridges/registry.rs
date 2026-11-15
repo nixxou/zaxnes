@@ -118,6 +118,8 @@ use super::mappers::{
     Bandai74161, Bf9096, CnRomProtect, IremTamS1, JalecoJf11, SmallBoard, Sunsoft1, Sunsoft2,
     TaitoTc0190, Vrc1,
 };
+#[cfg(feature = "board-chip-switch")]
+use super::mappers::{ChipSwitch, ChipSwitchKind};
 #[cfg(any(feature = "board-162", feature = "board-163"))]
 use super::mappers::{ChrWindowBoard, ChrWindowKind};
 #[cfg(feature = "board-fine-rom")]
@@ -956,6 +958,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     554,
     #[cfg(feature = "board-555")]
     555,
+    #[cfg(feature = "board-556")]
+    556,
     #[cfg(feature = "board-557")]
     557,
     #[cfg(feature = "board-558")]
@@ -3558,6 +3562,11 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         369 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
             memory,
             Mmc3PKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-556")]
+        556 => Board::IrqBoard(IrqBoard::ChipSwitch(Box::new(ChipSwitch::new(
+            memory,
+            ChipSwitchKind::of(mapper)?,
         )))),
         #[cfg(feature = "board-299")]
         299 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
