@@ -51,10 +51,12 @@ pub(super) enum EdgeKind {
     /// the dot, before the switch (applied after dot 257's work, which with the rendering off
     /// does nothing else to `v`).
     CopyAfterSwitchOff,
+    /// The second phase of a coarse-Y wrap from 29 (A7): coarse Y 30 back to 0, one dot later.
+    SettleCoarseY,
 }
 
 impl EdgeKind {
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 9] = [
         Self::LoadAddress,
         Self::StoreData,
         Self::ReadLatch,
@@ -63,6 +65,7 @@ impl EdgeKind {
         Self::ReadLatchAfterFetch,
         Self::SwitchRendering,
         Self::CopyAfterSwitchOff,
+        Self::SettleCoarseY,
     ];
 
     fn from_u8(byte: u8) -> Option<Self> {
@@ -199,7 +202,7 @@ impl Ppu2C02 {
 
     /// Posts an edge from inside another edge: `dots` after the dot being applied, whatever dots
     /// an access ran ahead.
-    fn post_edge_now(&mut self, dots: i32, kind: EdgeKind) {
+    pub(super) fn post_edge_now(&mut self, dots: i32, kind: EdgeKind) {
         let count = usize::from(self.edge_count);
         if count < EDGE_SLOTS {
             self.edges[count] = Edge {
@@ -218,9 +221,15 @@ impl Ppu2C02 {
         cart: Cart<'_, '_, K>,
     ) {
         while count > 0 {
+            if self.edge_count == 0 && !self.tracing() {
+                // Nothing pending: the standard core's stretches (idle dots, visible spans), which
+                // post nothing; a dot that may (256, a register's edge) goes through `step_dot`.
+                count -= self.run_dot_stretch(count, cart);
+                continue;
+            }
             #[cfg(feature = "ppu-dot-trace")]
             self.dot_trace_bus.set(0xFFFF);
-            self.step_dot(cart);
+            self.step_dot_out_of_line(cart);
             // Only the edges pending before this dot: one an edge posts counts from the next.
             let mut index = 0;
             let mut pending = usize::from(self.edge_count);
@@ -243,10 +252,68 @@ impl Ppu2C02 {
         }
     }
 
+    /// Whether the per-dot trace is on (feature `ppu-dot-trace`).
+    #[allow(clippy::unused_self)]
+    const fn tracing(&self) -> bool {
+        #[cfg(feature = "ppu-dot-trace")]
+        {
+            self.dot_trace.is_some()
+        }
+        #[cfg(not(feature = "ppu-dot-trace"))]
+        {
+            false
+        }
+    }
+
+    /// [`Ppu2C02::step_dot`] for the Fidélité+ paths: one copy of the dot's work, kept apart from
+    /// the standard loop's inlined one.
+    #[inline(never)]
+    fn step_dot_out_of_line<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {
+        self.step_dot(cart);
+    }
+
+    /// One stretch of `run_dots`'s standard loop (idle dots, a visible span, or one dot), at
+    /// most `count` dots; returns the dots run.
+    #[inline(never)]
+    fn run_dot_stretch<K: BoardKind>(&mut self, count: i64, cart: Cart<'_, '_, K>) -> i64 {
+        let idle = self.idle_dots_ahead().min(count);
+        if idle > 0 {
+            #[allow(clippy::cast_possible_truncation)] // At most a line of dots.
+            let idle_i32 = idle as i32;
+            if self.scanline < super::VISIBLE_SCANLINES && self.dot < super::SCREEN_WIDTH_I32 {
+                self.fill_backdrop(
+                    self.dot + 1,
+                    (self.dot + idle_i32).min(super::SCREEN_WIDTH_I32),
+                );
+            }
+            self.dot += idle_i32;
+            self.ppu_clock += idle;
+            return idle;
+        }
+        let span = self.visible_span_ahead(count);
+        if span > 0 {
+            if !self.run_visible_span::<K>(span, cart.as_deref()) {
+                self.run_visible_span_through_bus(span, cart);
+            }
+            return span;
+        }
+        self.step_dot_out_of_line(cart);
+        1
+    }
+
     fn apply_edge<K: BoardKind>(&mut self, kind: EdgeKind, value: u8, cart: Cart<'_, '_, K>) {
         match kind {
             EdgeKind::SwitchRendering => self.edge_switch_rendering(value, cart),
             EdgeKind::CopyAfterSwitchOff => self.transfer_address_x(),
+            EdgeKind::SettleCoarseY => {
+                if (self.v >> 5) & 0x1F == 30 {
+                    let before = self.v;
+                    self.v &= !0x03E0;
+                    if self.v_row_next == before {
+                        self.v_row_next = self.v;
+                    }
+                }
+            }
             EdgeKind::LoadAddress => self.edge_load_address(cart),
             EdgeKind::StoreData => {
                 let address = self.v & 0x3FFF;

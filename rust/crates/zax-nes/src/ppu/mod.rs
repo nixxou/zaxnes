@@ -2152,8 +2152,8 @@ impl Ppu2C02 {
     /// Runs `count` dots, skipping in one go the stretches where a dot does nothing but
     /// move the counters (or, on a visible line with rendering off, draw the backdrop).
     fn run_dots<K: BoardKind>(&mut self, mut count: i64, cart: Cart<'_, '_, K>) {
-        if self.edge_count != 0 {
-            // Fidélité+ only: an edge is pending (`edges`).
+        if self.edge_count != 0 || self.fidelity_plus {
+            // Fidélité+ (`edges`): its own loop, which may post an edge from a dot's own work.
             self.run_dots_with_edges(count, cart);
             return;
         }
@@ -2265,6 +2265,12 @@ impl Ppu2C02 {
         self.vblank_just_started = false;
     }
 
+    /// One dot. **Inlined into `run_dots`**, and it has to stay: lot FIDPLUS-A gave it two more
+    /// callers (the Fidélité+ loop), LLVM outlined it and every dot of the standard path paid the
+    /// call, +2.3 % on `metroid` (callgrind). The Fidélité+ paths call
+    /// [`Self::step_dot_out_of_line`] instead.
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
     fn step_dot<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {
         self.advance_counters();
         self.process_dot(cart);
