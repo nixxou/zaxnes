@@ -12,6 +12,8 @@ use super::Fk23c;
 use super::Huang1;
 #[cfg(feature = "board-irq-latch")]
 use super::IrqLatch;
+#[cfg(feature = "board-irq-p")]
+use super::IrqP;
 #[cfg(feature = "board-jy-asic")]
 use super::JyCompany;
 #[cfg(feature = "board-303")]
@@ -376,6 +378,9 @@ pub enum IrqBoard {
     /// Mapper 530, the AX5705 VRC4 board (lot MAPPERS-N).
     #[cfg(feature = "board-530")]
     Ax5705(Box<Ax5705>),
+    /// Lot MAPPERS-P's CPU-cycle IRQ boards ([`IrqP`]), boxed for [`IrqBoard::Ax5705`]'s reason.
+    #[cfg(feature = "board-irq-p")]
+    IrqP(Box<IrqP>),
     /// Lot MAPPERS-P's VRC2/VRC4 boards ([`VrcP`]), boxed for [`IrqBoard::Ax5705`]'s reason.
     #[cfg(feature = "board-vrc-p")]
     VrcP(Box<VrcP>),
@@ -462,6 +467,8 @@ macro_rules! inner {
             IrqBoard::Kaiser7017($b) => $body,
             #[cfg(feature = "board-530")]
             IrqBoard::Ax5705($b) => $body,
+            #[cfg(feature = "board-irq-p")]
+            IrqBoard::IrqP($b) => $body,
             #[cfg(feature = "board-vrc-p")]
             IrqBoard::VrcP($b) => $body,
             #[cfg(feature = "board-529")]
@@ -645,6 +652,7 @@ impl Mapper for IrqBoard {
         feature = "board-mmc3-clones",
         feature = "board-mmc3-p",
         feature = "board-vrc-p",
+        feature = "board-irq-p",
         feature = "board-irq-latch",
         feature = "board-176",
         feature = "board-682",

@@ -39,7 +39,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 295 | `mapper_295.c` | 69 | 12 | 0 | done (batch 2, `JyCompany` + `JyMulticart`) |
 | 297 | `mapper_297.c` | 119 | 1 | 0 | done (batch 11, `Mmc1Outer`) |
 | 308 | `mapper_308.c` | 90 | 1 | 0 | done (batch 16, `VrcP`) |
-| 311 | `mapper_311.c` | 97 | 1 | 0 | todo |
+| 311 | `mapper_311.c` | 97 | 1 | 0 | done (batch 18, `IrqP`) |
 | 315 | `mapper_315.c` | 92 | 1 | 0 | done (batch 12, `Mmc3P`) |
 | 322 | `mapper_322.c` | 101 | 1 | 0 | done (batch 12, `Mmc3P`) |
 | 327 | `mapper_327.c` | 89 | 0 | 0 | done (batch 12, `Mmc3P`) |
@@ -62,13 +62,13 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 354 | `mapper_354.c` | 111 | 0 | 0 | done (batch 4, `MultiP`) |
 | 355 | `mapper_355.c` | 258 | 4 | 1 | todo |
 | 356 | `mapper_356.c` | 106 | 1 | 0 | todo |
-| 357 | `mapper_357.c` | 118 | 1 | 0 | todo |
+| 357 | `mapper_357.c` | 118 | 1 | 0 | done (batch 18, `IrqP`) |
 | 358 | `mapper_358.c` | 76 | 4 | 0 | done (batch 3, `JyCompany` + `JyMulticart`) |
 | 359 | `mapper_359.c` | 293 | 3 | 0 | todo |
 | 360 | `mapper_360.c` | 54 | 1 | 0 | done (batch 2, `MultiP`) |
 | 361 | `mapper_361.c` | 85 | 5 | 0 | done (batch 12, `Mmc3P`) |
 | 362 | `mapper_362.c` | 99 | 2 | 0 | todo |
-| 368 | `mapper_368.c` | 106 | 2 | 0 | todo |
+| 368 | `mapper_368.c` | 106 | 2 | 0 | done (batch 18, `IrqP`) |
 | 369 | `mapper_369.c` | 221 | 1 | 0 | todo |
 | 370 | `mapper_370.c` | 117 | 1 | 0 | todo |
 | 372 | `mapper_372.c` | 96 | 1 | 0 | done (batch 12, `Mmc3P`) |
@@ -103,8 +103,8 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 413 | `mapper_413.c` | 135 | 1 | 0 | todo |
 | 414 | `mapper_414.c` | 80 | 1 | 0 | done (batch 7, `MultiP`) |
 | 415 | `mapper_415.c` | 69 | 1 | 0 | done (batch 7, `MultiP`) |
-| 416 | `mapper_416.c` | 133 | 1 | 0 | todo |
-| 417 | `mapper_417.c` | 131 | 1 | 0 | todo |
+| 416 | `mapper_416.c` | 133 | 1 | 0 | done (batch 18, `IrqP`) |
+| 417 | `mapper_417.c` | 131 | 1 | 0 | done (batch 18, `IrqP`) |
 | 420 | `mapper_420.c` | 96 | 1 | 0 | done (batch 13, `Mmc3P`) |
 | 421 | `mapper_421.c` | 72 | 1 | 0 | done (batch 7, `JyCompany` + `JyMulticart`) |
 | 422 | `mapper_126.c` | 153 | 7 | 0 | todo |
@@ -223,3 +223,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   (308, 524). The four numbers join `clocks_on_cpu_cycle`. 362 and 398 (PRG switched by CHR
   fetches), 527 (CIRAM pages from CHR bit 7), 528 and 559 remain.
 * Batch 17: `MultiP` 340 (CHR-RAM write protection in its NROM modes); `map_b9` split off.
+* Batch 18: `irq_p.rs` (`IrqP`, boxed `IrqBoard` variant, umbrella `board-irq-p`): the *SMB2J*
+  conversions 311, 357, 368, 416 and the *Batman* pirate 417 (CIRAM page per table, in
+  `nametable_pages_vary`; its free-running counter is in the mf_5a sweep). All five join
+  `clocks_on_cpu_cycle`.

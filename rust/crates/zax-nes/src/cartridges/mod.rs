@@ -550,6 +550,8 @@ const fn nametable_pages_vary(mapper: i32) -> bool {
             // MAPPERS-N: 307, the KS7037, a CIRAM page per table from four registers
             // (`Kaiser7037.h`, `SetNametables`).
             | 307
+            // MAPPERS-P: 417, a CIRAM page per table from four registers (`mapper_417.c`).
+            | 417
             // MAPPERS-N: 284 serves every table while its extended attributes are on.
             | 284
             // MAPPERS-N: 682 serves every table.
@@ -602,6 +604,16 @@ const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
             | 529
             // MAPPERS-N: mapper 266's VRC4 IRQ (nesdev "NES 2.0 Mapper 266").
             | 266
+            // MAPPERS-P: mapper 417, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
+            | 417
+            // MAPPERS-P: mapper 416, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
+            | 416
+            // MAPPERS-P: mapper 368, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
+            | 368
+            // MAPPERS-P: mapper 357, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
+            | 357
+            // MAPPERS-P: mapper 311, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
+            | 311
             // MAPPERS-P: mapper 524, `VrcP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
             | 524
             // MAPPERS-P: mapper 447, `VrcP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
@@ -2296,6 +2308,10 @@ mod tests {
         }
         if Cartridge::is_supported(183) {
             expected.extend_from_slice(&[183, 183]);
+        }
+        // MAPPERS-P: mapper 417's counter runs whether or not its IRQ is enabled.
+        if Cartridge::is_supported(417) {
+            expected.extend_from_slice(&[417, 417]);
         }
         // MAPPERS-N: mapper 682's jitter counter runs on every CPU cycle (`Rainbow.cpp`).
         if Cartridge::is_supported(682) {

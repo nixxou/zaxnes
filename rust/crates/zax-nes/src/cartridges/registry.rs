@@ -124,6 +124,8 @@ use super::mappers::{ChrWindowBoard, ChrWindowKind};
 use super::mappers::{FineRom, FineRomKind};
 #[cfg(feature = "board-irq-latch")]
 use super::mappers::{IrqLatch, IrqLatchKind};
+#[cfg(feature = "board-irq-p")]
+use super::mappers::{IrqP, IrqPKind};
 #[cfg(feature = "board-jaleco-72-92-86")]
 use super::mappers::{JalecoJf13, JalecoJf17};
 #[cfg(any(
@@ -683,6 +685,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     308,
     #[cfg(feature = "board-309")]
     309,
+    #[cfg(feature = "board-311")]
+    311,
     #[cfg(feature = "board-312")]
     312,
     #[cfg(feature = "board-313")]
@@ -747,6 +751,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     352,
     #[cfg(feature = "board-354")]
     354,
+    #[cfg(feature = "board-357")]
+    357,
     #[cfg(feature = "board-358")]
     358,
     #[cfg(feature = "board-360")]
@@ -755,6 +761,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     361,
     #[cfg(feature = "board-366")]
     366,
+    #[cfg(feature = "board-368")]
+    368,
     #[cfg(feature = "board-372")]
     372,
     #[cfg(feature = "board-374")]
@@ -811,6 +819,10 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     414,
     #[cfg(feature = "board-415")]
     415,
+    #[cfg(feature = "board-416")]
+    416,
+    #[cfg(feature = "board-417")]
+    417,
     #[cfg(feature = "board-420")]
     420,
     #[cfg(feature = "board-421")]
@@ -939,13 +951,14 @@ fn datach_has_external_eeprom(header: &InesHeader) -> bool {
 /// The MAPPERS-N boards whose iNES 1.0 CHR-RAM is Mesen2's 8 KiB default (see
 /// [`board_memory_sizes`]).
 const MAPPERS_N_CHR_RAM_8K: &[i32] = &[
-    340, 564, 541, 538, 481, 437, 434, 433, 431, 415, 409, 396, 382, 380, 354, 375, 350, 337, 381,
-    237, 39, 40, 42, 43, 44, 45, 46, 49, 50, 51, 52, 54, 56, 57, 58, 59, 60, 61, 53, 62, 63, 103,
-    104, 106, 108, 113, 117, 120, 125, 126, 134, 142, 148, 166, 167, 170, 171, 174, 177, 179, 183,
-    196, 197, 200, 201, 202, 203, 204, 205, 212, 213, 214, 216, 217, 221, 222, 224, 226, 227, 229,
-    230, 231, 233, 235, 236, 238, 240, 241, 242, 244, 245, 249, 250, 254, 255, 258, 259, 261, 265,
-    274, 283, 285, 286, 287, 288, 289, 290, 299, 300, 301, 302, 303, 304, 305, 306, 307, 309, 312,
-    313, 314, 319, 320, 324, 325, 329, 331, 332, 333, 336, 346, 348, 349, 366, 518, 521, 522,
+    368, 357, 311, 340, 564, 541, 538, 481, 437, 434, 433, 431, 415, 409, 396, 382, 380, 354, 375,
+    350, 337, 381, 237, 39, 40, 42, 43, 44, 45, 46, 49, 50, 51, 52, 54, 56, 57, 58, 59, 60, 61, 53,
+    62, 63, 103, 104, 106, 108, 113, 117, 120, 125, 126, 134, 142, 148, 166, 167, 170, 171, 174,
+    177, 179, 183, 196, 197, 200, 201, 202, 203, 204, 205, 212, 213, 214, 216, 217, 221, 222, 224,
+    226, 227, 229, 230, 231, 233, 235, 236, 238, 240, 241, 242, 244, 245, 249, 250, 254, 255, 258,
+    259, 261, 265, 274, 283, 285, 286, 287, 288, 289, 290, 299, 300, 301, 302, 303, 304, 305, 306,
+    307, 309, 312, 313, 314, 319, 320, 324, 325, 329, 331, 332, 333, 336, 346, 348, 349, 366, 518,
+    521, 522,
 ];
 
 /// The volatile-memory sizes of `mapper`'s board for `header`.
@@ -3273,6 +3286,31 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
             memory,
             MultiPKind::of(mapper)?,
         ))),
+        #[cfg(feature = "board-311")]
+        311 => Board::IrqBoard(IrqBoard::IrqP(Box::new(IrqP::new(
+            memory,
+            IrqPKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-357")]
+        357 => Board::IrqBoard(IrqBoard::IrqP(Box::new(IrqP::new(
+            memory,
+            IrqPKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-368")]
+        368 => Board::IrqBoard(IrqBoard::IrqP(Box::new(IrqP::new(
+            memory,
+            IrqPKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-416")]
+        416 => Board::IrqBoard(IrqBoard::IrqP(Box::new(IrqP::new(
+            memory,
+            IrqPKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-417")]
+        417 => Board::IrqBoard(IrqBoard::IrqP(Box::new(IrqP::new(
+            memory,
+            IrqPKind::of(mapper)?,
+        )))),
         #[cfg(feature = "board-299")]
         299 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
             memory,

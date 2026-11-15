@@ -969,6 +969,11 @@ places where puNES itself is incomplete are copied, not invented around:
   (J33's convention).
 * 401's DIP switches choose which register bits drive PRG A19-A20 and can disable PRG; at 0 the
   `reg[1]` D5-D6 lines are used and nothing is disabled.
+* 416: `extcl_cpu_every_cycle_416` resets the counter on every cycle that does not reach `$1000`
+  (`if (enable && ++counter == 0x1000) {...; return;} counter = 0;`), so as written its IRQ never
+  fires. `IrqP` counts while enabled, asserts at `$1000` and clears when disabled; no dump in the
+  Hackset to settle it.
+* 357 runs its *SMB2J* layout only (DIP switch 0); the other three games are selected by the DIP.
 * 281/282/295 apply puNES's outer bank to ROM nametables too (`mirroring_swap_jyasic_28x`); with
   no dump in the Hackset this is untested on a real image.
 

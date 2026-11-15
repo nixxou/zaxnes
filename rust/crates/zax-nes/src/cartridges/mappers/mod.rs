@@ -69,6 +69,8 @@ mod iremg101;
 mod irq_boards;
 #[cfg(feature = "board-irq-latch")]
 mod irq_latch;
+#[cfg(feature = "board-irq-p")]
+mod irq_p;
 #[cfg(feature = "board-small-boards")]
 mod jaleco_jf11;
 #[cfg(feature = "board-jaleco-72-92-86")]
@@ -252,6 +254,8 @@ pub use iremg101::IremG101;
 pub use irq_boards::IrqBoard;
 #[cfg(feature = "board-irq-latch")]
 pub use irq_latch::{IrqLatch, IrqLatchKind};
+#[cfg(feature = "board-irq-p")]
+pub use irq_p::{IrqP, IrqPKind};
 #[cfg(feature = "board-small-boards")]
 pub use jaleco_jf11::JalecoJf11;
 #[cfg(feature = "board-jaleco-72-92-86")]

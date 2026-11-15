@@ -832,3 +832,60 @@ fn mappers_p_340_switches_unrom_and_nrom() {
     core.mapper_write(0x8024, 0);
     assert_eq!([8, 9, 10, 11], core.prg_windows());
 }
+
+/// `mapper_311.c`: `$4022` the 32 KiB bank; `$5000` 4 KiB bank 17 and `$6000` 8 KiB bank 9.
+#[cfg(feature = "board-311")]
+#[test]
+fn mappers_p_311_maps_rom_below_8000() {
+    let mut core = MapperRom::new(311).prg(16).load();
+    core.mapper_write(0x4022, 0x01);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    assert_eq!(8, core.read_memory(0x5000));
+    assert_eq!(9, core.read_memory(0x6000));
+}
+
+/// `mapper_357.c` with the DIP switch at 0: the *SMB2J* layout.
+#[cfg(feature = "board-357")]
+#[test]
+fn mappers_p_357_has_the_smb2j_layout() {
+    let mut core = MapperRom::new(357).prg(16).load();
+    assert_eq!([1, 0, 4, 10], core.prg_windows());
+    core.mapper_write(0x4022, 0x02);
+    assert_eq!([1, 0, 5, 10], core.prg_windows());
+}
+
+/// `mapper_368.c`: `$4022` D0-D2 pick the `$C000` bank; `$4122` reads back `$8A | (D & $35)`.
+#[cfg(feature = "board-368")]
+#[test]
+fn mappers_p_368_has_a_readable_irq_register() {
+    let mut core = MapperRom::new(368).prg(16).load();
+    assert_eq!([1, 0, 4, 8], core.prg_windows());
+    core.mapper_write(0x4022, 0x01);
+    assert_eq!([1, 0, 3, 8], core.prg_windows());
+    core.mapper_write(0x4122, 0x01);
+    assert_eq!(0x8B, core.read_memory(0x4122));
+}
+
+/// `mapper_416.c`: `$4020` the *SMB2J* `$C000` bank, `$8000` D3 the NROM modes.
+#[cfg(feature = "board-416")]
+#[test]
+fn mappers_p_416_switches_to_nrom() {
+    let mut core = MapperRom::new(416).prg(16).chr(32).load();
+    core.mapper_write(0x4020, 0x01);
+    assert_eq!([0, 1, 4, 3], core.prg_windows());
+    core.mapper_write(0x8000, 0x88);
+    assert_eq!([12, 13, 14, 15], core.prg_windows());
+}
+
+/// `mapper_417.c`: three 8 KiB PRG registers, the last bank fixed.
+#[cfg(feature = "board-417")]
+#[test]
+fn mappers_p_417_has_three_prg_registers() {
+    let mut core = MapperRom::new(417).prg(16).chr(64).load();
+    core.mapper_write(0x8000, 5);
+    core.mapper_write(0x8001, 6);
+    core.mapper_write(0x8002, 7);
+    core.mapper_write(0x8012, 9);
+    assert_eq!([5, 6, 7, 15], core.prg_windows());
+    assert_eq!(9, core.chr_windows()[2]);
+}

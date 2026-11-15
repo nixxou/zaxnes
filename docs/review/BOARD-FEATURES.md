@@ -809,6 +809,11 @@ dispatch is the generic path of the exotic ones only.
 | `board-384` | 384 | `VrcP` kind M384 (IrqBoard): L1A16, VRC4e with a lockable outer bank (puNES; MAPPERS-P). Requires `board-vrc-p` | — | — (unit test) | **on** |
 | `board-447` | 447 | `VrcP` kind M447 (IrqBoard): KL-06, VRC4e with an address-latched outer bank and NROM mode (puNES; MAPPERS-P). Requires `board-vrc-p` | — | — (unit test) | **on** |
 | `board-524` | 524 | `VrcP` kind M524 (IrqBoard): BTL-900218, VRC2b with its own CPU-cycle IRQ (puNES; MAPPERS-P). Requires `board-vrc-p` | — | — (unit test) | **on** |
+| `board-311` | 311 | `IrqP` kind M311 (IrqBoard): SMB2J conversion, $4022/$4122, PRG-ROM at $5000/$6000 (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-357` | 357 | `IrqP` kind M357 (IrqBoard): Bit Corp 4-in-1, SMB2J layout with the DIP at 0 (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-368` | 368 | `IrqP` kind M368 (IrqBoard): YUNG-08 SMB2J, readable IRQ status (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-416` | 416 | `IrqP` kind M416 (IrqBoard): 4-in-1 N-32, SMB2J layout and NROM latch (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-417` | 417 | `IrqP` kind M417 (IrqBoard): Batman pirate, CIRAM page per table (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
 | `board-53` | 53 | `MiscN` M53: Supervision 16-in-1, outer register at `$6000`, ROM at `$6000-$7FFF`, optional EPROM by CRC (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-487` | 487 | `MiscN` M487: NINA-03 and outer registers at `$4100`/`$4180`, Color Dreams register in the second half (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-518` | 518 | `MiscN` M518: Dance 2000, `$5000`/`$5200`, open bus over `$8000-$FFFF`, CHR page 0 from the nametable address (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
