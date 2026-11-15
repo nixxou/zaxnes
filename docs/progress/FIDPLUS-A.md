@@ -135,6 +135,34 @@ first.
 * Option `emu.fidelity_plus` (Emulation tab, desktop and handheld, French and English texts; off,
   takes effect at the next load).
 
+## The standard path's cost, and how it was found (2026-11-15)
+
+Callgrind, clean builds, PR-1 set against 6c9cb163 (before FIDPLUS-A):
+
+| Commit | Worst | Cause |
+|---|---|---|
+| 7c7d3c52 (step 1) | +0.001 % | — |
+| bcfd363e (step 4) | +2.31 % (`metroid`), +1.95 % `mm2`, +1.79 % `smb1` | `step_dot` outlined from `run_dots`: the Fidélité+ loop gave it more callers |
+| c5836c29 | +0.995 % `duelito`, +0.61 % `mmc5`, +0.57 % `smb3` (most ROMs -0.2 to -0.7 %) | `step_dot` pinned; `process_dot` and `run_visible_span_through_bus` then outlined (`smb3`) |
+| 0b5dbf58 | (measuring) | `process_dot` and both span functions pinned; the Fidélité+ paths call `step_dot_out_of_line` |
+
+Found with `callgrind_annotate` per function, base against new: the regressed functions are
+always a callee appearing with a body of its own.
+
+## Step 3a — the address latch as state (2026-11-15)
+
+* In the Fidélité+ loop, after an odd fetching dot's work the octal latch takes the address's
+  low byte and the fetch is remembered; after the next dot's work the read is checked against the
+  address of that moment (the PPU's high lines now, the latch's low byte): when `v` moved between
+  the two halves, or the latch took another byte, the byte read is the one at that address.
+* What it replaces: the `$2006` "hybrid address" patch (`AccuracyCoin`, `Hybrid Addresses`) and
+  the `ALE + Read` refetch edge: a `$2007` read latching on a cadence ALE half puts its byte in the
+  latch, and the next read takes it. Both now follow from the bus.
+* AccuracyCoin 147/147 in the four alignments, corpus unchanged (`g2006px`, `g2001px`, `g3e01px`
+  0 dots; `g2006x` 2; `g2005px`, `g2000` 2; `oam` 1).
+* A7 (the two-phase coarse-Y wrap) in Fidélité+ too: coarse Y 30 with the nametable bit flipped
+  for one dot, cleared by an edge after the next dot.
+
 ## Next: step 3
 
 The PPU DATA read and write state machines as state, on PPU clock halves (AccuracyCoin's
