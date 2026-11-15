@@ -141,6 +141,8 @@ use super::mappers::{LatchBoard, SingleLatch};
 use super::mappers::{LatchKind, LatchMulti};
 #[cfg(feature = "board-misc-n")]
 use super::mappers::{MiscKind, MiscN};
+#[cfg(feature = "board-mmc1-outer")]
+use super::mappers::{Mmc1Outer, Mmc1OuterKind};
 #[cfg(feature = "board-mmc3-clones")]
 use super::mappers::{Mmc3Clone, Mmc3CloneKind};
 #[cfg(feature = "board-multi-p")]
@@ -647,6 +649,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     292,
     #[cfg(feature = "board-295")]
     295,
+    #[cfg(feature = "board-297")]
+    297,
     #[cfg(feature = "board-298")]
     298,
     #[cfg(feature = "board-299")]
@@ -725,6 +729,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     360,
     #[cfg(feature = "board-366")]
     366,
+    #[cfg(feature = "board-374")]
+    374,
     #[cfg(feature = "board-375")]
     375,
     #[cfg(feature = "board-380")]
@@ -751,6 +757,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     400,
     #[cfg(feature = "board-403")]
     403,
+    #[cfg(feature = "board-404")]
+    404,
     #[cfg(feature = "board-409")]
     409,
     #[cfg(feature = "board-414")]
@@ -799,6 +807,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     538,
     #[cfg(feature = "board-541")]
     541,
+    #[cfg(feature = "board-550")]
+    550,
     #[cfg(feature = "board-taito-x1")]
     552,
     #[cfg(feature = "board-554")]
@@ -3043,6 +3053,26 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
             memory,
             MultiPKind::of(mapper)?,
         ))),
+        #[cfg(feature = "board-297")]
+        297 => Board::DecodeBoard(DecodeBoard::Mmc1Outer(Box::new(Mmc1Outer::new(
+            memory,
+            Mmc1OuterKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-374")]
+        374 => Board::DecodeBoard(DecodeBoard::Mmc1Outer(Box::new(Mmc1Outer::new(
+            memory,
+            Mmc1OuterKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-404")]
+        404 => Board::DecodeBoard(DecodeBoard::Mmc1Outer(Box::new(Mmc1Outer::new(
+            memory,
+            Mmc1OuterKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-550")]
+        550 => Board::DecodeBoard(DecodeBoard::Mmc1Outer(Box::new(Mmc1Outer::new(
+            memory,
+            Mmc1OuterKind::of(mapper)?,
+        )))),
         #[cfg(feature = "board-299")]
         299 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
             memory,

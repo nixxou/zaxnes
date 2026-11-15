@@ -37,7 +37,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 282 | `mapper_282.c` | 76 | 13 | 0 | done (batch 2, `JyCompany` + `JyMulticart`) |
 | 291 | `mapper_291.c` | 90 | 1 | 0 | todo |
 | 295 | `mapper_295.c` | 69 | 12 | 0 | done (batch 2, `JyCompany` + `JyMulticart`) |
-| 297 | `mapper_297.c` | 119 | 1 | 0 | todo |
+| 297 | `mapper_297.c` | 119 | 1 | 0 | done (batch 11, `Mmc1Outer`) |
 | 308 | `mapper_308.c` | 90 | 1 | 0 | todo |
 | 311 | `mapper_311.c` | 97 | 1 | 0 | todo |
 | 315 | `mapper_315.c` | 92 | 1 | 0 | todo |
@@ -72,7 +72,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 369 | `mapper_369.c` | 221 | 1 | 0 | todo |
 | 370 | `mapper_370.c` | 117 | 1 | 0 | todo |
 | 372 | `mapper_372.c` | 96 | 1 | 0 | todo |
-| 374 | `mapper_374.c` | 56 | 4 | 0 | todo |
+| 374 | `mapper_374.c` | 56 | 4 | 0 | done (batch 11, `Mmc1Outer`) |
 | 375 | `mapper_375.c` | 77 | 1 | 0 | done (batch 3, `MultiP`) |
 | 377 | `mapper_377.c` | 86 | 3 | 0 | todo |
 | 380 | `mapper_380.c` | 89 | 9 | 0 | done (batch 4, `MultiP`) |
@@ -94,7 +94,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 400 | `mapper_400.c` | 105 | 1 | 0 | done (batch 6, `MultiP`) |
 | 401 | `mapper_401.c` | 97 | 1 | 0 | todo |
 | 403 | `mapper_403.c` | 96 | 4 | 0 | done (batch 6, `MultiP`) |
-| 404 | `mapper_404.c` | 71 | 1 | 0 | todo |
+| 404 | `mapper_404.c` | 71 | 1 | 0 | done (batch 11, `Mmc1Outer`) |
 | 406 | `mapper_406.c` | 120 | 2 | 0 | todo |
 | 409 | `mapper_409.c` | 56 | 1 | 0 | done (batch 6, `MultiP`) |
 | 410 | `mapper_410.c` | 96 | 1 | 0 | todo |
@@ -144,7 +144,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 541 | `mapper_541.c` | 70 | 1 | 0 | done (batch 9, `MultiP`) |
 | 543 | `mapper_543.c` | 87 | 0 | 0 | todo |
 | 547 | `mapper_547.c` | 241 | 8 | 4 | todo |
-| 550 | `mapper_550.c` | 86 | 1 | 0 | todo |
+| 550 | `mapper_550.c` | 86 | 1 | 0 | done (batch 11, `Mmc1Outer`) |
 | 551 | `mapper_178.c` | 109 | 4 | 0 | todo |
 | 554 | `mapper_554.c` | 94 | 1 | 0 | done (batch 10, `MultiP`) |
 | 555 | `mapper_555.c` | 142 | 3 | 0 | todo |
@@ -197,3 +197,10 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 * Batch 10: `MultiP` 525 (eight 1 KiB CHR registers, `MultiP::chr`, in the save state) and 554
   (latch moved by CPU **reads** of trigger addresses: its four ROM windows are `NO_ROM_WINDOW`,
   so every `$8000-$FFFF` read reaches `cpu_read_override` on this board alone).
+* Perf, batches 1-10 (cacb0bbb) against e4596884: mm2 core +0.000 %, total -0.000 %; zelda2 core
+  +0.000 %, total -0.002 %.
+* Batch 11: `mmc1_outer.rs` (`Mmc1Outer`, boxed `DecodeBoard` variant, umbrella
+  `board-mmc1-outer`), the `FaridSlrom` pattern: the MMC1 untouched, its windows rebuilt
+  (`Mmc1::refresh_banks`) and narrowed after every change. 297 and 550 also have a latch mode
+  that bypasses the chip; 374 counts resets. 543 (MMC1 with a serial outer register and banked
+  WRAM) is still to do.

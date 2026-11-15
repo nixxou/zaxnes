@@ -509,3 +509,53 @@ fn mappers_p_554_latches_on_a_read() {
     assert_eq!(Some(14), bus.try_cpu_read(0x6000));
     assert_eq!(112, core.chr_windows()[0]);
 }
+
+/// `mapper_297.c`: power-on latch mode (UNROM-like, `$8000` D4-D5); `$4100` bit 0 hands the
+/// windows to the MMC1 in outer 128 KiB bank 1.
+#[cfg(feature = "board-297")]
+#[test]
+fn mappers_p_297_switches_between_its_latch_and_the_mmc1() {
+    let mut core = MapperRom::new(297).prg(32).chr(64).load();
+    assert_eq!([0, 1, 6, 7], core.prg_windows());
+    core.mapper_write(0x8000, 0x20);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    core.mapper_write(0x4100, 0x01);
+    assert_eq!([16, 17, 30, 31], core.prg_windows());
+}
+
+/// `mapper_374.c`: each reset moves the MMC1 to the next 128 KiB PRG / 128 KiB CHR game.
+#[cfg(feature = "board-374")]
+#[test]
+fn mappers_p_374_counts_resets() {
+    let mut core = MapperRom::new(374).prg(64).chr(256).load();
+    assert_eq!([0, 1, 14, 15], core.prg_windows());
+    core.soft_reset();
+    assert_eq!([16, 17, 30, 31], core.prg_windows());
+    assert_eq!(128, core.chr_bank(0x0000));
+}
+
+/// `mapper_404.c`: `$6000` the outer bank (D6 halves the inner mask), D7 locks it.
+#[cfg(feature = "board-404")]
+#[test]
+fn mappers_p_404_takes_its_outer_bank_at_6000_and_locks() {
+    let mut core = MapperRom::new(404).prg(128).chr(256).load();
+    core.mapper_write(0x6000, 0x41);
+    assert_eq!([16, 17, 30, 31], core.prg_windows());
+    // D6 clear: a 256 KiB inner mask, so the fixed bank is the MMC1's own last (30-31).
+    core.mapper_write(0x6000, 0x80);
+    assert_eq!([0, 1, 30, 31], core.prg_windows());
+    core.mapper_write(0x6000, 0x01);
+    assert_eq!([0, 1, 30, 31], core.prg_windows());
+}
+
+/// `mapper_550.c`: a 32 KiB latch until `$7000-$7FFF` A1-A2 select the MMC1.
+#[cfg(feature = "board-550")]
+#[test]
+fn mappers_p_550_switches_from_its_latch_to_the_mmc1() {
+    let mut core = MapperRom::new(550).prg(64).chr(256).load();
+    core.mapper_write(0x8000, 0x30);
+    assert_eq!([12, 13, 14, 15], core.prg_windows());
+    core.mapper_write(0x7006, 0);
+    assert_eq!([48, 49, 62, 63], core.prg_windows());
+    assert_eq!(96, core.chr_bank(0x0000));
+}

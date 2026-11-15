@@ -196,6 +196,10 @@ default = [
     "board-266",
     "board-284",
     "board-682",
+    "board-550",
+    "board-404",
+    "board-374",
+    "board-297",
     "board-554",
     "board-525",
     "board-564",
@@ -322,6 +326,12 @@ board-168 = []
 
 # MAPPERS-N umbrella.
 board-latch-multi = ["board-decode-boards"]
+# MAPPERS-P umbrella: the boards of `mmc1_outer.rs`.
+board-mmc1-outer = ["board-decode-boards"]
+board-550 = ["board-mmc1-outer"]
+board-404 = ["board-mmc1-outer"]
+board-374 = ["board-mmc1-outer"]
+board-297 = ["board-mmc1-outer"]
 # MAPPERS-P umbrella: the discrete boards of `multicart_p.rs`.
 board-multi-p = ["board-decode-boards"]
 board-554 = ["board-multi-p"]

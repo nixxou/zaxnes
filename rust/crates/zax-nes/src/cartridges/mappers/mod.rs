@@ -93,6 +93,8 @@ mod maxi15;
 #[cfg(feature = "board-misc-n")]
 mod misc_n;
 mod mmc1;
+#[cfg(feature = "board-mmc1-outer")]
+mod mmc1_outer;
 #[cfg(feature = "board-111")]
 mod mmc1_parallel;
 mod mmc2;
@@ -270,6 +272,8 @@ pub use maxi15::Maxi15;
 #[cfg(feature = "board-misc-n")]
 pub use misc_n::{MiscKind, MiscN};
 pub use mmc1::Mmc1;
+#[cfg(feature = "board-mmc1-outer")]
+pub use mmc1_outer::{Mmc1Outer, Mmc1OuterKind};
 #[cfg(feature = "board-111")]
 pub use mmc1_parallel::Mmc1Parallel;
 pub use mmc2::Mmc2;

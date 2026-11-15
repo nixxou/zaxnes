@@ -284,7 +284,7 @@ impl Mmc1 {
 
     /// Recomputes the windows from the registers, for a board that holds this chip and writes
     /// its own PRG layout over them (mappers 105 and 116). Behind the two features that need it.
-    #[cfg(feature = "board-116")]
+    #[cfg(any(feature = "board-116", feature = "board-mmc1-outer"))]
     pub(crate) fn refresh_banks(&mut self, memory: &mut CartridgeMemory) {
         self.update_banks(memory);
     }
