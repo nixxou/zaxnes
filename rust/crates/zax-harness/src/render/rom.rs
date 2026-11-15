@@ -146,6 +146,15 @@ fn smooth_scrolling(core: &NesCore, picture: &mut [u8], scene: &mut SceneState) 
 /// [`HarnessError::Io`] when a file cannot be read or written.
 #[allow(clippy::too_many_lines)] // One run of the ROM, step by step.
 pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError> {
+    // A forced scene emphasis is in force from the first frame, as the app's setting is: the
+    // profile's scripts read palette colours while the frames run.
+    if let Some(forced) = std::env::var("ZAXNES_EMPHASIS_3D").ok().and_then(|value| {
+        value
+            .strip_prefix("force:")
+            .and_then(|n| n.parse::<u8>().ok())
+    }) {
+        zax_engine3d::palette::set_scene_emphasis(forced);
+    }
     let profile = request.profile;
     let file_name = file_name(request.rom);
     let (mut host, mut scene) = Host::start(&Startup {
@@ -275,6 +284,15 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
     zax_engine3d::palette::set_scene_emphasis(scene_emphasis);
     // The backdrop read again: it is a palette colour too.
     scene.nes_background_color = engine.frame_color(0);
+    if !setting.is_empty() {
+        println!(
+            "render: backdrop {:?}, nes background used {}, skybox {:?}, chosen {:?}",
+            scene.nes_background_color,
+            scene.use_nes_background_color,
+            scene.settings.skybox,
+            scene.background_color()
+        );
+    }
     let draw_list = engine.build_draw_list().clone();
 
     Ok(SyntheticScene {
