@@ -60,7 +60,26 @@ Measured: callgrind against 6c9cb163 (clean builds), PR-1 set -0.000 % to +0.001
 * `tests/fidplus_equivalence_tests.rs` now checks PAL and Dendy (no edge there): equal to the
   standard core.
 
-## Next: step 2b
+Validation of step 2a with `ZAXNES_FIDELITY_PLUS=1`: campaign 215 / 4, AccuracyCoin passes in the
+four alignments, golden-core the same as the standard core (SMB3 Japan and Zelda II Europe, the
+known moves).
 
-`$2007` read (latch at the edge, the merge rules to fall out of the order), `$2001` (switch and the
-dot-257 copy), `$2000`, `$2005`; the `$2006` write on dot 304.
+## Step 2b — `$2007` read as edges (2026-11-15)
+
+* The read returns the buffer (the palette at once); the latch is an edge at the start of dot X
+  (latency 30: D+5 in alignments 0-1, D+6 in 2-3): in a blanking the byte at `v`, on an odd
+  fetching X the byte X - 1 left on the bus; on an even fetching X, after X's work, the byte X's
+  fetch read. The increment comes in the middle of X (after X's work): visible on dot X, as the
+  netlist shows it (the first version, one dot early, left 2008 runs on `r2007`).
+* What stays written is what the netlist says about signals, not about order: the read's increment
+  lines and the pipeline's are the same (on a natural coarse-X dot only Y is added, on 256
+  nothing), and the horizontal copy of 257 wins over the read's coarse X.
+* A bug found on the way: an edge posted from inside an edge was counted down in the same dot.
+* `r2007`: 250 708 dots (standard) -> 85 875, all of them the program's post-render lines (the
+  netlist's PPUCTRL powers on with bit 2 set, the program never writes `$2000`, A7) and one dot at
+  each coarse-Y wrap from 29 (the two-phase wrap, A7, step 3).
+
+## Next: step 2c
+
+`$2001` (switch and the dot-257 copy), `$2000`, `$2005`; the `$2006` write on dot 304; then the
+whole campaign and golden in Fidélité+.

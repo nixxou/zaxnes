@@ -2514,6 +2514,9 @@ impl Ppu2C02 {
     /// allocator, which `docs/progress/MF-5a.md` records rather than takes.
     #[inline(never)]
     fn read_data<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) -> u8 {
+        if self.edges_on() {
+            return self.read_data_with_edges(cart);
+        }
         let address = self.v & 0x3FFF;
         // A `$2007` access is an ALE of `v` (step 39).
         self.ale_low = address.to_le_bytes()[0];

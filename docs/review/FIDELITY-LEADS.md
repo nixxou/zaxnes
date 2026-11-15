@@ -376,6 +376,18 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 - Earlier 2A03 letters are reported with a different duty (to check against nesdev before use:
   the 2A03E and earlier); part C's console model should carry it per revision.
 
+### A7. The coarse-Y wrap takes two phases — open, Fidélité+ step 3 (2026-11-15)
+- Netlist, `r2007`, alignments 2 and 3: when a Y increment wraps coarse Y from 29 (fine Y 7), `v`
+  shows for **one dot** coarse Y 30 with the vertical nametable bit already flipped (`$7FAF` ->
+  `$07D0` -> `$0410`), then coarse Y 0: the increment ripples first, the "30" detection clears it
+  in the next phase. Seen on the natural increment of dot 256 and on a `$2007` read's increment.
+- Only a fetch made during that dot can see it: the refetch of an odd-X `$2007` read latch
+  (`ALE + Read`) takes its high address lines from that `v`, so it would read row 30 (the attribute
+  table's rows). Not modelled; step 3 (AD bus and address latch per half dot) is where it belongs.
+- Also seen with the same bench: `r2007` never writes `$2000`, and the netlist's PPUCTRL powers on
+  with bit 2 set (+32 increments in vblank) where Zaxnes has 0: the post-render lines of that
+  program are not comparable.
+
 ## B. Power-on and reset
 
 ### B1. PPU position at power-on — open (no perf cost; moves every game)

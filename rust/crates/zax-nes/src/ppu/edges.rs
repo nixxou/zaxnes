@@ -27,6 +27,17 @@ pub(super) enum EdgeKind {
     LoadAddress,
     /// A `$2007` write outside rendering: the data latch is stored at `v`, then `v` increments.
     StoreData,
+    /// A `$2007` read, at the start of its latch dot X: outside the fetches the buffer takes the
+    /// byte at `v`; on an odd X the byte the fetch of X - 1 left on the bus. The increment follows
+    /// in the middle of X ([`EdgeKind::ReadIncrement`]).
+    ReadLatch,
+    /// The increment of an odd-X or blanking read, in the middle of X (after X's work here); on a
+    /// fetching dot the fetch X set up is then read again with the buffered byte as its low
+    /// address byte (`AccuracyCoin`, `ALE + Read`).
+    ReadIncrement,
+    /// A `$2007` read whose latch dot X is an even fetching dot: after X's work, the byte X's fetch
+    /// read. Then the increment, merged with X's own.
+    ReadLatchAfterFetch,
 }
 
 /// One pending edge: applied after the work of the `dots`-th dot from now.
@@ -46,6 +57,10 @@ impl Edge {
 /// Latency of the `$2006` load, in half master clocks from M2 fall: `v` is loaded in the middle
 /// of the third dot after the access dot in all four alignments (A3c, step 33; A5 `g2006x`).
 const LOAD_ADDRESS_LATENCY: i32 = 18;
+
+/// Latency of the `$2007` read latch: the very start of dot D+5 in alignments 0 and 1, D+6 in 2
+/// and 3 (A3c, step 25, netlist), one latency with the alignment offsets.
+const READ_LATCH_LATENCY: i32 = 30;
 
 /// Latency of the store of a `$2007` write and of its increment of `v`: after the sixth dot (A5,
 /// `g2006px`, palette writes, alignments 2 and 3: `v` moves on dot D+6). The second write of
@@ -94,6 +109,16 @@ impl Ppu2C02 {
         self.edge_count += 1;
     }
 
+    /// Posts an edge from inside another edge: `dots` after the dot being applied, whatever dots
+    /// an access ran ahead.
+    fn post_edge_now(&mut self, dots: i32, kind: EdgeKind) {
+        let count = usize::from(self.edge_count);
+        if count < EDGE_SLOTS {
+            self.edges[count] = Edge { dots, kind };
+            self.edge_count += 1;
+        }
+    }
+
     /// Runs `count` dots one at a time, applying each pending edge after the work of its dot.
     pub(super) fn run_dots_with_edges<K: BoardKind>(
         &mut self,
@@ -104,14 +129,17 @@ impl Ppu2C02 {
             #[cfg(feature = "ppu-dot-trace")]
             self.dot_trace_bus.set(0xFFFF);
             self.step_dot(cart);
+            // Only the edges pending before this dot: one an edge posts counts from the next.
             let mut index = 0;
-            while index < usize::from(self.edge_count) {
+            let mut pending = usize::from(self.edge_count);
+            while index < pending {
                 self.edges[index].dots -= 1;
                 if self.edges[index].dots <= 0 {
                     let kind = self.edges[index].kind;
                     self.edges
                         .copy_within(index + 1..usize::from(self.edge_count), index);
                     self.edge_count -= 1;
+                    pending -= 1;
                     self.apply_edge(kind, cart);
                 } else {
                     index += 1;
@@ -130,6 +158,55 @@ impl Ppu2C02 {
                 let address = self.v & 0x3FFF;
                 self.write_vram_inner(address, self.data_latch, PpuBusAccess::Cpu, cart);
                 self.increment_vram_address(cart);
+            }
+            EdgeKind::ReadLatch => {
+                if self.fetching() {
+                    // The start of an odd dot: the bus still holds the byte X - 1 read.
+                    self.read_buffer = self.fetch_bus_value(cart.as_deref());
+                } else {
+                    let address = self.v & 0x3FFF;
+                    let source = if is_palette_address(address) {
+                        address & 0x2FFF
+                    } else {
+                        address
+                    };
+                    self.read_buffer =
+                        self.read_vram_inner(source, PpuBusAccess::Cpu, ChrFetch::Background, cart);
+                }
+                self.post_edge_now(1, EdgeKind::ReadIncrement);
+            }
+            EdgeKind::ReadIncrement => {
+                if self.fetching() {
+                    if self.dot == 257 {
+                        // The horizontal copy of X and the read's coarse-X increment drive the
+                        // same lines in the same half: the copy wins, the Y increment is left
+                        // (A5, netlist).
+                        self.increment_y();
+                        self.v_row_next = self.v;
+                        self.notify_address_bus(self.v & 0x3FFF, cart);
+                    } else {
+                        self.increment_vram_address(cart);
+                    }
+                    self.refetch_with_low_byte(self.read_buffer, cart.as_deref());
+                } else {
+                    self.increment_vram_address(cart);
+                }
+            }
+            EdgeKind::ReadLatchAfterFetch => {
+                self.read_buffer = self.fetch_bus_value(cart.as_deref());
+                // The read's X and Y increment signals and the pipeline's own are the same lines:
+                // on a dot that increments coarse X anyway its X is already made, on dot 256 both.
+                let dot = self.dot;
+                let natural_x =
+                    (dot % 8 == 0 && (8..=256).contains(&dot)) || dot == 328 || dot == 336;
+                if !natural_x {
+                    self.increment_coarse_x();
+                }
+                if dot != 256 {
+                    self.increment_y();
+                }
+                self.v_row_next = self.v;
+                self.notify_address_bus(self.v & 0x3FFF, cart);
             }
         }
     }
@@ -191,6 +268,46 @@ impl Ppu2C02 {
         }
         let dots = self.edge_dot(LOAD_ADDRESS_LATENCY);
         self.post_edge(dots, EdgeKind::LoadAddress);
+    }
+
+    /// A `$2007` read in Fidélité+: the buffer as it stands now (the palette answers at once), the
+    /// latch and the increment later. Returns the value the CPU reads.
+    pub(super) fn read_data_with_edges<K: BoardKind>(&mut self, _cart: Cart<'_, '_, K>) -> u8 {
+        let address = self.v & 0x3FFF;
+        // A `$2007` access is an ALE of `v` (step 39).
+        self.ale_low = address.to_le_bytes()[0];
+        let value = if is_palette_address(address) && !self.pre_g_revision {
+            let value = (self.palette_raw[super::palette_index(address)]
+                & self.palette_read_mask())
+                | (self.decay & 0xC0);
+            self.refresh_decay(value, 0x3F);
+            value
+        } else {
+            let value = self.read_buffer;
+            self.refresh_decay(value, 0xFF);
+            value
+        };
+        let dots = self.edge_dot(READ_LATCH_LATENCY);
+        // X, the latch dot, is the dot after the one the edge follows.
+        let latch_dot = self.dot + dots + 1;
+        let kind = if self.fetching_at(latch_dot) && latch_dot % 2 == 0 {
+            EdgeKind::ReadLatchAfterFetch
+        } else {
+            EdgeKind::ReadLatch
+        };
+        let dots = if kind == EdgeKind::ReadLatchAfterFetch {
+            dots + 1
+        } else {
+            dots
+        };
+        self.post_edge(dots, kind);
+        value
+    }
+
+    /// Whether the fetches still run on `dot` of this line (a later dot of the same line; a read
+    /// is never posted across a line end that matters: the fetches stop at 340).
+    const fn fetching_at(&self, dot: i32) -> bool {
+        self.fetching() && dot <= 340
     }
 
     /// A `$2007` write in Fidélité+ outside rendering: the data latch now, the store and the
