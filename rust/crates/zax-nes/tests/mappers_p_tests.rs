@@ -774,3 +774,50 @@ fn mappers_p_412_has_an_nrom_mode() {
     assert_eq!([4, 5, 6, 7], core.prg_windows());
     assert_eq!(16, core.chr_windows()[0]);
 }
+
+/// `mapper_384.c`: a `VRC4e` whose `$6800-$6FFF` register is the outer 128 KiB bank.
+#[cfg(feature = "board-384")]
+#[test]
+fn mappers_p_384_takes_its_outer_bank_at_6800() {
+    let mut core = MapperRom::new(384).prg(64).chr(256).prg_ram(8192, 0).load();
+    core.mapper_write(0x8000, 0x01);
+    core.mapper_write(0x6800, 0x01);
+    assert_eq!([17, 17, 30, 31], core.prg_windows());
+    core.mapper_write(0x6800, 0x08);
+    core.mapper_write(0x6800, 0x01);
+    assert_eq!([1, 1, 14, 15], core.prg_windows());
+}
+
+/// `mapper_447.c`: the `$6000` address latch's D2 is an NROM mode repeating the two registers.
+#[cfg(feature = "board-447")]
+#[test]
+fn mappers_p_447_has_an_nrom_mode() {
+    let mut core = MapperRom::new(447)
+        .prg(128)
+        .chr(256)
+        .prg_ram(8192, 0)
+        .load();
+    core.mapper_write(0x6006, 0);
+    assert_eq!([96, 97, 96, 97], core.prg_windows());
+}
+
+/// `mapper_524.c`: a `VRC2b` (`$8000` the first PRG bank) whose `$F00x` is its own IRQ.
+#[cfg(feature = "board-524")]
+#[test]
+fn mappers_p_524_is_a_vrc2b() {
+    let mut core = MapperRom::new(524).prg(16).chr(64).load();
+    core.mapper_write(0x8000, 0x03);
+    core.mapper_write(0xF008, 0x00);
+    assert_eq!([3, 1, 14, 15], core.prg_windows());
+}
+
+/// `mapper_308.c`: a `VRC2b`; `$F001` enables its IRQ and `$F003` sets the high counter.
+#[cfg(feature = "board-308")]
+#[test]
+fn mappers_p_308_is_a_vrc2b() {
+    let mut core = MapperRom::new(308).prg(16).chr(64).load();
+    core.mapper_write(0xA000, 0x05);
+    core.mapper_write(0xF003, 0x10);
+    core.mapper_write(0xF001, 0x00);
+    assert_eq!([0, 5, 14, 15], core.prg_windows());
+}

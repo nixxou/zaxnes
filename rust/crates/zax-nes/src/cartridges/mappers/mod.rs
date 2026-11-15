@@ -190,6 +190,8 @@ mod vrc3;
 mod vrc6;
 mod vrc7;
 mod vrc_irq;
+#[cfg(feature = "board-vrc-p")]
+mod vrc_p;
 #[cfg(feature = "board-vs-system")]
 mod vs_system;
 #[cfg(feature = "board-252")]
@@ -382,6 +384,8 @@ pub use vrc2_vrc4::Vrc2Vrc4;
 pub use vrc3::Vrc3;
 pub use vrc6::Vrc6;
 pub use vrc7::Vrc7;
+#[cfg(feature = "board-vrc-p")]
+pub use vrc_p::{VrcP, VrcPKind};
 #[cfg(feature = "board-vs-system")]
 pub use vs_system::VsBoard;
 #[cfg(feature = "board-252")]

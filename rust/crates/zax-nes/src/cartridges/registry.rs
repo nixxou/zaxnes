@@ -151,6 +151,8 @@ use super::mappers::{Mmc3P, Mmc3PKind};
 use super::mappers::{MultiP, MultiPKind};
 #[cfg(feature = "board-taito-x1")]
 use super::mappers::{TaitoX1005, TaitoX1017};
+#[cfg(feature = "board-vrc-p")]
+use super::mappers::{VrcP, VrcPKind};
 #[cfg(feature = "board-111")]
 use super::FlashRom;
 use super::{BankWindows, Board, CartridgeMemory};
@@ -677,6 +679,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     306,
     #[cfg(feature = "board-307")]
     307,
+    #[cfg(feature = "board-308")]
+    308,
     #[cfg(feature = "board-309")]
     309,
     #[cfg(feature = "board-312")]
@@ -763,6 +767,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     381,
     #[cfg(feature = "board-382")]
     382,
+    #[cfg(feature = "board-384")]
+    384,
     #[cfg(feature = "board-386")]
     386,
     #[cfg(feature = "board-387")]
@@ -821,6 +827,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     437,
     #[cfg(feature = "board-438")]
     438,
+    #[cfg(feature = "board-447")]
+    447,
     #[cfg(feature = "board-455")]
     455,
     #[cfg(feature = "board-456")]
@@ -845,6 +853,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     521,
     #[cfg(feature = "board-522")]
     522,
+    #[cfg(feature = "board-524")]
+    524,
     #[cfg(feature = "board-525")]
     525,
     #[cfg(feature = "board-529")]
@@ -3235,6 +3245,26 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         412 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
             memory,
             Mmc3PKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-308")]
+        308 => Board::IrqBoard(IrqBoard::VrcP(Box::new(VrcP::new(
+            memory,
+            VrcPKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-384")]
+        384 => Board::IrqBoard(IrqBoard::VrcP(Box::new(VrcP::new(
+            memory,
+            VrcPKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-447")]
+        447 => Board::IrqBoard(IrqBoard::VrcP(Box::new(VrcP::new(
+            memory,
+            VrcPKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-524")]
+        524 => Board::IrqBoard(IrqBoard::VrcP(Box::new(VrcP::new(
+            memory,
+            VrcPKind::of(mapper)?,
         )))),
         #[cfg(feature = "board-299")]
         299 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(

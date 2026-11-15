@@ -602,6 +602,14 @@ const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
             | 529
             // MAPPERS-N: mapper 266's VRC4 IRQ (nesdev "NES 2.0 Mapper 266").
             | 266
+            // MAPPERS-P: mapper 524, `VrcP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
+            | 524
+            // MAPPERS-P: mapper 447, `VrcP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
+            | 447
+            // MAPPERS-P: mapper 384, `VrcP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
+            | 384
+            // MAPPERS-P: mapper 308, `VrcP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
+            | 308
             // MAPPERS-N: mapper 284's IRQ counter and PCM channels (`UnlDripGame.h`).
             | 284
             // MAPPERS-N: 682's CPU IRQ, VRC6 audio and PPU-idle detection (`Rainbow.cpp`).

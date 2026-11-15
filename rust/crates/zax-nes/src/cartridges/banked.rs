@@ -201,7 +201,8 @@ impl BankWindows {
         feature = "board-219",
         feature = "board-323",
         feature = "board-266",
-        feature = "board-mmc1-outer"
+        feature = "board-mmc1-outer",
+        feature = "board-vrc-p"
     ))]
     pub fn remap_prg_banks(&mut self, mask: i32, bits: i32) {
         for slot in 0..Self::PRG_WINDOWS {
@@ -256,7 +257,8 @@ impl BankWindows {
         feature = "board-215",
         feature = "board-219",
         feature = "board-323",
-        feature = "board-mmc1-outer"
+        feature = "board-mmc1-outer",
+        feature = "board-vrc-p"
     ))]
     pub fn remap_chr_banks(&mut self, mask: i32, bits: i32) {
         for slot in 0..Self::CHR_WINDOWS {

@@ -804,6 +804,10 @@ dispatch is the generic path of the exotic ones only.
 | `board-516` | 516 | `Mmc3P` kind M516 (IrqBoard): Cocoma Pack, A4-latched outer bank (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
 | `board-393` | 393 | `Mmc3P` kind M393 (IrqBoard): 820720C, NROM-like modes, CHR-RAM mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
 | `board-412` | 412 | `Mmc3P` kind M412 (IrqBoard): Intellivision 10-in-1 PVP, NROM/CNROM mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-308` | 308 | `VrcP` kind M308 (IrqBoard): TH2131-1, VRC2b with its own CPU-cycle IRQ (puNES; MAPPERS-P). Requires `board-vrc-p` | — | — (unit test) | **on** |
+| `board-384` | 384 | `VrcP` kind M384 (IrqBoard): L1A16, VRC4e with a lockable outer bank (puNES; MAPPERS-P). Requires `board-vrc-p` | — | — (unit test) | **on** |
+| `board-447` | 447 | `VrcP` kind M447 (IrqBoard): KL-06, VRC4e with an address-latched outer bank and NROM mode (puNES; MAPPERS-P). Requires `board-vrc-p` | — | — (unit test) | **on** |
+| `board-524` | 524 | `VrcP` kind M524 (IrqBoard): BTL-900218, VRC2b with its own CPU-cycle IRQ (puNES; MAPPERS-P). Requires `board-vrc-p` | — | — (unit test) | **on** |
 | `board-53` | 53 | `MiscN` M53: Supervision 16-in-1, outer register at `$6000`, ROM at `$6000-$7FFF`, optional EPROM by CRC (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-487` | 487 | `MiscN` M487: NINA-03 and outer registers at `$4100`/`$4180`, Color Dreams register in the second half (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-518` | 518 | `MiscN` M518: Dance 2000, `$5000`/`$5200`, open bus over `$8000-$FFFF`, CHR page 0 from the nametable address (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |

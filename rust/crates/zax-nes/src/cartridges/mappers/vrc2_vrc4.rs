@@ -272,7 +272,11 @@ impl Vrc2Vrc4 {
     /// 14's at `$A131`, and both pages give their board work RAM in the usual place. The field is
     /// cleared here because [`Vrc2Vrc4::new`] is asked for mapper **23** below, so the predicate
     /// would otherwise answer for a number this image does not have.
-    #[cfg(any(feature = "board-116", feature = "board-huang1"))]
+    #[cfg(any(
+        feature = "board-116",
+        feature = "board-huang1",
+        feature = "board-vrc-p"
+    ))]
     pub(crate) fn new_vrc2b(memory: &CartridgeMemory, mapper_number: i32) -> Self {
         let lines = VrcVariant::Vrc2b.index_lines();
         Self {
@@ -299,12 +303,17 @@ impl Vrc2Vrc4 {
 
     /// The same for the VRC4e wiring, A0 on CPU A2 and A1 on CPU A3: mapper 529's T-230 (nesdev
     /// "NES 2.0 Mapper 529": "a VRC4 clone (A2/A3, VRC4e)"; lot MAPPERS-N).
-    #[cfg(any(feature = "board-529", feature = "board-266"))]
+    #[cfg(any(feature = "board-529", feature = "board-266", feature = "board-vrc-p"))]
     pub(crate) fn new_vrc4e(memory: &CartridgeMemory, mapper_number: i32) -> Self {
         Self::new_vrc4_wired(memory, mapper_number, VrcVariant::Vrc4e)
     }
 
-    #[cfg(any(feature = "board-529", feature = "board-530", feature = "board-266"))]
+    #[cfg(any(
+        feature = "board-529",
+        feature = "board-530",
+        feature = "board-266",
+        feature = "board-vrc-p"
+    ))]
     fn new_vrc4_wired(memory: &CartridgeMemory, mapper_number: i32, variant: VrcVariant) -> Self {
         let lines = variant.index_lines();
         Self {
@@ -344,9 +353,20 @@ impl Vrc2Vrc4 {
 
     /// Recomputes the windows from the registers (mappers 116, 14); see
     /// [`super::Mmc3Board::refresh_banks`].
-    #[cfg(any(feature = "board-116", feature = "board-huang1"))]
+    #[cfg(any(
+        feature = "board-116",
+        feature = "board-huang1",
+        feature = "board-vrc-p"
+    ))]
     pub(crate) fn refresh_banks(&mut self) {
         self.update_banks();
+    }
+
+    /// The two switchable PRG registers, `$8000` and `$A000` (lot MAPPERS-P, mapper 447's NROM
+    /// mode repeats them; puNES `vrc2and4.prg[0]`/`[1]`).
+    #[cfg(feature = "board-vrc-p")]
+    pub(crate) const fn prg_registers(&self) -> (u8, u8) {
+        (self.prg0, self.prg1)
     }
 
     /// Sets all eight CHR registers without a register write.

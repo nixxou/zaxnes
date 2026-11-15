@@ -58,6 +58,8 @@ use super::Sunsoft4;
 use super::Tengen800037;
 #[cfg(feature = "board-119")]
 use super::Tqrom;
+#[cfg(feature = "board-vrc-p")]
+use super::VrcP;
 #[cfg(feature = "board-252")]
 use super::Waixing252;
 #[cfg(feature = "board-253")]
@@ -374,6 +376,9 @@ pub enum IrqBoard {
     /// Mapper 530, the AX5705 VRC4 board (lot MAPPERS-N).
     #[cfg(feature = "board-530")]
     Ax5705(Box<Ax5705>),
+    /// Lot MAPPERS-P's VRC2/VRC4 boards ([`VrcP`]), boxed for [`IrqBoard::Ax5705`]'s reason.
+    #[cfg(feature = "board-vrc-p")]
+    VrcP(Box<VrcP>),
     /// Mapper 529, the T-230 VRC4e board (lot MAPPERS-N).
     #[cfg(feature = "board-529")]
     T230(Box<T230>),
@@ -457,6 +462,8 @@ macro_rules! inner {
             IrqBoard::Kaiser7017($b) => $body,
             #[cfg(feature = "board-530")]
             IrqBoard::Ax5705($b) => $body,
+            #[cfg(feature = "board-vrc-p")]
+            IrqBoard::VrcP($b) => $body,
             #[cfg(feature = "board-529")]
             IrqBoard::T230($b) => $body,
             #[cfg(feature = "board-266")]
@@ -637,6 +644,7 @@ impl Mapper for IrqBoard {
         feature = "board-268",
         feature = "board-mmc3-clones",
         feature = "board-mmc3-p",
+        feature = "board-vrc-p",
         feature = "board-irq-latch",
         feature = "board-176",
         feature = "board-682",

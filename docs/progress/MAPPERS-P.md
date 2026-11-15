@@ -38,7 +38,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 291 | `mapper_291.c` | 90 | 1 | 0 | done (batch 12, `Mmc3P`) |
 | 295 | `mapper_295.c` | 69 | 12 | 0 | done (batch 2, `JyCompany` + `JyMulticart`) |
 | 297 | `mapper_297.c` | 119 | 1 | 0 | done (batch 11, `Mmc1Outer`) |
-| 308 | `mapper_308.c` | 90 | 1 | 0 | todo |
+| 308 | `mapper_308.c` | 90 | 1 | 0 | done (batch 16, `VrcP`) |
 | 311 | `mapper_311.c` | 97 | 1 | 0 | todo |
 | 315 | `mapper_315.c` | 92 | 1 | 0 | done (batch 12, `Mmc3P`) |
 | 322 | `mapper_322.c` | 101 | 1 | 0 | done (batch 12, `Mmc3P`) |
@@ -78,7 +78,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 380 | `mapper_380.c` | 89 | 9 | 0 | done (batch 4, `MultiP`) |
 | 381 | `mapper_381.c` | 60 | 0 | 0 | done (batch 2, `MultiP`) |
 | 382 | `mapper_382.c` | 70 | 1 | 0 | done (batch 5, `MultiP`) |
-| 384 | `mapper_384.c` | 65 | 0 | 0 | todo |
+| 384 | `mapper_384.c` | 65 | 0 | 0 | done (batch 16, `VrcP`) |
 | 386 | `mapper_386.c` | 76 | 1 | 0 | done (batch 5, `JyCompany` + `JyMulticart`) |
 | 387 | `mapper_387.c` | 76 | 4 | 0 | done (batch 5, `JyCompany` + `JyMulticart`) |
 | 388 | `mapper_388.c` | 76 | 2 | 0 | done (batch 5, `JyCompany` + `JyMulticart`) |
@@ -119,7 +119,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 438 | `mapper_438.c` | 71 | 2 | 0 | done (batch 8, `MultiP`) |
 | 442 | `mapper_442.c` | 127 | 1 | 0 | todo |
 | 446 | `mapper_446.c` | 746 | 4 | 0 | todo |
-| 447 | `mapper_447.c` | 98 | 1 | 0 | todo |
+| 447 | `mapper_447.c` | 98 | 1 | 0 | done (batch 16, `VrcP`) |
 | 451 | `mapper_451.c` | 147 | 2 | 0 | todo |
 | 452 | `mapper_452.c` | 119 | 1 | 0 | todo |
 | 455 | `mapper_455.c` | 97 | 1 | 0 | done (batch 14, `Mmc3P`) |
@@ -130,7 +130,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 512 | `mapper_512.c` | 94 | 2 | 1 | todo |
 | 516 | `mapper_516.c` | 79 | 2 | 0 | done (batch 14, `Mmc3P`) |
 | 517 | `mapper_517.c` | 107 | 1 | 1 | done (batch 1, `MultiP`) |
-| 524 | `mapper_524.c` | 81 | 0 | 0 | todo |
+| 524 | `mapper_524.c` | 81 | 0 | 0 | done (batch 16, `VrcP`) |
 | 525 | `mapper_525.c` | 91 | 1 | 0 | done (batch 10, `MultiP`) |
 | 526 | `mapper_526.c` | 123 | 1 | 0 | todo |
 | 527 | `mapper_527.c` | 61 | 0 | 0 | todo |
@@ -217,3 +217,8 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   and 344 (DIP reads over `$8000-$FFFF`) and 436 (OneBus) wait for their own step.
 * Batch 15: `Mmc3P` 393 (UNROM latch on every chip write, CHR-RAM mode) and 412. 370 (CIRAM
   page per table from CHR bits, like `TxSROM`) and 512 (banked WRAM, CHR-RAM nametables) wait.
+* Batch 16: `vrc_p.rs` (`VrcP`, boxed `IrqBoard` variant, umbrella `board-vrc-p`), the `Ax5705`
+  shape: a `Vrc2Vrc4` untouched (`VRC2b` or `VRC4e` wiring), narrowed by `remap_*_banks` (384, 447
+  with its NROM mode through the new `Vrc2Vrc4::prg_registers`) or with its own CPU-cycle IRQ
+  (308, 524). The four numbers join `clocks_on_cpu_cycle`. 362 and 398 (PRG switched by CHR
+  fetches), 527 (CIRAM pages from CHR bit 7), 528 and 559 remain.
