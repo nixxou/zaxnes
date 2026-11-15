@@ -1370,6 +1370,36 @@ fn fidplus_c3c_pal_rendering_switch_takes_four_dots() {
     assert!(!increments(false), "NTSC: the switch is in force by dot 16");
 }
 
+/// Lot FIDPLUS-C C3c (Visual 2C07 netlist, `g2000`, `g2001px`): the PAL 2C07 copies `t`'s
+/// vertical bits into `v` from dot 278 of the pre-render line, the 2C02 from dot 280. By dot 279
+/// the copy is in `v` on PAL and not yet on NTSC.
+#[test]
+fn fidplus_c3c_pal_vertical_copy_starts_on_dot_278() {
+    fn copied_by_279(pal: bool) -> bool {
+        let mut fixture = TileFixture::new();
+        if pal {
+            fixture.core.set_region(zax_nes::NesRegion::Pal);
+        }
+        fixture.set_control(0x00);
+        fixture.set_scroll(0, 80);
+        fixture.set_mask(0x0A);
+        let bus = fixture.core.bus_mut();
+        let mut guard = 0;
+        loop {
+            bus.tick();
+            bus.sync_ppu();
+            let ppu = bus.ppu();
+            if ppu.scanline() == ppu.pre_render_scanline() && ppu.dot() == 279 {
+                return (ppu.vram_v() & 0x7BE0) == (ppu.vram_t() & 0x7BE0);
+            }
+            guard += 1;
+            assert!(guard < 5_000_000, "never reached dot 279 of the pre-render line");
+        }
+    }
+    assert!(copied_by_279(true), "PAL: copied from dot 278");
+    assert!(!copied_by_279(false), "NTSC: not before dot 280");
+}
+
 /// Lot FIDPLUS-2 (A5, transistor netlist): a `$2001` write landing on dot 254 switches the
 /// fetches and increments from dot 257 on, but the horizontal copy of dot 257 still follows the
 /// old state in alignments 2 and 3: switched off, the copy is made; switched on, it is not.

@@ -326,7 +326,7 @@ impl Ppu2C02 {
                     self.load_extra_sprites(cart.as_deref());
                 }
 
-                if !VISIBLE && (280..=304).contains(&dot) {
+                if !VISIBLE && self.vertical_copy_dots().contains(&dot) {
                     self.transfer_address_y();
                 }
             }

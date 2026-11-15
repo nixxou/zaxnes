@@ -3262,6 +3262,18 @@ impl Ppu2C02 {
             && (self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline())
     }
 
+    /// The dots of the pre-render line that copy `t`'s vertical bits into `v`: 280 to 304 on the
+    /// 2C02, two dots earlier on the PAL 2C07 (Visual 2C07 netlist, lot FIDPLUS-C C3c: the copy is
+    /// in `v` at the end of dot 278 in every frame of `g2000` and `g2001px`). The end of the PAL
+    /// window is taken as shifted too; no corpus write has landed there yet.
+    pub(super) const fn vertical_copy_dots(&self) -> std::ops::RangeInclusive<i32> {
+        if matches!(self.timing.region, NesRegion::Pal) {
+            278..=302
+        } else {
+            280..=304
+        }
+    }
+
     /// Whether the rules measured on the NTSC 2C02 netlist apply (lot FIDPLUS-2, A5): the PAL
     /// 2C07 (3.2 dots a cycle) and the clones keep the previous model, which their golden pictures
     /// follow (Zelda II Europe moved with them), until a measurement of their own.

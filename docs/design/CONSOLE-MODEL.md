@@ -79,7 +79,12 @@ Revision A fails `5-MMC3` (both suites) and `6.MMC3_rev_B`: no single model pass
   a frame left, against 54 000 to 97 000 with 2, 3 or 5; then the dot-257 copy follows the state
   before a switch landing on it, as on the 2C02 (`late_switch`, the write on dot 252 with four
   dots): 0 differing dots on whole frames but the pre-render's 2 (line 311, dots 278-279). Test
-  `fidplus_c3c_pal_rendering_switch_takes_four_dots`. Open: the pre-render's vertical copy, and
+  `fidplus_c3c_pal_rendering_switch_takes_four_dots`.
+  Step 5, the pre-render's vertical copy: **the 2C07 copies `t`'s vertical bits from dot 278**,
+  the 2C02 from 280 (`v` holds the copy at the end of dot 278 in every frame, `vcopy.py`). Window
+  278-302 on PAL (`Ppu2C02::vertical_copy_dots`; its end shifted too, unmeasured): `g2001px` 0
+  differing dots on every whole frame, `g2000` 1 a frame (line 239 dot 256). Test
+  `fidplus_c3c_pal_vertical_copy_starts_on_dot_278`. Still open from the earlier steps:
   the first frame's `$2007` increments seen 4-5 dots later on the netlist (line 241).
   Corpus at reset phase e3 so far (alignment 3 against 0, differing dots, whole frames): `g2005`
   31 543 / 25 103 and `g2005px` 7 508 / 2 034 (the alignment-3 `$2005` open-bus effects look
