@@ -852,6 +852,7 @@ dispatch is the generic path of the exotic ones only.
 | `board-413` | 413 | `IrqP` kind M413 (IrqBoard): SMB3 / Batman bootleg, A12 IRQ and serial misc ROM (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
 | `board-406` | 406 | `Mmc3P` kind M406 (IrqBoard): Haradius Zero / Sidewinder, MMC3 with an MX29F040/AM29F040 flash PRG (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
 | `board-451` | 451 | `Mmc3P` kind M451 (IrqBoard): Haratyler HP/MP, AMIC A29040B flash PRG behind an MMC3 (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-547` | 547 | `IrqP` kind M547 (IrqBoard): Konami QTa (Q-Tai), kanji CHR-ROM through a QT RAM shadowing the nametables (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
 | `board-53` | 53 | `MiscN` M53: Supervision 16-in-1, outer register at `$6000`, ROM at `$6000-$7FFF`, optional EPROM by CRC (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-487` | 487 | `MiscN` M487: NINA-03 and outer registers at `$4100`/`$4180`, Color Dreams register in the second half (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-518` | 518 | `MiscN` M518: Dance 2000, `$5000`/`$5200`, open bus over `$8000-$FFFF`, CHR page 0 from the nametable address (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |

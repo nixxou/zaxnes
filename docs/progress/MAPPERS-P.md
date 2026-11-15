@@ -143,7 +143,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 540 | `mapper_359.c` | 293 | 1 | 0 | done (batch 42, `IrqP`) |
 | 541 | `mapper_541.c` | 70 | 1 | 0 | done (batch 9, `MultiP`) |
 | 543 | `mapper_543.c` | 87 | 0 | 0 | done (batch 22, `Mmc1Outer`) |
-| 547 | `mapper_547.c` | 241 | 8 | 4 | todo |
+| 547 | `mapper_547.c` | 241 | 8 | 4 | done (batch 51, `IrqP`) |
 | 550 | `mapper_550.c` | 86 | 1 | 0 | done (batch 11, `Mmc1Outer`) |
 | 551 | `mapper_178.c` | 109 | 4 | 0 | done (batch 19, `WaixingFs305`) |
 | 554 | `mapper_554.c` | 94 | 1 | 0 | done (batch 10, `MultiP`) |
@@ -359,3 +359,10 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   `board_memory_sizes`); the windows leave the cache while the chip answers. 406 crosses A0/A1
   (submapper 0) or A13-A14 (submapper 1) on the way to the MMC3 and has no WRAM; 451 feeds the
   MMC3 from the address lines and banks from `$E000` A0-A1. Both in `clocks_on_cpu_cycle`.
+* Batch 51: `IrqP` 547 (Konami QTa, *Q-Tai*): registers at `$D000-$DFFF` (window 2 off the
+  cache for the `$DC00`/`$DD00` JIS-to-tile lookup), 4 KiB work-RAM windows (`try_read_prg` and
+  `intercept_cpu_write`), a 16-bit CPU-cycle IRQ, and the QT RAM: the board serves the console's
+  tables and a 2 KiB QT RAM beside them (`$DA00` D0 routes nametable writes there), a tile fetch
+  latches the QT byte (`watches_ppu_reads`), and the next background pattern fetch reads the
+  kanji CHR-ROM (D6, plane 1 from D7) or a CHR-RAM bank (D0); sprites see the 8 KiB CHR-RAM
+  (`board_memory_sizes`, `IrqP::ppu_write`).

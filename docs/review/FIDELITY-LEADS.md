@@ -1039,6 +1039,13 @@ places where puNES itself is incomplete are copied, not invented around:
   (puNES's `default:` arm), and the chip address is the PRG-ROM offset through the MMC3 banks,
   so a game that unlocks through a window not mapped as puNES maps it would differ only if the
   two cores' bank maps differed.
+* 547 (`mapper_547.c`): puNES turns a pattern fetch to the QT byte's bank when its address
+  equals the PPU's current background address (`bck_adr`); this board does it for every fetch
+  the core tags `ChrFetch::Background`, which also covers `$2007` CHR reads and host peeks, so a
+  `$2007` read of CHR-RAM after a tile fetch whose QT byte has D6 set reads the kanji ROM here
+  where puNES would read the CHR-RAM. The QT byte is latched by every nametable read below
+  `$x3C0` the PPU bus carries, `$2007` reads included, as `extcl_rd_nmt_547` does. The work RAM
+  is the header's, wrapped (puNES sizes it the same way).
 
 ### J36. Mapper 682 (Rainbow): the ESP is modelled from the protocol document
 The ESP (`rainbow_esp.rs`) follows Broke Studio's `rainbow-net.md` and `mapper-doc.md`; no

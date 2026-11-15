@@ -1633,3 +1633,50 @@ fn mappers_p_451_banks_from_the_address_and_answers_its_ids() {
         core.cartridge_mut().unwrap().try_cpu_read(0xA000)
     );
 }
+
+/// `mapper_547.c`: `$D200-$D400` the PRG banks (D6 adds `$10`), `$E000` bank `$4F`; `$D000`
+/// a 4 KiB work-RAM bank; `$DC00`/`$DD00` the JIS code in and its glyph's tile out; a nametable
+/// write with `$DA00` D0 set lands in the QT RAM, whose byte a tile fetch latches to turn the
+/// background pattern fetch to the kanji CHR-ROM (D6) while sprites see the CHR-RAM.
+#[cfg(feature = "board-547")]
+#[test]
+fn mappers_p_547_reads_kanji_through_its_qt_ram() {
+    let mut core = MapperRom::new(547).prg(128).chr(256).load();
+    assert_eq!([0, 0, 0, 0x4F], core.prg_windows());
+    core.mapper_write(0xD200, 0x45);
+    core.mapper_write(0xD300, 0x03);
+    assert_eq!([0x15, 3, 0, 0x4F], core.prg_windows());
+
+    core.mapper_write(0xDC00, 0x21);
+    core.mapper_write(0xDD00, 0x21);
+    core.mapper_write(0xDB00, 0x06);
+    let cartridge = core.cartridge_mut().unwrap();
+    assert_eq!(Some(0x84 | 0x02), cartridge.try_cpu_read(0xDC00));
+    assert_eq!(Some(0xC0), cartridge.try_cpu_read(0xDD00));
+
+    core.mapper_write(0xD000, 0x09);
+    core.write_memory(0x6000, 0x5A);
+    core.mapper_write(0xD000, 0x01);
+    assert_eq!(
+        Some(0x5A),
+        core.cartridge_mut().unwrap().try_cpu_read(0x6000)
+    );
+
+    core.mapper_write(0xDA00, 0x01);
+    core.write_memory(0x2006, 0x24);
+    core.write_memory(0x2006, 0x05);
+    core.write_memory(0x2007, 0xC5);
+    core.mapper_write(0xDA00, 0x00);
+    core.write_memory(0x2006, 0x00);
+    core.write_memory(0x2006, 0x00);
+    core.write_memory(0x2007, 0x77);
+    let cartridge = core.cartridge_mut().unwrap();
+    cartridge.on_ppu_address_bus(0x2405, 0);
+    assert_eq!(20, core.chr_bank(0x0000));
+    assert_eq!(0xFF, core.chr_bank(0x0008));
+    let cartridge = core.cartridge().unwrap();
+    assert_eq!(
+        0x77,
+        cartridge.ppu_peek(0x0000, zax_nes::cartridges::ChrFetch::Sprite)
+    );
+}

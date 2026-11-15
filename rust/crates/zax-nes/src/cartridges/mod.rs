@@ -570,6 +570,8 @@ const fn nametable_pages_vary(mapper: i32) -> bool {
             | 512
             // MAPPERS-P: 560 serves the console's tables itself.
             | 560
+            // MAPPERS-P: 547 serves the console's tables and its QT RAM itself.
+            | 547
             // MAPPERS-P: 559, a 1 KiB nametable register per table.
             | 559
             // MAPPERS-P: 353, game 0 pages CIRAM from the CHR registers' D7.
@@ -626,6 +628,8 @@ const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
             | 529
             // MAPPERS-N: mapper 266's VRC4 IRQ (nesdev "NES 2.0 Mapper 266").
             | 266
+            // MAPPERS-P: mapper 547, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
+            | 547
             // MAPPERS-P: mapper 351, `ChipSwitch` (its VRC4 IRQ, puNES `EXTCL_CPU_EVERY_CYCLE`).
             | 351
             // MAPPERS-P: mapper 556, `ChipSwitch` (its VRC4 IRQ, puNES `EXTCL_CPU_EVERY_CYCLE`).
@@ -896,6 +900,8 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 398
             // MAPPERS-P: 560 latches the nametable address its pattern fetches use.
             | 560
+            // MAPPERS-P: 547 latches its QT byte on each tile fetch (`extcl_rd_nmt_547`).
+            | 547
     ) || mmc3_p_board(mapper)
 }
 
