@@ -13,6 +13,12 @@ use crate::NametableMirroring;
 /// Which board, one variant per iNES number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IrqLatchKind {
+    /// 6, the Front Fareast Magic Card 1M/2M copier format (`Unlicensed/FrontFareast.h`).
+    M6,
+    /// 8, the FFE F3xxx copier format (`Unlicensed/FrontFareast.h`).
+    M8,
+    /// 17, the FFE F8xxx copier format (`Unlicensed/FrontFareast.h`).
+    M17,
     /// 40, `Whirlwind/Mapper40.h` (NTDEC 2722, *SMB2J* conversion).
     M40,
     /// 42, `Unlicensed/Mapper42.h` (*Ai Senshi Nicol* / *Mario Baby* conversions).
@@ -36,6 +42,9 @@ impl IrqLatchKind {
     #[must_use]
     pub const fn of(mapper: i32) -> Option<Self> {
         Some(match mapper {
+            6 => Self::M6,
+            8 => Self::M8,
+            17 => Self::M17,
             40 => Self::M40,
             42 => Self::M42,
             43 => Self::M43,
@@ -50,6 +59,9 @@ impl IrqLatchKind {
 
     const fn number(self) -> i32 {
         match self {
+            Self::M6 => 6,
+            Self::M8 => 8,
+            Self::M17 => 17,
             Self::M40 => 40,
             Self::M42 => 42,
             Self::M43 => 43,
@@ -126,8 +138,13 @@ impl IrqLatch {
             // `Mapper50.h:16-19`, `:33`.
             IrqLatchKind::M50 => [8, 9, p(0), 0x0B],
             // `Mapper106.h:15-18,37-38`: power-on -1 everywhere.
-            // `Mapper117.h:17` (`SelectPrgPage4x(0, -4)`) and `:32-34`: four 8 KiB registers too.
-            IrqLatchKind::M106 | IrqLatchKind::M117 => [p(0), p(1), p(2), p(3)],
+            // `Mapper117.h:17` (`SelectPrgPage4x(0, -4)`) and `:32-34`: four 8 KiB registers too,
+            // as are the three FFE formats (`FrontFareast.h`, `InitMapper` and `WriteRegister`).
+            IrqLatchKind::M6
+            | IrqLatchKind::M8
+            | IrqLatchKind::M17
+            | IrqLatchKind::M106
+            | IrqLatchKind::M117 => [p(0), p(1), p(2), p(3)],
             // `Mapper183.h` `UpdatePrg` and the `$8800`/`$A800`/`$A000` ports.
             IrqLatchKind::M183 => [p(0), p(1), p(2), -1],
             // `Mapper222.h:17` (`SelectPrgPage2x(1, -2)`) and `$8000`/`$A000`.
@@ -137,7 +154,13 @@ impl IrqLatch {
             self.banks.map_prg_8k(slot, *bank);
         }
         match self.kind {
-            IrqLatchKind::M106 | IrqLatchKind::M117 | IrqLatchKind::M183 | IrqLatchKind::M222 => {
+            IrqLatchKind::M6
+            | IrqLatchKind::M8
+            | IrqLatchKind::M17
+            | IrqLatchKind::M106
+            | IrqLatchKind::M117
+            | IrqLatchKind::M183
+            | IrqLatchKind::M222 => {
                 for (slot, bank) in self.chr.iter().enumerate() {
                     self.banks.map_chr_1k(slot, i32::from(*bank));
                 }
@@ -175,6 +198,62 @@ impl IrqLatch {
     #[allow(clippy::too_many_lines)]
     fn write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) -> bool {
         match self.kind {
+            // `FrontFareast.h` `WriteRegister`: the shared ports at `$42FE-$4517`, then per format.
+            IrqLatchKind::M6 | IrqLatchKind::M8 | IrqLatchKind::M17 => {
+                match address {
+                    0x42FE => {
+                        // `_ffeAltMode` is kept in `second`.
+                        self.second = value & 0x80 == 0;
+                        memory.set_mirroring(if value & 0x10 == 0 {
+                            NametableMirroring::SingleScreenA
+                        } else {
+                            NametableMirroring::SingleScreenB
+                        });
+                    }
+                    0x42FF => memory.set_mirroring(if value & 0x10 == 0 {
+                        NametableMirroring::Vertical
+                    } else {
+                        NametableMirroring::Horizontal
+                    }),
+                    0x4501 => {
+                        self.enabled = false;
+                        self.pending = false;
+                    }
+                    0x4502 => {
+                        self.counter = (self.counter & 0xFF00) | u16::from(value);
+                        self.pending = false;
+                    }
+                    0x4503 => {
+                        self.counter = (self.counter & 0x00FF) | (u16::from(value) << 8);
+                        self.enabled = true;
+                        self.pending = false;
+                    }
+                    0x4504..=0x4507 if self.kind == IrqLatchKind::M17 => {
+                        self.prg[usize::from(address - 0x4504)] = value;
+                    }
+                    0x4510..=0x4517 if self.kind == IrqLatchKind::M17 => {
+                        self.chr[usize::from(address - 0x4510)] = value;
+                    }
+                    0x8000..=0xFFFF if self.kind == IrqLatchKind::M6 => {
+                        let mut chr = value;
+                        if !self.has_chr_rom || self.second {
+                            let page = (value & 0xFC) >> 1;
+                            self.prg[0] = page;
+                            self.prg[1] = page + 1;
+                            chr &= 0x03;
+                        }
+                        self.chr = std::array::from_fn(|i| (chr << 3) + i.to_le_bytes()[0]);
+                    }
+                    0x8000..=0xFFFF if self.kind == IrqLatchKind::M8 => {
+                        let page = (value & 0xF8) >> 2;
+                        self.prg[0] = page;
+                        self.prg[1] = page + 1;
+                        self.chr =
+                            std::array::from_fn(|i| ((value & 0x07) << 3) + i.to_le_bytes()[0]);
+                    }
+                    _ => return (0x42FE..=0x4517).contains(&address) || address >= 0x8000,
+                }
+            }
             // `Mapper40.h:29-41`.
             IrqLatchKind::M40 => match address & 0xE000 {
                 0x8000 => {
@@ -387,7 +466,22 @@ impl Mapper for IrqLatch {
     fn reset(&mut self, _memory: &mut CartridgeMemory) {
         self.prg = [0; 6];
         self.chr = [0; 8];
+        self.second = false;
         match self.kind {
+            // `FrontFareast.h` `InitMapper`: `_ffeAltMode = true`; 6 maps 16 KiB pages 0 and 7
+            // (`SelectPrgPage2x(1, 14)`), 8 the first 32 KiB, 17 the last.
+            IrqLatchKind::M6 => {
+                self.prg[..4].copy_from_slice(&[0, 1, 14, 15]);
+                self.second = true;
+            }
+            IrqLatchKind::M8 => {
+                self.prg[..4].copy_from_slice(&[0, 1, 2, 3]);
+                self.second = true;
+            }
+            IrqLatchKind::M17 => {
+                self.prg[..4].copy_from_slice(&[0xFC, 0xFD, 0xFE, 0xFF]);
+                self.second = true;
+            }
             // `Mapper106.h:15-18`: every PRG window -1.
             IrqLatchKind::M106 => self.prg[..4].fill(0xFF),
             // `Mapper117.h:17`: `SelectPrgPage4x(0, -4)`, the last 32 KiB.
@@ -398,7 +492,6 @@ impl Mapper for IrqLatch {
         self.scaler = 0;
         self.reload = 0;
         self.enabled = false;
-        self.second = false;
         self.pending = false;
         self.a12.reset();
         self.map();
@@ -423,6 +516,12 @@ impl Mapper for IrqLatch {
         }
         match self.kind {
             IrqLatchKind::M43 | IrqLatchKind::M50 | IrqLatchKind::M183 => {
+                self.write(memory, address, value)
+            }
+            // `FrontFareast.h:13-14`: the register window is `$42FE-$4517`.
+            IrqLatchKind::M6 | IrqLatchKind::M8 | IrqLatchKind::M17
+                if (0x42FE..=0x4517).contains(&address) =>
+            {
                 self.write(memory, address, value)
             }
             _ => false,
@@ -489,8 +588,8 @@ impl Mapper for IrqLatch {
                     }
                 }
             }
-            // `Mapper106.h:20-28`.
-            IrqLatchKind::M106 => {
+            // `Mapper106.h:20-28`, and `FrontFareast.h` `ProcessCpuClock`, the same counter.
+            IrqLatchKind::M6 | IrqLatchKind::M8 | IrqLatchKind::M17 | IrqLatchKind::M106 => {
                 if self.enabled {
                     self.counter = self.counter.wrapping_add(1);
                     if self.counter == 0 {

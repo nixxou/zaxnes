@@ -134,7 +134,11 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     3,
     4,
     5,
+    #[cfg(feature = "board-6")]
+    6,
     7,
+    #[cfg(feature = "board-8")]
+    8,
     9,
     10,
     11,
@@ -149,6 +153,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     14,
     15,
     16,
+    #[cfg(feature = "board-17")]
+    17,
     18,
     19,
     21,
@@ -802,6 +808,13 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // MAPPERS-N: "GetChrRamSize() { return 0x800; }" (Mesen2 `Mapper253.h:21`).
         // A CHR-RAM-only image keeps the header's size: the 2 KiB is the chip beside the CHR-ROM.
         // MAPPERS-N: mapper 125's LH32 has 8 KiB of work RAM at `$C000-$DFFF` (Mesen2 `Lh32.h:18`).
+        // MAPPERS-N: the Front Fareast formats give a CHR-RAM image 32 KiB (Mesen2
+        // `FrontFareast.h:12`, `GetChrRamSize() { return 0x8000; }`).
+        #[cfg(feature = "board-irq-latch")]
+        6 | 8 | 17 if header.chr_rom_size == 0 => BoardMemorySizes {
+            chr_ram: Some(0x8000),
+            ..BoardMemorySizes::default()
+        },
         #[cfg(feature = "board-125")]
         125 => BoardMemorySizes {
             prg_ram: Some(0x2000),
@@ -2164,6 +2177,21 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         )))),
         #[cfg(feature = "board-222")]
         222 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-6")]
+        6 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-8")]
+        8 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-17")]
+        17 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
             memory,
             IrqLatchKind::of(mapper)?,
         )))),

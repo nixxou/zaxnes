@@ -256,9 +256,12 @@ fn req_core_100_every_required_mapper_is_registered() {
     let sachen8259 = cfg!(feature = "board-sachen8259");
     let huang1 = cfg!(feature = "board-huang1");
     let cony = cfg!(feature = "board-cony");
-    let additions: [(i32, bool); 185] = [
+    let additions: [(i32, bool); 188] = [
+        (6, cfg!(feature = "board-6")),
+        (8, cfg!(feature = "board-8")),
         (12, huang1),
         (14, huang1),
+        (17, cfg!(feature = "board-17")),
         (19, true),
         (24, true),
         (26, true),
@@ -463,7 +466,7 @@ fn req_core_102_any_other_mapper_is_refused() {
     // REQ-CORE-011 refuses it"; MF-6a3 step 4 implements it instead, behind `board-116`, so the
     // sweep drops it exactly when that feature is on. REQ-CORE-102's own acceptance criterion
     // (mapper 200) is untouched either way, which is the other half of Q-130.
-    let mut refused = vec![6usize, 84, 200];
+    let mut refused = vec![20usize, 84, 200];
     if !cfg!(feature = "board-116") {
         refused.insert(1, 116);
     }

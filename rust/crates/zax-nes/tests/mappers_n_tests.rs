@@ -404,3 +404,33 @@ fn mappers_n_106_maps_its_sixteen_ports() {
     core.mapper_write(0x8004, 0x21);
     assert_eq!(0x21, core.chr_windows()[4]);
 }
+
+/// `FrontFareast.h`: format 6 powers on with 16 KiB pages 0 and 7, and a `$8000` write in alt
+/// mode banks PRG from the high six bits and CHR from the low two.
+#[cfg(feature = "board-6")]
+#[test]
+fn mappers_n_6_banks_from_one_port() {
+    let mut core = MapperRom::new(6).prg(16).chr(64).load();
+    assert_eq!([0, 1, 14, 15], core.prg_windows());
+    core.mapper_write(0x8000, (3 << 2) | 0x02);
+    assert_eq!([6, 7, 14, 15], core.prg_windows());
+    assert_eq!(16, core.chr_windows()[0]);
+}
+
+/// `FrontFareast.h`: format 17's ports at `$4504-$4517`, and the shared 16-bit IRQ counter.
+#[cfg(feature = "board-17")]
+#[test]
+fn mappers_n_17_ports_and_irq() {
+    let mut core = MapperRom::new(17).prg(16).chr(64).load();
+    assert_eq!([12, 13, 14, 15], core.prg_windows());
+    core.mapper_write(0x4505, 3);
+    core.mapper_write(0x4512, 9);
+    assert_eq!(3, core.prg_windows()[1]);
+    assert_eq!(9, core.chr_windows()[2]);
+    core.mapper_write(0x4502, 0xF0);
+    core.mapper_write(0x4503, 0xFF);
+    for _ in 0..0x20 {
+        core.bus_mut().tick();
+    }
+    assert!(core.cartridge().unwrap().irq_asserted());
+}
