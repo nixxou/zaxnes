@@ -930,6 +930,20 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   it. Not yet modelled: the MMC3's A12 filter differences between revisions, if any (no test ROM
   separates them).
 
+### G4. Letterless RP2A03: the noise channel's last period — done; the reset of `$4017` — open (FIDPLUS-C, 2026-11-15)
+
+- BeesNES (MIT, `LSNApuUnit.cpp` `m_ui16NoisePeriodsOld`) gives the letterless RP2A03 a noise
+  period table whose last entry is 2046 CPU cycles, not 4068, and no short mode
+  (`Write400E`, `OldNoiseTable`). Zaxnes had the missing short mode only (`audio.console_profile`'s
+  letterless consoles, the N0260073). Done: `LETTERLESS_PERIODS` in `apu/noise_channel.rs`, taken
+  with the flag; a reset keeps the chip's table (it used to fall back to the default).
+- Open: BeesNES's reset (`LSNApu2A0X.h:576`) does not rewrite `$4017` on a letterless NTSC chip;
+  Zaxnes follows the 2A03G on every chip (Q-078, a spec decision). Changing it for the letterless
+  chip is a spec change for the owner.
+- Open: the letterless chip is reached only through the audio profile of one measured console; a
+  console-model choice of its own (with the other RP2A03 letter differences, DMA timings) is part
+  of C3.
+
 ## H. Video output (shaders lot, not core)
 
 ### H1. Composite / RF signal, CRT gamma, phosphor decay — open
