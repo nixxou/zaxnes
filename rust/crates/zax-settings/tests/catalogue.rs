@@ -109,6 +109,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "emu.lua_experimental",
             "emu.lua_optimized",
             "emu.lua_smooth_gc",
+            "emu.mmc3_revision",
             "emu.oam_corruption",
             "emu.oam_decay",
             "emu.oamaddr_bug",

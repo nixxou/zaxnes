@@ -31,7 +31,8 @@ Revision A fails `5-MMC3` (both suites) and `6.MMC3_rev_B`: no single model pass
 
 ## Next
 
-* C2: the application's setting (`emu.mmc3_revision`, in the console-model menu's presets).
+* C2 (done): the application's setting `emu.mmc3_revision` ("MMC3 revision": the cartridge's,
+  MMC3A / MMC6, MMC3B / MMC3C), next to the PPU revision, read at the next load.
 * C3: the other variants of the goal: RP2A03 letter revisions (the DMC/OAM DMA and `$4015` read
   differences), the PAL 2C07 measured as the 2C02 was, random CPU/PPU alignment and RAM at power-on
   as a model choice; each with the test ROM or netlist that judges it.

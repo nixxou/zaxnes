@@ -540,6 +540,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("option.Blargg's console", "Console de blargg"),
     ("option.2C02G", "2C02G"),
     ("option.2C02 before G", "2C02 avant G"),
+    ("setting.emu.mmc3_revision", "Révision du MMC3"),
+    ("option.The cartridge's", "Celle de la cartouche"),
+    ("option.MMC3A / MMC6", "MMC3A / MMC6"),
+    ("option.MMC3B / MMC3C", "MMC3B / MMC3C"),
     ("setting.emu.power_on_ram", "RAM à l'allumage"),
     ("setting.emu.power_on_ppu_ram", "Mémoire vidéo à l'allumage"),
     ("setting.emu.ppu_revision", "Révision de la puce vidéo"),
@@ -1224,6 +1228,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (
         "detail.emu.palette_corruption",
         "Un défaut de la puce vidéo : couper l'image au milieu d'une ligne, ou faire sortir l'adresse vidéo de la palette, peut changer certaines couleurs de la palette. Modélisé seulement pour les consoles en alignement 2, celui où il a été observé de façon fiable, d'après les mesures de l'auteur d'AccuracyCoin ; les couleurs exactes sont une approximation. Les jeux écrits pour la console l'évitent. Prend effet au prochain chargement. Par défaut : activé.",
+    ),
+    (
+        "detail.emu.mmc3_revision",
+        "Quelle révision de la puce MMC3 contient une cartouche qui l'utilise. Les deux comptent les lignes de l'image un peu différemment quand un jeu met le compte à zéro : le MMC3A et le MMC6 interrompent une fois, le MMC3B et le MMC3C à chaque ligne. Celle de la cartouche, par défaut, prend ce que disent l'en-tête de la ROM et la base de cartouches, c'est-à-dire le MMC3B / MMC3C pour presque tous les jeux. Ne choisissez une révision que pour un programme de test écrit pour elle. Prend effet au prochain chargement. Par défaut : celle de la cartouche.",
     ),
     (
         "detail.emu.ppu_revision",

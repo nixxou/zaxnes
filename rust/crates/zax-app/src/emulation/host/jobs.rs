@@ -111,6 +111,7 @@ struct ConsoleHardware {
     power_on_ppu_ram: zax_nes::PowerOnPpuRam,
     pre_g_revision: bool,
     oamaddr_write_corruption: bool,
+    mmc3_revision: zax_nes::Mmc3Revision,
 }
 
 impl ConsoleHardware {
@@ -119,6 +120,7 @@ impl ConsoleHardware {
         core.set_power_on_ppu_ram(self.power_on_ppu_ram);
         core.set_ppu_pre_g_revision(self.pre_g_revision);
         core.set_oamaddr_write_corruption(self.oamaddr_write_corruption);
+        core.set_mmc3_revision(self.mmc3_revision);
     }
 }
 
@@ -571,6 +573,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 .settings
                 .get(SettingId::EmuOamaddrWriteCorruption)
                 .as_bool(),
+            mmc3_revision: match self.settings.get(SettingId::EmuMmc3Revision).as_int() {
+                1 => zax_nes::Mmc3Revision::A,
+                2 => zax_nes::Mmc3Revision::B,
+                _ => zax_nes::Mmc3Revision::Cartridge,
+            },
         }
     }
 

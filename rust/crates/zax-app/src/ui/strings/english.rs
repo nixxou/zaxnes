@@ -528,6 +528,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("option.Blargg's console", "Blargg's console"),
     ("option.2C02G", "2C02G"),
     ("option.2C02 before G", "2C02 before G"),
+    ("setting.emu.mmc3_revision", "MMC3 revision"),
+    ("option.The cartridge's", "The cartridge's"),
+    ("option.MMC3A / MMC6", "MMC3A / MMC6"),
+    ("option.MMC3B / MMC3C", "MMC3B / MMC3C"),
     ("setting.emu.power_on_ram", "Work RAM at power-on"),
     ("setting.emu.power_on_ppu_ram", "Video memory at power-on"),
     ("setting.emu.ppu_revision", "Video chip revision"),
@@ -1250,6 +1254,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         "detail.emu.palette_corruption",
         "A defect of the video chip: switching the picture off in the middle of a line, or moving the video address out of the colour palette, can change some palette colours. Only modelled for consoles in alignment 2, the one where it was observed reliably, from the measurements of the AccuracyCoin author; the exact colours are an approximation. Games written for the console avoid it. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.mmc3_revision",
+        "Which revision of the MMC3 chip a cartridge that uses it holds. The two count the lines of the picture slightly differently when a game sets the count to zero: the MMC3A and the MMC6 interrupt once, the MMC3B and MMC3C at every line. The cartridge's, the default, takes what the ROM's header and the cartridge database say, which is the MMC3B / MMC3C for nearly every game. Choose a revision only for a test program written for it. Takes effect at the next load. Default: the cartridge's.",
     ),
     (
         "detail.emu.ppu_revision",

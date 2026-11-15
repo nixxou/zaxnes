@@ -1161,6 +1161,24 @@ fn emulation_power_on_ppu(out: &mut Vec<SettingDescriptor>) {
         ]))
         .with_label("Power-on video memory"),
     );
+    // Lot FIDPLUS-C (docs/design/CONSOLE-MODEL.md): the MMC3's scanline counter, the cartridge's
+    // (its header and the database) by default, or a chip revision chosen.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuMmc3Revision,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "The cartridge's"),
+            opt(1, "MMC3A / MMC6"),
+            opt(2, "MMC3B / MMC3C"),
+        ]))
+        .with_label("MMC3 revision"),
+    );
 }
 
 fn emulation_cartridge(out: &mut Vec<SettingDescriptor>) {

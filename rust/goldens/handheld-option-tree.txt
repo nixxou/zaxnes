@@ -100,6 +100,7 @@ options
       emu.power_on_ram
       emu.power_on_ppu_ram
       emu.ppu_revision
+      emu.mmc3_revision
       emu.oamaddr_write_corruption
       emu.oam_corruption
       emu.ppu_bus_conflicts

@@ -930,6 +930,13 @@ impl EngineHandle {
         }
     }
 
+    /// `emu.mmc3_revision` (lot FIDPLUS-C), read at the next load; Zaxnes only.
+    pub fn set_mmc3_revision(&mut self, revision: zax_nes::Mmc3Revision) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_mmc3_revision(revision);
+        }
+    }
+
     /// `emu.oamaddr_write_corruption` (lot FIDELITY step 37); Zaxnes only.
     pub fn set_oamaddr_write_corruption(&mut self, enabled: bool) {
         if let Some(core) = self.zaxnes_mut() {
