@@ -378,9 +378,11 @@ impl Ppu2C02 {
             value
         };
         let dots = self.edge_dot(READ_LATCH_LATENCY);
-        // X, the latch dot, is the dot after the one the edge follows.
-        let latch_dot = self.dot + dots + 1;
-        let kind = if self.fetching_at(latch_dot) && latch_dot % 2 == 0 {
+        // X, the latch dot, is the dot after the one the edge follows; past dot 340 it is on the
+        // next line, whose fetches the line's own state decides (a visible line follows a visible
+        // or pre-render one).
+        let latch_dot = (self.dot + dots + 1) % super::DOTS_PER_SCANLINE;
+        let kind = if self.fetching() && latch_dot % 2 == 0 {
             EdgeKind::ReadLatchAfterFetch
         } else {
             EdgeKind::ReadLatch
@@ -392,12 +394,6 @@ impl Ppu2C02 {
         };
         self.post_edge(dots, kind);
         value
-    }
-
-    /// Whether the fetches still run on `dot` of this line (a later dot of the same line; a read
-    /// is never posted across a line end that matters: the fetches stop at 340).
-    const fn fetching_at(&self, dot: i32) -> bool {
-        self.fetching() && dot <= 340
     }
 
     /// A `$2007` write in Fidélité+ outside rendering: the data latch now, the store and the

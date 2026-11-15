@@ -91,11 +91,13 @@ known moves).
 * Campaign 215 / 4 and golden as the standard core; AccuracyCoin failed `ALE + Read` in the four
   alignments: the refetch of an odd-X read was made after X's work and overwritten by X + 1's
   normal read. Now an edge after X + 1's work: 147/147 in alignments 2 and 3.
-* **Open: `$2007 Stress Test` fails in alignments 0 and 1** (146/147). The test's own notes describe
-  the PPU DATA state machine half cycle by half cycle (it starts at M2 fall; ALE one PPU cycle
-  later, read three cycles later; whether the PPU clock is high or low when it starts decides
-  which reads are stable): that is step 3's subject, where the state machine and the AD bus become
-  state; it is not patched here.
+* Then `$2007 Stress Test` failed in alignments 0 and 1 (146/147): a read whose latch dot passes
+  dot 340 took the parity of the unwrapped number. Fixed: **AccuracyCoin 147/147 in the four
+  alignments in Fidélité+.** The test's notes describe the PPU DATA state machine half cycle by
+  half cycle (it starts at M2 fall; ALE two halves, idle two, Read two). Read against this
+  mapping they give A3c's latch dots: M2 falls in the second half of dot D+1 in alignments 2-3
+  (Read on the whole of D+5, latch at the start of D+6) and in its first half in 0-1 (Read across
+  D+4 / D+5, latch D+5). Step 3 makes that machine state instead of a latency.
 
 Corpus without the netlist's first frame (power-on artefact), alignments 2 and 3, dots whose
 `v`/`t` differ over the two whole frames left:
