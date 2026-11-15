@@ -647,3 +647,63 @@ fn mappers_p_377_takes_its_outer_bank_at_6000() {
     core.mapper_write(0x6000, 0x02);
     assert_eq!([17, 18, 30, 31], core.prg_windows());
 }
+
+/// `mapper_395.c`: `$6000` D4-D5 and D3 the outer bank, `$6010` D0 and D3 (halving the mask).
+#[cfg(feature = "board-395")]
+#[test]
+fn mappers_p_395_has_two_outer_registers() {
+    let mut core = MapperRom::new(395).prg(128).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    core.mapper_write(0x6000, 0x10);
+    assert_eq!([33, 34, 62, 63], core.prg_windows());
+    core.mapper_write(0x6010, 0x08);
+    assert_eq!([33, 34, 46, 47], core.prg_windows());
+}
+
+/// `mapper_399.c`: PRG 0, `reg[0]`, `reg[1]`, last; `$8001` with D7 set writes `reg[1]`.
+#[cfg(feature = "board-399")]
+#[test]
+fn mappers_p_399_has_its_own_banks() {
+    let mut core = MapperRom::new(399).prg(16).chr(64).load();
+    assert_eq!([0, 0, 1, 15], core.prg_windows());
+    core.mapper_write(0x8001, 0x85);
+    assert_eq!([0, 0, 5, 15], core.prg_windows());
+    core.mapper_write(0x8000, 0x03);
+    assert_eq!(12, core.chr_windows()[0]);
+}
+
+/// `mapper_410.c`: four registers in turn until `reg[3]` D6 locks them.
+#[cfg(feature = "board-410")]
+#[test]
+fn mappers_p_410_locks_its_registers() {
+    let mut core = MapperRom::new(410).prg(64).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    for value in [0x00, 0x10, 0x0F, 0x70] {
+        core.mapper_write(0x6000, value);
+    }
+    assert_eq!([17, 18, 30, 31], core.prg_windows());
+    core.mapper_write(0x6000, 0x00);
+    assert_eq!([17, 18, 30, 31], core.prg_windows());
+}
+
+/// `mapper_411.c`: `$5000` D6 the NROM mode, D1 NROM-256, D0/D2/D3 the bank.
+#[cfg(feature = "board-411")]
+#[test]
+fn mappers_p_411_has_nrom_modes_at_5000() {
+    let mut core = MapperRom::new(411).prg(64).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    core.mapper_write(0x5001, 0x00);
+    // Bank D0 | D2 = 4 in 16 KiB units, NROM-256: 32 KiB bank 2.
+    core.mapper_write(0x5000, 0x46);
+    assert_eq!([8, 9, 10, 11], core.prg_windows());
+}
+
+/// `mapper_420.c`: `$6000` D7 the NROM-256 mode, D1-D3 the bank.
+#[cfg(feature = "board-420")]
+#[test]
+fn mappers_p_420_has_an_nrom_mode() {
+    let mut core = MapperRom::new(420).prg(64).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    core.mapper_write(0x6000, 0x84);
+    assert_eq!([8, 9, 10, 11], core.prg_windows());
+}

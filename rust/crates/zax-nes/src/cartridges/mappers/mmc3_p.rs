@@ -49,6 +49,19 @@ pub enum Mmc3PKind {
     M372,
     /// 377, `mapper_377.c` (JY-111/JY-112): `$6000-$6FFF` the outer bank.
     M377,
+    /// 395, `mapper_395.c` (Realtec 8210): two outer registers at `$6000`/`$6010`, a lock.
+    M395,
+    /// 399, `mapper_399.c` (BATMAP-000): the MMC3's IRQ and mirroring with its own PRG and CHR
+    /// banks, written at `$8000-$9FFF` by A0 and D7.
+    M399,
+    /// 401, `mapper_401.c` (KC885): mapper 45's four registers with DIP-selected lines.
+    M401,
+    /// 410, `mapper_410.c` (JC-016-2 variant): mapper 45's four registers, a CHR-RAM mode.
+    M410,
+    /// 411, `mapper_411.c` (A88S-1): two registers at `$5000`/`$5001`, NROM modes.
+    M411,
+    /// 420, `mapper_420.c` (A971210): four registers at `$6000-$6003`, an NROM mode.
+    M420,
 }
 
 impl Mmc3PKind {
@@ -67,6 +80,12 @@ impl Mmc3PKind {
             361 => Self::M361,
             372 => Self::M372,
             377 => Self::M377,
+            395 => Self::M395,
+            399 => Self::M399,
+            401 => Self::M401,
+            410 => Self::M410,
+            411 => Self::M411,
+            420 => Self::M420,
             _ => return None,
         })
     }
@@ -84,6 +103,12 @@ impl Mmc3PKind {
             Self::M361 => 361,
             Self::M372 => 372,
             Self::M377 => 377,
+            Self::M395 => 395,
+            Self::M399 => 399,
+            Self::M401 => 401,
+            Self::M410 => 410,
+            Self::M411 => 411,
+            Self::M420 => 420,
         }
     }
 }
@@ -115,9 +140,16 @@ impl Mmc3P {
     fn power_on(&mut self) {
         self.outer = [0; 4];
         self.index = 0;
-        // `map_init_372`: "m372.reg[2] = 0x0F", the CHR mask fully open.
-        if self.kind == Mmc3PKind::M372 {
-            self.outer[2] = 0x0F;
+        match self.kind {
+            // `map_init_372`/`_401`/`_410`/`_420`: "reg[2] = 0x0F", the CHR mask fully open.
+            Mmc3PKind::M372 | Mmc3PKind::M401 | Mmc3PKind::M410 | Mmc3PKind::M420 => {
+                self.outer[2] = 0x0F;
+            }
+            // `map_init_399`: banks 0, 1 for PRG and CHR.
+            Mmc3PKind::M399 => self.outer = [0, 1, 0, 1],
+            // `map_init_411`: `$80`, `$82`.
+            Mmc3PKind::M411 => self.outer = [0x80, 0x82, 0, 0],
+            _ => {}
         }
         self.refresh();
     }
@@ -199,6 +231,57 @@ impl Mmc3P {
                 (o[1] | ((o[2] & 0xC0) << 2)) | (page & (!o[3] & 0x3F))
             }
             Mmc3PKind::M377 => mix((((r & 0x20) >> 2) | (r & 0x06)) << 3, 0x0F, page),
+            _ => self.prg_page_b2(slot, page),
+        }
+    }
+
+    /// [`Mmc3P::prg_page`] for group 2.
+    fn prg_page_b2(&self, slot: usize, page: i32) -> i32 {
+        let o = self.outer.map(i32::from);
+        let window = i32::try_from(slot).unwrap_or(0);
+        match self.kind {
+            Mmc3PKind::M395 => {
+                let base = ((o[0] & 0x08) << 4) | ((o[0] & 0x30) << 1) | ((o[1] & 0x01) << 4);
+                base | (page & (0x1F >> ((o[1] & 0x08) >> 3)))
+            }
+            // `prg_fix_mmc3_399`: 0, `reg[0]`, `reg[1]`, last.
+            Mmc3PKind::M399 => [0, o[0], o[1], LAST][slot],
+            // `prg_swap_mmc3_401` with the DIP switches at 0 (J37): `reg[1]` D5-D6 cross into A19-A20.
+            Mmc3PKind::M401 => {
+                let base =
+                    (o[1] & 0x1F) | (o[2] & 0x80) | ((o[1] & 0x40) >> 1) | ((o[1] & 0x20) << 1);
+                base | (page & (!o[3] & 0x1F))
+            }
+            Mmc3PKind::M410 => (o[1] | ((o[2] & 0xC0) << 2)) | (page & (!o[3] & 0x3F)),
+            // `prg_swap_mmc3_411`: `$5000` D6 the NROM mode, D1 NROM-256.
+            Mmc3PKind::M411 => {
+                if o[0] & 0x40 != 0 {
+                    let base =
+                        ((o[1] & 0x40) >> 2) | (o[1] & 0x08) | (o[0] & 0x05) | ((o[0] & 0x08) >> 2);
+                    if o[0] & 0x02 != 0 {
+                        ((base >> 1) << 2) | (window & 0x03)
+                    } else {
+                        (base << 1) | (window & 0x01)
+                    }
+                } else {
+                    let base = ((o[1] & 0x40) >> 1) | ((o[1] & 0x08) << 1);
+                    base | (page & (0x0F | ((o[1] & 0x02) << 3)))
+                }
+            }
+            // `prg_swap_mmc3_420`: `$6000` D7 the NROM-256 mode.
+            Mmc3PKind::M420 => {
+                if o[0] & 0x80 != 0 {
+                    ((((o[3] & 0x20) >> 2) | ((o[0] & 0x0E) >> 1)) << 2) | (window & 0x03)
+                } else {
+                    let shift = if o[0] & 0x20 != 0 {
+                        2
+                    } else {
+                        (o[3] & 0x20) >> 5
+                    };
+                    ((o[3] & 0x04) << 3) | (page & (0x3F >> shift))
+                }
+            }
+            _ => page,
         }
     }
 
@@ -231,6 +314,30 @@ impl Mmc3P {
                 (o[0] | ((o[2] & 0xF0) << 4)) | (page & (0xFF >> (!o[2] & 0x0F)))
             }
             Mmc3PKind::M377 => mix((((r & 0x20) >> 2) | (r & 0x06)) << 6, 0x7F, page),
+            _ => self.chr_page_b2(page),
+        }
+    }
+
+    /// [`Mmc3P::chr_page`] for group 2 (399 maps its CHR in [`Mmc3P::refresh`]).
+    fn chr_page_b2(&self, page: i32) -> i32 {
+        let o = self.outer.map(i32::from);
+        match self.kind {
+            Mmc3PKind::M395 => {
+                let base = ((o[1] & 0x20) << 5) | ((o[0] & 0x30) << 4) | ((o[1] & 0x10) << 3);
+                base | (page & (0xFF >> ((o[1] & 0x40) >> 6)))
+            }
+            Mmc3PKind::M401 | Mmc3PKind::M410 => {
+                (o[0] | ((o[2] & 0xF0) << 4)) | (page & (0xFF >> (!o[2] & 0x0F)))
+            }
+            Mmc3PKind::M411 => {
+                let base = ((o[0] & 0x10) << 4) | ((o[1] & 0x04) << 5);
+                base | (page & (0x7F | ((o[1] & 0x02) << 6)))
+            }
+            Mmc3PKind::M420 => {
+                let base = ((o[1] & 0x80) << 1) | ((o[1] & 0x04) << 5);
+                base | (page & (0xFF >> ((o[1] & 0x80) >> 7)))
+            }
+            _ => page,
         }
     }
 
@@ -269,6 +376,7 @@ impl Mmc3P {
             && match self.kind {
                 Mmc3PKind::M327 => self.outer[0] & 0x10 != 0,
                 Mmc3PKind::M372 => self.outer[2] & 0x20 != 0,
+                Mmc3PKind::M410 => self.outer[2] & 0x40 != 0,
                 _ => false,
             }
     }
@@ -281,6 +389,19 @@ impl Mmc3P {
         let raw_chr = self.mmc3_chr();
         let chr: [i32; BankWindows::CHR_WINDOWS] = if self.chr_ram_mode() {
             std::array::from_fn(|slot| i32::try_from(slot).unwrap_or(0))
+        } else if self.kind == Mmc3PKind::M399 {
+            // `chr_fix_mmc3_399`: two 4 KiB banks, `reg[2]` and `reg[3]`.
+            let (low, high) = (i32::from(self.outer[2]) << 2, i32::from(self.outer[3]) << 2);
+            [
+                low,
+                low + 1,
+                low + 2,
+                low + 3,
+                high,
+                high + 1,
+                high + 2,
+                high + 3,
+            ]
         } else {
             std::array::from_fn(|slot| self.chr_page(raw_chr[slot]))
         };
@@ -349,6 +470,29 @@ impl Mmc3P {
                     r[0] = data;
                 }
             }
+            // `extcl_cpu_wr_mem_395`: A4 picks the register until `reg[1]` D7 locks both.
+            Mmc3PKind::M395 if (0x6000..=0x7FFF).contains(&address) => {
+                if r[1] & 0x80 == 0 && writable {
+                    r[usize::from((address & 0x0010) >> 4)] = data;
+                }
+            }
+            // `extcl_cpu_wr_mem_420`: `$6000-$6003` under mask 3.
+            Mmc3PKind::M420 if (0x6000..=0x7FFF).contains(&address) => {
+                if writable {
+                    r[usize::from(address & 0x03)] = data;
+                }
+            }
+            // `extcl_cpu_wr_mem_411`: `$5000-$5FFF`, A0 the register, no RAM there.
+            Mmc3PKind::M411 if (0x5000..=0x5FFF).contains(&address) => {
+                r[usize::from(address & 0x0001)] = data;
+            }
+            // `extcl_cpu_wr_mem_401`/`_410`: four registers in turn until `reg[3]` D6 locks them.
+            Mmc3PKind::M401 | Mmc3PKind::M410 if (0x6000..=0x7FFF).contains(&address) => {
+                if r[3] & 0x40 == 0 && writable {
+                    r[usize::from(self.index)] = data;
+                    self.index = (self.index + 1) & 0x03;
+                }
+            }
             // `extcl_cpu_wr_mem_372`: four registers in turn.
             Mmc3PKind::M372 if (0x6000..=0x7FFF).contains(&address) => {
                 if writable {
@@ -359,7 +503,7 @@ impl Mmc3P {
             _ => return false,
         }
         // `wram_wr` before the board: the RAM takes the byte too.
-        if writable {
+        if writable && address >= 0x6000 {
             let ram = memory.prg_ram_mut();
             if !ram.is_empty() {
                 let len = ram.len();
@@ -432,6 +576,12 @@ impl Mapper for Mmc3P {
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         if address < 0x8000 {
             return;
+        }
+        // `extcl_cpu_wr_mem_399`: `$8000-$9FFF` also writes its own bank registers, A0 clear
+        // the CHR pair and D7 the half.
+        if self.kind == Mmc3PKind::M399 && address < 0xA000 {
+            let index = (usize::from(address & 0x0001 == 0) << 1) | usize::from(value >> 7);
+            self.outer[index] = u16::from(value);
         }
         self.mmc3.write_register(memory, address, value);
         self.refresh();

@@ -967,6 +967,8 @@ places where puNES itself is incomplete are copied, not invented around:
   core has one CHR memory per cartridge, so the mode is honoured on CHR-RAM images only.
 * 334's DIP read at `$6002` is `(open bus & $FE) | 0`; the high address byte stands in for the bus
   (J33's convention).
+* 401's DIP switches choose which register bits drive PRG A19-A20 and can disable PRG; at 0 the
+  `reg[1]` D5-D6 lines are used and nothing is disabled.
 * 281/282/295 apply puNES's outer bank to ROM nametables too (`mirroring_swap_jyasic_28x`); with
   no dump in the Hackset this is untested on a real image.
 

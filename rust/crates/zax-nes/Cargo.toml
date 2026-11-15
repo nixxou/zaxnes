@@ -196,6 +196,12 @@ default = [
     "board-266",
     "board-284",
     "board-682",
+    "board-420",
+    "board-411",
+    "board-410",
+    "board-401",
+    "board-399",
+    "board-395",
     "board-377",
     "board-372",
     "board-361",
@@ -307,6 +313,12 @@ default = [
 board-mmc3-clones = []
 # MAPPERS-P umbrella: the MMC3 multicarts of `mmc3_p.rs`.
 board-mmc3-p = []
+board-420 = ["board-mmc3-p"]
+board-411 = ["board-mmc3-p"]
+board-410 = ["board-mmc3-p"]
+board-401 = ["board-mmc3-p"]
+board-399 = ["board-mmc3-p"]
+board-395 = ["board-mmc3-p"]
 board-377 = ["board-mmc3-p"]
 board-372 = ["board-mmc3-p"]
 board-361 = ["board-mmc3-p"]

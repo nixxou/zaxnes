@@ -798,17 +798,6 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 199
             | 513
             | 260
-            | 377
-            | 372
-            | 361
-            | 345
-            | 339
-            | 334
-            | 327
-            | 322
-            | 315
-            | 291
-            | 267
             | 258
             | 333
             | 348
@@ -817,7 +806,7 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 284
             // MAPPERS-N: 682 counts every fetch for its scanline IRQ and extended modes.
             | 682
-    )
+    ) || mmc3_p_board(mapper)
 }
 
 /// The second of the two lists [`watches_ppu_reads`] documents: the boards that also move when
@@ -916,21 +905,35 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 199
             | 513
             | 260
-            | 377
-            | 372
-            | 361
-            | 345
-            | 339
-            | 334
-            | 327
-            | 322
-            | 315
-            | 291
-            | 267
             | 258
             | 333
             | 348
             | 366
+    ) || mmc3_p_board(mapper)
+}
+
+/// Lot MAPPERS-P's MMC3 multicarts (`mappers::Mmc3P`): each holds an `Mmc3`, so each is in both
+/// PPU-bus lists for mapper 4's reason. A function of its own, called by both, so that neither
+/// list outgrows `clippy::too_many_lines`; a number whose board is off is never created.
+const fn mmc3_p_board(mapper: i32) -> bool {
+    matches!(
+        mapper,
+        267 | 291
+            | 315
+            | 322
+            | 327
+            | 334
+            | 339
+            | 345
+            | 361
+            | 372
+            | 377
+            | 395
+            | 399
+            | 401
+            | 410
+            | 411
+            | 420
     )
 }
 
@@ -2196,7 +2199,7 @@ mod tests {
         for number in [
             44, 45, 49, 52, 117, 165, 176, 198, 199, 217, 254, 258, 333, 348, 366, 126, 134, 191,
             196, 197, 205, 222, 224, 238, 245, 249, 250, 259, 287, 313, 325, 513, 260, 267, 291,
-            315, 322, 327, 334, 339, 345, 361, 372, 377,
+            315, 322, 327, 334, 339, 345, 361, 372, 377, 395, 399, 401, 410, 411, 420,
         ] {
             if Cartridge::is_supported(number) {
                 expected.extend_from_slice(&[number, number]);

@@ -86,26 +86,26 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 390 | `mapper_390.c` | 93 | 0 | 0 | done (batch 5, `MultiP`) |
 | 393 | `mapper_393.c` | 123 | 1 | 0 | todo |
 | 394 | `mapper_394.c` | 193 | 0 | 0 | todo |
-| 395 | `mapper_395.c` | 88 | 4 | 0 | todo |
+| 395 | `mapper_395.c` | 88 | 4 | 0 | done (batch 13, `Mmc3P`) |
 | 396 | `mapper_396.c` | 68 | 5 | 0 | done (batch 6, `MultiP`) |
 | 397 | `mapper_397.c` | 69 | 1 | 0 | done (batch 6, `JyCompany` + `JyMulticart`) |
 | 398 | `mapper_398.c` | 89 | 1 | 0 | todo |
-| 399 | `mapper_399.c` | 79 | 1 | 0 | todo |
+| 399 | `mapper_399.c` | 79 | 1 | 0 | done (batch 13, `Mmc3P`) |
 | 400 | `mapper_400.c` | 105 | 1 | 0 | done (batch 6, `MultiP`) |
-| 401 | `mapper_401.c` | 97 | 1 | 0 | todo |
+| 401 | `mapper_401.c` | 97 | 1 | 0 | done (batch 13, `Mmc3P`) |
 | 403 | `mapper_403.c` | 96 | 4 | 0 | done (batch 6, `MultiP`) |
 | 404 | `mapper_404.c` | 71 | 1 | 0 | done (batch 11, `Mmc1Outer`) |
 | 406 | `mapper_406.c` | 120 | 2 | 0 | todo |
 | 409 | `mapper_409.c` | 56 | 1 | 0 | done (batch 6, `MultiP`) |
-| 410 | `mapper_410.c` | 96 | 1 | 0 | todo |
-| 411 | `mapper_411.c` | 103 | 7 | 0 | todo |
+| 410 | `mapper_410.c` | 96 | 1 | 0 | done (batch 13, `Mmc3P`) |
+| 411 | `mapper_411.c` | 103 | 7 | 0 | done (batch 13, `Mmc3P`) |
 | 412 | `mapper_412.c` | 106 | 1 | 0 | todo |
 | 413 | `mapper_413.c` | 135 | 1 | 0 | todo |
 | 414 | `mapper_414.c` | 80 | 1 | 0 | done (batch 7, `MultiP`) |
 | 415 | `mapper_415.c` | 69 | 1 | 0 | done (batch 7, `MultiP`) |
 | 416 | `mapper_416.c` | 133 | 1 | 0 | todo |
 | 417 | `mapper_417.c` | 131 | 1 | 0 | todo |
-| 420 | `mapper_420.c` | 96 | 1 | 0 | todo |
+| 420 | `mapper_420.c` | 96 | 1 | 0 | done (batch 13, `Mmc3P`) |
 | 421 | `mapper_421.c` | 72 | 1 | 0 | done (batch 7, `JyCompany` + `JyMulticart`) |
 | 422 | `mapper_126.c` | 153 | 7 | 0 | todo |
 | 428 | `mapper_428.c` | 95 | 6 | 0 | done (batch 7, `MultiP`) |
@@ -210,3 +210,6 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   its byte. The cfg lists naming `board-mmc3-clones` in `irq_boards.rs` and `mmc3.rs` now name
   `board-mmc3-p` too; the numbers join the two PPU-bus latch lists and the mf_3b sweep. 11 boards:
   267, 291, 315, 322, 327, 334, 339, 345, 361, 372, 377.
+* Batch 13: `Mmc3P` 395, 399 (own PRG/CHR banks over the chip's IRQ), 401 (DIP lines at 0), 410,
+  411 (registers at `$5000`), 420. The MMC3-P numbers moved out of the two PPU-bus lists into
+  `mmc3_p_board` (`cartridges/mod.rs`), which both call, to keep them under clippy's line limit.

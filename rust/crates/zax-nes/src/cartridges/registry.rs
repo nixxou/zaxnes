@@ -773,22 +773,34 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     389,
     #[cfg(feature = "board-390")]
     390,
+    #[cfg(feature = "board-395")]
+    395,
     #[cfg(feature = "board-396")]
     396,
     #[cfg(feature = "board-397")]
     397,
+    #[cfg(feature = "board-399")]
+    399,
     #[cfg(feature = "board-400")]
     400,
+    #[cfg(feature = "board-401")]
+    401,
     #[cfg(feature = "board-403")]
     403,
     #[cfg(feature = "board-404")]
     404,
     #[cfg(feature = "board-409")]
     409,
+    #[cfg(feature = "board-410")]
+    410,
+    #[cfg(feature = "board-411")]
+    411,
     #[cfg(feature = "board-414")]
     414,
     #[cfg(feature = "board-415")]
     415,
+    #[cfg(feature = "board-420")]
+    420,
     #[cfg(feature = "board-421")]
     421,
     #[cfg(feature = "board-428")]
@@ -3149,6 +3161,36 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         )))),
         #[cfg(feature = "board-377")]
         377 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
+            memory,
+            Mmc3PKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-395")]
+        395 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
+            memory,
+            Mmc3PKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-399")]
+        399 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
+            memory,
+            Mmc3PKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-401")]
+        401 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
+            memory,
+            Mmc3PKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-410")]
+        410 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
+            memory,
+            Mmc3PKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-411")]
+        411 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
+            memory,
+            Mmc3PKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-420")]
+        420 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
             memory,
             Mmc3PKind::of(mapper)?,
         )))),
