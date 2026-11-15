@@ -19,6 +19,9 @@ default = ["ppu-2007-render-read"]
 parked-boards = ["vs-system", "zax-nes/parked-boards"]
 # Lot FIDPLUS-2: the `dot-trace` subcommand (the PPU dot by dot). Diagnostics only.
 dot-trace = ["zax-nes/ppu-dot-trace"]
+# Lot CPU-NETLIST-DIAG: `cpu-bus-trace` prints every cycle of a DMA (halt, dummy, alignment,
+# fetch, OAM get and put) instead of one `DMA <n>` line. Diagnostics only.
+bus-trace = ["zax-nes/bus-trace"]
 
 # The wgpu renderer (`render --backend vulkan|dx12`), desktop only.
 wgpu = ["zax-render/wgpu"]

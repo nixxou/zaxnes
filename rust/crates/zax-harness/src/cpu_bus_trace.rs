@@ -4,7 +4,10 @@
 //!
 //! The program is loaded as the bench loads it: 32 KiB of PRG at `$8000`, RESET at `$8000`, NMI
 //! and IRQ at `$9000`. Cycles the CPU did not make itself (a DMA stealing them inside the bus) show
-//! as one `DMA <n>` line, `n` the cycles stolen.
+//! as one `DMA <n>` line, `n` the cycles stolen; built with feature `bus-trace`, each of those
+//! cycles is a line instead, `cycle address R|W data D` (the DMA unit's own access), or
+//! `cycle address R -- I` for an idle cycle on which the 2A03 repeats the halted read but
+//! the controller port sees no new read (the address is the halted one, the byte unknown).
 //!
 //! Output: `cycle address R|W data` per line, the cycle counted from the first opcode fetch at
 //! `$8000`.
@@ -223,9 +226,33 @@ pub fn command(args: &[String]) -> Result<(), HarnessError> {
     }
     let first = start.ok_or_else(|| HarnessError::Rom("the program never ran".to_owned()))?;
     let origin = recorder.lines[first].0;
+    #[cfg(feature = "bus-trace")]
+    let dma: std::collections::HashMap<i64, (u16, bool, u8)> = recorder
+        .bus
+        .take_dma_trace()
+        .into_iter()
+        .map(|(cycle, address, read, value)| (cycle, (address, read, value)))
+        .collect();
     let mut text = String::new();
     let mut expected = origin;
     for &(cycle, address, read, value) in recorder.lines[first..].iter().take(options.cycles) {
+        #[cfg(feature = "bus-trace")]
+        for stolen in expected..cycle {
+            match dma.get(&stolen) {
+                Some(&(at, read, byte)) => {
+                    let _ = writeln!(
+                        text,
+                        "{} {at:04X} {} {byte:02X} D",
+                        stolen - origin,
+                        if read { 'R' } else { 'W' }
+                    );
+                }
+                None => {
+                    let _ = writeln!(text, "{} {address:04X} R -- I", stolen - origin);
+                }
+            }
+        }
+        #[cfg(not(feature = "bus-trace"))]
         if cycle > expected {
             let _ = writeln!(text, "{} DMA {}", expected - origin, cycle - expected);
         }
