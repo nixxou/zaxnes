@@ -3545,7 +3545,10 @@ impl Ppu2C02 {
         layout: NametableMirroring,
     ) -> u8 {
         let page = self.nametable_page(address, cartridge);
-        if page == Cartridge::SERVED_BY_CARTRIDGE {
+        // Lot MAPPERS-N: `K::SERVES_NAMETABLES` is a constant, so on a kind whose board never
+        // serves its tables (MMC1, MMC3, NROM...) this whole branch is compiled out; see
+        // `BoardKind::SERVES_NAMETABLES` and `read_nametable_inner`.
+        if K::SERVES_NAMETABLES && page == Cartridge::SERVED_BY_CARTRIDGE {
             if let Some(cartridge) = cartridge {
                 // Lot MF-LEG-2: the MMC5 answers all four tables in extended attribute mode
                 // and with the vertical split on, CIRAM's included, so it is handed the VRAM

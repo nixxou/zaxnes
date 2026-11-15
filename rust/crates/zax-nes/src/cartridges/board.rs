@@ -738,6 +738,17 @@ pub trait BoardKind {
     /// every instruction and hands the rest of the frame back to `with_board_kind!`.
     const SWITCHES: bool = false;
 
+    /// Whether this kind's board may answer [`Cartridge::SERVED_BY_CARTRIDGE`] for a nametable
+    /// (lot MAPPERS-N). `false` for the six one-board kinds of `board_kind!` (NROM, MMC1, `UxROM`,
+    /// `CNROM`, MMC3, `AxROM`): none of those boards serves its own tables, so
+    /// `Ppu2C02::read_nametable_inner::<K>` holds **no code at all** for that branch on their
+    /// paths. Callgrind of Mega Man 2 and Zelda II showed why it matters: even a cold call there
+    /// gave the function a stack frame on every nametable fetch, +0.046 % `core`. A kind whose
+    /// board may serve (the dispatch, the MMC5s) keeps the default `true`.
+    ///
+    /// [`Cartridge::SERVED_BY_CARTRIDGE`]: super::Cartridge::SERVED_BY_CARTRIDGE
+    const SERVES_NAMETABLES: bool = true;
+
     /// Whether `board` is this kind's variant.
     fn matches(board: &Board) -> bool;
 
@@ -778,11 +789,18 @@ impl BoardKind for AnyBoard {
 /// the rule of [`BoardKind`] holds, and it panics rather than read the wrong board if it ever is.
 macro_rules! board_kind {
     ($(#[$doc:meta])* $kind:ident, $board:ident) => {
+        board_kind!($(#[$doc])* $kind, $board, false);
+    };
+    ($(#[$doc:meta])* $kind:ident, $board:ident, $serves:literal) => {
         $(#[$doc])*
         pub enum $kind {}
 
         impl BoardKind for $kind {
             type B = $board;
+
+            // See `BoardKind::SERVES_NAMETABLES`: `false` unless the invocation says otherwise
+            // (the full MMC5, `Mmc5ExtKind`, serves all four tables).
+            const SERVES_NAMETABLES: bool = $serves;
 
             #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
             #[inline(always)]
@@ -951,5 +969,6 @@ impl BoardKind for Mmc5Kind {
 board_kind!(
     /// Mapper 5 with extended attributes or the split armed; it stays so until a reset or a state.
     Mmc5ExtKind,
-    Mmc5Ext
+    Mmc5Ext,
+    true
 );

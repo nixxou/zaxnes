@@ -1621,6 +1621,8 @@ impl Cartridge {
     /// `Board` dispatch cost exactly the same frame before this function existed.
     #[must_use]
     #[inline(never)]
+    // Superseded for the specialised kinds by `BoardKind::SERVES_NAMETABLES`, which removes the
+    // call altogether; kept out of line for the dispatch and the MMC5 kinds.
     pub fn read_nametable_from_vram_as<K: BoardKind>(&self, address: u16, vram: &[u8]) -> u8 {
         if K::SWITCHES {
             self.board
