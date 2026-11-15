@@ -116,6 +116,10 @@ pub enum MultiPKind {
     M554,
     /// 340, `mapper_340.c` (K-3036): address latch, NROM/UNROM modes, CHR-RAM write protection.
     M340,
+    /// 557, `mapper_557.c` (an FDS conversion on a Namcot 118 clone): the 118's select/data pair
+    /// at `$8000`/`$8001`, R6/R7 4-bit PRG banks, CHR fixed (each 1 KiB window its own bank) and
+    /// R5 D5 the mirroring.
+    M557,
 }
 
 impl MultiPKind {
@@ -164,6 +168,7 @@ impl MultiPKind {
             525 => Self::M525,
             554 => Self::M554,
             340 => Self::M340,
+            557 => Self::M557,
             _ => return None,
         })
     }
@@ -211,6 +216,7 @@ impl MultiPKind {
             Self::M525 => 525,
             Self::M554 => 554,
             Self::M340 => 340,
+            Self::M557 => 557,
         }
     }
 
@@ -278,7 +284,12 @@ impl MultiP {
                 _ => [0; 4],
             },
             adc: [0; 3],
-            chr: [0; 8],
+            // `init_N118`: R0-R7 = 0, 2, 4, 5, 6, 7, 0, 1 (557 keeps the 118's registers here).
+            chr: if matches!(kind, MultiPKind::M557) {
+                [0, 2, 4, 5, 6, 7, 0, 1]
+            } else {
+                [0; 8]
+            },
             prg_size: memory.rom().prg_rom().len(),
             header_mirroring: memory.rom().header().mirroring,
             submapper: {
@@ -416,6 +427,13 @@ impl MultiP {
                 0x8000 => r[0] = u16::from(value),
                 0x9000 => r[1] = u16::from(value),
                 0xB000 => self.chr[usize::from(address & 0x07)] = value,
+                _ => {}
+            },
+            // `init_N118`: the 118's select byte, then the register it names (mask `$E001`); the
+            // eight registers live in `MultiP::chr`.
+            MultiPKind::M557 => match address & 0xE001 {
+                0x8000 => r[0] = u16::from(value),
+                0x8001 => self.chr[usize::from(r[0] & 0x07)] = value,
                 _ => {}
             },
             MultiPKind::M564 => {
@@ -960,6 +978,17 @@ impl MultiP {
                     b.map_chr_1k(slot, i32::from(*bank));
                 }
                 mirror(r[1] & 0x01 == 0)
+            }
+            // `prg_swap_n118_557`: R6/R7 `& $0F`, the last two banks fixed; `chr_swap_n118_557`:
+            // window `n` is bank `n`; `mirroring_fix_557`: R5 D5 horizontal.
+            MultiPKind::M557 => {
+                b.map_prg_8k(0, i32::from(self.chr[6] & 0x0F));
+                b.map_prg_8k(1, i32::from(self.chr[7] & 0x0F));
+                // The 118's fixed `$FE`/`$FF` go through the same `& $0F`.
+                b.map_prg_8k(2, 0x0E);
+                b.map_prg_8k(3, 0x0F);
+                b.map_chr_8k(0);
+                mirror(self.chr[5] & 0x20 == 0)
             }
             // `prg_fix_554`/`chr_fix_554`: PRG fixed to banks `$0A`, `$0B`, 6 and 7; the latch is
             // the CHR bank.

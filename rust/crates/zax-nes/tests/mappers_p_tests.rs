@@ -1097,3 +1097,16 @@ fn mappers_p_559_indexes_by_a10_a11() {
     assert_eq!(0, cartridge.nametable_page(0));
     assert_eq!(1, cartridge.nametable_page(1));
 }
+
+/// `mapper_557.c`: R6/R7 masked to 4 bits, banks `$0E`/`$0F` fixed, CHR fixed, R5 D5 horizontal.
+#[cfg(feature = "board-557")]
+#[test]
+fn mappers_p_557_is_a_namcot_118_with_fixed_chr() {
+    let mut core = MapperRom::new(557).prg(32).chr(8).load();
+    assert_eq!([0, 1, 14, 15], core.prg_windows());
+    core.mmc3_bank(6, 0x13);
+    core.mmc3_bank(7, 0x05);
+    core.mmc3_bank(0, 0x40);
+    assert_eq!([3, 5, 14, 15], core.prg_windows());
+    assert_eq!([0, 1, 2, 3, 4, 5, 6, 7], core.chr_windows());
+}

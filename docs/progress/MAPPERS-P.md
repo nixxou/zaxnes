@@ -149,7 +149,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 554 | `mapper_554.c` | 94 | 1 | 0 | done (batch 10, `MultiP`) |
 | 555 | `mapper_555.c` | 142 | 3 | 0 | todo |
 | 556 | `mapper_556.c` | 178 | 1 | 0 | todo |
-| 557 | `mapper_557.c` | 58 | 1 | 0 | todo |
+| 557 | `mapper_557.c` | 58 | 1 | 0 | done (batch 31, `MultiP`) |
 | 558 | `mapper_558.c` | 135 | 14 | 0 | todo |
 | 559 | `mapper_559.c` | 108 | 1 | 0 | done (batch 30, `VrcP`) |
 | 560 | `mapper_560.c` | 83 | 1 | 0 | todo |
@@ -255,3 +255,6 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 * Batch 30: `VrcP` 559 (a VRC4 indexed by A10/A11 through the new `Vrc2Vrc4::new_vrc4_lines`;
   `$9C00` the `$C000` bank, `$9C04-$9C07` four nametable registers in `VrcP::pages`, saved for
   that kind only, and in `nametable_pages_vary`; high-nibble registers take D4-D7).
+* Batch 31: `MultiP` 557 (an FDS conversion on a Namcot 118 clone: the 118's eight registers kept
+  in `MultiP::chr`, already in the save state; PRG `& $0F` with the fixed pair at `$0E`/`$0F`,
+  CHR fixed, R5 D5 the mirroring). Kept off `Namcot108`, whose layout is a measured hot path.

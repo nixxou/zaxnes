@@ -928,6 +928,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     552,
     #[cfg(feature = "board-554")]
     554,
+    #[cfg(feature = "board-557")]
+    557,
     #[cfg(feature = "board-559")]
     559,
     #[cfg(feature = "board-564")]
@@ -3428,6 +3430,8 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
             memory,
             VrcPKind::of(mapper)?,
         )))),
+        #[cfg(feature = "board-557")]
+        557 => Board::DecodeBoard(DecodeBoard::MultiP(MultiP::new(memory, MultiPKind::of(mapper)?))),
         #[cfg(feature = "board-299")]
         299 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
             memory,
