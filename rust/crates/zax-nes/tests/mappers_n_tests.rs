@@ -1010,3 +1010,29 @@ fn mappers_n_260_bases_the_mmc3_and_locks() {
         core.cartridge_mut().unwrap().try_cpu_read(0x5000)
     );
 }
+
+/// Mesen2 `UnlDripGame.h`: with `$800A` bit 2 an attribute fetch returns the palette stored at
+/// `$C000-$FFFF` for the tile whose nametable byte was fetched just before, four times over;
+/// `$8008`/`$8009` arm a CPU-cycle IRQ; a channel's FIFO status reads at `$5000`.
+#[cfg(feature = "board-284")]
+#[test]
+fn mappers_n_284_extends_the_attributes_and_counts() {
+    let mut core = MapperRom::new(284).prg(16).chr(0).load();
+    core.mapper_write(0x800B, 3);
+    assert_eq!([6, 7, 14, 15], core.prg_windows());
+    core.mapper_write(0xC000 + 0x45, 0x02); // table 0 (vertical), tile $45
+    core.mapper_write(0x800A, 0x04); // vertical, extended attributes on
+    let vram = [0x11u8; 0x800];
+    let cartridge = core.cartridge_mut().unwrap();
+    assert_eq!(-2, cartridge.nametable_page(0));
+    cartridge.on_ppu_address_bus(0x2045, 0);
+    assert_eq!(0xAA, cartridge.read_nametable_from_vram(0x23C1, &vram));
+    assert_eq!(0x11, cartridge.read_nametable_from_vram(0x2045, &vram));
+    assert_eq!(Some(0x40), cartridge.try_cpu_read(0x5000));
+    core.mapper_write(0x8008, 0x20);
+    core.mapper_write(0x8009, 0x80);
+    for _ in 0..0x30 {
+        core.bus_mut().tick();
+    }
+    assert!(core.cartridge().unwrap().irq_asserted());
+}

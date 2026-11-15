@@ -600,6 +600,10 @@ impl Mapper for Board {
     fn read_nametable_from_vram(&self, memory: &CartridgeMemory, address: u16, vram: &[u8]) -> u8 {
         match self {
             Board::Mmc5Ext(board) => board.read_nametable_from_vram(memory, address, vram),
+            #[cfg(feature = "board-284")]
+            Board::IrqBoard(IrqBoard::Drip(board)) => {
+                board.read_nametable_from_vram(memory, address, vram)
+            }
             _ => self.read_nametable(memory, address),
         }
     }
@@ -611,6 +615,8 @@ impl Mapper for Board {
     fn nametable_write_offset(&self, address: u16) -> Option<usize> {
         match self {
             Board::Mmc5Ext(board) => board.nametable_write_offset(address),
+            #[cfg(feature = "board-284")]
+            Board::IrqBoard(IrqBoard::Drip(board)) => board.nametable_write_offset(address),
             _ => None,
         }
     }
@@ -623,6 +629,8 @@ impl Mapper for Board {
     fn substitutes_background_tiles(&self) -> bool {
         match self {
             Board::Mmc5Ext(board) => board.substitutes_background_tiles(),
+            #[cfg(feature = "board-284")]
+            Board::IrqBoard(IrqBoard::Drip(board)) => board.substitutes_background_tiles(),
             _ => false,
         }
     }
@@ -631,21 +639,31 @@ impl Mapper for Board {
     fn background_capture_state(&self) -> u64 {
         match self {
             Board::Mmc5Ext(board) => board.background_capture_state(),
+            #[cfg(feature = "board-284")]
+            Board::IrqBoard(IrqBoard::Drip(board)) => board.background_capture_state(),
             _ => 0,
         }
     }
 
     #[cfg(feature = "board-mmc5-exattr-split")]
     fn set_background_capture_state(&mut self, state: u64) {
-        if let Board::Mmc5Ext(board) = self {
-            board.set_background_capture_state(state);
+        match self {
+            Board::Mmc5Ext(board) => board.set_background_capture_state(state),
+            #[cfg(feature = "board-284")]
+            Board::IrqBoard(IrqBoard::Drip(board)) => board.set_background_capture_state(state),
+            _ => {}
         }
     }
 
     #[cfg(feature = "board-mmc5-exattr-split")]
     fn position_captured_background_tile(&mut self, address: u16, column: i32, line: i32) {
-        if let Board::Mmc5Ext(board) = self {
-            board.position_captured_background_tile(address, column, line);
+        match self {
+            Board::Mmc5Ext(board) => board.position_captured_background_tile(address, column, line),
+            #[cfg(feature = "board-284")]
+            Board::IrqBoard(IrqBoard::Drip(board)) => {
+                board.position_captured_background_tile(address, column, line);
+            }
+            _ => {}
         }
     }
 

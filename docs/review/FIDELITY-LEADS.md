@@ -940,6 +940,18 @@ CHR-RAM) and puNES (`mapper_198.c`, banks from `$50` folding onto `$40-$4F`). Th
 password screen cleanly; the later `[T+ChSFIX2]` and `[T+ChTFIX2]` patches show stray glyphs on
 the password screen, not investigated (translation hacks; their CHR use may differ).
 
+### J34. Mapper 284 (Drip): rendering fetches only, and the audio level
+Mesen2 (`UnlDripGame.h`, `MapperReadVram`) substitutes the attribute byte only on a
+`PpuRenderingRead`. This core's nametable path (`read_nametable_from_vram`, the MMC5's) is the
+same for a rendering fetch and a `$2007` read, so with extended attributes on a CPU read of an
+attribute byte returns the substituted palette too; the "last tile" is whatever nametable address
+the board last saw on the PPU bus. A game reads attributes back rarely, and never while it
+streams them. The PCM channels' level is a guess: Mesen2 adds `(sample - $80) * volume * 3` to
+its VRC7 channel; here each channel's `(sample - $80) * volume` is multiplied by 4, so the two at
+full swing span about the DMC's own range. The attribute memory powers on at 0 (Mesen2: the
+console's power-on RAM pattern). No dump at hand; the board widens the MMC5's six `Board` arms
+by one each, behind `board-284`.
+
 ### J33. Mapper 260: nesdev and puNES over Mesen2
 nesdev ("NES 2.0 Mapper 260") and puNES (`mapper_260.c`) agree: a six-bit 16 KiB PRG base and
 a seven-bit 8 KiB CHR base, "opposite-masked" with the MMC3's banks, the lock in `$5000` bit 7

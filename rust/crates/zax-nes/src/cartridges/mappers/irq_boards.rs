@@ -4,6 +4,8 @@ use super::Ax5705;
 use super::CityFighter;
 #[cfg(feature = "board-cony")]
 use super::Cony;
+#[cfg(feature = "board-284")]
+use super::Drip;
 #[cfg(feature = "board-176")]
 use super::Fk23c;
 #[cfg(feature = "board-huang1")]
@@ -371,6 +373,9 @@ pub enum IrqBoard {
     /// Mapper 266, the City Fighter IV VRC4 board (lot MAPPERS-N).
     #[cfg(feature = "board-266")]
     CityFighter(Box<CityFighter>),
+    /// Mapper 284, the Drip homebrew board (lot MAPPERS-N).
+    #[cfg(feature = "board-284")]
+    Drip(Box<Drip>),
     #[cfg(feature = "board-252")]
     Waixing252(Box<Waixing252>),
     #[cfg(feature = "board-253")]
@@ -444,6 +449,8 @@ macro_rules! inner {
             IrqBoard::T230($b) => $body,
             #[cfg(feature = "board-266")]
             IrqBoard::CityFighter($b) => $body,
+            #[cfg(feature = "board-284")]
+            IrqBoard::Drip($b) => $body,
             #[cfg(feature = "board-252")]
             IrqBoard::Waixing252($b) => $body,
             #[cfg(feature = "board-253")]
@@ -574,6 +581,7 @@ impl Mapper for IrqBoard {
         feature = "board-huang1",
         feature = "board-mmc3-clones",
         feature = "board-176",
+        feature = "board-284",
     ))]
     fn prg_ram_writable(&self) -> bool {
         inner!(self, b => b.prg_ram_writable())
@@ -613,7 +621,12 @@ impl Mapper for IrqBoard {
     /// about 1.2 M on the two MMC1 ROMs, on a dispatch no MMC1 reaches. Out of line it is one
     /// `callq` per *register write* of a mapper-158 cartridge, four times, and nothing for
     /// anybody else.
-    #[cfg(any(feature = "board-158", feature = "board-68", feature = "board-jy-asic"))]
+    #[cfg(any(
+        feature = "board-158",
+        feature = "board-68",
+        feature = "board-jy-asic",
+        feature = "board-284"
+    ))]
     #[inline(never)]
     fn nametable_page(&self, table: i32) -> i32 {
         inner!(self, b => b.nametable_page(table))
@@ -700,7 +713,12 @@ impl Mapper for IrqBoard {
     /// **Behaviour-neutral for the other boards of this enum**: none of the fourteen overrides
     /// either method, so each one's own default is `Mapper::cpu_peek_override`'s `None` -- the
     /// same answer the un-forwarded dispatch gave them.
-    #[cfg(any(feature = "board-292", feature = "board-303", feature = "board-529"))]
+    #[cfg(any(
+        feature = "board-292",
+        feature = "board-303",
+        feature = "board-529",
+        feature = "board-284"
+    ))]
     #[inline(never)]
     fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
         inner!(self, b => b.cpu_read_override(memory, address))
@@ -708,7 +726,12 @@ impl Mapper for IrqBoard {
 
     /// The side-effect-free counterpart, for the same board and the same reason: without it
     /// `Mapper::cpu_read_override`'s own default would route a host peek through the fill.
-    #[cfg(any(feature = "board-292", feature = "board-303", feature = "board-529"))]
+    #[cfg(any(
+        feature = "board-292",
+        feature = "board-303",
+        feature = "board-529",
+        feature = "board-284"
+    ))]
     #[inline(never)]
     fn cpu_peek_override(&self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
         inner!(self, b => b.cpu_peek_override(memory, address))
@@ -727,6 +750,14 @@ impl Mapper for IrqBoard {
     #[inline(never)]
     fn on_ppu_address_bus(&mut self, memory: &mut CartridgeMemory, address: u16, clock: i64) {
         inner!(self, b => b.on_ppu_address_bus(memory, address, clock));
+    }
+
+    /// Forwarded for mapper 284 alone (lot MAPPERS-N), the one board of this enum with expansion
+    /// audio: every other one keeps `Mapper`'s `None`, which `Cartridge::has_expansion_audio`
+    /// reads once at attach, so their bus never asks again.
+    #[cfg(feature = "board-284")]
+    fn expansion_audio_output(&self) -> Option<i32> {
+        inner!(self, b => b.expansion_audio_output())
     }
 
     /// **`None` for the whole variant, which is the body the MMC5 already gives**, and MF-6b

@@ -194,6 +194,7 @@ default = [
     "board-530",
     "board-529",
     "board-266",
+    "board-284",
     "board-302",
     "board-305",
     "board-306",
@@ -381,6 +382,8 @@ board-530 = []
 board-529 = []
 # MAPPERS-N: City Fighter IV, a VRC4 with A13/A14 crossed (`CityFighter`).
 board-266 = []
+# MAPPERS-N: the Drip homebrew board, extended attributes on the MMC5's path (`Drip`).
+board-284 = ["board-mmc5-exattr-split"]
 board-265 = ["board-latch-multi"]
 board-283 = ["board-latch-multi"]
 board-285 = ["board-latch-multi"]

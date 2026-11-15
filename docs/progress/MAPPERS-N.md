@@ -142,6 +142,9 @@ Owner's request (2026-11-15): implement the mappers missing compared with the ot
 
 ## Not implemented, with the reason (owner's call to reopen)
 
+* **284 — reopened and done** (see the end of this note): the "PPU files" reason was wrong, the
+  PPU side of the MMC5's path is already generic and the board filter is in `board.rs`.
+  Original note kept for the record:
 * **284, the Drip homebrew board** (Mesen2 `Homebrew/UnlDripGame.h`). Its banking, IRQ and two
   FIFO PCM channels fit the existing hooks (`expansion_audio_output`), but its *extended
   attributes* replace the attribute byte of **rendering fetches only**, per tile, from 2 KiB of
@@ -155,3 +158,7 @@ Owner's request (2026-11-15): implement the mappers missing compared with the ot
   with its own message protocol and network access, self-flashing PRG/CHR, its own audio and
   several nametable/attribute extension modes. A board of its own size, with a network side this
   core has nowhere to put; out of this lot's scope.
+* 284 (`Drip`, IrqBoard) done: extended attributes ride the MMC5's `board-mmc5-exattr-split` path
+  with one more arm in each of `Board`'s six MMC5 methods; PCM channels as expansion audio
+  (J34). No dump. Next: 682 Rainbow without Wi-Fi, then its Wi-Fi behind an emulation option off
+  by default (owner, 2026-11-15), then callgrind and the merge request.

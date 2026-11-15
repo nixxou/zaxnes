@@ -534,6 +534,8 @@ const fn nametable_pages_vary(mapper: i32) -> bool {
             // MAPPERS-N: 307, the KS7037, a CIRAM page per table from four registers
             // (`Kaiser7037.h`, `SetNametables`).
             | 307
+            // MAPPERS-N: 284 serves every table while its extended attributes are on.
+            | 284
     )
 }
 
@@ -582,6 +584,8 @@ const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
             | 529
             // MAPPERS-N: mapper 266's VRC4 IRQ (nesdev "NES 2.0 Mapper 266").
             | 266
+            // MAPPERS-N: mapper 284's IRQ counter and PCM channels (`UnlDripGame.h`).
+            | 284
             // MAPPERS-N: the CPU-clocked counters of `IrqLatch`.
             | 56
             | 142
@@ -758,6 +762,8 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 333
             | 348
             | 366
+            // MAPPERS-N: 284 remembers the last nametable fetch for its extended attributes.
+            | 284
     )
 }
 
@@ -2044,6 +2050,10 @@ mod tests {
             if Cartridge::is_supported(number) {
                 expected.extend_from_slice(&[number, number]);
             }
+        }
+        // MAPPERS-N: mapper 284 remembers the last nametable byte fetched (`UnlDripGame.h`).
+        if Cartridge::is_supported(284) {
+            expected.extend_from_slice(&[284, 284]);
         }
         expected.sort_unstable();
         assert_eq!(

@@ -43,6 +43,8 @@ mod daou306;
 #[cfg(feature = "board-decode-boards")]
 mod decode_boards;
 mod discrete;
+#[cfg(feature = "board-284")]
+mod drip;
 #[cfg(feature = "board-eeprom")]
 mod eeprom24c0x;
 #[cfg(feature = "board-164")]
@@ -212,6 +214,8 @@ pub use decode_boards::DecodeBoard;
 pub use discrete::{
     AxRom, CnRom, Codemasters, ColorDreams, CpRom, GxRom, Mapper078, UnRom512, UxRom,
 };
+#[cfg(feature = "board-284")]
+pub use drip::Drip;
 #[cfg(feature = "board-eeprom")]
 pub use eeprom24c0x::{Eeprom24C0X, EepromKind, EepromPort};
 #[cfg(feature = "board-164")]

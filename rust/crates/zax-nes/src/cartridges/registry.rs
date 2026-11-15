@@ -18,6 +18,8 @@ use super::mappers::CityFighter;
 use super::mappers::Cony;
 #[cfg(feature = "board-decode-boards")]
 use super::mappers::DecodeBoard;
+#[cfg(feature = "board-284")]
+use super::mappers::Drip;
 #[cfg(feature = "board-eeprom")]
 use super::mappers::EepromPort;
 #[cfg(feature = "board-323")]
@@ -607,6 +609,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     274,
     #[cfg(feature = "board-283")]
     283,
+    #[cfg(feature = "board-284")]
+    284,
     #[cfg(feature = "board-285")]
     285,
     #[cfg(feature = "board-286")]
@@ -2194,6 +2198,8 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         529 => Board::IrqBoard(IrqBoard::T230(Box::new(T230::new(memory)))),
         #[cfg(feature = "board-266")]
         266 => Board::IrqBoard(IrqBoard::CityFighter(Box::new(CityFighter::new(memory)))),
+        #[cfg(feature = "board-284")]
+        284 => Board::IrqBoard(IrqBoard::Drip(Box::new(Drip::new(memory)))),
         #[cfg(feature = "board-252")]
         252 => Board::IrqBoard(IrqBoard::Waixing252(Box::new(Waixing252::new(memory)))),
         #[cfg(feature = "board-253")]
