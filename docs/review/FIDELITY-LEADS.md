@@ -318,7 +318,13 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   pairing artefact of the sliding program).
 - **Regions**: every rule of A5 that depends on dots (dot 257, the read merge) applies to NTSC
   and Multi only (`Ppu2C02::netlist_measured_region`): the netlist is a 2C02; the PAL 2C07 (3.2
-  dots a cycle) and the clones keep the previous model until a measurement of their own. The
+  dots a cycle) and the clones keep the previous model until a measurement of their own. A 2C07
+  netlist exists (owner, 2026-11-15): Visual 2C07, `https://www.qmtpro.com/~nes/chipimages/visual2c07/`
+  (same site as Visual 2C02; its `transdefs.js` differs from the 2C02's, 1.22 MB against 1.13 MB;
+  its `nodenames.js`, dated 2016-09-01, looks partly carried over from the 2C02, e.g.
+  `vpos_eq_261`). Licence not stated on the page (visual6502 lineage). It would unblock C3c and
+  D2c as a measurement tool outside the repository, like VisualNes; the download waits on the
+  owner. The
   `INC $2007` rule (a data latch, dots 1 to 4 apart) applies everywhere.
 - **Bench artefacts to keep in mind**: PPUCTRL/PPUMASK power-on values of the netlist (write
   `$2000` after the warm-up); the PPU ignores writes during the warm-up; the `bus` column also
