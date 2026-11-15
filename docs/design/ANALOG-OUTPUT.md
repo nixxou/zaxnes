@@ -61,6 +61,10 @@ entries; at 0 the sky of Super Mario Bros. decoded magenta) and pinned by a test
 measured in release: 7.1 ms a frame first, 1.2 ms with tables for the levels and the demodulation;
 the standard path pays nothing (the option is a branch per displayed frame). Harness:
 `ZAXNES_COMPOSITE=1` writes `<scene>-composite.png` next to the flat picture.
+D1b (2026-11-15): the profile filters' memory in the savestate (formats 14 / 15, FIDELITY-LEADS
+E1 (5)); and the filters are no longer rebuilt at rest by every ratio recomputation (a click at each
+fine pacing adjustment of the host before). Standard path: untouched (no profile, format 10 / 11).
+
 D1a's cost on the standard path (callgrind, clean builds against 6c9cb163, PR-1 set): first
 +0.89 % on `mmc5` (the profile test in the setter the MMC5 calls on every level change), then
 +0.417 % with that branch out of line, and **-0.057 %** at 7edd528e, where the setter is back to

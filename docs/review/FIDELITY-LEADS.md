@@ -829,8 +829,14 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   (owner, an exception to AMD-061 §6.2 inside the profile option, FIDPLUS-D1a)**: with a profile,
   the expansion level is a band-limited signal of its own (`expansion_ring`), added between the
   second and the third high-pass; without one, the clip of AMD-061 is unchanged (golden identical,
-  audio included); (5) filter state is
-  not in the savestate (a load restarts it at rest: inaudible click at most); (6) the
+  audio included); (5) filter state not in the savestate — **done 2026-11-15 (FIDPLUS-D1b)**:
+  a savestate taken with a profile carries the filters' memory (format 14 / 15: a flags byte, then
+  the edges and / or the 64-byte filter block; 12 and 13 still read, no profile keeps 10 / 11), and
+  a load gives the same samples as the machine that went on (test, exact). Found on the way: every
+  recomputation of the resampling ratio (speed, the host's fine pacing adjustment, a load's region)
+  rebuilt the filters at rest, a click each time; the same profile at the same rate now keeps them.
+  Open: run-ahead's in-memory restore keeps the filters where the frames ahead left them (their
+  audio is not heard; a few samples of filter memory apart); (6) the
   N20914398 profile was measured with a Sunsoft 5B cartridge and has no low-pass and no
   inversion — kept as BeesNES lists it.
 

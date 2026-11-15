@@ -1265,6 +1265,28 @@ impl Apu2A03 {
     /// Bytes the APU's part of a savestate occupies at most (REQ-ARCH-013).
     pub const MAX_STATE_SIZE: usize = 512 + BandLimitedResampler::STATE_SIZE;
 
+    /// Bytes the console profile's filter block occupies (lot FIDPLUS-D1b).
+    pub const PROFILE_FILTER_STATE_SIZE: usize = console_profile::ProfileFilter::STATE_SIZE;
+
+    /// Whether a console audio profile is set, so that a savestate carries its filters' memory.
+    #[must_use]
+    pub const fn has_profile_filter(&self) -> bool {
+        self.resampler.has_profile_filter()
+    }
+
+    /// Appends the console profile's filter memory (nothing without a profile).
+    pub fn save_profile_filter(&self, writer: &mut StateWriter) {
+        self.resampler.save_profile_filter(writer);
+    }
+
+    /// Reads the console profile's filter memory into the filters in force, or skips it.
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated.
+    pub fn load_profile_filter(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.resampler.load_profile_filter(reader)
+    }
+
     /// Appends the APU state to `writer` (REQ-CORE-090).
     pub fn save_state(&self, writer: &mut StateWriter) {
         self.pulse1.save_state(writer);

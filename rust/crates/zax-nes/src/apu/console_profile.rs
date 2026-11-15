@@ -237,6 +237,19 @@ pub(crate) struct ProfileFilter {
 }
 
 impl ProfileFilter {
+    /// A filter with no stage, to read a block into and drop.
+    pub(crate) const fn at_rest() -> Self {
+        Self {
+            low_pass: None,
+            low_pass_input: 0.0,
+            low_pass_output: 0.0,
+            high_pass: [None; 3],
+            high_pass_input: [0.0; 3],
+            high_pass_output: [0.0; 3],
+            sign: 1.0,
+        }
+    }
+
     /// The filters of `profile` at `sample_rate` Hz, at rest.
     pub(crate) fn new(profile: &ConsoleAudioProfile, sample_rate: i32) -> Self {
         let rate = f64::from(sample_rate.max(1));
@@ -267,6 +280,38 @@ impl ProfileFilter {
             high_pass_output: [0.0; 3],
             sign: if profile.inverted { -1.0 } else { 1.0 },
         }
+    }
+
+    /// Bytes [`Self::save_state`] writes.
+    pub(crate) const STATE_SIZE: usize = 8 * 8;
+
+    /// Appends the filters' memory (lot FIDPLUS-D1b, FIDELITY-LEADS E1-5): the low-pass's last
+    /// input and output and the three high-passes'. The coefficients are the profile's and the
+    /// sample rate's, settings rather than state.
+    pub(crate) fn save_state(&self, writer: &mut crate::state::StateWriter) {
+        writer.write_f64(self.low_pass_input);
+        writer.write_f64(self.low_pass_output);
+        for stage in 0..3 {
+            writer.write_f64(self.high_pass_input[stage]);
+            writer.write_f64(self.high_pass_output[stage]);
+        }
+    }
+
+    /// Restores what [`Self::save_state`] wrote.
+    ///
+    /// # Errors
+    /// [`crate::state::InvalidState`] when the block is truncated.
+    pub(crate) fn load_state(
+        &mut self,
+        reader: &mut crate::state::StateReader,
+    ) -> Result<(), crate::state::InvalidState> {
+        self.low_pass_input = reader.read_f64()?;
+        self.low_pass_output = reader.read_f64()?;
+        for stage in 0..3 {
+            self.high_pass_input[stage] = reader.read_f64()?;
+            self.high_pass_output[stage] = reader.read_f64()?;
+        }
+        Ok(())
     }
 
     /// One output sample through the low-pass, the three high-passes and the sign.

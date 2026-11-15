@@ -454,11 +454,13 @@ impl NesCore {
         // here and the host would stop recognising it, which is the one way bumping the format
         // could have broken a file it still loads.
         match i32::from_le_bytes([header[4], header[5], header[6], header[7]]) {
-            Self::STATE_VERSION | Self::STATE_VERSION_8 | Self::FIDPLUS_STATE_VERSION => {
-                Some(false)
-            }
+            Self::STATE_VERSION
+            | Self::STATE_VERSION_8
+            | Self::FIDPLUS_STATE_VERSION
+            | Self::EXTENDED_STATE_VERSION => Some(false),
             Self::WIDE_STATE_VERSION
             | Self::FIDPLUS_WIDE_STATE_VERSION
+            | Self::EXTENDED_WIDE_STATE_VERSION
             | Self::WIDE_STATE_VERSION_9
             | Self::WIDE_STATE_VERSION_6
             | Self::WIDE_STATE_VERSION_5 => Some(true),
@@ -530,6 +532,16 @@ impl NesCore {
     /// every other block keeps the version earlier builds read.
     pub const FIDPLUS_STATE_VERSION: i32 = 12;
 
+    /// [`Self::STATE_VERSION`] followed by a byte of flags and the optional blocks it names: bit 0
+    /// the PPU's pending Fidélité+ edges, bit 1 the console audio profile's filter memory (lot
+    /// FIDPLUS-D1b). Written only when one of them is present, so every other block keeps the
+    /// version earlier builds read; 12 and 13 stay readable.
+    pub const EXTENDED_STATE_VERSION: i32 = 14;
+
+    /// [`Self::WIDE_STATE_VERSION`] followed by the flags and blocks of
+    /// [`Self::EXTENDED_STATE_VERSION`].
+    pub const EXTENDED_WIDE_STATE_VERSION: i32 = 15;
+
     /// [`Self::WIDE_STATE_VERSION`] followed by the PPU's pending Fidélité+ edges.
     pub const FIDPLUS_WIDE_STATE_VERSION: i32 = 13;
 
@@ -553,6 +565,7 @@ impl NesCore {
             version,
             Self::WIDE_STATE_VERSION
                 | Self::FIDPLUS_WIDE_STATE_VERSION
+                | Self::EXTENDED_WIDE_STATE_VERSION
                 | Self::WIDE_STATE_VERSION_9
                 | Self::WIDE_STATE_VERSION_7
                 | Self::WIDE_STATE_VERSION_6
@@ -564,6 +577,7 @@ impl NesCore {
     const fn is_known_state_version(version: i32) -> bool {
         version == Self::STATE_VERSION
             || version == Self::FIDPLUS_STATE_VERSION
+            || version == Self::EXTENDED_STATE_VERSION
             || version == Self::STATE_VERSION_8
             || version == Self::STATE_VERSION_4
             || Self::is_wide_state_version(version)
@@ -2282,13 +2296,14 @@ impl NesCore {
 
         let wide = self.bus.ppu().wide();
         let edges = self.bus.ppu().edges_pending();
+        let filter = self.bus.apu().has_profile_filter();
         let mut writer = StateWriter::reusing(std::mem::take(buffer));
         writer.write_u32(Self::STATE_MAGIC);
-        writer.write_i32(match (wide.unlocked(), edges) {
+        writer.write_i32(match (wide.unlocked(), edges || filter) {
             (true, false) => Self::WIDE_STATE_VERSION,
             (false, false) => Self::STATE_VERSION,
-            (true, true) => Self::FIDPLUS_WIDE_STATE_VERSION,
-            (false, true) => Self::FIDPLUS_STATE_VERSION,
+            (true, true) => Self::EXTENDED_WIDE_STATE_VERSION,
+            (false, true) => Self::EXTENDED_STATE_VERSION,
         });
         writer.write_string(Self::CORE_NAME);
         writer.write_bool(include_rom_image);
@@ -2307,8 +2322,14 @@ impl NesCore {
         if wide.unlocked() {
             wide.save_state(&mut writer);
         }
-        if edges {
-            self.bus.ppu().save_edge_state(&mut writer);
+        if edges || filter {
+            writer.write_u8(u8::from(edges) | (u8::from(filter) << 1));
+            if edges {
+                self.bus.ppu().save_edge_state(&mut writer);
+            }
+            if filter {
+                self.bus.apu().save_profile_filter(&mut writer);
+            }
         }
 
         *buffer = writer.into_vec();
@@ -2334,6 +2355,7 @@ impl NesCore {
             + 1024 // MMC5 ExRAM.
             + MAX_TILE_RECORD_STATE_SIZE
             + Apu2A03::MAX_STATE_SIZE
+            + Apu2A03::PROFILE_FILTER_STATE_SIZE
             + 4096; // headers, registers, counters and the length prefixes
 
         rom_bytes + fixed_bytes + 256 + name_bytes
@@ -2491,6 +2513,17 @@ impl NesCore {
             || (version == Self::FIDPLUS_WIDE_STATE_VERSION && wide_read)
         {
             self.bus.ppu_mut().load_edge_state(reader)?;
+        }
+        if version == Self::EXTENDED_STATE_VERSION
+            || (version == Self::EXTENDED_WIDE_STATE_VERSION && wide_read)
+        {
+            let flags = reader.read_u8()?;
+            if flags & 1 != 0 {
+                self.bus.ppu_mut().load_edge_state(reader)?;
+            }
+            if flags & 2 != 0 {
+                self.bus.apu_mut().load_profile_filter(reader)?;
+            }
         }
         Ok(())
     }
