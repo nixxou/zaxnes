@@ -474,3 +474,8 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   when its misc ROM is a tape (`registry::is_study_box`), so `req_core_102`'s bare 186 is still
   refused and 186 stays out of `SUPPORTED_MAPPERS`. The app finds `StudyBox.bin` beside the tape
   or beside the executable. All 135 numbers are covered.
+* Perf, the whole lot against e4596884. After batch 59 (5c5b8de2): mm2 core +0.059 %, zelda2
+  core +0.062 %, smb3 core +0.048 %. A bisect put all of it on batch 59 (562 and 355 alone:
+  +0.003 %), on the 532 frame hooks inlined into `run_frame` and the 256-byte snapshot on its
+  frame. With them cold, out of line and the snapshot boxed (a8a846bd): mm2 core +0.003 % and
+  total +0.001 %, zelda2 core +0.002 % and total +0.002 %, smb3 core +0.002 % and total +0.007 %.
