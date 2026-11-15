@@ -1094,3 +1094,35 @@ fn mappers_n_682_acknowledges_on_a_4011_read() {
     assert_eq!(0, core.bus_mut().read(0x4011));
     assert!(!core.cartridge().unwrap().irq_asserted());
 }
+
+/// Mesen2 `FlashS29.h`, as `Rainbow.cpp` wires it to PRG-ROM: `$AAA`/`$555` unlock, `$A0`
+/// program (AND), `$90` software ID (manufacturer `$01`, S29AL008 `$5B`), `$80`/`$30` sector erase;
+/// the written sectors reach the flash save file.
+#[cfg(feature = "board-682")]
+#[test]
+fn mappers_n_682_programs_and_erases_its_prg_flash() {
+    let mut core = MapperRom::new(682).prg(32).chr(0).chr_ram(0x8000).load();
+    let read =
+        |core: &mut zax_nes::NesCore, address| core.cartridge_mut().unwrap().try_cpu_read(address);
+    let unlock = |core: &mut zax_nes::NesCore, command| {
+        core.mapper_write(0x8AAA, 0xAA);
+        core.mapper_write(0x8555, 0x55);
+        core.mapper_write(0x8AAA, command);
+    };
+    unlock(&mut core, 0xA0);
+    core.mapper_write(0xE000, 0x01);
+    assert_eq!(Some(0x01), read(&mut core, 0xE000));
+    assert_eq!(Some(0x03), read(&mut core, 0xE001));
+    unlock(&mut core, 0x90);
+    assert_eq!(Some(0x01), read(&mut core, 0x8000));
+    assert_eq!(Some(0x5B), read(&mut core, 0x8002));
+    core.mapper_write(0x8000, 0xF0);
+    assert_eq!(Some(0x00), read(&mut core, 0x8002));
+    unlock(&mut core, 0x80);
+    core.mapper_write(0x8AAA, 0xAA);
+    core.mapper_write(0x8555, 0x55);
+    core.mapper_write(0xE000, 0x30);
+    assert_eq!(Some(0xFF), read(&mut core, 0xE000));
+    assert_eq!(Some(0xFF), read(&mut core, 0x8000));
+    assert_ne!(core.export_flash_save(), Vec::<u8>::new());
+}

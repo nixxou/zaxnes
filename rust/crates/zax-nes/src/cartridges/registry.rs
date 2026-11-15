@@ -1192,6 +1192,13 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
             flash_sector: Some(FlashRom::SST39SF040_SECTOR),
             ..BoardMemorySizes::default()
         },
+        // MAPPERS-N: the Rainbow's PRG-ROM is an S29 flash the game programs (Mesen2
+        // `Rainbow.cpp`, `FlashS29`); its smallest erase unit, 8 KiB, is the tracking sector.
+        #[cfg(feature = "board-682")]
+        682 => BoardMemorySizes {
+            flash_sector: Some(super::mappers::Rainbow::FLASH_TRACK_SECTOR),
+            ..BoardMemorySizes::default()
+        },
         // nesdev ("INES Mapper 096"): "PRG RAM capacity: No", and "CHR capacity: 32 KiB RAM" --
         // eight of the 4 KiB pages the board banks in. The CHR figure is the same one
         // REQ-CORE-012's default gives an image with no CHR-ROM, and it is stated anyway

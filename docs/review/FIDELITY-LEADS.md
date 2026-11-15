@@ -953,8 +953,15 @@ sprite extended mode evaluates, as Mesen2 does, so an OAM **DMA** does not reach
 `$4011` read with `$415A` bit 2 acknowledges the CPU IRQ and answers the 6-bit DAC sum doubled
 (Mesen2 `GetLastOutput() << 1`; here the VRC6 generators' sum, Mesen2's own audio differs in its
 mixing). The 3D capture replays both nametable fetches of each column (previous line's fetches 41
-and 42 for tiles 0 and 1) and puts the per-fetch state back afterwards. Not yet: the ESP (no
-Wi-Fi: `$4191`/`$4192` read 0), and the flash self-programming (PRG-ROM writes are dropped). Two readings: `$4151` returns the scanline
+and 42 for tiles 0 and 1) and puts the per-fetch state back afterwards. Phase 4 added the S29 flash
+(Mesen2 `FlashS29.h`): program, unlock bypass, sector and chip erase, software ID, on PRG-ROM and
+CHR-ROM. The chip model is taken from the ROM size as Mesen2 does (1 MiB S29AL008 and any other
+size, 2 MiB AL016, 4 MiB JL032, 8 MiB GL064S); the last 64 KiB's smaller sectors follow it. A
+command byte that is not one of the known ones at the third unlock cycle resets the sequence here
+(Mesen2 leaves the state until the next write). PRG writes go through this core's `FlashRom`, so
+they reach the flash save file (8 KiB tracking sectors) and the savestate; **CHR flash writes change
+CHR-ROM in place and are neither in the save file nor in a savestate** (Mesen2 keeps both through
+its ROM patch). Not yet: the ESP (no Wi-Fi: `$4191`/`$4192` read 0). Two readings: `$4151` returns the scanline
 IRQ flag as it was **before** the read acknowledges it (Mesen2 clears first, so its bit 0 always
 reads 0, which contradicts the doc's "IRQ pending" bit); the PPU-idle reset after three CPU cycles
 without a fetch sets the scanline to -1 as Mesen2 does. `cpu_peek_override` clones the board to

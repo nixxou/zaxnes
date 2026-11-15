@@ -193,6 +193,12 @@ impl CartridgeMemory {
         self.rom.prg_rom_mut()
     }
 
+    /// CHR-ROM, mutably: mapper 682's CHR is an S29 flash its game may program (MAPPERS-N).
+    #[cfg(feature = "board-682")]
+    pub(crate) fn chr_rom_mut(&mut self) -> &mut [u8] {
+        self.rom.chr_rom_mut()
+    }
+
     /// PRG-RAM at $6000-$7FFF, 8 KiB unless the board or the header asks for more.
     #[must_use]
     pub fn prg_ram(&self) -> &[u8] {
@@ -298,7 +304,7 @@ impl CartridgeMemory {
     ///
     /// A board with no flash row in [`registry::board_memory_sizes`] still gets the write, so the
     /// behaviour of a board that had one before this module existed is unchanged.
-    #[cfg(feature = "board-111")]
+    #[cfg(any(feature = "board-111", feature = "board-682"))]
     pub(crate) fn flash_program(&mut self, offset: usize, value: u8) {
         let rom = self.rom.prg_rom_mut();
         if let Some(flash) = &mut self.flash {
@@ -310,7 +316,7 @@ impl CartridgeMemory {
 
     /// Erases the flash sector `offset` falls in to `$FF`, the `$80`/`$30` command, and marks it
     /// changed.
-    #[cfg(feature = "board-111")]
+    #[cfg(any(feature = "board-111", feature = "board-682"))]
     pub(crate) fn flash_erase_sector(&mut self, offset: usize) {
         let rom = self.rom.prg_rom_mut();
         if let Some(flash) = &mut self.flash {

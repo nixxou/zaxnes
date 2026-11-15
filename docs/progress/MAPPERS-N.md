@@ -203,4 +203,6 @@ ext, capture path, bus hooks; 3 Wi-Fi option; 4 flash. Each phase committed on i
   `$4011` read to the board; separate attribute answer; 3D capture arms in `board.rs`. Tests
   `mappers_n_682_*` (2), zax-nes suite and clippy green; workspace builds (`zax-app` link needs the
   SDL2 cmake build that a target purge removed, not rebuilt for disk space).
-* Next: phase 3 (Wi-Fi ESP behind an emulation option, off by default), phase 4 (flash).
+* Phase 4 done: S29 flash on PRG (save file and savestate through `FlashRom`) and CHR (in place);
+  test `mappers_n_682_programs_and_erases_its_prg_flash`.
+* Next: phase 3 (Wi-Fi ESP behind an emulation option, off by default).

@@ -70,6 +70,169 @@ enum NtAnswer {
     Window(u16, Option<u8>),
 }
 
+/// What one write to an S29 flash asks for (Mesen2 `FlashS29.h`, read, not copied).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum FlashOp {
+    None,
+    /// Program (AND) the byte at the offset.
+    Program(usize, u8),
+    /// Erase to `$FF` the byte range.
+    Erase(std::ops::Range<usize>),
+}
+
+/// The S29 command state machine: unlock `$AAA`/`$555` on the low 12 address bits, program
+/// (`$A0`), unlock bypass (`$20`), sector and chip erase (`$80` then `$30`/`$10`), software ID
+/// (`$90`, left by `$F0`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct FlashS29 {
+    /// 0 waiting for a command, 1 programming, 2 erasing.
+    mode: u8,
+    cycle: u8,
+    software_id: bool,
+    unlock_bypass: bool,
+}
+
+impl FlashS29 {
+    const fn reset_state(&mut self) {
+        self.mode = 0;
+        self.cycle = 0;
+    }
+
+    /// The erase sector of `offset` in a chip of `size` bytes: 64 KiB sectors, the last 64 KiB
+    /// split `{32, 8, 8, 16}` KiB on the S29AL008/016 and in eight 8 KiB on the larger chips.
+    fn sector(offset: usize, size: usize) -> std::ops::Range<usize> {
+        let last = size.saturating_sub(0x10000);
+        if offset < last || size < 0x10000 {
+            let start = offset & !0xFFFF;
+            return start..(start + 0x10000).min(size);
+        }
+        let split: &[usize] = if size >= 0x40_0000 {
+            &[8, 8, 8, 8, 8, 8, 8, 8]
+        } else {
+            &[32, 8, 8, 16]
+        };
+        let mut start = last;
+        for kib in split {
+            let end = start + kib * 1024;
+            if offset < end {
+                return start..end;
+            }
+            start = end;
+        }
+        last..size
+    }
+
+    /// The device ID byte at offset 2 (`S29AL008` `$5B`, `AL016` `$49`, `JL032`/`GL064S` `$7E`).
+    const fn device_id(size: usize) -> u8 {
+        match size {
+            0x20_0000 => 0x49,
+            0x40_0000 | 0x80_0000 => 0x7E,
+            _ => 0x5B,
+        }
+    }
+
+    /// A software-ID read, `None` outside that mode.
+    fn read(self, offset: usize, size: usize) -> Option<u8> {
+        if !self.software_id {
+            return None;
+        }
+        let large = size >= 0x40_0000;
+        Some(match offset & 0x1FF {
+            0x00 => 0x01,
+            0x02 => Self::device_id(size),
+            0x1C if large => {
+                if size == 0x40_0000 {
+                    0x0A
+                } else {
+                    0x10
+                }
+            }
+            0x1E if large => 0x00,
+            _ => 0xFF,
+        })
+    }
+
+    fn write(&mut self, offset: usize, value: u8, size: usize) -> FlashOp {
+        let cmd = offset & 0xFFF;
+        match self.mode {
+            1 => {
+                self.reset_state();
+                return if offset < size {
+                    FlashOp::Program(offset, value)
+                } else {
+                    FlashOp::None
+                };
+            }
+            2 => {
+                match (self.cycle, cmd, value) {
+                    (3, 0xAAA, 0xAA) | (4, 0x555, 0x55) => self.cycle += 1,
+                    (5, 0xAAA, 0x10) => {
+                        self.reset_state();
+                        return FlashOp::Erase(0..size);
+                    }
+                    (5, _, 0x30) => {
+                        self.reset_state();
+                        return FlashOp::Erase(Self::sector(offset, size));
+                    }
+                    _ => self.reset_state(),
+                }
+                return FlashOp::None;
+            }
+            _ => {}
+        }
+        if self.unlock_bypass {
+            match (self.cycle, value) {
+                (0, 0xA0) => self.mode = 1,
+                (0, 0x90) => self.cycle = 1,
+                (1, 0x00) => {
+                    self.unlock_bypass = false;
+                    self.cycle = 0;
+                }
+                _ => self.cycle = 0,
+            }
+            return FlashOp::None;
+        }
+        match (self.cycle, cmd, value) {
+            (0, _, 0xF0) => {
+                self.reset_state();
+                self.software_id = false;
+            }
+            (0, 0xAAA, 0xAA) | (1, 0x555, 0x55) => self.cycle += 1,
+            (2, 0xAAA, command) => {
+                self.cycle = 0;
+                match command {
+                    0x20 => self.unlock_bypass = true,
+                    0x80 => {
+                        self.mode = 2;
+                        self.cycle = 3;
+                    }
+                    0x90 => self.software_id = true,
+                    0xA0 => self.mode = 1,
+                    0xF0 => self.software_id = false,
+                    _ => {}
+                }
+            }
+            _ => self.cycle = 0,
+        }
+        FlashOp::None
+    }
+
+    fn save(self, writer: &mut StateWriter) {
+        writer.write_u8(self.mode);
+        writer.write_u8(self.cycle);
+        writer.write_bool(self.software_id);
+        writer.write_bool(self.unlock_bypass);
+    }
+
+    fn load(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.mode = reader.read_u8()? % 3;
+        self.cycle = reader.read_u8()? % 6;
+        self.software_id = reader.read_bool()?;
+        self.unlock_bypass = reader.read_bool()?;
+        Ok(())
+    }
+}
+
 /// Mapper 682.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rainbow {
@@ -144,6 +307,8 @@ pub struct Rainbow {
     audio: Vrc6Audio,
     audio_pins: u8,
     audio_volume: u8,
+    prg_flash: FlashS29,
+    chr_flash: FlashS29,
     nt_answer: NtAnswer,
     /// The answer of the attribute fetch, kept apart so that the 3D capture can decide both.
     at_answer: NtAnswer,
@@ -156,6 +321,8 @@ impl Rainbow {
     const FPGA_RAM: usize = 0x2000;
     /// The generated OAM routines (`_oamCode`).
     const OAM_CODE: usize = 0x506;
+    /// The flash save file's sector, the S29's smallest erase unit (`FlashRom`).
+    pub(crate) const FLASH_TRACK_SECTOR: usize = 0x2000;
 
     pub(crate) fn new(_memory: &CartridgeMemory) -> Self {
         Self {
@@ -229,6 +396,8 @@ impl Rainbow {
             audio: Vrc6Audio::new(),
             audio_pins: 0,
             audio_volume: 0,
+            prg_flash: FlashS29::default(),
+            chr_flash: FlashS29::default(),
             nt_answer: NtAnswer::Plain,
             at_answer: NtAnswer::Plain,
             capture_stash: None,
@@ -273,6 +442,12 @@ impl Rainbow {
     }
 
     fn read_target(&self, memory: &CartridgeMemory, kind: u8, offset: usize) -> Option<u8> {
+        if kind == 0 {
+            let size = memory.rom().prg_rom().len();
+            if let Some(value) = self.prg_flash.read(offset % size.max(1), size) {
+                return Some(value);
+            }
+        }
         let memory_of = match kind {
             0 => memory.rom().prg_rom(),
             1 => memory.prg_ram(),
@@ -432,7 +607,7 @@ impl Rainbow {
                         }
                     }
                     2 => self.fpga_ram[offset % Self::FPGA_RAM] = value,
-                    _ => {}
+                    _ => self.write_prg_flash(memory, offset, value),
                 }
             }
             _ => {}
@@ -485,6 +660,34 @@ impl Rainbow {
             0x4174 => self.window_scroll_x = value & 0x1F,
             0x4175 => self.window_scroll_y = value,
             _ => {}
+        }
+    }
+
+    /// `WriteRegister`'s `_prgFlash->Write`: PRG-ROM through the save-tracked `FlashRom`.
+    fn write_prg_flash(&mut self, memory: &mut CartridgeMemory, offset: usize, value: u8) {
+        let size = memory.rom().prg_rom().len();
+        match self.prg_flash.write(offset % size.max(1), value, size) {
+            FlashOp::None => {}
+            FlashOp::Program(offset, value) => memory.flash_program(offset, value),
+            FlashOp::Erase(range) => {
+                for chunk in range.step_by(Self::FLASH_TRACK_SECTOR) {
+                    memory.flash_erase_sector(chunk);
+                }
+            }
+        }
+    }
+
+    /// `MapperWriteVram`'s `_chrFlash->Write`: CHR-ROM in place (not in the save file, J35).
+    fn write_chr_flash(&mut self, memory: &mut CartridgeMemory, offset: usize, value: u8) {
+        let rom = memory.chr_rom_mut();
+        let size = rom.len();
+        if size == 0 {
+            return;
+        }
+        match self.chr_flash.write(offset % size, value, size) {
+            FlashOp::None => {}
+            FlashOp::Program(offset, value) => rom[offset] &= value,
+            FlashOp::Erase(range) => rom[range].fill(0xFF),
         }
     }
 
@@ -591,7 +794,13 @@ impl Rainbow {
     /// Reads CHR through the extended modes' wide address (`ReadChr`).
     fn read_chr_wide(&self, memory: &CartridgeMemory, address: usize) -> u8 {
         let memory_of: &[u8] = match self.chr_source {
-            0 => memory.rom().chr_rom(),
+            0 => {
+                let size = memory.rom().chr_rom().len();
+                if let Some(value) = self.chr_flash.read(address % size.max(1), size) {
+                    return value;
+                }
+                memory.rom().chr_rom()
+            }
             1 => memory.chr_ram(),
             _ => return self.fpga_ram[address & 0x1FFF],
         };
@@ -864,6 +1073,8 @@ impl Mapper for Rainbow {
         writer.write_raw(&self.oam_code);
         writer.write_raw(&self.fpga_ram);
         self.audio.save_state(writer);
+        self.prg_flash.save(writer);
+        self.chr_flash.save(writer);
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -947,6 +1158,8 @@ impl Mapper for Rainbow {
         reader.read_into(&mut self.oam_code)?;
         reader.read_into(&mut self.fpga_ram)?;
         self.audio.load_state(reader)?;
+        self.prg_flash.load(reader)?;
+        self.chr_flash.load(reader)?;
         self.nt_answer = NtAnswer::Plain;
         self.at_answer = NtAnswer::Plain;
         self.capture_stash = None;
@@ -1248,13 +1461,13 @@ impl Mapper for Rainbow {
     }
 
     fn ppu_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        let size = 0x2000usize >> self.chr_mode.min(4);
+        let slot = usize::from(address) / size;
+        let offset =
+            usize::from(self.chr_banks[slot & 0x0F]) * size + (usize::from(address) & (size - 1));
         match self.chr_source {
-            0 => {}
+            0 => self.write_chr_flash(memory, offset, value),
             1 => {
-                let size = 0x2000usize >> self.chr_mode.min(4);
-                let slot = usize::from(address) / size;
-                let offset = usize::from(self.chr_banks[slot & 0x0F]) * size
-                    + (usize::from(address) & (size - 1));
                 let ram = memory.chr_ram_mut();
                 if !ram.is_empty() {
                     let len = ram.len();
