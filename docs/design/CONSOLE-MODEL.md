@@ -42,9 +42,19 @@ Revision A fails `5-MMC3` (both suites) and `6.MMC3_rev_B`: no single model pass
 * C3b (state, 2026-11-15): a random CPU/PPU alignment and random power-on memories are already
   choices (`emu.cpu_ppu_alignment` "Random", `emu.power_on_ram` and `emu.power_on_ppu_ram`
   "Random", lot FIDELITY step 36), drawn at each load as a console draws them at power-on.
-* C3c (blocked): the PAL 2C07 measured as the 2C02 was needs a 2C07 netlist; only the 2C02's
-  (`ext-tools/visualnes-src/Core/segdefs.txt`) is here. Getting one is a download, gated by the
-  owner. The 2A03 CPU netlist is here too (`cpusegdefs.txt`), which lot A-bis's bench would use.
+* C3c (unblocked 2026-11-15): the PAL 2C07 measured as the 2C02 was. The owner found Visual 2C07
+  (`https://www.qmtpro.com/~nes/chipimages/visual2c07/`) and approved its download:
+  `ext-tools/visual2c07` (the three .js files), converted by `ext-tools/visual2c07-tools/convert.py`
+  to VisualNes's text format (16 940 transistors, 53 043 segments; the 2C02 has 16 758 / 35 615;
+  367 node names, renumbered for this die). Step 1, the PPU alone on VisualNes's simulator
+  (`visual2c07-tools/bench2c07.cpp`, master clock on `clk0`, CPU writes driven on the pins):
+  312 lines of 341 dots, a dot every 10 master half-clocks (the /5 divider), `vbl_flag` set on
+  line 241 dot 1 and cleared on line 311 dot 1, every frame 1 063 920 half-clocks with rendering on
+  (`bkg_enable` and `spr_enable` read back high): **no odd-frame dot skip**. Zaxnes's PAL timing
+  (`region_timing.rs`: 312, vblank 241, pre-render 311, no skip) agrees on all of it. Next: the
+  register-write and read timing with a CPU on the bus. The 2A07 is not in the netlist set; the
+  2A03 netlist clocked at 12/16 of the master would give the PAL CPU rate, its M2 duty left as
+  the 2A03's (to state as an approximation).
 * C3 (the goal's list, for the record): RP2A03 letter revisions (the DMC/OAM DMA and `$4015` read
   differences), the PAL 2C07 measured as the 2C02 was, random CPU/PPU alignment and RAM at power-on
   as a model choice; each with the test ROM or netlist that judges it.
