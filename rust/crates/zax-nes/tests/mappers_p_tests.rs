@@ -1017,3 +1017,19 @@ fn mappers_p_356_has_a_four_screen_mode() {
     let cartridge = core.cartridge_mut().unwrap();
     assert_eq!(zax_nes::NametableMirroring::FourScreen, cartridge.mirroring());
 }
+
+/// `mapper_269.c`: without CHR-ROM the CHR is the PRG with its data lines permuted (D0 to D6);
+/// four `$5000` writes set the offsets and masks.
+#[cfg(feature = "board-269")]
+#[test]
+fn mappers_p_269_reads_chr_from_permuted_prg() {
+    let mut core = MapperRom::new(269).prg(16).chr(0).load();
+    core.mmc3_bank(2, 8);
+    assert_eq!(0x40, core.chr_windows()[4]);
+    mmc3_start(&mut core, 1, 2);
+    for value in [0x00, 0x04, 0x0F, 0x38] {
+        core.mapper_write(0x5000, value);
+    }
+    // PRG offset 4 ORed with the chip's banks under mask 7: 1, 2 and the fixed 6, 7.
+    assert_eq!([5, 6, 6, 7], core.prg_windows());
+}

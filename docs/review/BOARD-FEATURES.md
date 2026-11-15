@@ -824,6 +824,7 @@ dispatch is the generic path of the exotic ones only.
 | `board-344` | 344 | `Mmc3P` kind M344 (IrqBoard): GN-26, address outer bank, NROM-256 mode, DIP read (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
 | `board-432` | 432 | `Mmc3P` kind M432 (IrqBoard): Realtec 8090, solder-pad read, NROM modes (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
 | `board-356` | 356 | `Mmc3P` kind M356 (IrqBoard): JY-215 7-in-1, CHR-RAM mode, four-screen mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-269` | 269 | `Mmc3P` kind M269 (IrqBoard): Games Xplosion 121-in-1, CHR from permuted PRG (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
 | `board-53` | 53 | `MiscN` M53: Supervision 16-in-1, outer register at `$6000`, ROM at `$6000-$7FFF`, optional EPROM by CRC (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-487` | 487 | `MiscN` M487: NINA-03 and outer registers at `$4100`/`$4180`, Color Dreams register in the second half (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-518` | 518 | `MiscN` M518: Dance 2000, `$5000`/`$5200`, open bus over `$8000-$FFFF`, CHR page 0 from the nametable address (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |

@@ -644,6 +644,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     267,
     #[cfg(feature = "board-268")]
     268,
+    #[cfg(feature = "board-269")]
+    269,
     #[cfg(feature = "board-271")]
     271,
     #[cfg(feature = "board-274")]
@@ -1004,6 +1006,13 @@ const MAPPERS_N_CHR_RAM_8K: &[i32] = &[
 #[allow(clippy::too_many_lines)]
 pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemorySizes {
     match mapper {
+        // MAPPERS-P: puNES `map_init_269` copies the PRG-ROM into CHR when the image has no
+        // CHR-ROM, so the CHR memory is the PRG-ROM's size (`Mmc3P::fill_chr_269`).
+        #[cfg(feature = "board-269")]
+        269 if header.chr_rom_size == 0 => BoardMemorySizes {
+            chr_ram: Some(header.prg_rom_size),
+            ..BoardMemorySizes::default()
+        },
         // MR-34-2, nesdev ("INES Mapper 034"): the NINA boards have "8 KiB of unbanked
         // PRG-RAM" at $6000-$7FFF and the BNROM has none, so that window is open bus there.
         34 if !mapper_34_is_nina(header) => BoardMemorySizes {
@@ -3383,6 +3392,11 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         )))),
         #[cfg(feature = "board-356")]
         356 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
+            memory,
+            Mmc3PKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-269")]
+        269 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
             memory,
             Mmc3PKind::of(mapper)?,
         )))),

@@ -95,6 +95,10 @@ pub enum Mmc3PKind {
     /// 356, `mapper_356.c` (JY-215 / 7-in-1 *Rockman*): mapper 410's four registers, CHR-RAM
     /// while `reg[2]` D5 is clear, four-screen mirroring from `reg[2]` D6.
     M356,
+    /// 269, `mapper_269.c` (Games Xplosion 121-in-1): four registers written in turn at
+    /// `$5000-$5FFF` (CHR offset, PRG offset, CHR mask, PRG mask and lock); an image without
+    /// CHR-ROM reads its CHR from the PRG-ROM with the data lines permuted.
+    M269,
 }
 
 impl Mmc3PKind {
@@ -131,6 +135,7 @@ impl Mmc3PKind {
             344 => Self::M344,
             432 => Self::M432,
             356 => Self::M356,
+            269 => Self::M269,
             _ => return None,
         })
     }
@@ -166,6 +171,7 @@ impl Mmc3PKind {
             Self::M344 => 344,
             Self::M432 => 432,
             Self::M356 => 356,
+            Self::M269 => 269,
         }
     }
 }
@@ -185,6 +191,10 @@ pub struct Mmc3P {
     submapper: u8,
     /// The PRG-ROM size in bytes, which 432's solder-pad decode reads (`less1024`).
     prg_size: usize,
+    /// Mapper 269's CHR when the image has no CHR-ROM: the PRG-ROM with its data lines permuted
+    /// (`map_init_269`), empty otherwise. Held here because the core clears the CHR-RAM after a
+    /// board's power-on (`Cartridge::clear_volatile_ram`); derived, so not in the save state.
+    chr_269: Vec<u8>,
     /// The last value written to the chip's `$A000`, which 356 returns to when it leaves its
     /// four-screen mode (the chip keeps no copy).
     a000: u8,
@@ -200,6 +210,11 @@ impl Mmc3P {
             chr_ram: memory.rom().chr_rom().is_empty(),
             prg_size: memory.rom().prg_rom().len(),
             a000: 0,
+            chr_269: if kind == Mmc3PKind::M269 {
+                Self::chr_269(memory)
+            } else {
+                Vec::new()
+            },
             submapper: {
                 let header = memory.rom().header();
                 if header.is_nes20 {
@@ -223,6 +238,9 @@ impl Mmc3P {
             | Mmc3PKind::M420 => {
                 self.outer[2] = 0x0F;
             }
+            // `map_init_269`: CHR offset 0, PRG offset 0, CHR mask `$FF`, PRG mask `$3F` (the
+            // fourth register keeps its last value in its high byte, for the lock).
+            Mmc3PKind::M269 => self.outer = [0, 0, 0xFF, 0x3F],
             // `map_init_399`: banks 0, 1 for PRG and CHR.
             Mmc3PKind::M399 => self.outer = [0, 1, 0, 1],
             // `map_init_411`: `$80`, `$82`.
@@ -411,6 +429,7 @@ impl Mmc3P {
             }
             Mmc3PKind::M422 | Mmc3PKind::M534 => self.prg_page_126(slot, page),
             Mmc3PKind::M370 => ((o[0] & 0x38) << 1) | (page & (0x1F >> ((o[0] & 0x20) >> 5))),
+            Mmc3PKind::M269 => o[1] | (page & (o[3] & 0x3F)),
             Mmc3PKind::M344 | Mmc3PKind::M432 => self.prg_page_dip(slot, page),
             _ => page,
         }
@@ -677,6 +696,9 @@ impl Mmc3P {
             std::array::from_fn(|slot| base | i32::try_from(slot).unwrap_or(0))
         } else if matches!(self.kind, Mmc3PKind::M344 | Mmc3PKind::M432) {
             std::array::from_fn(|slot| self.chr_page_dip(raw_chr[slot]))
+        } else if self.kind == Mmc3PKind::M269 {
+            let (offset, mask) = (i32::from(self.outer[0]), i32::from(self.outer[2]));
+            std::array::from_fn(|slot| offset | (raw_chr[slot] & mask))
         } else if self.kind == Mmc3PKind::M370 {
             std::array::from_fn(|slot| self.chr_page_370(raw_chr[slot]))
         } else if matches!(self.kind, Mmc3PKind::M422 | Mmc3PKind::M534) {
@@ -739,6 +761,48 @@ impl Mmc3P {
         }
     }
 
+    /// `extcl_cpu_wr_mem_269`: the four writes in turn. `r[0]`/`r[1]` the CHR/PRG offsets, `r[2]`
+    /// the CHR mask, `r[3]` the PRG mask with the fourth value above it.
+    fn write_269(r: &mut [u16; 4], index: u8, value: u8) {
+        let v = u16::from(value);
+        match index {
+            0 => r[0] = (r[0] & 0xFF00) | v,
+            1 => r[1] = (r[1] & 0xFF00) | v,
+            2 => {
+                r[0] = (r[0] & 0xF0FF) | ((v & 0xF0) << 4);
+                r[2] = 0xFF >> (!v & 0x0F);
+            }
+            _ => {
+                r[0] = (r[0] & 0xEFFF) | ((v & 0x40) << 6);
+                r[1] = (r[1] & 0xFEFF) | ((v & 0x40) << 2);
+                r[3] = (v << 8) | (!v & 0x3F);
+            }
+        }
+    }
+
+    /// `map_init_269`: without CHR-ROM, the CHR is the PRG-ROM with D0→D6, D1→D4, D2→D2,
+    /// D3→D0, D4→D1, D5→D3, D6→D5, D7→D7 (the board's wiring); empty with CHR-ROM.
+    fn chr_269(memory: &CartridgeMemory) -> Vec<u8> {
+        if !memory.rom().chr_rom().is_empty() {
+            return Vec::new();
+        }
+        memory
+            .rom()
+            .prg_rom()
+            .iter()
+            .map(|value| {
+                ((value & 0x01) << 6)
+                    | ((value & 0x02) << 3)
+                    | (value & 0x04)
+                    | ((value & 0x08) >> 3)
+                    | ((value & 0x10) >> 3)
+                    | ((value & 0x20) >> 2)
+                    | ((value & 0x40) >> 1)
+                    | (value & 0x80)
+            })
+            .collect()
+    }
+
     /// `extcl_cpu_wr_mem_126`: `$6000-$6003` until `$6003` D7 locks them; locked, `$6002` still
     /// takes its low one or two bits (one when its D4 is set).
     fn write_126(r: &mut [u16; 4], address: u16, data: u16) {
@@ -772,8 +836,42 @@ impl Mmc3P {
         self.settle_mirroring(memory);
     }
 
+    /// A write to `$4020-$5FFF` that reaches an outer register (no RAM there); `false` when it
+    /// is not one.
+    fn write_5000(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) -> bool {
+        let data = u16::from(value);
+        let r = &mut self.outer;
+        match self.kind {
+            // `extcl_cpu_wr_mem_455`/`_456`: `$4100` (A8 set in `$4000-$5FFF`), no RAM there.
+            Mmc3PKind::M455 if address < 0x6000 && address & 0x0100 != 0 => {
+                r[0] = address;
+                r[1] = data;
+            }
+            Mmc3PKind::M456 if address < 0x6000 && address & 0x0100 != 0 => r[0] = data,
+            // `extcl_cpu_wr_mem_269`.
+            Mmc3PKind::M269 if (0x5000..=0x5FFF).contains(&address) => {
+                if (r[3] >> 8) & 0x80 == 0 {
+                    Self::write_269(r, self.index, value);
+                    self.index = (self.index + 1) & 0x03;
+                }
+            }
+            // `extcl_cpu_wr_mem_370`: `$5000-$5FFF`, the low address byte.
+            Mmc3PKind::M370 if (0x5000..=0x5FFF).contains(&address) => r[0] = address & 0xFF,
+            // `extcl_cpu_wr_mem_411`: `$5000-$5FFF`, A0 the register, no RAM there.
+            Mmc3PKind::M411 if (0x5000..=0x5FFF).contains(&address) => {
+                r[usize::from(address & 0x0001)] = data;
+            }
+            _ => return false,
+        }
+        self.after_low_write(memory, address, value, false);
+        true
+    }
+
     /// A write below `$8000` that reaches an outer register; `false` when it is not one.
     fn write_low(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) -> bool {
+        if address < 0x6000 {
+            return self.write_5000(memory, address, value);
+        }
         let writable = self.mmc3.prg_ram_writable();
         let data = u16::from(value);
         let r = &mut self.outer;
@@ -831,12 +929,6 @@ impl Mmc3P {
                     r[usize::from(address & 0x03)] = data;
                 }
             }
-            // `extcl_cpu_wr_mem_455`/`_456`: `$4100` (A8 set in `$4000-$5FFF`), no RAM there.
-            Mmc3PKind::M455 if address < 0x6000 && address & 0x0100 != 0 => {
-                r[0] = address;
-                r[1] = data;
-            }
-            Mmc3PKind::M456 if address < 0x6000 && address & 0x0100 != 0 => r[0] = data,
             Mmc3PKind::M393 if (0x6000..=0x7FFF).contains(&address) => {
                 if writable {
                     r[0] = address & 0xFF;
@@ -853,12 +945,6 @@ impl Mmc3P {
                 if writable {
                     Self::write_432(r, self.prg_size, address, data);
                 }
-            }
-            // `extcl_cpu_wr_mem_370`: `$5000-$5FFF`, the low address byte.
-            Mmc3PKind::M370 if (0x5000..=0x5FFF).contains(&address) => r[0] = address & 0xFF,
-            // `extcl_cpu_wr_mem_411`: `$5000-$5FFF`, A0 the register, no RAM there.
-            Mmc3PKind::M411 if (0x5000..=0x5FFF).contains(&address) => {
-                r[usize::from(address & 0x0001)] = data;
             }
             // `extcl_cpu_wr_mem_401`/`_410`: four registers in turn until `reg[3]` D6 locks them.
             Mmc3PKind::M356 | Mmc3PKind::M401 | Mmc3PKind::M410
@@ -1019,14 +1105,27 @@ impl Mapper for Mmc3P {
     }
 
     fn chr_peek_view<'m>(&self, memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
+        if !self.chr_269.is_empty() {
+            return None;
+        }
         self.mmc3.chr_peek_view(memory)
     }
 
     fn ppu_peek(&self, memory: &CartridgeMemory, address: u16, fetch: ChrFetch) -> u8 {
+        if !self.chr_269.is_empty() && address < 0x2000 {
+            return self
+                .mmc3
+                .banks()
+                .map_or(0, |banks| banks.read_chr(address, &self.chr_269));
+        }
         self.mmc3.ppu_peek(memory, address, fetch)
     }
 
+    /// 269's PRG-derived CHR is ROM to the PPU.
     fn ppu_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        if !self.chr_269.is_empty() {
+            return;
+        }
         self.mmc3.ppu_write(memory, address, value);
     }
 

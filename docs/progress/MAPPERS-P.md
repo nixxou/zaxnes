@@ -30,7 +30,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 248 | `mapper_115.c` | 115 | 0 | 0 | done (batch 20, alias, `registry::board_number`) |
 | 256 | `mapper_256.c` | 123 | 241 | 0 | todo |
 | 267 | `mapper_267.c` | 87 | 1 | 0 | done (batch 12, `Mmc3P`) |
-| 269 | `mapper_269.c` | 130 | 3 | 0 | todo |
+| 269 | `mapper_269.c` | 130 | 3 | 0 | done (batch 26, `Mmc3P`) |
 | 271 | `mapper_271.c` | 69 | 1 | 0 | done (batch 2, `MultiP`) |
 | 272 | `mapper_272.c` | 160 | 1 | 0 | todo |
 | 281 | `mapper_281.c` | 69 | 11 | 0 | done (batch 2, `JyCompany` + `JyMulticart`) |
@@ -241,3 +241,4 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   `Mmc3P::rom_windows` answers `NO_ROM_WINDOW` while it is on, so the read reaches
   `try_read_prg`. `write_low`'s tail moved to `after_low_write`.
 * Batch 25: `Mmc3P` 356 (410's registers, CHR-RAM while `reg[2]` D5 is clear, four-screen from D6; `Mmc3P::a000` keeps the chip's last `$A000` to return to, in the save state).
+* Batch 26: `Mmc3P` 269. Without CHR-ROM its CHR is the PRG-ROM with the data lines permuted; the copy lives in the board (`Mmc3P::chr_269`, derived at load) because the core clears the CHR-RAM after a board's power-on, and `ppu_peek`/`ppu_write` serve it as ROM. The CHR-RAM is sized to the PRG-ROM (`board_memory_sizes`) so that the windows wrap on it. `020-FFF` registers moved to `Mmc3P::write_5000`.
