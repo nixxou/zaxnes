@@ -379,7 +379,11 @@ impl Mapper for DecodeBoard {
     /// whose window is *shorter* than its PRG-RAM: the 512 bytes of its 93C66 sit behind the
     /// volatile chip in the same `Vec`, where REQ-CORE-095's battery slice finds them, and the
     /// CPU's $6000-$7FFF window must stop at the volatile chip and mirror inside it.
-    #[cfg(any(feature = "board-164", feature = "board-178"))]
+    #[cfg(any(
+        feature = "board-164",
+        feature = "board-178",
+        feature = "board-latch-multi"
+    ))]
     fn prg_ram_window(&self, memory: &CartridgeMemory) -> (usize, usize) {
         inner!(self, b => b.prg_ram_window(memory))
     }

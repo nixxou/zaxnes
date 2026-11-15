@@ -165,6 +165,20 @@ pub enum LatchKind {
     M314,
     /// 319, `Unlicensed/Hp898f.h` (HP-898F).
     M319,
+    /// 309, `Whirlwind/Lh51.h` (LH51, FDS conversion).
+    M309,
+    /// 320, `Unlicensed/Bmc830425C4391T.h`.
+    M320,
+    /// 329, `Unlicensed/Edu2000.h` (EDU2000, 32 KiB banked work RAM).
+    M329,
+    /// 331, `Unlicensed/Bmc12in1.h`.
+    M331,
+    /// 332, `Unlicensed/Super40in1Ws.h`.
+    M332,
+    /// 346, `Kaiser/Kaiser7012.h`.
+    M346,
+    /// 521, `Unlicensed/DreamTech01.h`.
+    M521,
 }
 
 impl LatchKind {
@@ -235,6 +249,13 @@ impl LatchKind {
             301 => Self::M301,
             314 => Self::M314,
             319 => Self::M319,
+            309 => Self::M309,
+            320 => Self::M320,
+            329 => Self::M329,
+            331 => Self::M331,
+            332 => Self::M332,
+            346 => Self::M346,
+            521 => Self::M521,
             _ => return None,
         })
     }
@@ -304,6 +325,13 @@ impl LatchKind {
             Self::M301 => 301,
             Self::M314 => 314,
             Self::M319 => 319,
+            Self::M309 => 309,
+            Self::M320 => 320,
+            Self::M329 => 329,
+            Self::M331 => 331,
+            Self::M332 => 332,
+            Self::M346 => 346,
+            Self::M521 => 521,
         }
     }
 
@@ -329,6 +357,8 @@ impl LatchKind {
                 | Self::M274
                 | Self::M51
                 | Self::M312
+                | Self::M331
+                | Self::M332
                 | Self::M289
                 | Self::M301
                 | Self::M314
@@ -676,8 +706,8 @@ impl LatchMulti {
                 None
             }
             // `Mapper241.h:13-16`, 32 KiB pages.
-            // `Mapper39.h:13-19` is the same board.
-            LatchKind::M39 | LatchKind::M241 => {
+            // `Mapper39.h:13-19` and `Kaiser7012.h:9-19` (power-on 1) are the same board.
+            LatchKind::M39 | LatchKind::M241 | LatchKind::M346 => {
                 self.banks.map_prg_32k(r0);
                 self.banks.map_chr_8k(0);
                 None
@@ -1045,6 +1075,59 @@ impl LatchMulti {
                 self.prg_16k(prg & !mask, prg | mask);
                 Some(pick(r1 & 0x80 != 0, V, H))
             }
+            // `Lh51.h:9-24`, 8 KiB pages: one register at `$8000`, pages 13-15 fixed.
+            LatchKind::M309 => {
+                self.banks.map_prg_8k(0, r0 & 0x0F);
+                self.banks.map_prg_8k(1, 13);
+                self.banks.map_prg_8k(2, 14);
+                self.banks.map_prg_8k(3, 15);
+                self.banks.map_chr_8k(0);
+                self.flag.then(|| pick(r1 & 0x08 != 0, H, V))
+            }
+            // `Bmc830425C4391T.h:16-28`: `regs` = inner, outer, mode.
+            LatchKind::M320 => {
+                let outer = i32::from(regs[1]) << 3;
+                if regs[2] != 0 {
+                    self.prg_16k((r0 & 0x07) | outer, 0x07 | outer);
+                } else {
+                    self.prg_16k(r0 | outer, 0x0F | outer);
+                }
+                self.banks.map_chr_8k(0);
+                None
+            }
+            // `Edu2000.h:18-22`, 32 KiB pages; the work RAM bank is `prg_ram_window`'s.
+            LatchKind::M329 => {
+                self.banks.map_prg_32k(r0 & 0x1F);
+                self.banks.map_chr_8k(0);
+                None
+            }
+            // `Bmc12in1.h:17-29`, 4 KiB CHR pages: `regs` = R0, R1, mode.
+            LatchKind::M331 => {
+                let mode = i32::from(regs[2]);
+                let bank = (mode & 0x03) << 3;
+                self.banks.map_chr_4k(0, (r0 >> 3) | (bank << 2));
+                self.banks.map_chr_4k(4, (r1 >> 3) | (bank << 2));
+                if mode & 0x08 != 0 {
+                    let page = bank | (r0 & 0x06);
+                    self.prg_16k(page, page + 1);
+                } else {
+                    self.prg_16k(bank | (r0 & 0x07), bank | 0x07);
+                }
+                Some(pick(mode & 0x04 != 0, H, V))
+            }
+            // `Super40in1Ws.h:14-26`: `regs` = PRG value, CHR value, lock.
+            LatchKind::M332 => {
+                let inverted = ((r0 >> 3) & 0x01) ^ 0x01;
+                self.prg_16k(r0 & !inverted, r0 | inverted);
+                self.banks.map_chr_8k(r1);
+                Some(pick(r0 & 0x10 != 0, H, V))
+            }
+            // `DreamTech01.h:9-17`: `$5020` banks `$8000`, 16 KiB page 8 at `$C000`.
+            LatchKind::M521 => {
+                self.prg_16k(r0 & 0x07, 8);
+                self.banks.map_chr_8k(0);
+                None
+            }
             // `Bmc255.h:14-21`.
             LatchKind::M255 => {
                 let bit = i32::from(a & 0x1000 == 0);
@@ -1244,6 +1327,47 @@ impl LatchMulti {
                     self.regs[usize::from((address & 0x04) >> 2)] = value;
                 }
             }
+            // `Lh51.h:18-27`.
+            LatchKind::M309 => match address & 0xE000 {
+                0x8000 => self.regs[0] = value,
+                0xE000 => {
+                    self.regs[1] = value;
+                    self.flag = true;
+                }
+                _ => {}
+            },
+            // `Bmc830425C4391T.h:30-36`.
+            LatchKind::M320 => {
+                self.regs[0] = value & 0x0F;
+                if address & 0xFFE0 == 0xF0E0 {
+                    self.regs[1] = low_byte(address & 0x0F);
+                    self.regs[2] = low_byte((address >> 4) & 0x01);
+                }
+            }
+            // `Bmc12in1.h:31-37`.
+            LatchKind::M331 => match address & 0xE000 {
+                0xA000 => self.regs[0] = value,
+                0xC000 => self.regs[1] = value,
+                0xE000 => self.regs[2] = value & 0x0F,
+                _ => {}
+            },
+            // `Super40in1Ws.h:16-26`: `$6000-$6FFF`, A0 picks CHR or PRG, until bit 5 locks.
+            LatchKind::M332 => {
+                if self.regs[2] == 0 {
+                    if address & 0x01 != 0 {
+                        self.regs[1] = value;
+                    } else {
+                        self.regs[2] = u8::from(value & 0x20 != 0);
+                        self.regs[0] = value;
+                    }
+                }
+            }
+            // `Kaiser7012.h:15-19`: two exact addresses.
+            LatchKind::M346 => match address {
+                0xE0A0 => self.regs[0] = 0,
+                0xEE36 => self.regs[0] = 1,
+                _ => {}
+            },
             LatchKind::M113
             | LatchKind::M177
             | LatchKind::M283
@@ -1254,7 +1378,10 @@ impl LatchMulti {
                 self.regs[0] = value;
                 self.flag = true;
             }
-            LatchKind::M39
+            // `Edu2000.h:24-28` and `DreamTech01.h:15-17` too.
+            LatchKind::M329
+            | LatchKind::M521
+            | LatchKind::M39
             | LatchKind::M148
             | LatchKind::M203
             | LatchKind::M240
@@ -1279,6 +1406,8 @@ impl LatchMulti {
             LatchKind::M108 => self.regs[0] = 0xFF,
             // `Kaiser7016.h`: "_prgReg = 8".
             LatchKind::M306 => self.regs[0] = 8,
+            // `Kaiser7012.h:11`: "SelectPrgPage(0, 1)".
+            LatchKind::M346 => self.regs[0] = 1,
             // `Bmc64in1NoRepeat.h:16-19`.
             LatchKind::M314 => {
                 self.regs[0] = 0x80;
@@ -1386,6 +1515,9 @@ impl Mapper for LatchMulti {
             // `Bmc60311C.h:10`, `Hp898f.h:10` (registers from `$6000`) and
             // `Bmc64in1NoRepeat.h:13` (`$5000-$5003`).
             LatchKind::M314 => (0x5000..=0x5003).contains(&address),
+            // `Super40in1Ws.h:10-11` (`$6000-$6FFF`) and `DreamTech01.h:9-10` (`$5020`).
+            LatchKind::M332 => (0x6000..=0x6FFF).contains(&address),
+            LatchKind::M521 => address == 0x5020,
             LatchKind::M113 => (0x4100..=0x5FFF).contains(&address) && address & 0xE100 == 0x4100,
             LatchKind::M179 => (0x5000..=0x5FFF).contains(&address),
             // `Mapper120.h:9` (`$41FF`) and `Lh32.h:12` (`$6000`): the register is the bank of
@@ -1462,6 +1594,17 @@ impl Mapper for LatchMulti {
                 | LatchKind::M125
                 | LatchKind::M170
         )
+    }
+
+    /// `Edu2000.h:21`: mapper 329's `$6000-$7FFF` is one of four 8 KiB work RAM banks, chosen by
+    /// bits 6-7 of its register.
+    fn prg_ram_window(&self, memory: &CartridgeMemory) -> (usize, usize) {
+        let len = memory.prg_ram().len();
+        if self.kind == LatchKind::M329 && len != 0 {
+            ((usize::from(self.regs[0] >> 6) * 0x2000) % len, len)
+        } else {
+            (0, len)
+        }
     }
 
     fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {

@@ -498,3 +498,18 @@ fn mappers_n_254_xors_work_ram_reads() {
     core.mapper_write(0x8000, 0x00);
     assert_eq!(0x0F, core.read_memory(0x6000));
 }
+
+/// `Edu2000.h:18-28`: bits 6-7 of the register bank 32 KiB of work RAM at `$6000`.
+#[cfg(feature = "board-329")]
+#[test]
+fn mappers_n_329_banks_its_work_ram() {
+    let mut core = MapperRom::new(329).prg(16).load();
+    core.mapper_write(0x6000, 0x11);
+    core.mapper_write(0x8000, 0x41);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    core.mapper_write(0x6000, 0x22);
+    core.mapper_write(0x8000, 0x01);
+    assert_eq!(0x11, core.read_memory(0x6000));
+    core.mapper_write(0x8000, 0x41);
+    assert_eq!(0x22, core.read_memory(0x6000));
+}

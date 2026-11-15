@@ -585,6 +585,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     305,
     #[cfg(feature = "board-306")]
     306,
+    #[cfg(feature = "board-309")]
+    309,
     #[cfg(feature = "board-312")]
     312,
     #[cfg(feature = "board-313")]
@@ -593,18 +595,30 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     314,
     #[cfg(feature = "board-319")]
     319,
+    #[cfg(feature = "board-320")]
+    320,
     #[cfg(feature = "board-325")]
     325,
+    #[cfg(feature = "board-329")]
+    329,
+    #[cfg(feature = "board-331")]
+    331,
+    #[cfg(feature = "board-332")]
+    332,
     #[cfg(feature = "board-333")]
     333,
     #[cfg(feature = "board-336")]
     336,
+    #[cfg(feature = "board-346")]
+    346,
     #[cfg(feature = "board-348")]
     348,
     #[cfg(feature = "board-349")]
     349,
     #[cfg(feature = "board-366")]
     366,
+    #[cfg(feature = "board-521")]
+    521,
     #[cfg(feature = "board-taito-x1")]
     552,
 ];
@@ -885,6 +899,12 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         176 if !header.is_nes20 => BoardMemorySizes {
             prg_ram: Some(Fk23c::INES1_WORK_RAM),
             chr_ram: Some(Fk23c::INES1_CHR_RAM),
+            ..BoardMemorySizes::default()
+        },
+        // MAPPERS-N: "GetWorkRamSize() { return 0x8000; }" (Mesen2 `Edu2000.h:9`).
+        #[cfg(feature = "board-329")]
+        329 => BoardMemorySizes {
+            prg_ram: Some(0x8000),
             ..BoardMemorySizes::default()
         },
         #[cfg(feature = "board-125")]
@@ -2418,6 +2438,41 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
             memory,
             Mmc3CloneKind::of(mapper)?,
         )))),
+        #[cfg(feature = "board-309")]
+        309 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-320")]
+        320 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-329")]
+        329 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-331")]
+        331 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-332")]
+        332 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-346")]
+        346 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-521")]
+        521 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
         _ => return None,
     })
 }
