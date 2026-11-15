@@ -79,7 +79,39 @@ known moves).
   netlist's PPUCTRL powers on with bit 2 set, the program never writes `$2000`, A7) and one dot at
   each coarse-Y wrap from 29 (the two-phase wrap, A7, step 3).
 
-## Next: step 2c
+## Step 2c — `$2001` as an edge (2026-11-15)
 
-`$2001` (switch and the dot-257 copy), `$2000`, `$2005`; the `$2006` write on dot 304; then the
-whole campaign and golden in Fidélité+.
+* The rendering switch is an edge after the work of D+2 (latency 10), the line read when it lands;
+  the rest is the standard core's own post-switch code. A switch landing on dot 256: the copy of
+  dot 257 comes in its first half and follows the old state (after a switch off it is posted as an
+  edge after dot 257's work, where the netlist shows it). `g2001px`: equal to the netlist.
+
+## Validation after 2c, and the `ALE + Read` fix
+
+* Campaign 215 / 4 and golden as the standard core; AccuracyCoin failed `ALE + Read` in the four
+  alignments: the refetch of an odd-X read was made after X's work and overwritten by X + 1's
+  normal read. Now an edge after X + 1's work: 147/147 in alignments 2 and 3.
+* **Open: `$2007 Stress Test` fails in alignments 0 and 1** (146/147). The test's own notes describe
+  the PPU DATA state machine half cycle by half cycle (it starts at M2 fall; ALE one PPU cycle
+  later, read three cycles later; whether the PPU clock is high or low when it starts decides
+  which reads are stable): that is step 3's subject, where the state machine and the AD bus become
+  state; it is not patched here.
+
+Corpus without the netlist's first frame (power-on artefact), alignments 2 and 3, dots whose
+`v`/`t` differ over the two whole frames left:
+
+| Program | Standard | Fidélité+ |
+|---|---|---|
+| `g2006px` | 740 | 0 |
+| `g2006x` | 8850 | 2 (the `$2006` write on dot 304) |
+| `g2001px`, `g3e01px` | 0 | 0 |
+| `g2005px`, `g2000` | 2 | 2 |
+| `oam` | 1 | 1 |
+| `r2007` | 168 152 | 78 806 (post-render lines, the bench's PPUCTRL, A7) |
+| `g2005` | 57 399 | 57 399 (same artefact) |
+
+## Next: step 3
+
+The PPU DATA read and write state machines as state, on PPU clock halves (AccuracyCoin's
+description, checked on the netlist), the AD bus and the address latch: `$2007 Stress Test` in
+alignments 0 and 1, the tile latch of A5, the stale fetch, A7's two-phase coarse-Y wrap.

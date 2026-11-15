@@ -32,9 +32,13 @@ pub(super) enum EdgeKind {
     /// in the middle of X ([`EdgeKind::ReadIncrement`]).
     ReadLatch,
     /// The increment of an odd-X or blanking read, in the middle of X (after X's work here); on a
-    /// fetching dot the fetch X set up is then read again with the buffered byte as its low
-    /// address byte (`AccuracyCoin`, `ALE + Read`).
+    /// fetching dot the fetch whose address X set up is read again on X + 1
+    /// ([`EdgeKind::RefetchLow`]).
     ReadIncrement,
+    /// After the work of X + 1, the read of the fetch X set up while the read latched the bus: the
+    /// buffered byte as its low address byte, the high lines from the incremented `v`
+    /// (`AccuracyCoin`, `ALE + Read`).
+    RefetchLow,
     /// A `$2007` read whose latch dot X is an even fetching dot: after X's work, the byte X's fetch
     /// read. Then the increment, merged with X's own.
     ReadLatchAfterFetch,
@@ -212,9 +216,14 @@ impl Ppu2C02 {
                     } else {
                         self.increment_vram_address(cart);
                     }
-                    self.refetch_with_low_byte(self.read_buffer, cart.as_deref());
+                    self.post_edge_now(1, EdgeKind::RefetchLow);
                 } else {
                     self.increment_vram_address(cart);
+                }
+            }
+            EdgeKind::RefetchLow => {
+                if self.fetching() {
+                    self.refetch_with_low_byte(self.read_buffer, cart.as_deref());
                 }
             }
             EdgeKind::ReadLatchAfterFetch => {
