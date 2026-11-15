@@ -197,6 +197,14 @@ impl Checkpoints {
         // them is a change in the picture rather than in the layout.
         let mut indices = Vec::new();
         core.pixel_frame_indices_into(&mut indices);
+        // `ZAXNES_GOLDEN_DUMP=<dir>`: also writes each checkpoint's index image (256 x 240 bytes,
+        // 0 to 63) as `<dir>/<frame>.idx`, to look at a golden change (lot FIDPLUS-2).
+        if let Ok(dir) = std::env::var("ZAXNES_GOLDEN_DUMP") {
+            let _ = std::fs::write(
+                std::path::Path::new(&dir).join(format!("{key}.idx")),
+                &indices,
+            );
+        }
         self.pixels
             .insert(key.clone(), json!(hex(&Sha256::digest(&indices))));
         self.tiles
