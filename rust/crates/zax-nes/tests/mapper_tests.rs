@@ -507,8 +507,9 @@ fn req_core_102_any_other_mapper_is_refused() {
     // number optional and that ticket's provisional choice was "not implemented at all, so
     // REQ-CORE-011 refuses it"; MF-6a3 step 4 implements it instead, behind `board-116`, so the
     // sweep drops it exactly when that feature is on. REQ-CORE-102's own acceptance criterion
-    // (mapper 200) is untouched either way, which is the other half of Q-130.
-    let mut refused = vec![20usize, 84, 200];
+    // (mapper 84 since AMD-MAPPERS-N-200; 200 is a board now) is untouched either way, which is
+    // the other half of Q-130.
+    let mut refused = vec![20usize, 84];
     if !cfg!(feature = "board-116") {
         refused.insert(1, 116);
     }

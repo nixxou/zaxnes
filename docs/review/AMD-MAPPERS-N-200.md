@@ -1,6 +1,9 @@
 # AMD proposal — REQ-CORE-102's acceptance criterion names a mapper Mesen2 supports
 
-**Status:** proposed by lot MAPPERS-N (2026-11-15), awaiting the owner.
+**Status:** proposed by lot MAPPERS-N and **accepted by the owner (2026-11-15)**: SPEC-02 lines 90
+and 451 now name mapper 84, `board-200` is in `default`, the three tests sweep 84. nesdev ("INES
+Mapper 084") confirms 84 has only conflicting allocations (Pasofami, an SMB2J hack) and no known
+board.
 
 SPEC-02 §3.11, REQ-CORE-102: "Tout autre numéro de mapper DOIT être refusé au chargement
 (REQ-CORE-011). Ajouter des mappers au-delà de la liste est permis." Its acceptance criterion:

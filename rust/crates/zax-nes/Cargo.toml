@@ -108,6 +108,7 @@ default = [
     "board-58",
     "board-59",
     "board-63",
+    "board-200",
     "board-201",
     "board-202",
     "board-203",
@@ -243,9 +244,8 @@ board-57 = ["board-latch-multi"]
 board-58 = ["board-latch-multi"]
 board-59 = ["board-latch-multi"]
 board-63 = ["board-latch-multi"]
-# Mapper 200 is implemented but **off by default**: SPEC-02 REQ-CORE-102's acceptance criterion is
-# "en-tête annonçant le mapper 200 -> échec". docs/review/AMD-MAPPERS-N-200.md proposes moving the
-# criterion to 186 (the Study Box, never a cartridge board); until the owner answers, 200 is refused.
+# Mapper 200 in default since the owner accepted AMD-MAPPERS-N-200 (2026-11-15): SPEC-02's refusal
+# criteria now name mapper 84.
 board-200 = ["board-latch-multi"]
 board-201 = ["board-latch-multi"]
 board-202 = ["board-latch-multi"]

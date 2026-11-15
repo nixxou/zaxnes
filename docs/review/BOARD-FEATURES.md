@@ -710,8 +710,8 @@ dispatch is the generic path of the exotic ones only.
 | `board-mmc3-clones` + `board-NNN` | 44, 45, 49, 52, 126, 134, 196, 197, 205, 224, 238, 245, 249, 250, 259, 287, 313, 325 | `Mmc3Clone` (in `IrqBoard`): an `Mmc3` whose bank numbers a kind masks, offsets or re-lays out | ~480 | see below | **on** |
 | `board-191` | 191 | `Mmc3ChrRam<0x80, 0xFF, 2>` in `Mmc3ChrRamBoard` | 2 | see below | **on** |
 | `board-253` | 253 | `Waixing253` (in `IrqBoard`) | 5 | see below | **on** |
-| `board-latch-multi` + `board-NNN` | 46, 51, 57-63, 104, 108, 113, 120, 125, 170, 174, 177, 179, 200, 201-204, 212-214, 216, 221, 226, 227, 229-231, 233, 235, 236, 240-242, 244, 255, 261, 274, 286 | `LatchMulti` (in `DecodeBoard`): discrete multicarts | ~600 | see below | **on**, except `board-200` |
-| `board-200` | 200 | `LatchMulti` | 5 | — | **off**: SPEC-02 REQ-CORE-102's acceptance criterion is "mapper 200 → échec" (`AMD-MAPPERS-N-200.md`) |
+| `board-latch-multi` + `board-NNN` | 46, 51, 57-63, 104, 108, 113, 120, 125, 170, 174, 177, 179, 200, 201-204, 212-214, 216, 221, 226, 227, 229-231, 233, 235, 236, 240-242, 244, 255, 261, 274, 286 | `LatchMulti` (in `DecodeBoard`): discrete multicarts | ~600 | see below | **on** |
+| `board-200` | 200 | `LatchMulti` | 5 | — | **on** since the owner accepted `AMD-MAPPERS-N-200.md` (2026-11-15) |
 | `board-irq-latch` + `board-NNN` | 6, 8, 17, 40, 42, 43, 50, 106, 117, 183, 222 | `IrqLatch` (in `IrqBoard`): small boards with an IRQ counter, FFE copier formats | ~500 | see below | **on** |
 | `board-176` | 176 | `Fk23c` (in `IrqBoard`) | ~420 | see below | **on** |
 
