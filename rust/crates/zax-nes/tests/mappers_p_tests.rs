@@ -1475,3 +1475,21 @@ fn mappers_p_556_switches_from_mmc3_to_vrc4() {
     core.mapper_write(0xA000, 0x06);
     assert_eq!([37, 38, 46, 47], core.prg_windows());
 }
+
+/// `mapper_351.c`: `$5001` the outer PRG bank of the MMC3; `$5000` = 2 hands the board to the
+/// MMC1 (16 KiB banks through the same outer bank); `$5002` D4 an NROM-256 bank from `$5001`.
+#[cfg(feature = "board-351")]
+#[test]
+fn mappers_p_351_switches_between_three_chips() {
+    let mut core = MapperRom::new(351).prg(128).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    core.mapper_write(0x5001, 0x40);
+    assert_eq!([33, 34, 62, 63], core.prg_windows());
+    core.mapper_write(0x5000, 0x02);
+    core.mmc1_write(0x8000, 0x0C);
+    core.mmc1_write(0xE000, 0x03);
+    assert_eq!([38, 39, 62, 63], core.prg_windows());
+    core.mapper_write(0x5002, 0x10);
+    assert_eq!([32, 33, 34, 35], core.prg_windows());
+    assert_eq!(0x50, core.read_memory(0x5000));
+}

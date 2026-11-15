@@ -612,6 +612,8 @@ const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
             | 529
             // MAPPERS-N: mapper 266's VRC4 IRQ (nesdev "NES 2.0 Mapper 266").
             | 266
+            // MAPPERS-P: mapper 351, `ChipSwitch` (its VRC4 IRQ, puNES `EXTCL_CPU_EVERY_CYCLE`).
+            | 351
             // MAPPERS-P: mapper 556, `ChipSwitch` (its VRC4 IRQ, puNES `EXTCL_CPU_EVERY_CYCLE`).
             | 556
             // MAPPERS-P: mapper 528, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
@@ -844,6 +846,8 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 471
             // MAPPERS-P: mapper 556's MMC3 counter while that chip is in use (`ChipSwitch`).
             | 556
+            // MAPPERS-P: mapper 351's MMC3 counter while that chip is in use (`ChipSwitch`).
+            | 351
             // MAPPERS-P: mapper 442 latches PPU A0/A9 on the rise of A13 (`IrqP`).
             | 442
             // MAPPERS-P: 359 and 540 clock their IRQ on A12 rises (`IrqP`).
@@ -966,6 +970,8 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 471
             // MAPPERS-P: mapper 556's MMC3 counter while that chip is in use (`ChipSwitch`).
             | 556
+            // MAPPERS-P: mapper 351's MMC3 counter while that chip is in use (`ChipSwitch`).
+            | 351
             // MAPPERS-P: mapper 442 latches PPU A0/A9 on the rise of A13 (`IrqP`).
             | 442
             // MAPPERS-P: 359 and 540 clock their IRQ on A12 rises (`IrqP`).
@@ -2310,8 +2316,8 @@ mod tests {
             // A13's rise), 359 and 540 (A12 IRQ) in `IrqP`; 362 and 398 (the fetched CHR window)
             // in `VrcP`.
             471, 442, 359, 540, 362, 398,
-            // MAPPERS-P: 556 holds an `Mmc3`, in use at power-on (`ChipSwitch`).
-            556,
+            // MAPPERS-P: 556 and 351 hold an `Mmc3`, in use at power-on (`ChipSwitch`).
+            556, 351,
             // MAPPERS-P: 272 is latched too but absent here: its counter only moves once a game
             // enables it, and the sweep enables nothing.
             369,

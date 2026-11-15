@@ -56,7 +56,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 345 | `mapper_345.c` | 102 | 0 | 0 | done (batch 12, `Mmc3P`) |
 | 347 | `mapper_347.c` | 122 | 2 | 0 | done (batch 38, `MultiP`) |
 | 350 | `mapper_350.c` | 99 | 0 | 0 | done (batch 3, `MultiP`) |
-| 351 | `mapper_351.c` | 305 | 0 | 0 | todo |
+| 351 | `mapper_351.c` | 305 | 0 | 0 | done (batch 46, `ChipSwitch`) |
 | 352 | `mapper_352.c` | 66 | 0 | 0 | done (batch 2, `MultiP`) |
 | 353 | `mapper_353.c` | 149 | 1 | 0 | done (batch 28, `Mmc3P`) |
 | 354 | `mapper_354.c` | 111 | 0 | 0 | done (batch 4, `MultiP`) |
@@ -330,3 +330,6 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   A11. In `clocks_on_cpu_cycle` (VRC4), both PPU-bus lists and the mf_3b sweep (MMC3). The
   `cfg` of `Vrc2Vrc4::new_vrc4_wired` had been left on `new_vrc4_lines` by batch 30's insertion;
   restored.
+* Batch 46: `ChipSwitch` 351 (Techline XB): MMC3, MMC1 (`Mmc1::refresh_banks` now also behind
+  `board-chip-switch`) or VRC4e by `$5000` D0-D1, the outer bank through each chip's own units,
+  the NROM and 8 KiB CHR-ROM modes of `$5002` over them, and the DIP read at `$5000-$5FFF`.

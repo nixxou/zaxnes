@@ -1022,6 +1022,11 @@ places where puNES itself is incomplete are copied, not invented around:
 * 556 (`mapper_556.c`): on a switch of chip puNES re-runs the new chip's whole fix, mirroring
   included; here the windows are rebuilt but the mirroring stays the last one either chip wrote
   until the new chip writes its own.
+* 351 (`mapper_351.c`): puNES appends the CHR-ROM to the PRG-ROM at load and, in the CHR-RAM
+  mode (`$5002` D0), lets the PRG banks reach it (a multicart keeps an UNROM game there) while
+  the PPU sees CHR-RAM. This core's PRG windows wrap on the PRG-ROM alone and its CHR memory is
+  one chip, so that mode maps the image's own CHR and PRG banks past the PRG-ROM wrap. The DIP
+  switches read 0 (J33 for the open-bus bits).
 
 ### J36. Mapper 682 (Rainbow): the ESP is modelled from the protocol document
 The ESP (`rainbow_esp.rs`) follows Broke Studio's `rainbow-net.md` and `mapper-doc.md`; no
