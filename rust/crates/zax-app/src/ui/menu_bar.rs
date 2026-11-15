@@ -616,6 +616,8 @@ fn region_items() -> Vec<MenuItem> {
         ("NTSC", TvRegionSetting::Ntsc),
         ("PAL", TvRegionSetting::Pal),
         ("Dendy", TvRegionSetting::Dendy),
+        ("PAL-M (famiclone)", TvRegionSetting::PalM),
+        ("PAL-N (famiclone)", TvRegionSetting::PalN),
     ] {
         items.push(MenuItem::choice(
             Command::SetRegion,

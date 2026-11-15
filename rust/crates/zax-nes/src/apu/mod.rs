@@ -1073,6 +1073,8 @@ impl Apu2A03 {
     fn apply_timing(&mut self) {
         self.noise.set_timing(&self.timing);
         self.dmc.set_timing(&self.timing);
+        self.pulse1.set_swaps_duty(self.timing.swaps_pulse_duty);
+        self.pulse2.set_swaps_duty(self.timing.swaps_pulse_duty);
     }
 
     fn recompute_ratio(&mut self) {

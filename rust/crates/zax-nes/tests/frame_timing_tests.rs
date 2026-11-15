@@ -26,6 +26,10 @@ fn req_core_015_average_cpu_cycles_per_frame() {
         (NesRegion::Pal, 33247.5, 0.5),
         (NesRegion::Dendy, 35464.0, 1.0),
         (NesRegion::Multi, 29780.5, 0.5),
+        // PAL-M: NTSC geometry without the odd-frame skip, 262 x 341 / 3.
+        (NesRegion::PalM, 29780.67, 0.5),
+        // PAL-N: Dendy geometry, 312 x 341 / 3.
+        (NesRegion::PalN, 35464.0, 1.0),
     ] {
         let mut core = machine_with(&minimal(), "Minimal.nes");
         core.set_region(region);
@@ -52,6 +56,8 @@ fn req_core_015_timing_table() {
         (NesRegion::Pal, 1_662_607, 312, 241, 50, false),
         (NesRegion::Dendy, 1_773_448, 312, 291, 50, false),
         (NesRegion::Multi, 1_789_773, 262, 241, 60, true),
+        (NesRegion::PalM, 1_787_806, 262, 241, 60, false),
+        (NesRegion::PalN, 1_791_028, 312, 291, 50, false),
     ] {
         let timing = RegionTiming::for_region(region);
 
@@ -72,6 +78,20 @@ fn req_core_015_noise_and_dmc_period_tables_are_pal_only_for_pal() {
     assert!(!RegionTiming::for_region(NesRegion::Ntsc).uses_pal_noise_and_dmc_periods);
     assert!(!RegionTiming::for_region(NesRegion::Multi).uses_pal_noise_and_dmc_periods);
     assert!(!RegionTiming::for_region(NesRegion::Dendy).uses_pal_noise_and_dmc_periods);
+    assert!(!RegionTiming::for_region(NesRegion::PalM).uses_pal_noise_and_dmc_periods);
+    assert!(!RegionTiming::for_region(NesRegion::PalN).uses_pal_noise_and_dmc_periods);
+}
+
+#[test]
+fn fidplus_g2_only_famiclone_regions_swap_pulse_duty() {
+    for region in [NesRegion::Ntsc, NesRegion::Pal, NesRegion::Multi, NesRegion::Dendy] {
+        assert!(!RegionTiming::for_region(region).swaps_pulse_duty, "{region:?}");
+    }
+    for region in [NesRegion::PalM, NesRegion::PalN] {
+        assert!(RegionTiming::for_region(region).swaps_pulse_duty, "{region:?}");
+        assert_eq!(Some(region), NesRegion::from_u8(region as u8));
+    }
+    assert_eq!(None, NesRegion::from_u8(6));
 }
 
 #[test]

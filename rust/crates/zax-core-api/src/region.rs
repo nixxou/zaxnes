@@ -1,7 +1,7 @@
 /// TV region of the emulated console (SPEC-02 §4.5).
 ///
 /// The numeric values are observable through the persisted settings (SPEC-09) and must not
-/// change: NTSC = 0, PAL = 1, MULTI = 2, DENDY = 3.
+/// change: NTSC = 0, PAL = 1, MULTI = 2, DENDY = 3, PAL-M = 4, PAL-N = 5.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(u8)]
 pub enum NesRegion {
@@ -14,10 +14,16 @@ pub enum NesRegion {
     Multi = 2,
     /// Dendy timing: PAL-length frames with an NTSC-like CPU clock.
     Dendy = 3,
+    /// PAL-M (Brazilian famiclones): NTSC frame geometry and frame counter, a slightly slower
+    /// clock, no odd-frame dot skip, duty sequences 1 and 2 swapped (lot FIDPLUS-1, G2).
+    PalM = 4,
+    /// PAL-N (Argentinian famiclones): Dendy frame geometry, a clock close to NTSC's, duty
+    /// sequences 1 and 2 swapped (lot FIDPLUS-1, G2).
+    PalN = 5,
 }
 
 impl NesRegion {
-    /// The region of numeric value `value` (0 to 3), `None` otherwise.
+    /// The region of numeric value `value` (0 to 5), `None` otherwise.
     #[must_use]
     pub const fn from_u8(value: u8) -> Option<Self> {
         match value {
@@ -25,6 +31,8 @@ impl NesRegion {
             1 => Some(Self::Pal),
             2 => Some(Self::Multi),
             3 => Some(Self::Dendy),
+            4 => Some(Self::PalM),
+            5 => Some(Self::PalN),
             _ => None,
         }
     }
