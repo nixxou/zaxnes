@@ -122,13 +122,13 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 447 | `mapper_447.c` | 98 | 1 | 0 | todo |
 | 451 | `mapper_451.c` | 147 | 2 | 0 | todo |
 | 452 | `mapper_452.c` | 119 | 1 | 0 | todo |
-| 455 | `mapper_455.c` | 97 | 1 | 0 | todo |
-| 456 | `mapper_456.c` | 83 | 1 | 0 | todo |
-| 457 | `mapper_457.c` | 86 | 1 | 0 | todo |
+| 455 | `mapper_455.c` | 97 | 1 | 0 | done (batch 14, `Mmc3P`) |
+| 456 | `mapper_456.c` | 83 | 1 | 0 | done (batch 14, `Mmc3P`) |
+| 457 | `mapper_457.c` | 86 | 1 | 0 | done (batch 14, `Mmc3P`) |
 | 471 | `mapper_471.c` | 109 | 0 | 0 | todo |
 | 481 | `mapper_481.c` | 55 | 0 | 0 | done (batch 8, `MultiP`) |
 | 512 | `mapper_512.c` | 94 | 2 | 1 | todo |
-| 516 | `mapper_516.c` | 79 | 2 | 0 | todo |
+| 516 | `mapper_516.c` | 79 | 2 | 0 | done (batch 14, `Mmc3P`) |
 | 517 | `mapper_517.c` | 107 | 1 | 1 | done (batch 1, `MultiP`) |
 | 524 | `mapper_524.c` | 81 | 0 | 0 | todo |
 | 525 | `mapper_525.c` | 91 | 1 | 0 | done (batch 10, `MultiP`) |
@@ -213,3 +213,5 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 * Batch 13: `Mmc3P` 395, 399 (own PRG/CHR banks over the chip's IRQ), 401 (DIP lines at 0), 410,
   411 (registers at `$5000`), 420. The MMC3-P numbers moved out of the two PPU-bus lists into
   `mmc3_p_board` (`cartridges/mod.rs`), which both call, to keep them under clippy's line limit.
+* Batch 14: `Mmc3P` 455 and 456 (registers at `$4100`), 457, 516 (A4-latched outer bank). 432
+  and 344 (DIP reads over `$8000-$FFFF`) and 436 (OneBus) wait for their own step.

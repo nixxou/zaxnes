@@ -707,3 +707,47 @@ fn mappers_p_420_has_an_nrom_mode() {
     core.mapper_write(0x6000, 0x84);
     assert_eq!([8, 9, 10, 11], core.prg_windows());
 }
+
+/// `mapper_455.c`: power-on NROM mode; `$4100` with D0 clear hands the windows to the MMC3.
+#[cfg(feature = "board-455")]
+#[test]
+fn mappers_p_455_starts_in_nrom_mode() {
+    let mut core = MapperRom::new(455).prg(64).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    assert_eq!([0, 1, 0, 1], core.prg_windows());
+    // MMC3 mode; A0 widens the inner mask to 256 KiB, which covers the outer bit too.
+    core.mapper_write(0x4101, 0x04);
+    assert_eq!([1, 2, 30, 31], core.prg_windows());
+}
+
+/// `mapper_456.c`: `$4100` the outer 128 KiB bank.
+#[cfg(feature = "board-456")]
+#[test]
+fn mappers_p_456_takes_its_outer_bank_at_4100() {
+    let mut core = MapperRom::new(456).prg(64).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    core.mapper_write(0x4100, 0x02);
+    assert_eq!([33, 34, 46, 47], core.prg_windows());
+}
+
+/// `mapper_457.c`: `$6000` D0-D2 the outer bank, D3 a 256 KiB inner mask.
+#[cfg(feature = "board-457")]
+#[test]
+fn mappers_p_457_widens_its_inner_bank() {
+    let mut core = MapperRom::new(457).prg(64).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    core.mapper_write(0x6000, 0x01);
+    assert_eq!([17, 18, 30, 31], core.prg_windows());
+    core.mapper_write(0x6000, 0x08);
+    assert_eq!([1, 2, 30, 31], core.prg_windows());
+}
+
+/// `mapper_516.c`: a chip write with A4 set latches A0-A1 as the outer PRG bank.
+#[cfg(feature = "board-516")]
+#[test]
+fn mappers_p_516_latches_a4_writes() {
+    let mut core = MapperRom::new(516).prg(64).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    core.mapper_write(0x8011, 2);
+    assert_eq!([17, 18, 30, 31], core.prg_windows());
+}

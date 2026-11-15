@@ -798,6 +798,10 @@ dispatch is the generic path of the exotic ones only.
 | `board-410` | 410 | `Mmc3P` kind M410 (IrqBoard): JC-016-2 variant, CHR-RAM mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
 | `board-411` | 411 | `Mmc3P` kind M411 (IrqBoard): A88S-1, registers at $5000 (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
 | `board-420` | 420 | `Mmc3P` kind M420 (IrqBoard): A971210, NROM mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-455` | 455 | `Mmc3P` kind M455 (IrqBoard): N625836, outer registers at $4100, NROM mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-456` | 456 | `Mmc3P` kind M456 (IrqBoard): K6C3001A, outer bank at $4100 (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-457` | 457 | `Mmc3P` kind M457 (IrqBoard): 810431C, outer bank at $6000 (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-516` | 516 | `Mmc3P` kind M516 (IrqBoard): Cocoma Pack, A4-latched outer bank (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
 | `board-53` | 53 | `MiscN` M53: Supervision 16-in-1, outer register at `$6000`, ROM at `$6000-$7FFF`, optional EPROM by CRC (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-487` | 487 | `MiscN` M487: NINA-03 and outer registers at `$4100`/`$4180`, Color Dreams register in the second half (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-518` | 518 | `MiscN` M518: Dance 2000, `$5000`/`$5200`, open bus over `$8000-$FFFF`, CHR page 0 from the nametable address (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |

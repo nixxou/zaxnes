@@ -62,6 +62,15 @@ pub enum Mmc3PKind {
     M411,
     /// 420, `mapper_420.c` (A971210): four registers at `$6000-$6003`, an NROM mode.
     M420,
+    /// 455, `mapper_455.c` (N625836): `$4100` the address and data are the outer registers, an
+    /// NROM mode.
+    M455,
+    /// 456, `mapper_456.c` (K6C3001A): `$4100` the outer 128 KiB bank.
+    M456,
+    /// 457, `mapper_457.c` (810431C): `$6000` the outer bank, D3 doubling the inner one.
+    M457,
+    /// 516, `mapper_516.c` (Brilliant Com Cocoma Pack): a chip write with A4 set latches A0-A3.
+    M516,
 }
 
 impl Mmc3PKind {
@@ -86,6 +95,10 @@ impl Mmc3PKind {
             410 => Self::M410,
             411 => Self::M411,
             420 => Self::M420,
+            455 => Self::M455,
+            456 => Self::M456,
+            457 => Self::M457,
+            516 => Self::M516,
             _ => return None,
         })
     }
@@ -109,6 +122,10 @@ impl Mmc3PKind {
             Self::M410 => 410,
             Self::M411 => 411,
             Self::M420 => 420,
+            Self::M455 => 455,
+            Self::M456 => 456,
+            Self::M457 => 457,
+            Self::M516 => 516,
         }
     }
 }
@@ -149,6 +166,8 @@ impl Mmc3P {
             Mmc3PKind::M399 => self.outer = [0, 1, 0, 1],
             // `map_init_411`: `$80`, `$82`.
             Mmc3PKind::M411 => self.outer = [0x80, 0x82, 0, 0],
+            // `map_init_455`: `reg[1] = 1`, the NROM mode.
+            Mmc3PKind::M455 => self.outer[1] = 1,
             _ => {}
         }
         self.refresh();
@@ -281,6 +300,25 @@ impl Mmc3P {
                     ((o[3] & 0x04) << 3) | (page & (0x3F >> shift))
                 }
             }
+            // `prg_swap_mmc3_455`: `reg[1]` D0 the NROM mode, D1 NROM-256; `reg[0]` A0 doubles the
+            // inner bank.
+            Mmc3PKind::M455 => {
+                let base = ((o[1] & 0x40) >> 2) | ((o[0] & 0x04) << 1) | ((o[1] & 0x1C) >> 2);
+                if o[1] & 0x01 != 0 {
+                    let nrom = (o[1] & 0x02) >> 1;
+                    let base = if slot >= 2 { base | nrom } else { base & !nrom };
+                    ((base << 1) & !1) | (window & 0x01)
+                } else {
+                    let mask = 0x1F >> i32::from(o[0] & 0x01 == 0);
+                    ((base << 1) & !mask) | (page & mask)
+                }
+            }
+            Mmc3PKind::M456 => ((o[0] << 4) & !0x0F) | (page & 0x0F),
+            Mmc3PKind::M457 => {
+                let mask = 0x1F >> i32::from(o[0] & 0x08 == 0);
+                (((o[0] & 0x07) << 4) & !mask) | (page & mask)
+            }
+            Mmc3PKind::M516 => (((o[0] & 0x03) << 4) & !0x0F) | (page & 0x0F),
             _ => page,
         }
     }
@@ -337,6 +375,18 @@ impl Mmc3P {
                 let base = ((o[1] & 0x80) << 1) | ((o[1] & 0x04) << 5);
                 base | (page & (0xFF >> ((o[1] & 0x80) >> 7)))
             }
+            Mmc3PKind::M455 => {
+                let base =
+                    (((o[1] & 0x40) >> 2) | ((o[1] & 0x1C) >> 2) | ((o[0] & 0x04) << 1)) << 4;
+                let mask = 0xFF >> i32::from(o[0] & 0x02 == 0);
+                (base & !mask) | (page & mask)
+            }
+            Mmc3PKind::M456 => ((o[0] << 7) & !0x7F) | (page & 0x7F),
+            Mmc3PKind::M457 => {
+                let mask = 0xFF >> i32::from(o[0] & 0x08 == 0);
+                (((o[0] & 0x07) << 7) & !mask) | (page & mask)
+            }
+            Mmc3PKind::M516 => (((o[0] & 0x0C) << 5) & !0x7F) | (page & 0x7F),
             _ => page,
         }
     }
@@ -443,7 +493,9 @@ impl Mmc3P {
                     r[0] = data;
                 }
             }
-            Mmc3PKind::M315 | Mmc3PKind::M345 if (0x6000..=0x7FFF).contains(&address) => {
+            Mmc3PKind::M315 | Mmc3PKind::M345 | Mmc3PKind::M457
+                if (0x6000..=0x7FFF).contains(&address) =>
+            {
                 if writable {
                     r[0] = data;
                 }
@@ -482,6 +534,12 @@ impl Mmc3P {
                     r[usize::from(address & 0x03)] = data;
                 }
             }
+            // `extcl_cpu_wr_mem_455`/`_456`: `$4100` (A8 set in `$4000-$5FFF`), no RAM there.
+            Mmc3PKind::M455 if address < 0x6000 && address & 0x0100 != 0 => {
+                r[0] = address;
+                r[1] = data;
+            }
+            Mmc3PKind::M456 if address < 0x6000 && address & 0x0100 != 0 => r[0] = data,
             // `extcl_cpu_wr_mem_411`: `$5000-$5FFF`, A0 the register, no RAM there.
             Mmc3PKind::M411 if (0x5000..=0x5FFF).contains(&address) => {
                 r[usize::from(address & 0x0001)] = data;
@@ -579,6 +637,10 @@ impl Mapper for Mmc3P {
         }
         // `extcl_cpu_wr_mem_399`: `$8000-$9FFF` also writes its own bank registers, A0 clear
         // the CHR pair and D7 the half.
+        // `extcl_cpu_wr_mem_516`: a write with A4 set also latches A0-A3.
+        if self.kind == Mmc3PKind::M516 && address & 0x0010 != 0 {
+            self.outer[0] = address & 0x0F;
+        }
         if self.kind == Mmc3PKind::M399 && address < 0xA000 {
             let index = (usize::from(address & 0x0001 == 0) << 1) | usize::from(value >> 7);
             self.outer[index] = u16::from(value);
