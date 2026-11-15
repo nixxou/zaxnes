@@ -1353,7 +1353,7 @@ fn fidelity_switch_on_fetch_reads_the_stale_low_byte_in_alignments_2_and_3() {
 /// dot 16 still happens on PAL and not on NTSC.
 #[test]
 fn fidplus_c3c_pal_rendering_switch_takes_four_dots() {
-    fn increments(pal: bool) -> bool {
+    fn increments(pal: bool, phase: i32) -> bool {
         let mut fixture = TileFixture::new();
         if pal {
             fixture.core.set_region(zax_nes::NesRegion::Pal);
@@ -1362,12 +1362,19 @@ fn fidplus_c3c_pal_rendering_switch_takes_four_dots() {
         fixture.core.run_frame(0);
         park_on_dot(&mut fixture, 12);
         let ppu = fixture.core.bus_mut().ppu_mut();
+        if pal {
+            ppu.set_dot_accumulator_phase(phase);
+        }
         let before = ppu.vram_v();
         ppu.write(1, 0x00, None);
         ppu.vram_v() == increment_x(before)
     }
-    assert!(increments(true), "PAL: dot 16 still renders");
-    assert!(!increments(false), "NTSC: the switch is in force by dot 16");
+    for phase in 1..5 {
+        assert!(increments(true, phase), "PAL phase {phase}: dot 16 still renders");
+    }
+    // Three dots on the phase-0 cycle (`oam`): the switch is in force by dot 16.
+    assert!(!increments(true, 0), "PAL phase 0");
+    assert!(!increments(false, 0), "NTSC: the switch is in force by dot 16");
 }
 
 /// Lot FIDPLUS-C C3c (Visual 2C07 netlist, `g2006x`): the second `$2006` write's delayed load

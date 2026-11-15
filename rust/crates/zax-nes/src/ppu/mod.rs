@@ -932,8 +932,15 @@ impl Ppu2C02 {
         // (Visual 2C07 netlist, lot FIDPLUS-C C3c, `g2001px`: a switch on written on dot 12 leaves
         // dot 16's increment undone and fetches again from dot 17; 8 170 differing dots a frame
         // with four, 54 000 to 97 000 with two, three or five).
+        // On PAL three on the cycle whose dot accumulator is 0, as the `$2006` load comes a dot
+        // early there (`oam`, `g2001px`, `g3e01px`: 24 321 differing dots against 107 089 with
+        // four everywhere; phases 1 and 2 not reached by the corpus at reset phase e3, kept at 4).
         let delay = if self.timing.region == NesRegion::Pal {
-            4
+            if self.dot_accumulator == 0 {
+                3
+            } else {
+                4
+            }
         } else {
             2
         };

@@ -107,6 +107,10 @@ Revision A fails `5-MMC3` (both suites) and `6.MMC3_rev_B`: no single model pass
     2C07 takes from the written byte; only Fidelite+'s `post_address_load` models that case).
   Tests `fidplus_c3c_pal_2005_on_dot_257_takes_the_open_bus_one_cycle_in_five`,
   `fidplus_c3c_pal_2006_load_delay_follows_the_cycle_phase`.
+  Step 8, `oam` (rendering switched off and on mid-line, as `g2001px` on other dots): the 2C07's
+  switch delay is 3 dots on the cycle whose dot accumulator is 0, 4 on 3 and 4 (phases 1 and 2
+  not reached at reset phase e3, kept at 4; netlist traces at e0, e6 and e9 queued to reach them).
+  `oam`, `g2001px` and `g3e01px`: 0 differing dots on every whole frame.
   Still open from the earlier steps:
   the first frame's `$2007` increments seen 4-5 dots later on the netlist (line 241).
   Corpus at reset phase e3 so far (alignment 3 against 0, differing dots, whole frames): `g2005`
