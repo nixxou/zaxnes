@@ -342,6 +342,11 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
     last real nametable fetch. Probably visible (one wrong 8-pixel group after a mid-line switch
     on, alignments 2 and 3); the same mechanism as step 39's stale low byte, for the tile latch.
     To model with its own measurement (which bytes, which dots, per alignment) before porting.
+    **First attempt (2026-11-15), dropped**: "the tile register latches the AD bus value held at
+    the switch-off on every nametable dot passed with the rendering off" made the bus comparison
+    worse (5 100 -> 5 700 unmatched a frame) and missed the cases it targeted (dot 173 `00E0`).
+    The real rule needs the netlist's tile-register node and AD-bus node logged per half-step
+    (`benchdot` logs only the ALE address), not inferred from the address column.
 - **Next**: that tile-latch lead; `g2006px` with rendering on; C1 against the SMB3 Japan
   line-193 video.
 
