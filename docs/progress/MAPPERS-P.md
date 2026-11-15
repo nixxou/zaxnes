@@ -112,11 +112,11 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 429 | `mapper_429.c` | 56 | 1 | 0 | done (batch 7, `MultiP`) |
 | 431 | `mapper_431.c` | 81 | 1 | 0 | done (batch 7, `MultiP`) |
 | 432 | `mapper_432.c` | 112 | 1 | 0 | todo |
-| 433 | `mapper_433.c` | 75 | 1 | 0 | todo |
-| 434 | `mapper_434.c` | 74 | 4 | 0 | todo |
+| 433 | `mapper_433.c` | 75 | 1 | 0 | done (batch 8, `MultiP`) |
+| 434 | `mapper_434.c` | 74 | 4 | 0 | done (batch 8, `MultiP`) |
 | 436 | `mapper_436.c` | 59 | 1 | 0 | todo |
-| 437 | `mapper_437.c` | 74 | 1 | 0 | todo |
-| 438 | `mapper_438.c` | 71 | 2 | 0 | todo |
+| 437 | `mapper_437.c` | 74 | 1 | 0 | done (batch 8, `MultiP`) |
+| 438 | `mapper_438.c` | 71 | 2 | 0 | done (batch 8, `MultiP`) |
 | 442 | `mapper_442.c` | 127 | 1 | 0 | todo |
 | 446 | `mapper_446.c` | 746 | 4 | 0 | todo |
 | 447 | `mapper_447.c` | 98 | 1 | 0 | todo |
@@ -126,7 +126,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 456 | `mapper_456.c` | 83 | 1 | 0 | todo |
 | 457 | `mapper_457.c` | 86 | 1 | 0 | todo |
 | 471 | `mapper_471.c` | 109 | 0 | 0 | todo |
-| 481 | `mapper_481.c` | 55 | 0 | 0 | todo |
+| 481 | `mapper_481.c` | 55 | 0 | 0 | done (batch 8, `MultiP`) |
 | 512 | `mapper_512.c` | 94 | 2 | 1 | todo |
 | 516 | `mapper_516.c` | 79 | 2 | 0 | todo |
 | 517 | `mapper_517.c` | 107 | 1 | 1 | done (batch 1, `MultiP`) |
@@ -189,3 +189,5 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   at `$4100-$4103`), 409; `JyMulticart::M397`. 400's LED is not modelled (FIDELITY-LEADS J37).
 * Batch 7: `MultiP` 414 and 431 (bus conflicts), 415 (8 KiB PRG-ROM at `$6000`), 428 (registers
   at `$6000`), 429; `JyMulticart::M421`. `MultiP::latch` split (`latch_late`) for clippy.
+* Batch 8: `MultiP` 433 (CHR-RAM write enable), 434 and 437 (outer bank below `$8000`, bus
+  conflicts above), 438, 481 (`latch_b8`, `map_b8`).

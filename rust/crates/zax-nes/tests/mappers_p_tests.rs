@@ -403,3 +403,51 @@ fn mappers_p_421_widens_its_inner_prg_mask() {
     core.mapper_write(0xD003, 0x40);
     assert_eq!([33, 0, 0, 63], core.prg_windows());
 }
+
+/// `mapper_433.c`: D5 NROM-128 over NROM-256, D0-D4 the 16 KiB bank.
+#[cfg(feature = "board-433")]
+#[test]
+fn mappers_p_433_switches_nrom_128_and_256() {
+    let mut core = MapperRom::new(433).prg(32).load();
+    core.mapper_write(0x8000, 0x05);
+    assert_eq!([8, 9, 10, 11], core.prg_windows());
+    core.mapper_write(0x8000, 0x25);
+    assert_eq!([10, 11, 10, 11], core.prg_windows());
+}
+
+/// `mapper_434.c`: `$6000` the outer 128 KiB bank.
+#[cfg(feature = "board-434")]
+#[test]
+fn mappers_p_434_takes_its_outer_bank_at_6000() {
+    let mut core = MapperRom::new(434).prg(64).load();
+    core.mapper_write(0x6000, 0x01);
+    assert_eq!([16, 17, 30, 31], core.prg_windows());
+}
+
+/// `mapper_437.c`: `$5000-$5FFF` the address is the outer 128 KiB bank.
+#[cfg(feature = "board-437")]
+#[test]
+fn mappers_p_437_takes_its_outer_bank_from_a_5000_address() {
+    let mut core = MapperRom::new(437).prg(64).load();
+    core.mapper_write(0x5001, 0);
+    assert_eq!([16, 17, 30, 31], core.prg_windows());
+}
+
+/// `mapper_438.c`: A0 picks UNROM-like pairs; D1 up the CHR bank.
+#[cfg(feature = "board-438")]
+#[test]
+fn mappers_p_438_pairs_its_banks_by_a0() {
+    let mut core = MapperRom::new(438).prg(32).chr(32).load();
+    core.mapper_write(0x8005, 0x04);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    assert_eq!(16, core.chr_windows()[0]);
+}
+
+/// `mapper_481.c`: D7 the outer 128 KiB bank, D0-D2 the inner one.
+#[cfg(feature = "board-481")]
+#[test]
+fn mappers_p_481_has_an_outer_bank_in_d7() {
+    let mut core = MapperRom::new(481).prg(32).load();
+    core.mapper_write(0x8000, 0x82);
+    assert_eq!([20, 21, 30, 31], core.prg_windows());
+}

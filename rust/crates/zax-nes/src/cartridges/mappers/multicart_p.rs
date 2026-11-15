@@ -88,6 +88,17 @@ pub enum MultiPKind {
     M429,
     /// 431, `mapper_431.c` (Realtec GN-91B): two data registers with bus conflicts.
     M431,
+    /// 433, `mapper_433.c` (NC-20MB): one data latch, NROM-128/256, CHR-RAM write enable in D7.
+    M433,
+    /// 434, `mapper_434.c` (S-009): `$6000-$7FFF` the outer bank, `$8000` UNROM with bus conflicts.
+    M434,
+    /// 437, `mapper_437.c` (NTDEC TH2348): `$5000-$5FFF` address the outer bank, `$8000` UNROM with
+    /// bus conflicts.
+    M437,
+    /// 438, `mapper_438.c` (K-3071): address and data latch, NROM-128/256 by A0.
+    M438,
+    /// 481, `mapper_481.c` (045N): UNROM with D7 the outer 128 KiB bank.
+    M481,
 }
 
 impl MultiPKind {
@@ -125,6 +136,11 @@ impl MultiPKind {
             428 => Self::M428,
             429 => Self::M429,
             431 => Self::M431,
+            433 => Self::M433,
+            434 => Self::M434,
+            437 => Self::M437,
+            438 => Self::M438,
+            481 => Self::M481,
             _ => return None,
         })
     }
@@ -161,14 +177,20 @@ impl MultiPKind {
             Self::M428 => 428,
             Self::M429 => 429,
             Self::M431 => 431,
+            Self::M433 => 433,
+            Self::M434 => 434,
+            Self::M437 => 437,
+            Self::M438 => 438,
+            Self::M481 => 481,
         }
     }
 
     /// Whether the board takes writes below `$8000` (puNES `extend_wr`), and where.
     const fn decodes_low(self, address: u16) -> bool {
         match self {
-            Self::M122 | Self::M428 => address >= 0x6000,
+            Self::M122 | Self::M428 | Self::M434 => address >= 0x6000,
             Self::M400 => address >= 0x7800,
+            Self::M437 => address >= 0x5000 && address <= 0x5FFF,
             Self::M403 => address < 0x6000 && address & 0x0100 != 0,
             _ => false,
         }
@@ -180,6 +202,7 @@ impl MultiPKind {
             self,
             Self::M55
                 | Self::M122
+                | Self::M434
                 | Self::M517
                 | Self::M337
                 | Self::M350
@@ -322,6 +345,29 @@ impl MultiP {
         }
     }
 
+    /// [`MultiP::latch`] for the kinds of batch 8.
+    fn latch_b8(&mut self, address: u16, value: u8) {
+        let r = &mut self.regs;
+        match self.kind {
+            MultiPKind::M433 | MultiPKind::M481 => r[0] = u16::from(value),
+            // `extcl_cpu_wr_mem_434`/`_437`: the outer register below `$8000` (437's from the
+            // address), the inner one above with bus conflicts (`has_bus_conflicts`).
+            MultiPKind::M434 => r[usize::from(address >= 0x8000)] = u16::from(value),
+            MultiPKind::M437 => {
+                if address >= 0x8000 {
+                    r[1] = u16::from(value);
+                } else {
+                    r[0] = address;
+                }
+            }
+            MultiPKind::M438 => {
+                r[0] = address;
+                r[1] = u16::from(value);
+            }
+            _ => {}
+        }
+    }
+
     /// [`MultiP::latch`] for the kinds of batches 6 and 7.
     fn latch_late(&mut self, address: u16, value: u8) {
         let r = &mut self.regs;
@@ -366,7 +412,7 @@ impl MultiP {
             }
             // `extcl_cpu_wr_mem_431`: `$8000-$BFFF` and `$C000-$FFFF`, with bus conflicts.
             MultiPKind::M431 => r[usize::from(address >= 0xC000)] = u16::from(value),
-            _ => {}
+            _ => self.latch_b8(address, value),
         }
     }
 
@@ -753,6 +799,57 @@ impl MultiP {
                 b.map_prg_16k(2, base | 0x07);
                 mirror(r[0] & 0x01 == 0)
             }
+            _ => self.map_b8(),
+        }
+    }
+
+    /// [`MultiP::map`] for the kinds of batch 8 (`docs/progress/MAPPERS-P.md`).
+    fn map_b8(&mut self) -> Option<NametableMirroring> {
+        let r = self.regs.map(i32::from);
+        let b = &mut self.banks;
+        let mirror = |vertical: bool| {
+            Some(if vertical {
+                NametableMirroring::Vertical
+            } else {
+                NametableMirroring::Horizontal
+            })
+        };
+        match self.kind {
+            MultiPKind::M433 => {
+                let bank = r[0] & 0x1F;
+                if r[0] & 0x20 == 0 {
+                    b.map_prg_32k(bank >> 1);
+                } else {
+                    b.map_prg_16k(0, bank);
+                    b.map_prg_16k(2, bank);
+                }
+                mirror(r[0] & 0x40 == 0)
+            }
+            MultiPKind::M434 => {
+                let base = (r[0] & 0x07) << 3;
+                b.map_prg_16k(0, base | (r[1] & 0x07));
+                b.map_prg_16k(2, base | 0x07);
+                mirror(r[0] & 0x20 != 0)
+            }
+            MultiPKind::M437 => {
+                let base = (r[0] & 0x0F) << 3;
+                b.map_prg_16k(0, base | (r[1] & 0x07));
+                b.map_prg_16k(2, base | 0x07);
+                mirror(r[0] & 0x08 == 0)
+            }
+            MultiPKind::M438 => {
+                let bank = r[0] >> 1;
+                b.map_prg_16k(0, bank & !(r[0] & 0x01));
+                b.map_prg_16k(2, bank | (r[0] & 0x01));
+                b.map_chr_8k(r[1] >> 1);
+                mirror(r[1] & 0x01 == 0)
+            }
+            MultiPKind::M481 => {
+                let bank = (r[0] & 0x80) >> 4;
+                b.map_prg_16k(0, bank | (r[0] & 0x07));
+                b.map_prg_16k(2, bank | 0x07);
+                None
+            }
             _ => None,
         }
     }
@@ -767,6 +864,8 @@ impl MultiP {
         match self.kind {
             MultiPKind::M375 | MultiPKind::M380 => self.regs[0] & 0x80 != 0,
             MultiPKind::M354 => self.regs[0] & 0x08 != 0,
+            // `chr_fix_433`: D7 is the write enable.
+            MultiPKind::M433 => self.regs[0] & 0x80 == 0,
             _ => false,
         }
     }
@@ -810,7 +909,7 @@ impl MultiP {
             }
             // `extcl_cpu_rd_mem_428`: open bus with the two DIP bits (0) below; this core's open
             // bus is whole, so the read is open bus (J37).
-            MultiPKind::M122 | MultiPKind::M428 => Some(None),
+            MultiPKind::M122 | MultiPKind::M428 | MultiPKind::M434 => Some(None),
             // `wram_fix_415`: `$6000-$7FFF` an 8 KiB PRG-ROM bank from D0-D3.
             MultiPKind::M415 => {
                 let rom = memory.rom().prg_rom();
