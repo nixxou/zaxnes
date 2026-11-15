@@ -978,6 +978,13 @@ places where puNES itself is incomplete are copied, not invented around:
   from the switches) is not modelled, since the switches are 0 and the ROM windows stay cached;
   534's two-cycle A12 IRQ delay (`irqA12_delay = 2`) is not either; the "old dumps" CHR XOR is
   read the non-old way. No dump in the Hackset.
+* 432: puNES's NROM mode reads `mmc3.reg[5 + (bank & 1)]`, R5 (a CHR register) for `$8000`;
+  nesdev ("NES 2.0 Mapper 432") gives R6 for `$8000`/`$C000` and R7 for `$A000`/`$E000`, which
+  this board follows. puNES also leaves out `$6001` D5 as PRG/CHR A19 on images of 1 MiB and more
+  (nesdev, submapper 0); it is applied here. Only submapper 0 is decoded.
+* 344: puNES picks a second chip order for one dump by its PRG CRC (`0xAB2ACA46`); this board
+  keeps order 0 for all.
+* 344 and 432 read 0 for the DIP switches / solder pad.
 * 281/282/295 apply puNES's outer bank to ROM nametables too (`mirroring_swap_jyasic_28x`); with
   no dump in the Hackset this is untested on a real image.
 

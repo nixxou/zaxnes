@@ -52,7 +52,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 341 | `mapper_341.c` | 67 | 1 | 0 | done (batch 2, `MultiP`) |
 | 342 | `mapper_342.c` | 2381 | 9 | 0 | todo |
 | 343 | `mapper_343.c` | 71 | 0 | 0 | done (batch 2, `MultiP`) |
-| 344 | `mapper_344.c` | 125 | 3 | 0 | todo |
+| 344 | `mapper_344.c` | 125 | 3 | 0 | done (batch 24, `Mmc3P`) |
 | 345 | `mapper_345.c` | 102 | 0 | 0 | done (batch 12, `Mmc3P`) |
 | 347 | `mapper_347.c` | 122 | 2 | 0 | todo |
 | 350 | `mapper_350.c` | 99 | 0 | 0 | done (batch 3, `MultiP`) |
@@ -111,7 +111,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 428 | `mapper_428.c` | 95 | 6 | 0 | done (batch 7, `MultiP`) |
 | 429 | `mapper_429.c` | 56 | 1 | 0 | done (batch 7, `MultiP`) |
 | 431 | `mapper_431.c` | 81 | 1 | 0 | done (batch 7, `MultiP`) |
-| 432 | `mapper_432.c` | 112 | 1 | 0 | todo |
+| 432 | `mapper_432.c` | 112 | 1 | 0 | done (batch 24, `Mmc3P`) |
 | 433 | `mapper_433.c` | 75 | 1 | 0 | done (batch 8, `MultiP`) |
 | 434 | `mapper_434.c` | 74 | 4 | 0 | done (batch 8, `MultiP`) |
 | 436 | `mapper_436.c` | 59 | 1 | 0 | todo |
@@ -237,3 +237,6 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   Mesen2's `MMC3_126.h` and is left as it is). 534 inverts `$C000`/`$C001` data.
 * Batch 22: `Mmc1Outer` 543 (outer register shifted in through `$5000` D3, WRAM bank from it and the MMC1's `$A000` D3, power-on `$E000` = `$0E` via `Mmc1::force_prg_register`).
 * Batch 23: `Mmc3P` 370 (CIRAM page per table from R0-R5 D7 in mode 1). The `cfg(any(...))` lists of `IrqBoard`'s forwards (`nametable_page`, `try_read_prg`, `prg_ram_enabled`) now name `board-irq-p`/`board-mmc3-p` too: the default build already compiled those forwards through other features, but a build with only these boards on would have dropped them. Both 370 and 417 have a page test.
+* Batch 24: `Mmc3P` 344 and 432, whose DIP / solder-pad read replaces `$8000-$FFFF`:
+  `Mmc3P::rom_windows` answers `NO_ROM_WINDOW` while it is on, so the read reaches
+  `try_read_prg`. `write_low`'s tail moved to `after_low_write`.

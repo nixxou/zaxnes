@@ -86,6 +86,12 @@ pub enum Mmc3PKind {
     /// 370, `mapper_370.c` (F600): the address at `$5000-$5FFF` the outer bank; mode 1 takes a
     /// CIRAM page per table from the CHR registers' D7, as the `TxSROM` does.
     M370,
+    /// 344, `mapper_344.c` (GN-26): the address at `$6000` the outer bank, an NROM-256 mode from
+    /// R6, a DIP read over `$8000-$FFFF`.
+    M344,
+    /// 432, `mapper_432.c` (Realtec 8090): `$6000`/`$6001` (even/odd) the solder pad and the outer
+    /// bank, NROM modes, a solder-pad read over `$8000-$FFFF`; nesdev "NES 2.0 Mapper 432".
+    M432,
 }
 
 impl Mmc3PKind {
@@ -119,6 +125,8 @@ impl Mmc3PKind {
             422 => Self::M422,
             534 => Self::M534,
             370 => Self::M370,
+            344 => Self::M344,
+            432 => Self::M432,
             _ => return None,
         })
     }
@@ -151,6 +159,8 @@ impl Mmc3PKind {
             Self::M422 => 422,
             Self::M534 => 534,
             Self::M370 => 370,
+            Self::M344 => 344,
+            Self::M432 => 432,
         }
     }
 }
@@ -168,6 +178,8 @@ pub struct Mmc3P {
     chr_ram: bool,
     /// The NES 2.0 submapper (0 on iNES 1.0), which 422's PRG A20 doubling reads.
     submapper: u8,
+    /// The PRG-ROM size in bytes, which 432's solder-pad decode reads (`less1024`).
+    prg_size: usize,
 }
 
 impl Mmc3P {
@@ -178,6 +190,7 @@ impl Mmc3P {
             outer: [0; 4],
             index: 0,
             chr_ram: memory.rom().chr_rom().is_empty(),
+            prg_size: memory.rom().prg_rom().len(),
             submapper: {
                 let header = memory.rom().header();
                 if header.is_nes20 {
@@ -380,6 +393,7 @@ impl Mmc3P {
             }
             Mmc3PKind::M422 | Mmc3PKind::M534 => self.prg_page_126(slot, page),
             Mmc3PKind::M370 => ((o[0] & 0x38) << 1) | (page & (0x1F >> ((o[0] & 0x20) >> 5))),
+            Mmc3PKind::M344 | Mmc3PKind::M432 => self.prg_page_dip(slot, page),
             _ => page,
         }
     }
@@ -409,6 +423,72 @@ impl Mmc3P {
             }
         };
         (base & !mask) | (value & mask)
+    }
+
+    /// Whether 432's images are under 1 MiB, where `$6001` D5 is the pad read and not A19.
+    const fn small_432(&self) -> bool {
+        self.prg_size < 0x10_0000
+    }
+
+    /// `prg_swap_mmc3_344` (chip order 0: the CRC-selected order of one dump is not kept, J37)
+    /// and `prg_swap_mmc3_432`, whose NROM pages are R6 and R7 as nesdev gives them.
+    fn prg_page_dip(&self, slot: usize, page: i32) -> i32 {
+        let o = self.outer.map(i32::from);
+        let window = i32::try_from(slot).unwrap_or(0);
+        if self.kind == Mmc3PKind::M344 {
+            let mut base = (o[0] & 0x03) << 4;
+            if o[0] & 0x04 != 0 {
+                base |= i32::from(self.mmc3.bank_register(6)) & 0x0C;
+                return (base & !0x03) | (window & 0x03);
+            }
+            return (base & !0x0F) | (page & 0x0F);
+        }
+        let r1 = o[1];
+        let mut base = ((r1 & 0x01) << 4) | ((r1 & 0x10) << 1);
+        if !self.small_432() {
+            base |= (r1 & 0x20) << 1;
+        }
+        let mask = 0x1F >> ((r1 & 0x02) >> 1);
+        let value = if r1 & 0x40 != 0 {
+            let register = i32::from(self.mmc3.bank_register(6 | (slot & 0x01)));
+            let nrom256 = (r1 & 0x80) >> 6;
+            if slot < 2 {
+                register & !nrom256
+            } else {
+                register | nrom256
+            }
+        } else {
+            page
+        };
+        (base & !mask) | (value & mask)
+    }
+
+    /// `chr_swap_mmc3_344`/`_432`.
+    fn chr_page_dip(&self, page: i32) -> i32 {
+        let o = self.outer.map(i32::from);
+        if self.kind == Mmc3PKind::M344 {
+            let mask = if o[0] & 0x02 != 0 { 0x7F } else { 0xFF };
+            return ((o[0] & 0x03) << 7) | (page & mask);
+        }
+        let r1 = o[1];
+        let mut base = ((r1 & 0x08) << 5) | ((r1 & 0x01) << 7);
+        if !self.small_432() {
+            base |= (r1 & 0x20) << 4;
+        }
+        let mask = 0xFF >> ((r1 & 0x04) >> 2);
+        (base & !mask) | (page & mask)
+    }
+
+    /// Whether `$8000-$FFFF` reads the DIP switches / solder pad now (`extcl_cpu_rd_mem_344`:
+    /// the latch's A3; `_432`: `read_dp`).
+    const fn reads_dip(&self) -> bool {
+        match self.kind {
+            Mmc3PKind::M344 => self.outer[0] & 0x08 != 0,
+            Mmc3PKind::M432 => {
+                self.outer[0] & 0x01 != 0 || (self.small_432() && self.outer[1] & 0x20 != 0)
+            }
+            _ => false,
+        }
     }
 
     /// `chr_swap_mmc3_370`.
@@ -571,6 +651,8 @@ impl Mmc3P {
             // `chr_swap_mmc3_412` in the NROM mode: an 8 KiB bank from `reg[0]` D2 up.
             let base = (i32::from(self.outer[0]) >> 2) << 3;
             std::array::from_fn(|slot| base | i32::try_from(slot).unwrap_or(0))
+        } else if matches!(self.kind, Mmc3PKind::M344 | Mmc3PKind::M432) {
+            std::array::from_fn(|slot| self.chr_page_dip(raw_chr[slot]))
         } else if self.kind == Mmc3PKind::M370 {
             std::array::from_fn(|slot| self.chr_page_370(raw_chr[slot]))
         } else if matches!(self.kind, Mmc3PKind::M422 | Mmc3PKind::M534) {
@@ -613,6 +695,15 @@ impl Mmc3P {
         }
     }
 
+    /// `extcl_cpu_wr_mem_432`: A0 the register; on an image under 1 MiB an even write with D0
+    /// clear also clears `$6001` D5.
+    fn write_432(r: &mut [u16; 4], prg_size: usize, address: u16, data: u16) {
+        r[usize::from(address & 0x01)] = data;
+        if prg_size < 0x10_0000 && address & 0x01 == 0 && data & 0x01 == 0 {
+            r[1] &= !0x20;
+        }
+    }
+
     /// `extcl_cpu_wr_mem_126`: `$6000-$6003` until `$6003` D7 locks them; locked, `$6002` still
     /// takes its low one or two bits (one when its D4 is set).
     fn write_126(r: &mut [u16; 4], address: u16, data: u16) {
@@ -623,6 +714,27 @@ impl Mmc3P {
             let mask = 0x03 >> u16::from(r[2] & 0x10 != 0);
             r[2] = (r[2] & !mask) | (data & mask);
         }
+    }
+
+    /// What follows a write that reached an outer register: the RAM's copy, the windows and the
+    /// mirroring.
+    fn after_low_write(
+        &mut self,
+        memory: &mut CartridgeMemory,
+        address: u16,
+        value: u8,
+        writable: bool,
+    ) {
+        // `wram_wr` before the board: the RAM takes the byte too.
+        if writable && address >= 0x6000 {
+            let ram = memory.prg_ram_mut();
+            if !ram.is_empty() {
+                let len = ram.len();
+                ram[usize::from(address & 0x1FFF) % len] = value;
+            }
+        }
+        self.refresh();
+        self.settle_mirroring(memory);
     }
 
     /// A write below `$8000` that reaches an outer register; `false` when it is not one.
@@ -648,7 +760,9 @@ impl Mmc3P {
                     r[0] = data;
                 }
             }
-            Mmc3PKind::M322 | Mmc3PKind::M339 if (0x6000..=0x7FFF).contains(&address) => {
+            Mmc3PKind::M322 | Mmc3PKind::M339 | Mmc3PKind::M344
+                if (0x6000..=0x7FFF).contains(&address) =>
+            {
                 if writable {
                     r[0] = address;
                 }
@@ -699,6 +813,12 @@ impl Mmc3P {
                     r[usize::from(address & 0x03)] = data;
                 }
             }
+            // `extcl_cpu_wr_mem_432`.
+            Mmc3PKind::M432 if (0x6000..=0x7FFF).contains(&address) => {
+                if writable {
+                    Self::write_432(r, self.prg_size, address, data);
+                }
+            }
             // `extcl_cpu_wr_mem_370`: `$5000-$5FFF`, the low address byte.
             Mmc3PKind::M370 if (0x5000..=0x5FFF).contains(&address) => r[0] = address & 0xFF,
             // `extcl_cpu_wr_mem_411`: `$5000-$5FFF`, A0 the register, no RAM there.
@@ -725,16 +845,7 @@ impl Mmc3P {
             }
             _ => return false,
         }
-        // `wram_wr` before the board: the RAM takes the byte too.
-        if writable && address >= 0x6000 {
-            let ram = memory.prg_ram_mut();
-            if !ram.is_empty() {
-                let len = ram.len();
-                ram[usize::from(address & 0x1FFF) % len] = value;
-            }
-        }
-        self.refresh();
-        self.settle_mirroring(memory);
+        self.after_low_write(memory, address, value, writable);
         true
     }
 }
@@ -828,7 +939,24 @@ impl Mapper for Mmc3P {
     /// `extcl_cpu_rd_mem_334`: `$6000-$7FFF` with A1 set reads `(open bus & $FE) | DIP` while the
     /// RAM is readable; the DIP is 0 and the high address byte stands in for the bus, as
     /// [`super::Mmc3Clone`] does for its DIP reads (FIDELITY-LEADS J33).
+    /// The DIP / solder-pad read of 344 and 432 replaces the whole of `$8000-$FFFF`, so their
+    /// windows leave the cached path while it is on.
+    fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {
+        if self.reads_dip() {
+            return [super::NO_ROM_WINDOW; 4];
+        }
+        self.mmc3
+            .banks()
+            .map_or([super::NO_ROM_WINDOW; 4], |banks| {
+                banks.rom_windows(memory.rom().prg_rom().len())
+            })
+    }
+
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
+        // The switches and the pad are 0 (J37).
+        if address >= 0x8000 && self.reads_dip() {
+            return Some(0);
+        }
         // `extcl_cpu_rd_mem_370`: `$5000-$5FFF` reads `DIP & $80 | open bus & $7F`; the DIP is 0
         // and the high address byte stands in for the bus (J33).
         if self.kind == Mmc3PKind::M370 && (0x5000..=0x5FFF).contains(&address) {

@@ -973,3 +973,33 @@ fn mappers_p_417_pages_ciram_per_table() {
         [0, 1, 2, 3].map(|table| cartridge.nametable_page(table))
     );
 }
+
+/// `mapper_344.c`: the address at `$6000` the outer bank; A2 the NROM-256 mode from R6; A3 the
+/// DIP read over `$8000-$FFFF` (0).
+#[cfg(feature = "board-344")]
+#[test]
+fn mappers_p_344_has_nrom_and_a_dip_read() {
+    let mut core = MapperRom::new(344).prg(64).chr(256).load();
+    mmc3_start(&mut core, 5, 2);
+    core.mapper_write(0x6001, 0);
+    assert_eq!([21, 18, 30, 31], core.prg_windows());
+    core.mapper_write(0x6005, 0);
+    assert_eq!([20, 21, 22, 23], core.prg_windows());
+    core.mapper_write(0x6008, 0);
+    assert_eq!(0, core.read_memory(0x8001));
+}
+
+/// `mapper_432.c` (nesdev "NES 2.0 Mapper 432"): `$6001` D6 is NROM-128 from R6/R7; `$6000` D0
+/// the solder-pad read.
+#[cfg(feature = "board-432")]
+#[test]
+fn mappers_p_432_has_nrom_128_and_a_pad_read() {
+    let mut core = MapperRom::new(432).prg(64).chr(256).load();
+    mmc3_start(&mut core, 5, 6);
+    core.mapper_write(0x6001, 0x10);
+    assert_eq!([37, 38, 62, 63], core.prg_windows());
+    core.mapper_write(0x6001, 0x50);
+    assert_eq!([37, 38, 37, 38], core.prg_windows());
+    core.mapper_write(0x6000, 0x01);
+    assert_eq!(0, core.read_memory(0x8001));
+}
