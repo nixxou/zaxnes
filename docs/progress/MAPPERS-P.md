@@ -28,7 +28,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 186 | `mapper_186.c` | 82 | 1 | 0 | refused (MF-6 inventory §3.5, AMD-MAPPERS-N-200: the Study Box stays refused) |
 | 237 | `mapper_237.c` | 98 | 1 | 0 | done (batch 1, `MultiP`) |
 | 248 | `mapper_115.c` | 115 | 0 | 0 | done (batch 20, alias, `registry::board_number`) |
-| 256 | `mapper_256.c` | 123 | 241 | 0 | todo |
+| 256 | `mapper_256.c` | 123 | 241 | 0 | done (batch 53, `IrqP` + `one_bus.rs`) |
 | 267 | `mapper_267.c` | 87 | 1 | 0 | done (batch 12, `Mmc3P`) |
 | 269 | `mapper_269.c` | 130 | 3 | 0 | done (batch 26, `Mmc3P`) |
 | 271 | `mapper_271.c` | 69 | 1 | 0 | done (batch 2, `MultiP`) |
@@ -114,7 +114,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 432 | `mapper_432.c` | 112 | 1 | 0 | done (batch 24, `Mmc3P`) |
 | 433 | `mapper_433.c` | 75 | 1 | 0 | done (batch 8, `MultiP`) |
 | 434 | `mapper_434.c` | 74 | 4 | 0 | done (batch 8, `MultiP`) |
-| 436 | `mapper_436.c` | 59 | 1 | 0 | todo |
+| 436 | `mapper_436.c` | 59 | 1 | 0 | done (batch 53, `IrqP` + `one_bus.rs`) |
 | 437 | `mapper_437.c` | 74 | 1 | 0 | done (batch 8, `MultiP`) |
 | 438 | `mapper_438.c` | 71 | 2 | 0 | done (batch 8, `MultiP`) |
 | 442 | `mapper_442.c` | 127 | 1 | 0 | done (batch 39, `IrqP`) |
@@ -374,3 +374,14 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   `board-561`), asked by `NesCore::power_on` after the CPU reset: the misc ROM's load address,
   data and init, run through a `JSR init` / `JMP ($FFFC)` stub at `$0700`. 562 stays blocked: its
   puNES file carries the copier's BIOS as a firmware dump.
+* Batch 53: 256 and 436, the V.R. Technology OneBus famiclones (VT02/VT03), as `IrqP` kinds over a
+  new `one_bus.rs` holding the chip (`OneBus.c`): PRG from `$4107-$410B` with `$4100`/`$410A`
+  blocks, CHR 1 KiB windows from `$2012-$2017`/`$2018`/`$201A` over the CHR-ROM (or the PRG-ROM
+  without one), the MMC3 register file at `$8000-$FFFF` as an alias, the A12 counter, and the PCM
+  channel. 256's submapper wirings (`regs[]` of `mapper_256.c`, CRC detection on iNES 1.0) and
+  436's outer banks. Core hooks, all behind `board-256`/`board-436`: `NesBus` routes every CPU
+  write to `$2008-$3FFF` to the cartridge instead of the PPU (`vt_bus`), passes the APU writes
+  through `Mapper::snoop_apu_write` (which may clear `$4015` D4) and the `$4015` read through
+  `Mapper::apu_status`, and treats the board as an expansion-audio one so that
+  `push_expansion_audio` hands the APU the PCM's `$4011` byte (`Mapper::take_dac_write`). New
+  `irq_p_a12_board` list (471, 413, 256, 436, 359, 540) shared by both PPU-bus lists.

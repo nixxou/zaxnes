@@ -141,6 +141,8 @@ mod nina03;
 mod nrom;
 #[cfg(feature = "board-96")]
 mod oeka_kids;
+#[cfg(any(feature = "board-256", feature = "board-436"))]
+mod one_bus;
 #[cfg(feature = "board-164")]
 mod pec9588;
 #[cfg(feature = "board-168")]
@@ -807,6 +809,26 @@ pub trait Mapper {
     /// only (lot MAPPERS-P, puNES `EXTCL_CPU_INIT_PC`); `None` for every board but the copier
     /// loaders, so a power-on asks once and does nothing more.
     fn boot_program(&self, _memory: &CartridgeMemory) -> Option<BootProgram> {
+        None
+    }
+
+    /// A CPU write to an APU register (`$4000-$4013`, `$4015`, `$4017`) seen by a board whose
+    /// chip shares the APU's address space, and the value the APU then gets (lot MAPPERS-P,
+    /// the `OneBus` PCM channel of 256 and 436, puNES `extcl_wr_apu_OneBus`).
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    fn snoop_apu_write(&mut self, _address: u16, value: u8) -> u8 {
+        value
+    }
+
+    /// The `$4015` status as such a board alters it (puNES `extcl_rd_apu_OneBus`).
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    fn apu_status(&self, status: u8) -> u8 {
+        status
+    }
+
+    /// A byte the board's PCM channel wrote to the APU's `$4011` since the last call.
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    fn take_dac_write(&mut self) -> Option<u8> {
         None
     }
 }

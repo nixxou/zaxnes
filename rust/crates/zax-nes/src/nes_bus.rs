@@ -171,6 +171,10 @@ pub struct NesBus {
     /// game pays this flag's test on a PPU register write.
     #[cfg(feature = "board-682")]
     snoops_cpu_bus: bool,
+    /// Lot MAPPERS-P: a `OneBus` famiclone (256, 436) is attached; its chip takes the CPU writes
+    /// to `$2008-$3FFF` and shares the APU's registers (see `Cartridge::has_vt_bus`).
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    vt_bus: bool,
     /// `deferred_ppu && !expansion_audio`: whether the APU may lag at all, kept as one flag so
     /// that the per-cycle catch-up tests it **instead of** `deferred_ppu` rather than on top of
     /// it. Everything the MMC5's audio needs sits on the other side of that single test, out of
@@ -234,6 +238,8 @@ impl NesBus {
             samples_console: false,
             #[cfg(feature = "board-682")]
             snoops_cpu_bus: false,
+            #[cfg(any(feature = "board-256", feature = "board-436"))]
+            vt_bus: false,
             apu_batching: false,
             apu_quiet: 0,
             zone_instruction: false,
@@ -466,6 +472,14 @@ impl NesBus {
         self.expansion_audio = cartridge
             .as_ref()
             .is_some_and(Cartridge::has_expansion_audio);
+        // A OneBus PCM channel writes the APU's `$4011` on the cycle it fetches; the APU is kept
+        // in step with the cartridge as for expansion audio, and `push_expansion_audio` hands
+        // it the byte.
+        #[cfg(any(feature = "board-256", feature = "board-436"))]
+        {
+            self.vt_bus = cartridge.as_ref().is_some_and(Cartridge::has_vt_bus);
+            self.expansion_audio |= self.vt_bus;
+        }
         self.apu_batching = self.deferred_ppu && !self.expansion_audio;
         if !self.expansion_audio {
             // A board with no expansion audio leaves the APU's `M` at 0 for good.
@@ -733,6 +747,12 @@ impl NesBus {
     /// saved register — RU-3a's +15.7 % on `tick`.
     #[inline(never)]
     fn push_expansion_audio(&mut self) {
+        #[cfg(any(feature = "board-256", feature = "board-436"))]
+        if self.vt_bus {
+            if let Some(byte) = self.cartridge.as_mut().and_then(Cartridge::take_dac_write) {
+                let _ = self.apu.write(0x4011, byte);
+            }
+        }
         if let Some(level) = self
             .cartridge
             .as_ref()
@@ -1335,7 +1355,13 @@ impl NesBus {
                 // halves of `AccuracyCoin`'s `Internal Data Bus` test, and `Open Bus` 7 and 9
                 // (see [`NesBus::external_bus`]).
                 self.hold_external_bus();
-                self.apu.read_status(self.data_bus)
+                let status = self.apu.read_status(self.data_bus);
+                #[cfg(any(feature = "board-256", feature = "board-436"))]
+                let status = match self.cartridge.as_ref() {
+                    Some(cartridge) if self.vt_bus => cartridge.apu_status(status),
+                    _ => status,
+                };
+                status
             }
             // A controller port answers on the internal bus too, and its three open-bus bits
             // come from there — which is how `Implied Dummy Reads` can take the operands of a
@@ -1451,6 +1477,15 @@ impl NesBus {
                     cartridge.snoop_cpu_bus_write(0x2000 | (address & 0x07), value);
                 }
             }
+            // Lot MAPPERS-P: the OneBus chip decodes `$2008` and up itself; those writes never
+            // reach the PPU as mirrors (puNES `extcl_wr_ppu_reg_OneBus`).
+            #[cfg(any(feature = "board-256", feature = "board-436"))]
+            if self.vt_bus && address >= 0x2008 {
+                if let Some(cartridge) = self.cartridge.as_mut() {
+                    cartridge.cpu_write_as::<K>(address, value);
+                }
+                return;
+            }
             let register = address & 0x07;
             // Lot MAPPERS-N: "The RC2C05 swaps the meanings of $2000 and $2001" (nesdev,
             // "Vs. System"), done on the register number as the chip's pins do.
@@ -1481,6 +1516,14 @@ impl NesBus {
                 }
                 _ => {
                     self.sync_apu();
+                    #[cfg(any(feature = "board-256", feature = "board-436"))]
+                    let value = if self.vt_bus {
+                        self.cartridge
+                            .as_mut()
+                            .map_or(value, |cartridge| cartridge.snoop_apu_write(address, value))
+                    } else {
+                        value
+                    };
                     let ghost = if address == 0x4015 {
                         self.dmc_switch_off_window(value)
                     } else {

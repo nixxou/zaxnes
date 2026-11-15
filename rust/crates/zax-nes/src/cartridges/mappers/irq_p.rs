@@ -6,6 +6,8 @@
 //! [`Mapper::on_cpu_cycle`] and the line on [`Mapper::irq_asserted`], which that enum forwards.
 //! The PRG-ROM these boards show at `$5000`/`$6000` is answered by [`Mapper::try_read_prg`], with
 //! the work RAM disabled ([`Mapper::prg_ram_enabled`]).
+#[cfg(any(feature = "board-256", feature = "board-436"))]
+use super::one_bus::OneBus;
 use super::vrc_irq::VrcIrq;
 use super::{windows_for, BootProgram, Eeprom93C66, Mapper};
 use crate::cartridges::{A12Watcher, BankWindows, CartridgeMemory, ChrFetch, ChrView};
@@ -94,6 +96,13 @@ pub enum IrqPKind {
     /// timer at `$4024/$4025` and a count-up at `$4100/$4101`; the NES 2.0 misc ROM is the
     /// copier's trainer, run at power-on ([`Mapper::boot_program`]).
     M561,
+    /// 256, `mapper_256.c` (V.R. Technology VT02/VT03 "`OneBus`" famiclones): the chip's
+    /// registers in the console's own address space ([`super::one_bus`]), the submapper's
+    /// wiring permuting some of them.
+    M256,
+    /// 436, `mapper_436.c`: a `OneBus` multicart, its outer PRG and CHR banks from `$4100` and
+    /// `$410F` (submapper 0) or `$411C`/`$410F` (submapper 1).
+    M436,
 }
 
 impl IrqPKind {
@@ -118,6 +127,8 @@ impl IrqPKind {
             413 => Self::M413,
             547 => Self::M547,
             561 => Self::M561,
+            256 => Self::M256,
+            436 => Self::M436,
             _ => return None,
         })
     }
@@ -141,6 +152,8 @@ impl IrqPKind {
             Self::M413 => 413,
             Self::M547 => 547,
             Self::M561 => 561,
+            Self::M256 => 256,
+            Self::M436 => 436,
         }
     }
 }
@@ -191,6 +204,9 @@ pub struct IrqP {
     timers_561: [i16; 2],
     /// The NES 2.0 misc ROM 561 boots from, empty for the other kinds; derived from the image.
     misc_561: Vec<u8>,
+    /// 256's and 436's `OneBus` chip, `None` for the other kinds; saved for those kinds.
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    one_bus: Option<Box<OneBus>>,
     /// 528's VRC7 IRQ (`init_VRC7(0x01, 0x00)`), saved for that kind only.
     vrc_irq: VrcIrq,
     /// Whether the image has CHR-ROM, which 359's CHR banking needs (`chrrom_size()`).
@@ -230,6 +246,12 @@ impl IrqP {
             ext_561: [0; 5],
             timers_561: [0; 2],
             misc_561: Vec::new(),
+            #[cfg(any(feature = "board-256", feature = "board-436"))]
+            one_bus: match kind {
+                IrqPKind::M256 => Some(Box::new(OneBus::new(memory, 256))),
+                IrqPKind::M436 => Some(Box::new(OneBus::new(memory, 436))),
+                _ => None,
+            },
             nt_560: match kind {
                 IrqPKind::M560 => vec![0; NT_560],
                 IrqPKind::M547 => vec![0; NT_547],
@@ -330,6 +352,7 @@ impl IrqP {
             IrqPKind::M547 => self.map_547(),
             // `prg_fix_561`/`chr_fix_561` read the copier RAM in `try_read_prg`/`ppu_peek`.
             IrqPKind::M561 => {}
+            IrqPKind::M256 | IrqPKind::M436 => self.map_one_bus(),
             // `prg_fix_560`.
             IrqPKind::M560 => {
                 b.map_prg_32k(r[0]);
@@ -563,6 +586,75 @@ impl IrqP {
             self.banks.map_prg_8k(slot, i32::from(bank));
         }
         self.banks.map_prg_8k(3, 0x4F);
+    }
+
+    /// `extcl_after_mapper_init_256`/`_436`: the chip's PRG banks in the windows; its CHR
+    /// windows are kept by the chip and read in `ppu_peek`.
+    fn map_one_bus(&mut self) {
+        #[cfg(any(feature = "board-256", feature = "board-436"))]
+        if let Some(chip) = &mut self.one_bus {
+            chip.refresh_chr();
+            for (slot, bank) in chip.prg_banks().into_iter().enumerate() {
+                self.banks.map_prg_8k(slot, i32::from(bank));
+            }
+        }
+    }
+
+    /// `mirroring_fix_OneBus_base`.
+    fn one_bus_mirroring(&self) -> Option<NametableMirroring> {
+        #[cfg(any(feature = "board-256", feature = "board-436"))]
+        if let Some(chip) = &self.one_bus {
+            return Some(chip.mirroring());
+        }
+        None
+    }
+
+    /// A write the `OneBus` chip decodes.
+    #[cfg_attr(
+        not(any(feature = "board-256", feature = "board-436")),
+        allow(clippy::unused_self)
+    )]
+    fn latch_one_bus(&mut self, address: u16, value: u8) {
+        #[cfg(any(feature = "board-256", feature = "board-436"))]
+        if let Some(chip) = &mut self.one_bus {
+            chip.write(address, value);
+        }
+        let _ = (address, value);
+    }
+
+    /// `extcl_cpu_every_cycle_561`'s two timers.
+    fn step_561(&mut self) {
+        let fds = &mut self.timers_561[0];
+        *fds = fds.wrapping_add(3);
+        while *fds >= 448 && self.ext_561[4] & 0x80 != 0 {
+            *fds -= 448;
+            self.irq_pending = true;
+        }
+        let sgd = &mut self.timers_561[1];
+        if *sgd < 0 {
+            *sgd += 1;
+            if *sgd == 0 {
+                self.irq_pending = true;
+            }
+        }
+    }
+
+    /// `extcl_cpu_every_cycle_OneBus`: the PCM channel, reading through the board's windows.
+    #[cfg_attr(
+        not(any(feature = "board-256", feature = "board-436")),
+        allow(clippy::unused_self)
+    )]
+    fn step_one_bus(&mut self, memory: &CartridgeMemory) {
+        #[cfg(any(feature = "board-256", feature = "board-436"))]
+        if let Some(chip) = &mut self.one_bus {
+            let banks = &self.banks;
+            let rom = memory.rom().prg_rom();
+            let ram = memory.prg_ram();
+            chip.step_pcm(memory, |address| {
+                banks.read_prg(address, rom, ram).unwrap_or(0)
+            });
+        }
+        let _ = memory;
     }
 
     /// `map_init_561`/`extcl_after_mapper_init_561`: the copier RAM loaded from the image, `reg1m`
@@ -906,6 +998,7 @@ impl IrqP {
                 0x10 => NametableMirroring::SingleScreenB,
                 _ => NametableMirroring::Horizontal,
             }),
+            IrqPKind::M256 | IrqPKind::M436 => self.one_bus_mirroring(),
             // `mirroring_fix_547`.
             IrqPKind::M547 => Some(if self.ext_547[10] & 0x02 != 0 {
                 NametableMirroring::Horizontal
@@ -1046,6 +1139,7 @@ impl IrqP {
             IrqPKind::M413 => self.latch_413(address, value),
             IrqPKind::M547 => self.latch_547(address, value),
             IrqPKind::M561 => self.latch_561(address, value),
+            IrqPKind::M256 | IrqPKind::M436 => self.latch_one_bus(address, value),
             // `extcl_cpu_wr_mem_560`: any write toggles the bank.
             IrqPKind::M560 => {
                 if address >= 0x8000 {
@@ -1094,6 +1188,11 @@ impl Mapper for IrqP {
         if self.kind == IrqPKind::M547 {
             writer.write_raw(&self.ext_547);
         }
+        #[cfg(any(feature = "board-256", feature = "board-436"))]
+        if let Some(chip) = &self.one_bus {
+            chip.save_state(writer);
+            self.a12.save_state(writer);
+        }
         if self.kind == IrqPKind::M561 {
             writer.write_raw(&self.ext_561);
             for timer in self.timers_561 {
@@ -1133,6 +1232,11 @@ impl Mapper for IrqP {
         if self.kind == IrqPKind::M547 {
             reader.read_into(&mut self.ext_547)?;
         }
+        #[cfg(any(feature = "board-256", feature = "board-436"))]
+        if let Some(chip) = &mut self.one_bus {
+            chip.load_state(reader)?;
+            self.a12.load_state(reader)?;
+        }
         if self.kind == IrqPKind::M561 {
             reader.read_into(&mut self.ext_561)?;
             for timer in &mut self.timers_561 {
@@ -1159,6 +1263,10 @@ impl Mapper for IrqP {
     }
 
     fn irq_asserted(&self) -> bool {
+        #[cfg(any(feature = "board-256", feature = "board-436"))]
+        if let Some(chip) = &self.one_bus {
+            return chip.irq_pending || chip.pcm_irq();
+        }
         self.irq_pending || self.vrc_irq.asserted()
     }
 
@@ -1168,7 +1276,7 @@ impl Mapper for IrqP {
     /// written; this board counts while enabled, asserts at `$1000` and clears when disabled,
     /// which is the evident intent (FIDELITY-LEADS J37). 417: the counter runs always, bit 10
     /// asserts while enabled and restarts it.
-    fn on_cpu_cycle(&mut self, _memory: &mut CartridgeMemory) {
+    fn on_cpu_cycle(&mut self, memory: &mut CartridgeMemory) {
         match self.kind {
             IrqPKind::M311 => {
                 if self.irq_enabled {
@@ -1231,23 +1339,11 @@ impl Mapper for IrqP {
                 }
             }
             IrqPKind::M528 => self.vrc_irq.step_cpu_cycle(),
+            // `extcl_cpu_every_cycle_OneBus`: the PCM channel.
+            IrqPKind::M256 | IrqPKind::M436 => self.step_one_bus(memory),
             // `extcl_cpu_every_cycle_561`: the FDS-style timer gains 3 a cycle and asserts every
             // 448 while `irq.reg` D7 is set; the count-up asserts on reaching 0 from below.
-            IrqPKind::M561 => {
-                let fds = &mut self.timers_561[0];
-                *fds = fds.wrapping_add(3);
-                while *fds >= 448 && self.ext_561[4] & 0x80 != 0 {
-                    *fds -= 448;
-                    self.irq_pending = true;
-                }
-                let sgd = &mut self.timers_561[1];
-                if *sgd < 0 {
-                    *sgd += 1;
-                    if *sgd == 0 {
-                        self.irq_pending = true;
-                    }
-                }
-            }
+            IrqPKind::M561 => self.step_561(),
             // `extcl_cpu_every_cycle_547`: a 16-bit up-counter, reloaded and asserting on its wrap.
             IrqPKind::M547 => {
                 if self.irq_enabled {
@@ -1299,6 +1395,14 @@ impl Mapper for IrqP {
             && address & 0x03FF < 0x03C0
         {
             self.ext_547[16] = self.nt_560[0x800 + self.nt_offset_547(address)];
+        }
+        // `extcl_irq_A12_clock_OneBus`: puNES clocks the dot-256 mode (`$410B` D7, `$2010` D1)
+        // at dot 256 of each visible line instead; here both modes count A12's rises (J37).
+        #[cfg(any(feature = "board-256", feature = "board-436"))]
+        if let Some(chip) = &mut self.one_bus {
+            if self.a12.rose(address, clock) {
+                chip.clock_irq();
+            }
         }
         // `extcl_irq_A12_clock_413`: the MMC3's counter without its reload flag.
         if self.kind == IrqPKind::M413 && self.a12.rose(address, clock) {
@@ -1360,6 +1464,12 @@ impl Mapper for IrqP {
             if (0x6000..=0x7FFF).contains(&address) {
                 let ram = memory.prg_ram();
                 return (!ram.is_empty()).then(|| ram[self.ram_offset_547(address) % ram.len()]);
+            }
+        }
+        #[cfg(any(feature = "board-256", feature = "board-436"))]
+        if let Some(chip) = &self.one_bus {
+            if (0x4100..=0x4FFF).contains(&address) {
+                return chip.read(address);
             }
         }
         if self.kind == IrqPKind::M561 && address >= 0x8000 {
@@ -1437,7 +1547,12 @@ impl Mapper for IrqP {
     fn chr_peek_view<'m>(&self, memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
         if matches!(
             self.kind,
-            IrqPKind::M442 | IrqPKind::M560 | IrqPKind::M547 | IrqPKind::M561
+            IrqPKind::M442
+                | IrqPKind::M560
+                | IrqPKind::M547
+                | IrqPKind::M561
+                | IrqPKind::M256
+                | IrqPKind::M436
         ) {
             return None;
         }
@@ -1455,6 +1570,18 @@ impl Mapper for IrqP {
     fn ppu_peek(&self, memory: &CartridgeMemory, address: u16, fetch: ChrFetch) -> u8 {
         if self.kind == IrqPKind::M547 && address < 0x2000 {
             return self.chr_547(memory, address, fetch);
+        }
+        #[cfg(any(feature = "board-256", feature = "board-436"))]
+        if let Some(chip) = &self.one_bus {
+            if address < 0x2000 {
+                let rom = memory.rom();
+                let data = if rom.chr_rom().is_empty() {
+                    rom.prg_rom()
+                } else {
+                    rom.chr_rom()
+                };
+                return OneBus::chr_byte(data, &chip.windows, chip.planes, address);
+            }
         }
         if self.kind == IrqPKind::M561 && address < 0x2000 {
             return self
@@ -1497,6 +1624,10 @@ impl Mapper for IrqP {
         if address >= 0x2000 {
             return;
         }
+        // The OneBus patterns are ROM.
+        if matches!(self.kind, IrqPKind::M256 | IrqPKind::M436) {
+            return;
+        }
         // `memmap_vram_wp_8k(…, !(reg1m >= $80))`.
         if self.kind == IrqPKind::M561 {
             if self.ext_561[2] < 0x80 {
@@ -1523,6 +1654,41 @@ impl Mapper for IrqP {
         if memory.rom().chr_rom().is_empty() {
             self.banks.write_chr(address, value, memory.chr_ram_mut());
         }
+    }
+
+    /// `map_init_256`/`_436` on RESET: `init_OneBus`'s registers again and the IRQ cleared
+    /// (`memset(&nes[0].irqA12, …)`).
+    fn soft_reset(&mut self, memory: &mut CartridgeMemory) {
+        #[cfg(any(feature = "board-256", feature = "board-436"))]
+        if let Some(chip) = &mut self.one_bus {
+            chip.reset_registers();
+            chip.irq_counter = 0;
+            chip.irq_enabled = false;
+            chip.irq_pending = false;
+            self.a12 = A12Watcher::new(A12Watcher::MMC3_FILTER_DOTS);
+            self.settle(memory);
+        }
+        let _ = memory;
+    }
+
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    fn snoop_apu_write(&mut self, address: u16, value: u8) -> u8 {
+        match &mut self.one_bus {
+            Some(chip) => chip.snoop_apu_write(address, value),
+            None => value,
+        }
+    }
+
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    fn apu_status(&self, status: u8) -> u8 {
+        self.one_bus
+            .as_ref()
+            .map_or(status, |chip| chip.apu_status(status))
+    }
+
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    fn take_dac_write(&mut self) -> Option<u8> {
+        self.one_bus.as_mut().and_then(|chip| chip.take_dac())
     }
 
     /// `extcl_cpu_init_pc_561`: a 512-byte misc ROM is a trainer at `$7000` entered at `$7003`;

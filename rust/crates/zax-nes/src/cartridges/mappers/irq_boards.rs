@@ -840,6 +840,22 @@ impl Mapper for IrqBoard {
         inner!(self, b => b.write_register(memory, address, value));
     }
 
+    /// The `OneBus` hooks (lot MAPPERS-P), asked by the bus for mappers 256 and 436 alone.
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    fn snoop_apu_write(&mut self, address: u16, value: u8) -> u8 {
+        inner!(self, b => b.snoop_apu_write(address, value))
+    }
+
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    fn apu_status(&self, status: u8) -> u8 {
+        inner!(self, b => b.apu_status(status))
+    }
+
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    fn take_dac_write(&mut self) -> Option<u8> {
+        inner!(self, b => b.take_dac_write())
+    }
+
     /// Forwarded for the copier loaders (lot MAPPERS-P), asked once at power-on.
     #[cfg(feature = "board-561")]
     fn boot_program(&self, memory: &CartridgeMemory) -> Option<super::BootProgram> {

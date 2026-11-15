@@ -1056,6 +1056,17 @@ places where puNES itself is incomplete are copied, not invented around:
 * 562 (`mapper_562.c`): not implemented. puNES embeds the Venus Turbo Game Doctor's 4 KiB BIOS
   as a byte table and runs it; that table is a firmware dump, not puNES's own code, so it is
   not copied here (owner decision pending, MAPPERS-P status table).
+* 256, 436 (`OneBus.c`): as puNES, the VT02/VT03 are modelled in the console's ordinary 2 bpp
+  rendering. In the 4 bpp modes (`$2010` D1/D2) the banks select the de-interleaved low planes
+  puNES selects, but the PPU still draws two planes, so those games show what puNES shows, not
+  what the chip shows. puNES clocks the IRQ counter at dot 256 of each visible line when `$410B`
+  D7 or `$2010` D1 is set and on A12 rises otherwise; this board counts A12 rises in both modes
+  (no board hook sees dot 256). The PCM channel reads its bytes through the cartridge only: an
+  address below `$6000` (`$4030` D0-D1 = 3 or 2) reads 0 where puNES reads the console's RAM or
+  registers. Its byte reaches the APU's `$4011` on the cycle it is fetched, the APU being kept in
+  step with the cartridge as for expansion audio. The VT09/VT369 extras (GPIO at `$4140`, the
+  `$3000` window, the relative bank of `$4160`) and the iNES-only VT09 detection are absent;
+  submapper 2 and 4 detection by PRG CRC on iNES 1.0 images is puNES's.
 
 ### J36. Mapper 682 (Rainbow): the ESP is modelled from the protocol document
 The ESP (`rainbow_esp.rs`) follows Broke Studio's `rainbow-net.md` and `mapper-doc.md`; no

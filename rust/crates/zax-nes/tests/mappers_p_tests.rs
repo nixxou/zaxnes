@@ -1719,3 +1719,70 @@ fn mappers_p_561_boots_its_trainer_and_writes_its_ram() {
     cartridge.step_cpu_cycle();
     assert!(cartridge.irq_asserted());
 }
+
+/// `OneBus.c` through `mapper_256.c`: `$4107`/`$4108` and the MMC3 alias place the PRG banks,
+/// `$2016`/`$2017` and `$2012-$2015` the CHR windows (a CPU write to `$2016` is the chip's, not
+/// a PPU mirror), `$4106` the mirroring, `$4101`/`$4104` an A12 counter; with `$4030` D4 the
+/// `$4012`/`$4013`/`$4015` writes run a PCM channel that feeds `$4011` and raises an IRQ.
+#[cfg(feature = "board-256")]
+#[test]
+fn mappers_p_256_decodes_its_onebus_registers() {
+    let mut core = MapperRom::new(256).prg(64).chr(64).load();
+    assert_eq!([0, 1, 62, 63], core.prg_windows());
+    core.mapper_write(0x4107, 5);
+    assert_eq!([5, 1, 62, 63], core.prg_windows());
+    core.mapper_write(0x8000, 6);
+    core.mapper_write(0x8001, 7);
+    assert_eq!([7, 1, 62, 63], core.prg_windows());
+    assert_eq!([0, 1, 2, 3, 4, 5, 6, 7], core.chr_windows());
+    core.mapper_write(0x2016, 0x08);
+    core.mapper_write(0x2012, 0x20);
+    assert_eq!([8, 9, 2, 3, 0x20, 5, 6, 7], core.chr_windows());
+
+    core.mapper_write(0x4101, 2);
+    core.mapper_write(0x4104, 0);
+    let cartridge = core.cartridge_mut().unwrap();
+    for (rise, clock) in [(0, 0), (1, 40)] {
+        assert!(!cartridge.irq_asserted(), "rise {rise}");
+        cartridge.on_ppu_address_bus(0x0000, clock);
+        cartridge.on_ppu_address_bus(0x1000, clock + 20);
+    }
+    assert!(cartridge.irq_asserted());
+    core.mapper_write(0x4103, 0);
+
+    core.mapper_write(0x4030, 0x11);
+    core.mapper_write(0x4012, 0x00);
+    core.mapper_write(0x4013, 0x00);
+    core.mapper_write(0x4015, 0x10);
+    let cartridge = core.cartridge_mut().unwrap();
+    cartridge.take_dac_write();
+    let mut written = None;
+    for _ in 0..0xE1 {
+        cartridge.step_cpu_cycle();
+        written = written.or(cartridge.take_dac_write());
+    }
+    assert_eq!(Some(7 >> 1), written);
+    assert!(!cartridge.irq_asserted());
+    for _ in 0..0xE1 {
+        cartridge.step_cpu_cycle();
+    }
+    assert!(cartridge.irq_asserted());
+    assert_eq!(0x80, cartridge.apu_status(0x00) & 0x80);
+}
+
+/// `mapper_436.c`: submapper 0 takes its outer PRG bank from `$4100` D6 and `$410F` D5; `$410A`
+/// places the inner block.
+#[cfg(feature = "board-436")]
+#[test]
+fn mappers_p_436_places_the_onebus_in_an_outer_bank() {
+    let mut core = MapperRom::new(436).prg(256).chr(64).load();
+    // `$410F` = `$FF` at power-on: D5 is A21 of the 8 KiB bank (`$400`), out of 2 MiB.
+    assert_eq!([0, 1, 62, 63], core.prg_windows());
+    core.mapper_write(0x410F, 0x00);
+    core.mapper_write(0x4100, 0x40);
+    assert_eq!([0, 1, 62, 63], core.prg_windows());
+    // `$410A` above the mode's mask (`$3F` in mode 0) is the inner block.
+    core.mapper_write(0x4100, 0x00);
+    core.mapper_write(0x410A, 0x40);
+    assert_eq!([0x40, 0x41, 0x7E, 0x7F], core.prg_windows());
+}

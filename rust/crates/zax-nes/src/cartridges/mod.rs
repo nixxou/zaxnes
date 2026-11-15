@@ -628,6 +628,10 @@ const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
             | 529
             // MAPPERS-N: mapper 266's VRC4 IRQ (nesdev "NES 2.0 Mapper 266").
             | 266
+            // MAPPERS-P: mapper 436, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
+            | 436
+            // MAPPERS-P: mapper 256, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
+            | 256
             // MAPPERS-P: mapper 561, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
             | 561
             // MAPPERS-P: mapper 547, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
@@ -865,19 +869,12 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 191
             | 117
             | 222
-            // MAPPERS-P: mapper 471's IRQ on every A12 rise (`IrqP`).
-            | 471
-            // MAPPERS-P: mapper 413's MMC3-style A12 counter (`IrqP`).
-            | 413
             // MAPPERS-P: mapper 556's MMC3 counter while that chip is in use (`ChipSwitch`).
             | 556
             // MAPPERS-P: mapper 351's MMC3 counter while that chip is in use (`ChipSwitch`).
             | 351
             // MAPPERS-P: mapper 442 latches PPU A0/A9 on the rise of A13 (`IrqP`).
             | 442
-            // MAPPERS-P: 359 and 540 clock their IRQ on A12 rises (`IrqP`).
-            | 359
-            | 540
             // MAPPERS-P: mapper 272's IRQ counts the rendering's pattern fetches (`IrqP`).
             | 272
             | 176
@@ -905,6 +902,15 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             // MAPPERS-P: 547 latches its QT byte on each tile fetch (`extcl_rd_nmt_547`).
             | 547
     ) || mmc3_p_board(mapper)
+        || irq_p_a12_board(mapper)
+}
+
+/// Lot MAPPERS-P's `IrqP` boards with an A12 counter, in both PPU-bus lists: 471 (an IRQ on
+/// every rise), 413 and the `OneBus` chips 256 and 436 (MMC3-style counters), 359 and 540 (their
+/// IRQ clocked on rises). A list of its own, as [`mmc3_p_board`] is, to keep both functions
+/// under `clippy::too_many_lines`.
+const fn irq_p_a12_board(mapper: i32) -> bool {
+    matches!(mapper, 471 | 413 | 256 | 436 | 359 | 540)
 }
 
 /// The second of the two lists [`watches_ppu_reads`] documents: the boards that also move when
@@ -995,19 +1001,12 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 191
             | 117
             | 222
-            // MAPPERS-P: mapper 471's IRQ on every A12 rise (`IrqP`).
-            | 471
-            // MAPPERS-P: mapper 413's MMC3-style A12 counter (`IrqP`).
-            | 413
             // MAPPERS-P: mapper 556's MMC3 counter while that chip is in use (`ChipSwitch`).
             | 556
             // MAPPERS-P: mapper 351's MMC3 counter while that chip is in use (`ChipSwitch`).
             | 351
             // MAPPERS-P: mapper 442 latches PPU A0/A9 on the rise of A13 (`IrqP`).
             | 442
-            // MAPPERS-P: 359 and 540 clock their IRQ on A12 rises (`IrqP`).
-            | 359
-            | 540
             | 176
             | 217
             | 254
@@ -1021,6 +1020,7 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 348
             | 366
     ) || mmc3_p_board(mapper)
+        || irq_p_a12_board(mapper)
 }
 
 /// Lot MAPPERS-P's MMC3 multicarts (`mappers::Mmc3P`): each holds an `Mmc3`, so each is in both
@@ -1311,6 +1311,33 @@ impl Cartridge {
     #[must_use]
     pub fn irq_asserted_as<K: BoardKind>(&self) -> bool {
         K::board(&self.board).irq_asserted()
+    }
+
+    /// Whether the board is a `OneBus` famiclone (256, 436), whose chip decodes CPU writes to
+    /// `$2008-$3FFF` and shares the APU's registers; asked once by `NesBus::attach`.
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    #[must_use]
+    pub fn has_vt_bus(&self) -> bool {
+        matches!(self.mapper_number(), 256 | 436)
+    }
+
+    /// See [`Mapper::snoop_apu_write`].
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    pub fn snoop_apu_write(&mut self, address: u16, value: u8) -> u8 {
+        self.board.snoop_apu_write(address, value)
+    }
+
+    /// See [`Mapper::apu_status`].
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    #[must_use]
+    pub fn apu_status(&self, status: u8) -> u8 {
+        self.board.apu_status(status)
+    }
+
+    /// See [`Mapper::take_dac_write`].
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    pub fn take_dac_write(&mut self) -> Option<u8> {
+        self.board.take_dac_write()
     }
 
     /// The program a copier loader runs before its game, at power-on ([`Mapper::boot_program`]).
@@ -2358,8 +2385,8 @@ mod tests {
             471, 442, 359, 540, 362, 398,
             // MAPPERS-P: 556 and 351 hold an `Mmc3` in use at power-on (`ChipSwitch`); 560 has its
             // A13 latch and 413 an A12 counter (`IrqP`); 369 and 512 are `Mmc3P` boards.
-            556, 351, 560, 413, 369, 512, 406,
-            451,
+            556, 351, 560, 413, 369, 512, 406, 451, 256,
+            436,
             // MAPPERS-P: 272 is latched too but absent here: its counter only moves once a game
             // enables it, and the sweep enables nothing.
         ] {
