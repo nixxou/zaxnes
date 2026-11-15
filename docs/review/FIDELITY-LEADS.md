@@ -715,13 +715,24 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 
 ## G. Hardware variants
 
-### G1. PPU / CPU revisions — open
+### G1. PPU / CPU revisions — done as a menu (console model, FIDPLUS-1)
 - BeesNES exposes none of its hardware-bug behaviours as user settings (only video, audio profile,
   region); OAM decay is a compile-time define (`LSN_INT_OAM_DECAY`, `LSNPpu2C0X.h:33`), OAM corruption
   is always on, despite the README's "buggy and fixed states".
 - 2C02 letter revisions (pre-G palette read C6, G/H OAMADDR bug D3, OAM corruption differences),
   RP2A03 letter revisions (BeesNES flag `bRp2A02` in audio profiles), 2C07 PAL, 2C05 Vs.
 - Zaxnes: none selectable. A "console model" setting would group C6, D3, E1, E2.
+- **FIDPLUS-1 (2026-11-15)**: menu bar, Emulation > Console model
+  (`zax-app/src/persistence/console_model.rs`). A model is a shortcut, not a new setting: it sets
+  the region (detection off), `emu.ppu_revision` (C6) and `emu.oamaddr_bug` (D3), only where a
+  reference names the value (nesdev: palette reads on 2C02G, 2C02H and PAL PPUs; the OAMADDR defect
+  on the 2C02G/H). NES/Famicom 2C02G-H: G, defect on; 2C02 before G: before G, defect off; PAL NES
+  2C07: G (palette reads), defect off; Dendy, PAL-M, PAL-N: region only. The menu ticks the model
+  whose values are all in force, so a hand change leaves none ticked; nothing is persisted.
+  Left out: E1 (`audio.console_profile` is one measured console, not a model; the player picks it
+  separately), E2 (rejected), the RP2A03 letter revisions (only the "letterless" noise of the
+  audio profiles, already tied to those). The PAL 2C07's OAMADDR behaviour is not documented here:
+  "off" is the absence of the 2C02G/H defect, not a measured 2C07 behaviour.
 
 ### G2. Regions PAL-M and PAL-N famiclones — done (FIDPLUS-1)
 - BeesNES: per-region cycle tables (`Src/Ppu/LSNCreateCycleTablePalM.inl`, `...PalN.inl`) and
