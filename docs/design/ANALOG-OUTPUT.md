@@ -47,3 +47,9 @@ fed the same APU levels, per profile, plus the existing audio tests (default "no
 | D1d | low-pass with its zero before decimation (E1-1) | Fidélité+ (per-step cost) |
 | D2 | composite video from the PPU's signal, TV decoder | Fidélité+ (per-pixel cost) |
 | D3 | line-by-line presentation | with B5 |
+
+D1a's cost on the standard path (callgrind, clean builds against 6c9cb163, PR-1 set): first
++0.89 % on `mmc5` (the profile test in the setter the MMC5 calls on every level change), then
++0.417 % with that branch out of line, and **-0.057 %** at 7edd528e, where the setter is back to
+its pre-profile form and the profile's expansion step is made on the mix's cache miss the move
+forces (every other ROM of the set -0.09 % to -0.19 %).
