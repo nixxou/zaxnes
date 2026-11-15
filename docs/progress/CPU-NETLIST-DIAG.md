@@ -118,7 +118,7 @@ only the byte differs.
 | `dmcoam` | DMC fetches colliding with OAM DMAs every loop | 29 999 (29 237 DMA) | 0 | 0 |
 | `dmc2007` | `$2007` reads halted by DMC fetches | 29 999 | 0 | 0 |
 | `illegal` | every stable illegal opcode in every mode | 3 990 | 0 | 0 |
-| `dmc4016` | controller strobes and reads under DMC fetches | 29 999 | 0 | `$4017` bit 4 on every read (the bench's port-2 peripheral, C++ not transistors); 7 `$4016` reads right after a fetch (G6) |
+| `dmc4016` | controller strobes and reads under DMC fetches | 29 999 | 0 | `$4017` reads `$10` on the netlist (VisualNes has no controller and floats the bus, step 6); 7 `$4016` reads right after a fetch (G6) |
 | `intbranch` | frame IRQ and NMI against taken branches | 59 990 | 0 | `$2002` bit 5 (sprite overflow from the PPU's power-on OAM); `$4015` on the pins (below) |
 | `fc5` | `$4017` five-step then four-step with IRQ | 59 990 | 0 | `$4015` on the pins (below) |
 
@@ -128,9 +128,33 @@ programs store each value read, and those stores are identical on both sides.
 
 **Across all 18 programs and 353 000 cycles, no cycle has another address or another R/W.**
 
+## Step 6: the DMA cycles themselves, and the controller ports (2026-11-15)
+
+* Feature `bus-trace` (`zax-nes`, `zax-harness`, never in `default`; commit `bf1c75f5`): the bus
+  records every access a DMA unit makes (halt and idle re-reads, DMC fetch, OAM get and put), and
+  `cpu-bus-trace` prints each stolen cycle (`D`, or `I` for an idle re-read the controller does not
+  see) instead of one `DMA <n>` line. Without the feature the hook is an empty inline function.
+* `cmp3.py` compares every cycle, DMA included. With the settings of step 4, **all 18 programs,
+  421 901 cycles of which 32 131 are DMA cycles: 0 timing differences, and 0 byte differences on the
+  DMA cycles** (`final5.sh`). Byte-only differences stay where step 5 found them.
+* The controller ports: VisualNes has no controller hardware; any read in `$2000`-`$7FFF` that is
+  not a chip floats the external bus (`Core/macros.cpp`, `mCpuRead`, then `floatBits`). Its
+  `$4016` / `$4017` bits are therefore the switch-level simulation of a floating bus, not a
+  measurement. Program `g6jmp` (`mkg6.py`: opcode fetched from `$4015`, operand from `$4016`)
+  shows the netlist taking the open bits from the pins (operand `$40`, branch to `$4057`) where
+  Zaxnes takes the internal bus (`$00`); `AccuracyCoin`'s `Implied Dummy Reads`, verified on
+  hardware, expects the internal bus in that very situation (`[Read $4016: 21]` for every implied
+  opcode with bit 5 set, `$E1` by the pins for `$EA`). So the netlist is no judge for these bits,
+  and G6 stays as recorded in `FIDELITY-LEADS.md`.
+* `sweep.sh`: the PPU phase gives 0 differences on `nmi` for -12 to -4 and 14-17 outside (the NMI
+  taken one instruction earlier or later); without `--flip-get-put`, `oam0` 2 775 and `dmc0`
+  27 861 timing differences; without `--dmc 431,8`, `dmc` 27 836.
+
+The owner's proof document built from this lot: `docs/review/SUBCYCLE-PROOF.md` (in French), traces
+in `docs/review/subcycle-proof/traces.zip`.
+
 ## Meaning for A-bis
 
-Nothing measured needs the CPU on half-cycles: where the CPU differs, it is a timing value of the
-DMC unit, which a per-cycle model can carry. The DMA bus contents (which cycles are halt, dummy
-and fetch, and what a DMA does on a write cycle) still have to be traced on the Zaxnes side to be
-compared.
+Nothing measured needs the CPU on half-cycles: every bus cycle the CPU and the DMA units make is the
+netlist's, and the remaining differences are power-on states and the bench's floating bus. A-bis
+stays a proposal without a measured case to fix.

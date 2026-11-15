@@ -974,6 +974,14 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   read from `$4015`, which only the internal bus carries). Both observations fit a rule where the
   halt and dummy re-reads of `$4016` load the internal bus from the pins; not changed until a model
   satisfies both, with `AccuracyCoin` 147/147 kept.
+- Step 6 of the diagnostic (2026-11-15): the netlist is no judge here. VisualNes has no controller
+  and floats the external bus on every read of `$2000`-`$7FFF` that is not a chip (`mCpuRead`,
+  `floatBits`), so its `$4016` / `$4017` bits are a floating bus in a switch-level simulation (its
+  `$4017` reads `$10`). Program `g6jmp` (opcode from `$4015`, operand from `$4016`): the netlist
+  takes the pins (`$40`), while `AccuracyCoin`'s hardware-verified `Implied Dummy Reads` expects the
+  internal bus in that same sequence (`$21`, where the pins would give `$E1` for `NOP $EA`). Zaxnes
+  follows the hardware test; the DMC case alone has no hardware reference yet. Lead kept open for a
+  console measurement (a test ROM reading `$4016` right after a DMC fetch, run on hardware).
 
 ## H. Video output (shaders lot, not core)
 
