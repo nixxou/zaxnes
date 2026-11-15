@@ -482,14 +482,7 @@ impl Ppu2C02 {
         self.v &= !0x7000;
         let mut coarse_y = (self.v >> 5) & 0x1F;
         if coarse_y == 29 {
-            if self.edges_on() {
-                // Fidélité+ (A7, netlist): the increment ripples to 30, the nametable bit flips,
-                // and the "30" detection clears coarse Y in the next phase.
-                coarse_y = 30;
-                self.post_edge_now(1, super::edges::EdgeKind::SettleCoarseY);
-            } else {
-                coarse_y = 0;
-            }
+            coarse_y = 0;
             self.v ^= 0x0800;
         } else if coarse_y == 31 {
             // Coarse Y 30 and 31 address the attribute tables; the hardware wraps without

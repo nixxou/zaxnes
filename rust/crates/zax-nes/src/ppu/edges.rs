@@ -244,7 +244,11 @@ impl Ppu2C02 {
             // Only the edges pending before this dot count it down: one its own work posts (the
             // coarse-Y wrap of dot 256) or an edge posts counts from the next.
             let mut pending = usize::from(self.edge_count);
+            let before = self.v;
             self.run_one_dot(cart);
+            if self.dot == 256 && self.edges_on() {
+                self.two_phase_y_wrap(before);
+            }
             // The address latch as state (step 3): the read half of a fetch after its ALE half.
             if self.dot & 1 == 0 {
                 self.settle_fetch_read(cart.as_deref());
@@ -271,6 +275,28 @@ impl Ppu2C02 {
             }
             count -= 1;
         }
+    }
+
+    /// A7 (netlist): a Y increment that wrapped coarse Y from 29 shows, for one dot, coarse Y 30
+    /// with the nametable bit already flipped; the "30" detection clears it in the next phase
+    /// ([`EdgeKind::SettleCoarseY`]). `before` is `v` before the increment. Kept out of
+    /// `increment_y`, which the standard loop inlines.
+    fn two_phase_y_wrap(&mut self, before: u16) {
+        let wrapped = (before & 0x7000) == 0x7000 && (before >> 5) & 0x1F == 29;
+        if wrapped && self.v & 0x03E0 == 0 {
+            self.v = (self.v & !0x03E0) | (30 << 5);
+            if self.v_row_next == self.v & !0x03E0 {
+                self.v_row_next = self.v;
+            }
+            self.post_edge_now(1, EdgeKind::SettleCoarseY);
+        }
+    }
+
+    /// The pipeline's Y increment made by an edge, with A7's two phases.
+    fn increment_y_two_phase(&mut self) {
+        let before = self.v;
+        self.increment_y();
+        self.two_phase_y_wrap(before);
     }
 
     /// Whether the per-dot trace is on (feature `ppu-dot-trace`): the dots are then all run one at
@@ -400,11 +426,13 @@ impl Ppu2C02 {
                         // The horizontal copy of X and the read's coarse-X increment drive the
                         // same lines in the same half: the copy wins, the Y increment is left
                         // (A5, netlist).
-                        self.increment_y();
+                        self.increment_y_two_phase();
                         self.v_row_next = self.v;
                         self.notify_address_bus(self.v & 0x3FFF, cart);
                     } else {
+                        let before = self.v;
                         self.increment_vram_address(cart);
+                        self.two_phase_y_wrap(before);
                     }
                     // The read latched on a cadence ALE half: the octal latch took the byte it
                     // read, which the next dot's fetch then reads with (step 3).
@@ -429,7 +457,7 @@ impl Ppu2C02 {
                     self.increment_coarse_x();
                 }
                 if dot != 256 {
-                    self.increment_y();
+                    self.increment_y_two_phase();
                 }
                 self.v_row_next = self.v;
                 self.notify_address_bus(self.v & 0x3FFF, cart);
