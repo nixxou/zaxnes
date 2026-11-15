@@ -131,3 +131,26 @@ poll needs either:
 
 Without one of them B5 would run the machine along real time with the pads still read once per
 display frame, which gains nothing. Parked until the owner chooses; FIDPLUS-C goes on meanwhile.
+
+## B5 step 1: the software latency bench (2026-11-15)
+
+Owner's answers: gilrs is allowed; latency is measured in software (no camera or button rig);
+RawInput will be needed later anyway (light guns), not now.
+
+`ext-tools/padbench` (outside the repository, like the netlist bench: it needs `unsafe` FFI for
+RawInput and XInput, which a measuring tool may use and Zaxnes may not) timestamps, on one monotonic
+clock, the moment each API first sees a button go down after all were up:
+
+| Backend | How |
+|---|---|
+| `rawinput` (reference) | `WM_INPUT` on a message-only window, buttons parsed from the HID report |
+| `xinput-spin` | `XInputGetState` polled as fast as possible |
+| `xinput-1khz` | `XInputGetState` every millisecond (the B5 plan) |
+| `gilrs` | gilrs 0.11's event queue (Windows.Gaming.Input on Windows) |
+| `sdl-event` | SDL's controller events, pumped continuously |
+| `sdl-frame` | SDL's state read once per 60 Hz frame, as Zaxnes reads it today |
+
+Run `padbench.exe 60`, press and release one pad button a few dozen times; it prints each press's
+delays against RawInput, then mean, median, 95th percentile and maximum per backend. The numbers
+decide B5's poll: the backend closest to RawInput, polled from its own thread into the slices of B3.
+Waiting for a run with the owner's pads (Xbox / XInput and a HID pad if possible).
