@@ -196,6 +196,10 @@ default = [
     "board-266",
     "board-284",
     "board-682",
+    # MAPPERS-N: the VS. System, out of `parked-boards` since its quirks left the PPU and the
+    # specialised paths (`Ppu2C02::remap_palette`, `BoardKind::RUNS_VS`): mm2/zelda2 `core`
+    # +0.000 % / +0.001 % with it on.
+    "board-vs-system",
     "board-302",
     "board-305",
     "board-306",
@@ -1426,7 +1430,6 @@ board-taito-x1 = ["board-small-boards"]
 # vertical split: over the tolerance on four of PR-1's thirteen and two of level 2's five, its
 # own note above carrying the figures and the one symbol they come from.
 parked-boards = [
-    "board-vs-system",
     "board-292",
     "board-143-open-bus",
 ]

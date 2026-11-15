@@ -246,3 +246,20 @@ frame back. Both boards are on by default again, golden-core identical, and the 
 are 0.06 % faster than the base. The source notes on `read_nametable_inner`,
 `BoardKind::SERVES_NAMETABLES` and `Cartridge::read_nametable_from_vram_as` carry the figures for
 the backport.
+
+### VS. System unparked (owner, 2026-11-15: "bien entendu qu'il faut l'implémenter")
+* Cost found: four VS fields in `Ppu2C02` changed its layout and `run_dots`' code (+0.090 % /
+  +0.103 % `core`), then one test on `NesBus::read_cycle_as` (+0.045 % zelda2).
+* Fix: the three PPU quirks (`$2002` identifier, `$2000`/`$2001` swap, palette remap) applied by
+  `NesBus` from the `VsSystem` it holds (`vs_port` became a byte of flags, same size);
+  `Ppu2C02::remap_palette` re-shows the palette after each palette write, the power-on and a
+  state load; VS images always run on the generic path, `BoardKind::RUNS_VS` compiles the quirks
+  out of the specialised ones. Result (clean builds, c89d20f1): `core` +0.000 % / +0.001 %.
+* Inputs: hotkeys Coin 1, Coin 2, Service (keys 5, 6, 9; rebindable), commands in the menu,
+  `NesCore::vs_insert_coin` / `vs_press_service` / `set_vs_dip_switches`, settings
+  `emu.vs_dip_1..8` (Emulation page, next load). The service button is a 4-frame pulse.
+* The VS tests had been broken since lots FIDELITY/CARTDB (reset line, palette-address backdrop,
+  cartdb), unseen because the feature was parked; repaired.
+* Not done: dual-system VS (VS Tennis, VS Mahjong...: two consoles), as in MF-VS; a movie
+  (`.bk2`) does not record coins.
+
