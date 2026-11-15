@@ -48,6 +48,12 @@ fed the same APU levels, per profile, plus the existing audio tests (default "no
 | D2 | composite video from the PPU's signal, TV decoder | Fidélité+ (per-pixel cost) |
 | D3 | line-by-line presentation | with B5 |
 
+D2b step 1 (2026-11-15): colour emphasis reaches the 2D picture at all (it never did; FIDELITY-LEADS
+H3), common base since it costs nothing per pixel: a log of the `$2001` writes that change the bits,
+a plane for frames with emphasis, the palette scaled by the composite decoder's ratio, in the GL
+and wgpu uploads and the harness's flat PNG. Next, D2b step 2: the picture through the generator
+and a line decoder (colour artefacts, dot crawl), Fidélité+ only.
+
 D1a's cost on the standard path (callgrind, clean builds against 6c9cb163, PR-1 set): first
 +0.89 % on `mmc5` (the profile test in the setter the MMC5 calls on every level change), then
 +0.417 % with that branch out of line, and **-0.057 %** at 7edd528e, where the setter is back to

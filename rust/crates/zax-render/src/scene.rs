@@ -488,6 +488,10 @@ pub struct SceneFrame<'a> {
     pub nes_picture: &'a [u8],
     /// The rows of `nes_picture`: 240, more with a vertical widescreen margin (0 reads as 240).
     pub nes_picture_height: usize,
+    /// The colour emphasis of each pixel of `nes_picture` (PPUMASK bits 5-7 as 0 to 7), laid out
+    /// as the picture; empty for a frame without emphasis, which costs the upload nothing (lot
+    /// FIDPLUS-D2b).
+    pub nes_picture_emphasis: &'a [u8],
 }
 
 impl<'a> SceneFrame<'a> {
@@ -498,6 +502,7 @@ impl<'a> SceneFrame<'a> {
             draw_list: Some(draw_list),
             nes_picture: &[],
             nes_picture_height: 0,
+            nes_picture_emphasis: &[],
         }
     }
 }

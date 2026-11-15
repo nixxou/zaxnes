@@ -496,6 +496,17 @@ impl EngineHandle {
         STANDARD_ROWS
     }
 
+    /// The colour emphasis of [`Self::wide_picture_into`]'s picture, into `out` (empty when the
+    /// frame has none, or on an engine that does not report it).
+    pub fn wide_emphasis_into(&self, out: &mut Vec<u8>) {
+        match self.zaxnes() {
+            Some(core) => {
+                core.wide_emphasis_into(out);
+            }
+            None => out.clear(),
+        }
+    }
+
     /// The frame's experimental smooth-scrolling shift; `None` on an engine that has none.
     #[must_use]
     pub fn picture_shift(&self) -> Option<(f32, i32, i32)> {

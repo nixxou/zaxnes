@@ -991,6 +991,22 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 - Zaxnes: librashader slang shaders (branch feat/librashader). These are generic shaders, not a
   signal model. Candidate shaders/palettes to port; not a core item.
 
+### H3. Colour emphasis on screen — done in the 2D picture (FIDPLUS-D2b, 2026-11-15)
+- Found while preparing D2b: the picture carried colour index and opacity only; PPUMASK bits 5-7
+  never reached the screen (REQ-CORE-047 keeps them out of the tile records and the palette, and
+  nothing else carried them). Survey (`fidplus_d2b_emphasis_survey_tests`, 1800 frames each, 348
+  ROMs): `Duelito` (blue emphasis on every frame), `firefly`, `rastesam4`, `RasterDemo`,
+  `Sayoonara!`, `CMC80s`, the palette demos, blargg's `litewall`, `240pee`, `mmc5exram`; *Metroid*
+  one frame at power-on.
+- Now: the PPU logs each write that changes the bits with the first pixel it reaches (delay
+  2/1/1/2 dots by alignment, TriCNES's, not yet measured on the netlist), resets at the frame wrap;
+  the host expands it into a plane only for a frame with emphasis (nothing per pixel otherwise).
+  Colours: the chosen 64-colour palette scaled per channel by the composite decoder's ratio
+  (`palette::nes_color_emphasized`), so third-party tables darken as the signal does.
+- Open: the 3D view (tiles) shows no emphasis (REQ-CORE-047 for the records; a tint of the scene
+  would be the owner's call); the delay against the netlist's video pins; 512-entry palettes
+  (Mesen's, FirebrandX's own emphasis rows) as tables instead of the ratio.
+
 ### H2. The 2C02's composite signal — generator and reference decoder done (FIDPLUS-D2a, 2026-11-15)
 - nesdev "NTSC video": per pixel, 8 half-clock samples of a square wave at the colour subcarrier
   (12 phases per cycle), high or low level of the pixel's row; hue 0 always high, 13 always low,

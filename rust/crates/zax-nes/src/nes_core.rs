@@ -2025,6 +2025,13 @@ impl NesCore {
         self.bus.ppu().wide_picture_into(out)
     }
 
+    /// The colour emphasis of each pixel of [`NesCore::wide_picture_into`]'s picture (PPUMASK
+    /// bits 5-7 as 0 to 7), into `out`; `false` and empty `out` for a frame without emphasis
+    /// (lot FIDPLUS-D2b).
+    pub fn wide_emphasis_into(&self, out: &mut Vec<u8>) -> bool {
+        self.bus.ppu().wide_emphasis_into(out)
+    }
+
     /// Whether the margin decoder of the frame just run asks the screen's top and bottom 8 lines
     /// hidden with a vertical margin as without one, when the host hides them
     /// ([`crate::wide_decode::MarginDecoder::hides_overscan`]; false for a game without one).

@@ -19,6 +19,7 @@
 //! as an `Option<&mut Cartridge>` instead of holding a reference.
 
 mod edges;
+mod emphasis;
 mod palette_corruption;
 mod ppu_bus_access;
 mod render;
@@ -615,6 +616,11 @@ pub struct Ppu2C02 {
     /// the VS. System remap of one written byte.
     frame_palette: [u8; PALETTE_SIZE],
     frame_mask: u8,
+    /// The emphasis bits (PPUMASK 5-7) the frame being drawn started with, and the writes that
+    /// changed them since, by first pixel reached (`emphasis.rs`, lot FIDPLUS-D2b). Not saved,
+    /// like the picture they go with. Here at the cold end for the reason `frame_palette` gives.
+    emphasis_start: u8,
+    emphasis_log: Vec<(u32, u8)>,
 }
 
 impl Default for Ppu2C02 {
@@ -774,6 +780,8 @@ impl Ppu2C02 {
             margin_palette: None,
             frame_palette: [0; PALETTE_SIZE],
             frame_mask: 0,
+            emphasis_start: 0,
+            emphasis_log: Vec::new(),
         }
     }
 
@@ -1903,6 +1911,8 @@ impl Ppu2C02 {
         self.refresh_palette_views();
         self.decay_stamp.fill(0);
         self.pixels.fill(0);
+        self.emphasis_start = 0;
+        self.emphasis_log.clear();
 
         self.dot = 0;
         self.dot_accumulator = 0;
@@ -2296,6 +2306,9 @@ impl Ppu2C02 {
         }
 
         self.scanline = 0;
+        if self.emphasis_start != (self.mask & 0xE0) || !self.emphasis_log.is_empty() {
+            self.restart_emphasis();
+        }
 
         if self.odd_frame && self.timing.skips_dot_on_odd_frames && self.skip_latch {
             // With rendering on, the idle dot (0, 0) is skipped on odd frames, which makes
@@ -3067,6 +3080,9 @@ impl Ppu2C02 {
                     return;
                 }
                 if self.swaps_control_and_mask() {
+                    if ((value ^ self.mask) & 0xE0) != 0 {
+                        self.note_emphasis(value);
+                    }
                     self.mask = value;
                 } else {
                     self.write_control::<K>(value, cartridge.as_deref_mut());
@@ -3081,6 +3097,9 @@ impl Ppu2C02 {
                 if self.swaps_control_and_mask() {
                     self.write_control::<K>(value, cartridge.as_deref_mut());
                 } else {
+                    if ((value ^ self.mask) & 0xE0) != 0 {
+                        self.note_emphasis(value);
+                    }
                     let was_rendering = self.rendering_enabled();
                     if was_rendering == ((value & 0x18) != 0) {
                         self.mask = value;

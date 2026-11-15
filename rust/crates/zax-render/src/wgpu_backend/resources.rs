@@ -410,10 +410,11 @@ impl TextureStore {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         indices: &[u8],
+        emphasis: &[u8],
         height: usize,
     ) -> Option<TextureHandle> {
         let slot = self.picture;
-        let handle = self.upload_picture(device, queue, indices, height, slot)?;
+        let handle = self.upload_picture(device, queue, indices, emphasis, height, slot)?;
         self.picture = Some(handle);
         Some(handle)
     }
@@ -428,7 +429,7 @@ impl TextureStore {
         height: usize,
     ) -> Option<TextureHandle> {
         let slot = self.overlay;
-        let handle = self.upload_picture(device, queue, indices, height, slot)?;
+        let handle = self.upload_picture(device, queue, indices, &[], height, slot)?;
         self.overlay = Some(handle);
         Some(handle)
     }
@@ -439,6 +440,7 @@ impl TextureStore {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         indices: &[u8],
+        emphasis: &[u8],
         height: usize,
         slot: Option<TextureHandle>,
     ) -> Option<TextureHandle> {
@@ -451,6 +453,21 @@ impl TextureStore {
             }
             let color = nes_color(usize::from(index));
             pixel.copy_from_slice(&[color.r, color.g, color.b, 255]);
+        }
+        if emphasis.len() == indices.len() {
+            // A frame with colour emphasis (lot FIDPLUS-D2b); the loop above stays the plain one.
+            for ((pixel, &index), &bits) in self
+                .picture_pixels
+                .chunks_exact_mut(4)
+                .zip(indices)
+                .zip(emphasis)
+            {
+                if bits == 0 || index == crate::interop::HIDDEN_PIXEL {
+                    continue;
+                }
+                let color = zax_engine3d::palette::nes_color_emphasized(usize::from(index), bits);
+                pixel[..3].copy_from_slice(&[color.r, color.g, color.b]);
+            }
         }
 
         #[allow(clippy::cast_possible_truncation)] // At most 1280 and 720.

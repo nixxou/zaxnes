@@ -7,7 +7,7 @@
 //! like every other NES texture (REQ-E3D-563).
 
 use glow::Texture;
-use zax_engine3d::palette::nes_color;
+use zax_engine3d::palette::{nes_color, nes_color_emphasized};
 
 use super::api::{Gl, GlError};
 use super::texture_cache::set_nearest_clamp;
@@ -42,6 +42,17 @@ impl NesPictureTexture {
     /// Uploads `indices` (NES colour indices, row 0 first, `height` rows of 256 or of a
     /// widescreen width) and returns the texture, or `None` when the frame has no such size.
     pub fn upload(&mut self, indices: &[u8], height: usize) -> Result<Option<Texture>, GlError> {
+        self.upload_with_emphasis(indices, &[], height)
+    }
+
+    /// [`Self::upload`] with each pixel's colour emphasis (`emphasis`, laid out as `indices`,
+    /// PPUMASK bits 5-7 as 0 to 7); an empty `emphasis` is a frame without any (lot FIDPLUS-D2b).
+    pub fn upload_with_emphasis(
+        &mut self,
+        indices: &[u8],
+        emphasis: &[u8],
+        height: usize,
+    ) -> Result<Option<Texture>, GlError> {
         let Some(size) = crate::interop::picture_size(indices.len(), height) else {
             return Ok(None);
         };
@@ -76,6 +87,19 @@ impl NesPictureTexture {
                 255
             };
             pixel.copy_from_slice(&[color.r, color.g, color.b, alpha]);
+        }
+        if emphasis.len() == indices.len() {
+            // Only a frame with emphasis gets here; the loop above stays the plain one.
+            for ((pixel, &byte), &bits) in
+                self.pixels.chunks_exact_mut(4).zip(indices).zip(emphasis)
+            {
+                if bits == 0 || byte == crate::interop::HIDDEN_PIXEL {
+                    continue;
+                }
+                let color =
+                    nes_color_emphasized(usize::from(byte & crate::interop::PIXEL_COLOR), bits);
+                pixel[..3].copy_from_slice(&[color.r, color.g, color.b]);
+            }
         }
 
         let gl = &self.gl;

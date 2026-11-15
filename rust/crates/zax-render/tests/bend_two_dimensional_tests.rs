@@ -58,6 +58,7 @@ fn frame(picture: &[u8]) -> SceneFrame<'_> {
         draw_list: None,
         nes_picture: picture,
         nes_picture_height: 0,
+        nes_picture_emphasis: &[],
     }
 }
 

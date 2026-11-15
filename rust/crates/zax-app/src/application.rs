@@ -1529,6 +1529,7 @@ impl Running {
                     draw_list: Some(displayed),
                     nes_picture: &[],
                     nes_picture_height: 0,
+                    nes_picture_emphasis: &[],
                 };
                 draw_scene(graphics, view, &scene, &frame, shadow_reported, clock)
             };
@@ -2122,6 +2123,8 @@ struct RunState {
     picture: Vec<u8>,
     /// Its rows.
     picture_height: usize,
+    /// Its colour emphasis, empty without any (lot FIDPLUS-D2b).
+    picture_emphasis: Vec<u8>,
     /// Whether its playfield is drawn between two frames (the experimental 120 Hz scrolling):
     /// every display frame is then drawn, a new emulated frame or not.
     picture_between: bool,
@@ -2149,6 +2152,7 @@ impl RunState {
             was_two_dimensional: false,
             picture: Vec::new(),
             picture_height: 0,
+            picture_emphasis: Vec::new(),
             picture_between: false,
             emulated_now: 0,
             frame_time: 0.0,
@@ -2745,6 +2749,7 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     if two_dimensional {
         state.picture_height =
             session.copy_nes_picture_layers(&mut state.picture, &mut scene.picture_overlay);
+        session.copy_nes_emphasis(&mut state.picture_emphasis);
         scene.picture_shift = session.nes_picture_shift();
         // Experimental (owner request): on a display faster than the game, the playfield drawn
         // between two frames, along the camera's motion to the next one.
@@ -2845,6 +2850,11 @@ fn render_scene(
         draw_list: list,
         nes_picture: picture,
         nes_picture_height: state.picture_height,
+        nes_picture_emphasis: if picture.is_empty() {
+            &[]
+        } else {
+            &state.picture_emphasis
+        },
     };
     draw_scene(
         graphics,

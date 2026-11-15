@@ -226,6 +226,8 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
 
     let mut picture = Vec::new();
     let picture_height = host.core.wide_picture_into(&mut picture);
+    let mut emphasis = Vec::new();
+    host.core.wide_emphasis_into(&mut emphasis);
     smooth_scrolling(&host.core, &mut picture, &mut scene);
     let mut engine = host.engine;
     scene.camera.snap_to_setpoints();
@@ -263,6 +265,7 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
         draw_list,
         nes_picture: picture,
         nes_picture_height: picture_height,
+        nes_picture_emphasis: emphasis,
     })
 }
 

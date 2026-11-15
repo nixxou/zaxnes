@@ -285,6 +285,53 @@ pub const fn nes_color_in(palette: NesPalette, index: usize) -> Rgb24 {
     Rgb24::from_packed(palette.table()[index & 0x3F])
 }
 
+/// The RGB colour of NES colour index `index` shown with the colour emphasis bits `emphasis`
+/// (PPUMASK bits 5-7 as 0 to 7: red, green, blue on NTSC), in the palette chosen (lot
+/// FIDPLUS-D2b). Emphasis 0 is [`nes_color`] itself.
+///
+/// The palettes are 64-colour tables; the emphasis is applied to them as the 2C02 applies it to
+/// its signal: per channel, the ratio of the colour decoded from the attenuated signal to the one
+/// decoded from the plain signal (`zax_nes::composite::decode_uniform`), so that a measured or
+/// third-party table keeps its own colours and darkens the way the console does.
+#[must_use]
+pub fn nes_color_emphasized(index: usize, emphasis: u8) -> Rgb24 {
+    let base = nes_color(index);
+    let emphasis = usize::from(emphasis & 7);
+    if emphasis == 0 {
+        return base;
+    }
+    let factors = emphasis_factors()[(emphasis << 6) | (index & 0x3F)];
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // clamped to 0-255
+    let scale =
+        |channel: u8, factor: f32| (f32::from(channel) * factor).round().clamp(0.0, 255.0) as u8;
+    Rgb24::new(
+        scale(base.r, factors[0]),
+        scale(base.g, factors[1]),
+        scale(base.b, factors[2]),
+    )
+}
+
+/// Per emphasis (0-7) and colour index (0-63), the factor each channel takes.
+fn emphasis_factors() -> &'static [[f32; 3]; 512] {
+    static FACTORS: std::sync::OnceLock<[[f32; 3]; 512]> = std::sync::OnceLock::new();
+    FACTORS.get_or_init(|| {
+        // Keeps a channel the plain decode leaves near zero from blowing up.
+        const FLOOR: f32 = 0.02;
+        let mut table = [[1.0; 3]; 512];
+        for (slot, factors) in table.iter_mut().enumerate() {
+            #[allow(clippy::cast_possible_truncation)] // slot < 512
+            let (emphasis, pixel) = ((slot >> 6) as u8, (slot & 0x3F) as u8);
+            let plain = zax_nes::composite::decode_uniform(pixel, 0, 0.0);
+            let dimmed = zax_nes::composite::decode_uniform(pixel, emphasis, 0.0);
+            for channel in 0..3 {
+                factors[channel] =
+                    ((dimmed[channel] + FLOOR) / (plain[channel] + FLOOR)).clamp(0.0, 1.5);
+            }
+        }
+        table
+    })
+}
+
 /// The palette of one frame: 16 tables of 4 NES colour indices (REQ-E3D-250).
 ///
 /// Entry `e` is `p[0]` when `e mod 4 = 0` and `p[e mod 32]` otherwise, where `p` is the 32-byte
@@ -411,6 +458,25 @@ mod tests {
 #[cfg(test)]
 mod palette_choice_tests {
     use super::*;
+
+    #[test]
+    fn fidplus_d2b_emphasis_darkens_the_other_colours() {
+        // White ($30) with no emphasis is the palette's own; with red emphasis (bit 0) its green
+        // and blue go down and its red stays the strongest channel; all three darken it.
+        assert_eq!(nes_color_emphasized(0x30, 0), nes_color(0x30));
+        let white = nes_color(0x30);
+        let red = nes_color_emphasized(0x30, 1);
+        assert!(
+            red.g < white.g && red.b < white.b,
+            "{red:?} against {white:?}"
+        );
+        assert!(red.r >= red.g && red.r >= red.b, "{red:?}");
+        let all = nes_color_emphasized(0x30, 7);
+        assert!(
+            all.r < white.r && all.g < white.g && all.b < white.b,
+            "{all:?}"
+        );
+    }
 
     #[test]
     fn each_palette_has_its_own_colours() {

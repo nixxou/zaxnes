@@ -69,5 +69,6 @@ pub fn from_json(
         draw_list,
         nes_picture: Vec::new(),
         nes_picture_height: 0,
+        nes_picture_emphasis: Vec::new(),
     })
 }

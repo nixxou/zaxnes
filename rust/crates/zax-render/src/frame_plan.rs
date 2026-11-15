@@ -86,6 +86,7 @@ pub trait Residency {
     fn picture(
         &mut self,
         picture: &[u8],
+        emphasis: &[u8],
         height: usize,
     ) -> Result<Option<Self::Texture>, Self::Error>;
 
@@ -334,6 +335,7 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
                 residency,
                 fixed,
                 frame.nes_picture,
+                frame.nes_picture_emphasis,
                 frame.nes_picture_height,
                 scene.picture_shift.map(|(shift, _, _)| shift),
                 &scene.picture_overlay,
@@ -376,11 +378,14 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
     /// The textured quad of the 2D mode (AMD-009): the core's 256 × 240 picture mapped on the
     /// NES plane of REQ-E3D-410, shaded like any other front-facing tile. False when the
     /// picture has the wrong size.
+    // The picture's three parts (indices, emphasis, rows) travel side by side, as in the frame.
+    #[allow(clippy::too_many_arguments)]
     fn collect_picture_quad<R: Residency<Mesh = M, Texture = T>>(
         &mut self,
         residency: &mut R,
         fixed: FixedMeshes<'_>,
         picture: &[u8],
+        emphasis: &[u8],
         height: usize,
         shift: Option<f32>,
         overlay: &[u8],
@@ -389,7 +394,7 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
             return Ok(false);
         };
         if let (Some(shift), Some((playfield, rest))) = (shift, fixed.picture_bands) {
-            let Some(texture) = residency.picture(picture, height)? else {
+            let Some(texture) = residency.picture(picture, emphasis, height)? else {
                 return Ok(false);
             };
             #[allow(clippy::cast_precision_loss)] // 256 to 1280, 240 to 720.
@@ -439,7 +444,7 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
                 None => return Ok(false),
             }
         };
-        let Some(texture) = residency.picture(picture, height)? else {
+        let Some(texture) = residency.picture(picture, emphasis, height)? else {
             return Ok(false);
         };
         let Some(mesh) = residency.mesh(quad)? else {

@@ -52,6 +52,8 @@ pub struct SyntheticScene {
     pub nes_picture: Vec<u8>,
     /// Its rows (0 reads as 240).
     pub nes_picture_height: usize,
+    /// The colour emphasis of `nes_picture`, empty without any (lot FIDPLUS-D2b).
+    pub nes_picture_emphasis: Vec<u8>,
 }
 
 impl SyntheticScene {
@@ -61,6 +63,7 @@ impl SyntheticScene {
         SceneFrame {
             nes_picture: &self.nes_picture,
             nes_picture_height: self.nes_picture_height,
+            nes_picture_emphasis: &self.nes_picture_emphasis,
             ..SceneFrame::with_draw_list(&self.draw_list)
         }
     }
@@ -486,6 +489,7 @@ impl Builder {
             draw_list,
             nes_picture: Vec::new(),
             nes_picture_height: 0,
+            nes_picture_emphasis: Vec::new(),
         })
     }
 }

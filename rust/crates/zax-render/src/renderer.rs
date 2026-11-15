@@ -86,8 +86,13 @@ impl Residency for GlResidency<'_> {
         self.textures.get(texture)
     }
 
-    fn picture(&mut self, picture: &[u8], height: usize) -> Result<Option<Texture>, GlError> {
-        self.picture.upload(picture, height)
+    fn picture(
+        &mut self,
+        picture: &[u8],
+        emphasis: &[u8],
+        height: usize,
+    ) -> Result<Option<Texture>, GlError> {
+        self.picture.upload_with_emphasis(picture, emphasis, height)
     }
 
     fn overlay(&mut self, picture: &[u8], height: usize) -> Result<Option<Texture>, GlError> {

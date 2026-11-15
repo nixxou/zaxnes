@@ -568,11 +568,12 @@ impl Residency for WgpuResidency<'_> {
     fn picture(
         &mut self,
         picture: &[u8],
+        emphasis: &[u8],
         height: usize,
     ) -> Result<Option<TextureHandle>, Self::Error> {
         Ok(self
             .textures
-            .picture(self.device, self.queue, picture, height))
+            .picture(self.device, self.queue, picture, emphasis, height))
     }
 
     fn overlay(

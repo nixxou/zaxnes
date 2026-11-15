@@ -245,6 +245,7 @@ fn render(
         draw_list: list.as_ref(),
         nes_picture: &[],
         nes_picture_height: 0,
+        nes_picture_emphasis: &[],
     };
     gl.render(renderer, &scene, &frame)
 }

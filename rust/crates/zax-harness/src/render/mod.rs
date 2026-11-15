@@ -22,7 +22,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use zax_engine3d::palette::{nes_color, Rgb24};
+use zax_engine3d::palette::{nes_color, nes_color_emphasized, Rgb24};
 use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::space_bend::SpaceBend;
 use zax_nes::ppu::SpriteLimit;
@@ -837,6 +837,7 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
             write_nes_picture(
                 &options.output.join(format!("{}-2d.png", scene.name)),
                 &scene.nes_picture,
+                &scene.nes_picture_emphasis,
                 scene.nes_picture_height,
             )?;
         }
@@ -1046,16 +1047,28 @@ fn write_png(file: &Path, options: &Options, pixels: &[u8]) -> Result<(), Harnes
 }
 
 /// Writes the flat NES picture, one colour index per pixel (REQ-CORE-048).
-/// The 2D view: the picture as wide and tall as its widescreen margins make it, `rows` rows.
-fn write_nes_picture(file: &Path, indices: &[u8], rows: usize) -> Result<(), HarnessError> {
+/// The 2D view: the picture as wide and tall as its widescreen margins make it, `rows` rows,
+/// with each pixel's colour emphasis when `emphasis` has one per pixel (lot FIDPLUS-D2b).
+fn write_nes_picture(
+    file: &Path,
+    indices: &[u8],
+    emphasis: &[u8],
+    rows: usize,
+) -> Result<(), HarnessError> {
     // A JSON frame carries no picture height: the NES picture.
     let rows = if rows == 0 { 240 } else { rows };
     let width = indices.len() / rows;
     let pixels: Vec<u8> = indices
         .iter()
         .take(width * rows)
-        .flat_map(|&index| {
-            let color = nes_color(usize::from(index));
+        .enumerate()
+        .flat_map(|(at, &index)| {
+            let color = match emphasis.get(at) {
+                Some(&bits) if emphasis.len() == indices.len() => {
+                    nes_color_emphasized(usize::from(index), bits)
+                }
+                _ => nes_color(usize::from(index)),
+            };
             [color.r, color.g, color.b, 255]
         })
         .collect();
