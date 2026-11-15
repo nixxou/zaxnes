@@ -45,6 +45,8 @@ mod decode_boards;
 mod discrete;
 #[cfg(feature = "board-284")]
 mod drip;
+#[cfg(feature = "board-682")]
+mod rainbow;
 #[cfg(feature = "board-eeprom")]
 mod eeprom24c0x;
 #[cfg(feature = "board-164")]
@@ -216,6 +218,8 @@ pub use discrete::{
 };
 #[cfg(feature = "board-284")]
 pub use drip::Drip;
+#[cfg(feature = "board-682")]
+pub use rainbow::Rainbow;
 #[cfg(feature = "board-eeprom")]
 pub use eeprom24c0x::{Eeprom24C0X, EepromKind, EepromPort};
 #[cfg(feature = "board-164")]

@@ -79,6 +79,8 @@ use super::mappers::OekaKids;
 use super::mappers::Pec9588;
 #[cfg(feature = "board-168")]
 use super::mappers::Racermate;
+#[cfg(feature = "board-682")]
+use super::mappers::Rainbow;
 #[cfg(feature = "board-133")]
 use super::mappers::Sachen72008;
 #[cfg(feature = "board-sachen8259")]
@@ -703,6 +705,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     530,
     #[cfg(feature = "board-taito-x1")]
     552,
+    #[cfg(feature = "board-682")]
+    682,
 ];
 
 /// Whether `mapper` is implemented.
@@ -2200,6 +2204,8 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         266 => Board::IrqBoard(IrqBoard::CityFighter(Box::new(CityFighter::new(memory)))),
         #[cfg(feature = "board-284")]
         284 => Board::IrqBoard(IrqBoard::Drip(Box::new(Drip::new(memory)))),
+        #[cfg(feature = "board-682")]
+        682 => Board::IrqBoard(IrqBoard::Rainbow(Box::new(Rainbow::new(memory)))),
         #[cfg(feature = "board-252")]
         252 => Board::IrqBoard(IrqBoard::Waixing252(Box::new(Waixing252::new(memory)))),
         #[cfg(feature = "board-253")]

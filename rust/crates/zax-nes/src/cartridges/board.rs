@@ -604,6 +604,10 @@ impl Mapper for Board {
             Board::IrqBoard(IrqBoard::Drip(board)) => {
                 board.read_nametable_from_vram(memory, address, vram)
             }
+            #[cfg(feature = "board-682")]
+            Board::IrqBoard(IrqBoard::Rainbow(board)) => {
+                board.read_nametable_from_vram(memory, address, vram)
+            }
             _ => self.read_nametable(memory, address),
         }
     }
@@ -617,6 +621,8 @@ impl Mapper for Board {
             Board::Mmc5Ext(board) => board.nametable_write_offset(address),
             #[cfg(feature = "board-284")]
             Board::IrqBoard(IrqBoard::Drip(board)) => board.nametable_write_offset(address),
+            #[cfg(feature = "board-682")]
+            Board::IrqBoard(IrqBoard::Rainbow(board)) => board.nametable_write_offset(address),
             _ => None,
         }
     }

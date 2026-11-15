@@ -1036,3 +1036,42 @@ fn mappers_n_284_extends_the_attributes_and_counts() {
     }
     assert!(core.cartridge().unwrap().irq_asserted());
 }
+
+/// Mesen2 `Rainbow.cpp` and Broke Studio's mapper doc: `$4100` the PRG mode, 16-bit bank
+/// registers, the FPGA RAM port at `$415C-$415F` seen again at `$5000`, the CPU-cycle IRQ, and a
+/// fill-mode nametable once three identical fetches put the board in frame.
+#[cfg(feature = "board-682")]
+#[test]
+fn mappers_n_682_banks_fills_and_counts() {
+    let mut core = MapperRom::new(682).prg(32).chr(0).chr_ram(0x8000).load();
+    let read =
+        |core: &mut zax_nes::NesCore, address| core.cartridge_mut().unwrap().try_cpu_read(address);
+    assert_eq!(Some(3), read(&mut core, 0xE000));
+    core.mapper_write(0x4100, 0x03);
+    core.mapper_write(0x410C, 0x00);
+    core.mapper_write(0x411C, 0x09);
+    assert_eq!(Some(9), read(&mut core, 0xC000));
+    core.mapper_write(0x415D, 0x10);
+    core.mapper_write(0x415E, 0x01);
+    core.mapper_write(0x415F, 0xAB);
+    assert_eq!(Some(0xAB), read(&mut core, 0x5010));
+    assert_eq!(Some(0x20), read(&mut core, 0x4160));
+    core.mapper_write(0x4124, 0x77);
+    core.mapper_write(0x412A, 0x20);
+    let vram = [0x11u8; 0x800];
+    let cartridge = core.cartridge_mut().unwrap();
+    assert_eq!(-2, cartridge.nametable_page(0));
+    assert_eq!(0x11, cartridge.read_nametable_from_vram(0x2045, &vram));
+    for _ in 0..3 {
+        cartridge.on_ppu_address_bus(0x2000, 0);
+    }
+    cartridge.on_ppu_address_bus(0x2045, 0);
+    assert_eq!(0x77, cartridge.read_nametable_from_vram(0x2045, &vram));
+    core.mapper_write(0x4158, 0x00);
+    core.mapper_write(0x4159, 0x20);
+    core.mapper_write(0x415A, 0x01);
+    for _ in 0..0x30 {
+        core.bus_mut().tick();
+    }
+    assert!(core.cartridge().unwrap().irq_asserted());
+}

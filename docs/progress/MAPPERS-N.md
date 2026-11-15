@@ -193,3 +193,11 @@ Mapping onto Zaxnes's hooks (no `ppu/` change):
 
 Phases: 1 CPU side + nametable sources/fill/attr ext + IRQs + audio + vectors; 2 window, bg/sprite
 ext, capture path, bus hooks; 3 Wi-Fi option; 4 flash. Each phase committed on its own.
+
+### Rainbow progress
+* Phase 1 done (`rainbow.rs`, `board-682`): CPU map, PRG/CHR banking, FPGA RAM and port, four
+  nametable sources, fill, attribute/background extended modes, window, both IRQs, vectors, OAM
+  routines, audio on `Vrc6Audio`. Test `mappers_n_682_banks_fills_and_counts`; zax-nes suite and
+  clippy green. Leads in J35.
+* Next: phase 2 (`$2003`/`$2004` and `$4011` bus hooks in `nes_bus.rs`, 3D capture arms), then
+  phase 3 (Wi-Fi option), phase 4 (flash).

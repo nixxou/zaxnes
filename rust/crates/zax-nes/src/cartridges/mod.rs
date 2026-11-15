@@ -536,6 +536,8 @@ const fn nametable_pages_vary(mapper: i32) -> bool {
             | 307
             // MAPPERS-N: 284 serves every table while its extended attributes are on.
             | 284
+            // MAPPERS-N: 682 serves every table.
+            | 682
     )
 }
 
@@ -586,6 +588,8 @@ const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
             | 266
             // MAPPERS-N: mapper 284's IRQ counter and PCM channels (`UnlDripGame.h`).
             | 284
+            // MAPPERS-N: 682's CPU IRQ, VRC6 audio and PPU-idle detection (`Rainbow.cpp`).
+            | 682
             // MAPPERS-N: the CPU-clocked counters of `IrqLatch`.
             | 56
             | 142
@@ -764,6 +768,8 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 366
             // MAPPERS-N: 284 remembers the last nametable fetch for its extended attributes.
             | 284
+            // MAPPERS-N: 682 counts every fetch for its scanline IRQ and extended modes.
+            | 682
     )
 }
 
@@ -2055,6 +2061,10 @@ mod tests {
         if Cartridge::is_supported(284) {
             expected.extend_from_slice(&[284, 284]);
         }
+        // MAPPERS-N: mapper 682 counts every fetch for its scanline IRQ (`Rainbow.cpp`).
+        if Cartridge::is_supported(682) {
+            expected.extend_from_slice(&[682, 682]);
+        }
         expected.sort_unstable();
         assert_eq!(
             moved, expected,
@@ -2123,6 +2133,10 @@ mod tests {
         }
         if Cartridge::is_supported(183) {
             expected.extend_from_slice(&[183, 183]);
+        }
+        // MAPPERS-N: mapper 682's jitter counter runs on every CPU cycle (`Rainbow.cpp`).
+        if Cartridge::is_supported(682) {
+            expected.extend_from_slice(&[682, 682]);
         }
         assert_eq!(
             moved,

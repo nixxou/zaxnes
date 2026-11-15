@@ -940,6 +940,23 @@ CHR-RAM) and puNES (`mapper_198.c`, banks from `$50` folding onto `$40-$4F`). Th
 password screen cleanly; the later `[T+ChSFIX2]` and `[T+ChTFIX2]` patches show stray glyphs on
 the password screen, not investigated (translation hacks; their CHR use may differ).
 
+### J35. Mapper 682 (Rainbow): what phase 1 leaves out, and two readings
+Mesen2 mainline (`Homebrew/Rainbow.cpp`) and Broke Studio's `mapper-doc.md` are the sources.
+Phase 1 (`board-682`) has the CPU map, the five PRG modes and the two low-bank modes, the FPGA RAM
+and its port, the CHR banks and sources, the four nametable sources with fill, attribute and
+background extended modes, the window, both IRQs, the vectors, the three generated OAM routines and
+the VRC6-style audio (this core's own `Vrc6Audio`, its `$9000-$B002` ports at `$41A0-$41A8`'s
+offsets, scaled by `$41AA` / 15 and silenced when neither of `$41A9`'s two pins is set — the
+mixing level relative to the APU is the VRC6's, not measured on the board). Not yet: the sprite
+extended mode's OAM Y copy (Mesen2 watches `$2003`/`$2004` writes; here the copy stays zero, so
+sprite extended tiles always come from sprite 0's data), the `$4011` read acknowledge of the CPU
+IRQ, the 3D tile capture of the extended modes, the ESP (no Wi-Fi: `$4191`/`$4192` read 0), and
+the flash self-programming (PRG-ROM writes are dropped). Two readings: `$4151` returns the scanline
+IRQ flag as it was **before** the read acknowledges it (Mesen2 clears first, so its bit 0 always
+reads 0, which contradicts the doc's "IRQ pending" bit); the PPU-idle reset after three CPU cycles
+without a fetch sets the scanline to -1 as Mesen2 does. `cpu_peek_override` clones the board to
+read without side effects (debugger path only). No dump at hand: the test is synthetic.
+
 ### J34. Mapper 284 (Drip): rendering fetches only, and the audio level
 Mesen2 (`UnlDripGame.h`, `MapperReadVram`) substitutes the attribute byte only on a
 `PpuRenderingRead`. This core's nametable path (`read_nametable_from_vram`, the MMC5's) is the

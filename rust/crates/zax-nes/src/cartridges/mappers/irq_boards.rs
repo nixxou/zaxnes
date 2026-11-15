@@ -46,6 +46,8 @@ use super::Mmc3Unl8237;
 use super::NesEvent;
 #[cfg(feature = "board-168")]
 use super::Racermate;
+#[cfg(feature = "board-682")]
+use super::Rainbow;
 #[cfg(feature = "board-116")]
 use super::Somari;
 #[cfg(feature = "board-68")]
@@ -376,6 +378,9 @@ pub enum IrqBoard {
     /// Mapper 284, the Drip homebrew board (lot MAPPERS-N).
     #[cfg(feature = "board-284")]
     Drip(Box<Drip>),
+    /// Mapper 682, Broke Studio's Rainbow board (lot MAPPERS-N).
+    #[cfg(feature = "board-682")]
+    Rainbow(Box<Rainbow>),
     #[cfg(feature = "board-252")]
     Waixing252(Box<Waixing252>),
     #[cfg(feature = "board-253")]
@@ -451,6 +456,8 @@ macro_rules! inner {
             IrqBoard::CityFighter($b) => $body,
             #[cfg(feature = "board-284")]
             IrqBoard::Drip($b) => $body,
+            #[cfg(feature = "board-682")]
+            IrqBoard::Rainbow($b) => $body,
             #[cfg(feature = "board-252")]
             IrqBoard::Waixing252($b) => $body,
             #[cfg(feature = "board-253")]
@@ -537,6 +544,7 @@ impl Mapper for IrqBoard {
         feature = "board-jy-asic",
         feature = "board-irq-latch",
         feature = "board-176",
+        feature = "board-682",
     ))]
     fn prg_ram_enabled(&self) -> bool {
         inner!(self, b => b.prg_ram_enabled())
@@ -599,6 +607,7 @@ impl Mapper for IrqBoard {
         feature = "board-mmc3-clones",
         feature = "board-irq-latch",
         feature = "board-176",
+        feature = "board-682",
     ))]
     fn intercept_cpu_write(
         &mut self,
@@ -625,7 +634,8 @@ impl Mapper for IrqBoard {
         feature = "board-158",
         feature = "board-68",
         feature = "board-jy-asic",
-        feature = "board-284"
+        feature = "board-284",
+        feature = "board-682"
     ))]
     #[inline(never)]
     fn nametable_page(&self, table: i32) -> i32 {
@@ -717,7 +727,8 @@ impl Mapper for IrqBoard {
         feature = "board-292",
         feature = "board-303",
         feature = "board-529",
-        feature = "board-284"
+        feature = "board-284",
+        feature = "board-682"
     ))]
     #[inline(never)]
     fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
@@ -730,7 +741,8 @@ impl Mapper for IrqBoard {
         feature = "board-292",
         feature = "board-303",
         feature = "board-529",
-        feature = "board-284"
+        feature = "board-284",
+        feature = "board-682"
     ))]
     #[inline(never)]
     fn cpu_peek_override(&self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
@@ -739,6 +751,19 @@ impl Mapper for IrqBoard {
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         inner!(self, b => b.write_register(memory, address, value));
+    }
+
+    /// Forwarded for mapper 682 alone (lot MAPPERS-N): the Rainbow's sprite extended mode reads
+    /// the sprite size from `$2000`.
+    #[cfg(feature = "board-682")]
+    fn on_ppu_control(&mut self, control: u8) {
+        inner!(self, b => b.on_ppu_control(control));
+    }
+
+    /// Forwarded for mapper 682 alone: its nametables in CHR-RAM and FPGA RAM take `$2007` writes.
+    #[cfg(feature = "board-682")]
+    fn write_nametable(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        inner!(self, b => b.write_nametable(memory, address, value));
     }
 
     /// **`#[inline(never)]`, and §4.3 of `docs/review/MF-6-inventory.md` is why**: this dispatch
@@ -755,7 +780,7 @@ impl Mapper for IrqBoard {
     /// Forwarded for mapper 284 alone (lot MAPPERS-N), the one board of this enum with expansion
     /// audio: every other one keeps `Mapper`'s `None`, which `Cartridge::has_expansion_audio`
     /// reads once at attach, so their bus never asks again.
-    #[cfg(feature = "board-284")]
+    #[cfg(any(feature = "board-284", feature = "board-682"))]
     fn expansion_audio_output(&self) -> Option<i32> {
         inner!(self, b => b.expansion_audio_output())
     }

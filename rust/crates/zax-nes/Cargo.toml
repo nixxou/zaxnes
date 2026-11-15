@@ -195,6 +195,7 @@ default = [
     "board-529",
     "board-266",
     "board-284",
+    "board-682",
     "board-302",
     "board-305",
     "board-306",
@@ -384,6 +385,8 @@ board-529 = []
 board-266 = []
 # MAPPERS-N: the Drip homebrew board, extended attributes on the MMC5's path (`Drip`).
 board-284 = ["board-mmc5-exattr-split"]
+# MAPPERS-N: Broke Studio's Rainbow board, its nametables on the MMC5's path (`Rainbow`).
+board-682 = ["board-mmc5-exattr-split"]
 board-265 = ["board-latch-multi"]
 board-283 = ["board-latch-multi"]
 board-285 = ["board-latch-multi"]
