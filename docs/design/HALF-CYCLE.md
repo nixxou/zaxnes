@@ -106,3 +106,34 @@ PR-1 set; the standard path must stay within +0.02 % (the per-frame choice only)
 | 2 | PPU register edges (/CS fall/rise per alignment), `v`/`t` loads and increments as edges; A5 corpus on alignments 2-3 with A5's rules removed | 2 days |
 | 3 | AD bus and address latch as state, `$2007` latch chain; tile latch, stale fetch; `bus` column | 1-2 days |
 | 4 | Alignments 0-1, savestates, app option and menu, docs, validation | 1-2 days |
+
+## Step 3 design: the PPU DATA state machines (2026-11-15)
+
+Source: `AccuracyCoin.asm`, notes of `$2007 Stress Test` (the chain of five D latches clocked by
+alternate PPU clock halves, the SR latch, the NOR outputs), read against the netlist mapping of A5.
+Let E be the PPU half-dot in which M2 falls at the end of the access (`t0.1` in the notes). Then:
+
+| Chain | ALE (address latch takes `v`'s low byte) | Data | `v` increment |
+|---|---|---|---|
+| `$2007` read | halves E+3, E+4 | Read on halves E+7, E+8: the read buffer takes the bus | t5, with the dot's own increment lines |
+| `$2007` write | halves E+3, E+4 | Write on halves E+6, E+7 (suppressed for palette RAM, stored inside) | t5 |
+
+With the alignment offsets (`fidplus::MasterClock`), E is the second half of dot D+1 in alignments
+2-3 and its first half in 0-1. That gives back, without a constant per alignment, every latch
+dot A3c measured (read: whole of D+5 then latch at the start of D+6 in 2-3, across D+4/D+5 in 0-1)
+and step 2's palette increment on D+6.
+
+What becomes state in Fidélité+:
+* the two chains (five latches and the SR latch each, stepped on PPU clock halves);
+* the AD bus (`ad`) and the external octal latch (`ale_low`), driven by the background/sprite
+  cadence (ALE on odd dots, read on even dots) **and** by the chains: when both drive ALE the
+  cadence wins (notes, "the background fetch takes priority"); a chain ALE on a cadence read half,
+  or the reverse, is the analogue feedback case: the notes and the netlist call it unstable, and
+  the mode keeps the best measured value (A3c: the even-X / odd-X rule) and lists it;
+* the background fetch split into its ALE half (address high lines and latch) and its read half
+  (high lines of that moment, low byte of the latch): the hybrid `$2006` address, the stale fetch
+  and the tile latch of A5 are then the bus, not patches;
+* A7's coarse-Y wrap in two phases.
+
+The standard path keeps its whole-dot fetch; the split fetch lives in `ppu/edges.rs` (or a
+`ppu/fidplus/` module) and runs only in Fidélité+.
