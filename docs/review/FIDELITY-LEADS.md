@@ -797,3 +797,50 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 - I2. *The Legend of Zelda* sprite-overflow bit (C4).
 - I3. `$2002` open-bus bits and `$2007` reads during rendering vs Mesen (C5).
 - I4. Mega Man 2 widescreen not eyeballed; PAL/Dendy fidelity work unverified.
+
+## J. Cartridge boards (lot MAPPERS-N, 2026-11-15)
+
+Boards read from Mesen2 (`cleanroom/third_party/mesen2/Core/NES/Mappers`). Only **mapper 250** is
+checked on a real game (*Queen Bee V*); every other board of the lot has unit tests from its source
+and no local ROM, so each item below is a lead to verify the day a dump is at hand.
+
+### J1. Outer registers and the RESET button — documented divergence
+Mesen2 clears the outer registers of several multicarts on a soft reset (`MMC3_134.h` `Reset`,
+`Mapper226.h:24-33`, `ColorDreams46.h` `Reset`, `MMC3_217.h`, `Bmc80013B.h`, `Bmc810544CA1.h`).
+This build keeps its rule that a board cannot see RESET (`Mapper::soft_reset`), so those registers
+survive a reset and only a power cycle clears them. The exceptions are the boards whose page makes
+the reset reaction their function: 60 (`Mapper60.h:18-27`), 230 (`Mapper230.h:19-34`), 233
+(`Mapper233.h:14-24`) and 313 (`ResetTxrom.h:9-14`, nesdev "NES 2.0 Mapper 313"). A multicart menu
+reached by RESET on a real cartridge may therefore not come back here without a power cycle.
+
+### J2. Open bus answered by a board — approximation
+Mapper 212's protection read (`Mapper212.h:19-25`) ORs `$80` into whatever the bus holds; a board
+here cannot see the bus, so the high address byte stands in for it (what an absolute read leaves).
+Mappers 63 and 235 answer `None` for their unmapped chip, which is the bus's own open-bus value.
+
+### J3. Mapper 224 PRG mode 1 — Mesen2 swaps R6 and R7
+`MMC3_224.h:26-31` puts R6 at `$A000` and R7 at `$C000` in PRG mode 1, the reverse of every MMC3.
+This build keeps the MMC3 order and only adds the outer bit; one of the two is wrong for a game that
+uses mode 1. A dump of a KT-008 cartridge decides it.
+
+### J4. DIP switches — fixed at 0
+Mappers 59, 236, 286 and 287 read DIP switches (Mesen2 `GetDipSwitches()`, default 0). This build has
+no DIP setting for boards, so the menus a switch would select are unreachable.
+
+### J5. FK23C (176) — subtypes inferred from sizes, soft reset not taken
+`Fk23C.h` boots the second 512 KiB when PRG and CHR are both 1 MiB (subtype 1) and swaps `$46`/`$47`
+on 16 MiB CHR-RAM images (subtype 2); both are taken. Its soft-reset clear of the PRG base (with the
+WRAM config, CHR-RAM selected and a battery) is not, per J1. iNES 1.0 images get Mesen2's 256 KiB of
+CHR-RAM and 32 KiB of WRAM.
+
+### J6. A12-clocked counters of 117, 222 and 176 — filter value
+They use this build's MMC3 filter (`A12Watcher::MMC3_FILTER_DOTS`), as Mesen2 uses its own single
+`A12Watcher` for all boards. Not compared on a game.
+
+### J7. Mapper 253's only local dump is a bad dump
+`roms-owner/Excitebike_1_/… vs._excitebike_fds_conversion_b1.nes`: 144 KiB of PRG whose last 16 KiB
+are zeros and whose vectors point there; no emulator can run it. The board is tested by unit tests.
+
+### J8. Mapper 198 and 199 left out
+Mesen2's own comment on `MMC3_198.h` is "Most likely incorrect/incomplete"; 199 needs per-window
+CHR-RAM selection by page number. Neither was taken in this lot.

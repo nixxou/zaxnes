@@ -696,3 +696,27 @@ And the same-behaviour pair is **the same binary**: run against itself it moves 
 showed the Lua hash column moving a megabyte of instructions between two *differently-gated builds
 of one source*; this one shows it between two runs of **one binary**, which leaves no reading under
 which that column belongs to a board. `docs/progress/MF-UNL-8.md` step 7 has the four-column tables.
+
+
+## MAPPERS-N — the mappers other emulators run (2026-11-15)
+
+Lot MAPPERS-N (`docs/progress/MAPPERS-N.md`) adds the boards Mesen2 runs and this build did not,
+read from Mesen2's sources. **No new `Board` discriminant**: the boards share variants that existed,
+and since lot CORE-2 the seven popular boards run on their own specialised path, so `Board`'s
+dispatch is the generic path of the exotic ones only.
+
+| feature | mappers | board | titles (Mesen2 DB entries) | measured cost, PR-1's thirteen | default |
+| --- | --- | --- | ---: | --- | :-: |
+| `board-mmc3-clones` + `board-NNN` | 44, 45, 49, 52, 126, 134, 196, 197, 205, 224, 238, 245, 249, 250, 259, 287, 313, 325 | `Mmc3Clone` (in `IrqBoard`): an `Mmc3` whose bank numbers a kind masks, offsets or re-lays out | ~480 | see below | **on** |
+| `board-191` | 191 | `Mmc3ChrRam<0x80, 0xFF, 2>` in `Mmc3ChrRamBoard` | 2 | see below | **on** |
+| `board-253` | 253 | `Waixing253` (in `IrqBoard`) | 5 | see below | **on** |
+| `board-latch-multi` + `board-NNN` | 46, 51, 57-63, 104, 108, 113, 120, 125, 170, 174, 177, 179, 200, 201-204, 212-214, 216, 221, 226, 227, 229-231, 233, 235, 236, 240-242, 244, 255, 261, 274, 286 | `LatchMulti` (in `DecodeBoard`): discrete multicarts | ~600 | see below | **on**, except `board-200` |
+| `board-200` | 200 | `LatchMulti` | 5 | — | **off**: SPEC-02 REQ-CORE-102's acceptance criterion is "mapper 200 → échec" (`AMD-MAPPERS-N-200.md`) |
+| `board-irq-latch` + `board-NNN` | 6, 8, 17, 40, 42, 43, 50, 106, 117, 183, 222 | `IrqLatch` (in `IrqBoard`): small boards with an IRQ counter, FFE copier formats | ~500 | see below | **on** |
+| `board-176` | 176 | `Fk23c` (in `IrqBoard`) | ~420 | see below | **on** |
+
+**Measured** (callgrind, clean `git archive` builds in WSL, 300 frames, `tools/perf`): `e2b7fced`
+against `c2d6e19f` (73 of the lot's numbers): **worst ROM `m0` +80 860 (+0.0015 %)**, `smb3`
++0.0011 %, `z2` +0.0010 %, set total **+357 664 (+0.0005 %)** — inside the +0.02 % per-ROM tolerance
+and at the instrument's floor. golden-core over the 98 originals at 1 200 frames: byte-identical to
+`e2b7fced` at `0b9aea7c`. The lot's final figures are in `docs/progress/MAPPERS-N.md`.
