@@ -671,6 +671,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     366,
     #[cfg(feature = "board-487")]
     487,
+    #[cfg(feature = "board-513")]
+    513,
     #[cfg(feature = "board-518")]
     518,
     #[cfg(feature = "board-519")]
@@ -995,6 +997,12 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // CHR-RAM.
         // MAPPERS-N: nesdev ("INES Mapper 199"): "32 KiB of battery-backed PRG RAM, of which 12
         // KiB are mapped", and 8 KiB of unbanked CHR-RAM.
+        // MAPPERS-N: `Sachen9602.h`, "GetChrRamSize() … 0x8000", battery-backed there.
+        #[cfg(feature = "board-513")]
+        513 => BoardMemorySizes {
+            chr_ram: Some(0x8000),
+            ..BoardMemorySizes::default()
+        },
         #[cfg(feature = "board-199")]
         199 => BoardMemorySizes {
             prg_ram: Some(0x8000),
@@ -2597,6 +2605,11 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         )))),
         #[cfg(feature = "board-199")]
         199 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-513")]
+        513 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
             memory,
             Mmc3CloneKind::of(mapper)?,
         )))),

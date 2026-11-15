@@ -937,6 +937,11 @@ CHR-RAM) and puNES (`mapper_198.c`, banks from `$50` folding onto `$40-$4F`). Th
 password screen cleanly; the later `[T+ChSFIX2]` and `[T+ChTFIX2]` patches show stray glyphs on
 the password screen, not investigated (translation hacks; their CHR use may differ).
 
+### J28. Mapper 513: the 32 KiB of CHR-RAM are not saved
+Mesen2 (`Sachen9602.h`) marks the 32 KiB of CHR-RAM battery-backed (`ForceChrBattery`); this
+core saves PRG-RAM only, so the CHR-RAM starts fresh at every power-on. Mesen2 passes the chip
+`value & 0x1F` for R0-R5 and puNES `value & 0x3F`: the same pages with 32 KiB. No dump at hand.
+
 ### J27. Mapper 323: the outer bank's fourth bit, and the RAM under the register
 Mesen2 (`FaridSlrom.h`) takes the outer bank from bits 4-6 (`(value & 0x70) >> 1`) and makes
 `$6000-$7FFF` a register range, so the RAM does not take the byte; puNES (`mapper_323.c`) takes

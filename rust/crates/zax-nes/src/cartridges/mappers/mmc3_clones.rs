@@ -86,6 +86,11 @@ pub enum Mmc3CloneKind {
     /// unbanked CHR-RAM, 32 KiB of battery PRG-RAM of which `$6000-$7FFF` and `$5000-$5FFF`
     /// (its 4 KiB page 2) are mapped.
     M199,
+    /// NES 2.0 mapper 513, Sachen SA-9602B: `Sachen/Sachen9602.h` and puNES `mapper_513.c`. The
+    /// top two bits of a CHR register write (R0-R5) pick the 512 KiB PRG block of the two
+    /// switchable windows; the fixed windows stay at pages `$3E`/`$3F` of the first block; 32 KiB
+    /// of CHR-RAM.
+    M513,
 }
 
 impl Mmc3CloneKind {
@@ -120,6 +125,7 @@ impl Mmc3CloneKind {
             165 => Self::M165,
             198 => Self::M198,
             199 => Self::M199,
+            513 => Self::M513,
             _ => return None,
         })
     }
@@ -153,6 +159,7 @@ impl Mmc3CloneKind {
             Self::M165 => 165,
             Self::M198 => 198,
             Self::M199 => 199,
+            Self::M513 => 513,
         }
     }
 }
@@ -261,6 +268,9 @@ impl Mmc3Clone {
     fn prg_page(&self, slot: usize, page: i32) -> i32 {
         let r = &self.outer;
         match self.kind {
+            // `Sachen9602.h`: `(page & 0x3F) | (_regs[1] << 6)`, then the fixed `$3E`/`$3F`
+            // without the block (puNES `prg_fix_mmc3_513`, `~1 & 0x3F` and `~0 & 0x3F`).
+            Mmc3CloneKind::M513 if page >= SECOND_LAST => page & 0x3F,
             // `MMC3_44.h:28-31`.
             Mmc3CloneKind::M44 => {
                 let block = i32::from(r[0]);
@@ -313,8 +323,9 @@ impl Mmc3Clone {
                     | ((reg & (0x06 | ((reg & 0x40) >> 6))) << 4)
                     | ((reg & 0x10) << 3)
             }
-            // `MMC3_224.h:20-32`: `$5000` bit 2 is PRG A19.
-            Mmc3CloneKind::M224 => (page & 0x3F) | (i32::from(r[0]) << 6),
+            // `MMC3_224.h:20-32`: `$5000` bit 2 is PRG A19; 513's switchable windows, the same
+            // formula with its block from a CHR register write.
+            Mmc3CloneKind::M224 | Mmc3CloneKind::M513 => (page & 0x3F) | (i32::from(r[0]) << 6),
             // `MMC3_Bmc411120C.h:19-25`, DIP switch 0: `$xx` bits 0-1 are PRG A17-A18.
             Mmc3CloneKind::M287 => (page & 0x0F) | ((i32::from(r[0]) & 0x03) << 4),
             // `ResetTxrom.h:22-26`: the reset counter is PRG A17-A18.
@@ -887,6 +898,17 @@ impl Mapper for Mmc3Clone {
         if self.kind == Mmc3CloneKind::M44 && address & 0xE001 == 0xA001 {
             self.outer[0] = (value & 0x07).min(6);
         }
+        // `Sachen9602.h` `WriteRegister`: a write to R0-R5 also sets the block, and the chip
+        // takes the value's low five bits.
+        let value = if self.kind == Mmc3CloneKind::M513
+            && address & 0xE001 == 0x8001
+            && self.mmc3.select() & 0x07 < 6
+        {
+            self.outer[0] = value >> 6;
+            value & 0x1F
+        } else {
+            value
+        };
         match self.kind {
             Mmc3CloneKind::M217 if self.outer[2] != 0 => {
                 self.write_217(memory, address, value);

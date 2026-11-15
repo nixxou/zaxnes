@@ -925,3 +925,15 @@ fn mappers_n_323_confines_the_mmc1_to_a_game_and_locks() {
     assert_eq!([0x26, 0x27, 0x2E, 0x2F], core.prg_windows());
     assert_eq!(0x30, core.read_memory(0x6000)); // the RAM takes every write
 }
+
+/// Mesen2 `Sachen9602.h` and puNES `mapper_513.c`: bits 6-7 of a CHR register write pick the
+/// 512 KiB block of the switchable PRG windows; the fixed ones stay at `$3E`/`$3F`.
+#[cfg(feature = "board-513")]
+#[test]
+fn mappers_n_513_takes_the_prg_block_from_chr_writes() {
+    let mut core = MapperRom::new(513).prg(256).chr(0).load();
+    core.mmc3_bank(6, 5);
+    core.mmc3_bank(0, 0x80);
+    let windows = core.prg_windows();
+    assert_eq!((0x85, 0x3E, 0x3F), (windows[0], windows[2], windows[3]));
+}

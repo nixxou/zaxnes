@@ -131,3 +131,4 @@ Owner's request (2026-11-15): implement the mappers missing compared with the ot
 * 53, 487, 518, 519 in a new `MiscN` (DecodeBoard), no dumps. Remaining: 260 266 284 323 328 513
   529 530 682.
 * 323 (`FaridSlrom`, a wrapper of `Mmc1`), no dump. Remaining: 260 266 284 328 513 529 530 682.
+* 513 (`Mmc3Clone` M513), no dump. Remaining: 260 266 284 328 529 530 682.
