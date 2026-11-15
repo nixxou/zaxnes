@@ -965,3 +965,17 @@ fn mappers_n_529_maps_one_16_kib_bank_from_a000() {
     assert_eq!(5, core.chr_windows()[0]);
     assert_eq!(Some(1), core.cartridge_mut().unwrap().try_cpu_read(0x5000));
 }
+
+/// nesdev "NES 2.0 Mapper 266": CPU A13/A14 crossed into a `VRC4e`, `$900C` giving PRG A16-A15
+/// over the chip's own 8 KiB banks, CHR 0 at CPU `$D000`.
+#[cfg(feature = "board-266")]
+#[test]
+fn mappers_n_266_crosses_a13_a14_and_adds_an_outer_bank() {
+    let mut core = MapperRom::new(266).prg(32).chr(256).load();
+    core.mapper_write(0x8000, 1);
+    core.mapper_write(0x900C, 2);
+    let windows = core.prg_windows();
+    assert_eq!((9, 11), (windows[0], windows[3]));
+    core.mapper_write(0xD000, 5);
+    assert_eq!(5, core.chr_windows()[0]);
+}

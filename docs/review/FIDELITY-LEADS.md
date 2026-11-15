@@ -937,6 +937,16 @@ CHR-RAM) and puNES (`mapper_198.c`, banks from `$50` folding onto `$40-$4F`). Th
 password screen cleanly; the later `[T+ChSFIX2]` and `[T+ChTFIX2]` patches show stray glyphs on
 the password screen, not investigated (translation hacks; their CHR use may differ).
 
+### J31. Mapper 266: the page's inner banks, and the DAC not emulated
+nesdev ("NES 2.0 Mapper 266") keeps the VRC4's own 8 KiB inner banks under `$900C`'s PRG
+A16-A15 ("PRG A13 and A14 stay connected to VRC4"); puNES (`mapper_266.c`) takes the inner bank
+from the window number instead (a fixed 32 KiB), and Mesen2 (`CityFighter.h`) has its own
+register file and a 9-bit CPU counter. This board follows the page, the IRQ being the VRC4's
+(the page: the game uses its "pseudo-scanline mode during speech output").
+**Open:** the 4-bit DAC at `$980C` is not emulated, so the speech is silent; puNES low-pass
+filters `(pcm - 7) * 4096` into its mix, Mesen2 writes `(value & $0F) << 3` to `$4011`, and the
+page calls its purpose unclear. No dump at hand.
+
 ### J30. Mapper 529: Mesen2's T230 is another board, and the 93C56 is not emulated
 nesdev ("NES 2.0 Mapper 529") and puNES (`mapper_529.c`) agree: a VRC4e whose `$A00x` register
 is one 16 KiB bank at `$8000`, the last bank at `$C000`, `$800x` without effect, and a 93C56

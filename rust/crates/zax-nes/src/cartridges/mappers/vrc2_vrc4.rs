@@ -299,12 +299,12 @@ impl Vrc2Vrc4 {
 
     /// The same for the VRC4e wiring, A0 on CPU A2 and A1 on CPU A3: mapper 529's T-230 (nesdev
     /// "NES 2.0 Mapper 529": "a VRC4 clone (A2/A3, VRC4e)"; lot MAPPERS-N).
-    #[cfg(feature = "board-529")]
+    #[cfg(any(feature = "board-529", feature = "board-266"))]
     pub(crate) fn new_vrc4e(memory: &CartridgeMemory, mapper_number: i32) -> Self {
         Self::new_vrc4_wired(memory, mapper_number, VrcVariant::Vrc4e)
     }
 
-    #[cfg(any(feature = "board-529", feature = "board-530"))]
+    #[cfg(any(feature = "board-529", feature = "board-530", feature = "board-266"))]
     fn new_vrc4_wired(memory: &CartridgeMemory, mapper_number: i32, variant: VrcVariant) -> Self {
         let lines = variant.index_lines();
         Self {

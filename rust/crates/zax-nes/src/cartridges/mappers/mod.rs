@@ -33,6 +33,8 @@ mod bf9096;
 mod cheapocabra;
 #[cfg(any(feature = "board-162", feature = "board-163"))]
 mod chr_window;
+#[cfg(feature = "board-266")]
+mod city_fighter;
 #[cfg(feature = "board-small-boards")]
 mod cnrom_protect;
 #[cfg(feature = "board-cony")]
@@ -198,6 +200,8 @@ pub use bf9096::Bf9096;
 pub use cheapocabra::Cheapocabra;
 #[cfg(any(feature = "board-162", feature = "board-163"))]
 pub use chr_window::{ChrWindowBoard, ChrWindowKind};
+#[cfg(feature = "board-266")]
+pub use city_fighter::CityFighter;
 #[cfg(feature = "board-small-boards")]
 pub use cnrom_protect::CnRomProtect;
 #[cfg(feature = "board-cony")]

@@ -1,5 +1,7 @@
 #[cfg(feature = "board-530")]
 use super::Ax5705;
+#[cfg(feature = "board-266")]
+use super::CityFighter;
 #[cfg(feature = "board-cony")]
 use super::Cony;
 #[cfg(feature = "board-176")]
@@ -366,6 +368,9 @@ pub enum IrqBoard {
     /// Mapper 529, the T-230 VRC4e board (lot MAPPERS-N).
     #[cfg(feature = "board-529")]
     T230(Box<T230>),
+    /// Mapper 266, the City Fighter IV VRC4 board (lot MAPPERS-N).
+    #[cfg(feature = "board-266")]
+    CityFighter(Box<CityFighter>),
     #[cfg(feature = "board-252")]
     Waixing252(Box<Waixing252>),
     #[cfg(feature = "board-253")]
@@ -437,6 +442,8 @@ macro_rules! inner {
             IrqBoard::Ax5705($b) => $body,
             #[cfg(feature = "board-529")]
             IrqBoard::T230($b) => $body,
+            #[cfg(feature = "board-266")]
+            IrqBoard::CityFighter($b) => $body,
             #[cfg(feature = "board-252")]
             IrqBoard::Waixing252($b) => $body,
             #[cfg(feature = "board-253")]

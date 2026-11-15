@@ -135,3 +135,5 @@ Owner's request (2026-11-15): implement the mappers missing compared with the ot
 * 530 (`Ax5705`, a wrapper of `Vrc2Vrc4`), no dump. Remaining: 260 266 284 328 529 682.
 * 529 (`T230`, a wrapper of `Vrc2Vrc4`), no dump; its 93C56 EEPROM is an open lead (J30).
   Remaining: 260 266 284 328 682.
+* 266 (`CityFighter`, a wrapper of `Vrc2Vrc4`), no dump; DAC silent (J31). Remaining: 260 284
+  328 682.

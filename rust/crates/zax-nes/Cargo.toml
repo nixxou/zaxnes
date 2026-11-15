@@ -191,6 +191,7 @@ default = [
     "board-513",
     "board-530",
     "board-529",
+    "board-266",
     "board-302",
     "board-305",
     "board-306",
@@ -374,6 +375,8 @@ board-513 = ["board-mmc3-clones"]
 board-530 = []
 # MAPPERS-N: the T-230, a VRC4e with one 16 KiB bank (`T230`).
 board-529 = []
+# MAPPERS-N: City Fighter IV, a VRC4 with A13/A14 crossed (`CityFighter`).
+board-266 = []
 board-265 = ["board-latch-multi"]
 board-283 = ["board-latch-multi"]
 board-285 = ["board-latch-multi"]

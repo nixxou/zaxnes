@@ -199,7 +199,8 @@ impl BankWindows {
         feature = "board-mmc3-scramble",
         feature = "board-215",
         feature = "board-219",
-        feature = "board-323"
+        feature = "board-323",
+        feature = "board-266"
     ))]
     pub fn remap_prg_banks(&mut self, mask: i32, bits: i32) {
         for slot in 0..Self::PRG_WINDOWS {

@@ -12,6 +12,8 @@ use super::mappers::Ax5705;
 use super::mappers::BandaiKaraoke;
 #[cfg(feature = "board-111")]
 use super::mappers::Cheapocabra;
+#[cfg(feature = "board-266")]
+use super::mappers::CityFighter;
 #[cfg(feature = "board-cony")]
 use super::mappers::Cony;
 #[cfg(feature = "board-decode-boards")]
@@ -595,6 +597,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     264,
     #[cfg(feature = "board-265")]
     265,
+    #[cfg(feature = "board-266")]
+    266,
     #[cfg(feature = "board-268")]
     268,
     #[cfg(feature = "board-274")]
@@ -2184,6 +2188,8 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         530 => Board::IrqBoard(IrqBoard::Ax5705(Box::new(Ax5705::new(memory)))),
         #[cfg(feature = "board-529")]
         529 => Board::IrqBoard(IrqBoard::T230(Box::new(T230::new(memory)))),
+        #[cfg(feature = "board-266")]
+        266 => Board::IrqBoard(IrqBoard::CityFighter(Box::new(CityFighter::new(memory)))),
         #[cfg(feature = "board-252")]
         252 => Board::IrqBoard(IrqBoard::Waixing252(Box::new(Waixing252::new(memory)))),
         #[cfg(feature = "board-253")]
