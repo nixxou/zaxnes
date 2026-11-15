@@ -98,8 +98,17 @@ impl Mapper for Mapper034 {
             _ => return false,
         }
 
+        // The write-through is done here and the write reported as handled, so the cartridge
+        // refreshes its cached CPU read windows: answering `false` sent the write to the plain
+        // PRG-RAM path, which returns without that refresh, and the CPU went on fetching the
+        // old 32 KiB bank. Impossible Mission II, the NINA-001's one game, switches banks from
+        // code it runs in that RAM ($7465 `STA $7FFD` then `JSR $800F`) and crashed on it.
+        let len = memory.prg_ram().len();
+        if len != 0 {
+            memory.prg_ram_mut()[usize::from(address & 0x1FFF) % len] = value;
+        }
         self.update_banks(memory);
-        false
+        true
     }
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {

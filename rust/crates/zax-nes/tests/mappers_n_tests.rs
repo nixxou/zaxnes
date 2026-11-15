@@ -557,3 +557,20 @@ fn mappers_n_176_chr_ram_bit_without_chr_ram() {
     core.mapper_write(0x5FF0, 0x60);
     assert_eq!([0, 1, 2, 3, 4, 5, 6, 7], core.chr_windows());
 }
+
+/// MR-34-1, NINA-001: a `$7FFD` write switches the 32 KiB bank **and** reaches the PRG-RAM
+/// underneath, and the CPU reads the new bank at once. The register used to be answered as
+/// unhandled, so the write took the plain PRG-RAM path, which does not refresh the cached read
+/// windows; Impossible Mission II, which switches banks from code it runs in that RAM, crashed.
+#[test]
+fn mappers_n_34_nina_switch_refreshes_the_read_windows() {
+    let mut core = MapperRom::new(34).prg(8).chr(16).load();
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    core.mapper_write(0x7FFD, 1);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    assert_eq!(1, core.read_memory(0x7FFD));
+    // The CPU's own read path, through the cached windows.
+    let cartridge = core.cartridge().unwrap();
+    assert_eq!(Some(4), cartridge.read_rom_window(0x8100));
+    assert_eq!(Some(7), cartridge.read_rom_window(0xE100));
+}
