@@ -949,3 +949,19 @@ fn mappers_n_530_crosses_its_lines_into_a_vrc4() {
     core.mapper_write(0xA008, 0x05); // A3 is A12: $B008, CHR 0's low nibble
     assert_eq!(5, core.chr_windows()[0]);
 }
+
+/// nesdev "NES 2.0 Mapper 529" and puNES `mapper_529.c`: a `VRC4e` whose `$A00x` register is one
+/// 16 KiB bank at `$8000`, the last bank fixed at `$C000`, `$800x` without effect, and the
+/// EEPROM's data out on D0 at `$5000` (1, no EEPROM emulated).
+#[cfg(feature = "board-529")]
+#[test]
+fn mappers_n_529_maps_one_16_kib_bank_from_a000() {
+    let mut core = MapperRom::new(529).prg(16).chr(256).load();
+    core.mapper_write(0xA000, 3);
+    assert_eq!([6, 7, 14, 15], core.prg_windows());
+    core.mapper_write(0x8000, 5);
+    assert_eq!([6, 7, 14, 15], core.prg_windows());
+    core.mapper_write(0xB000, 5);
+    assert_eq!(5, core.chr_windows()[0]);
+    assert_eq!(Some(1), core.cartridge_mut().unwrap().try_cpu_read(0x5000));
+}

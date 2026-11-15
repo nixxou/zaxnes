@@ -160,6 +160,8 @@ mod sunsoft2;
 mod sunsoft3;
 #[cfg(feature = "board-68")]
 mod sunsoft4;
+#[cfg(feature = "board-529")]
+mod t230;
 #[cfg(feature = "board-small-boards")]
 mod taito_tc0190;
 mod taito_tc0690;
@@ -339,6 +341,8 @@ pub use sunsoft2::Sunsoft2;
 pub use sunsoft3::Sunsoft3;
 #[cfg(feature = "board-68")]
 pub use sunsoft4::Sunsoft4;
+#[cfg(feature = "board-529")]
+pub use t230::T230;
 #[cfg(feature = "board-small-boards")]
 pub use taito_tc0190::TaitoTc0190;
 pub use taito_tc0690::TaitoTc0690;

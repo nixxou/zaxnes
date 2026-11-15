@@ -54,6 +54,8 @@ use super::Tqrom;
 use super::Waixing252;
 #[cfg(feature = "board-253")]
 use super::Waixing253;
+#[cfg(feature = "board-529")]
+use super::T230;
 use super::{IremH3001, Mapper, Sunsoft3, TaitoTc0690, Vrc3};
 use crate::cartridges::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
@@ -361,6 +363,9 @@ pub enum IrqBoard {
     /// Mapper 530, the AX5705 VRC4 board (lot MAPPERS-N).
     #[cfg(feature = "board-530")]
     Ax5705(Box<Ax5705>),
+    /// Mapper 529, the T-230 VRC4e board (lot MAPPERS-N).
+    #[cfg(feature = "board-529")]
+    T230(Box<T230>),
     #[cfg(feature = "board-252")]
     Waixing252(Box<Waixing252>),
     #[cfg(feature = "board-253")]
@@ -430,6 +435,8 @@ macro_rules! inner {
             IrqBoard::Kaiser7017($b) => $body,
             #[cfg(feature = "board-530")]
             IrqBoard::Ax5705($b) => $body,
+            #[cfg(feature = "board-529")]
+            IrqBoard::T230($b) => $body,
             #[cfg(feature = "board-252")]
             IrqBoard::Waixing252($b) => $body,
             #[cfg(feature = "board-253")]
@@ -686,7 +693,7 @@ impl Mapper for IrqBoard {
     /// **Behaviour-neutral for the other boards of this enum**: none of the fourteen overrides
     /// either method, so each one's own default is `Mapper::cpu_peek_override`'s `None` -- the
     /// same answer the un-forwarded dispatch gave them.
-    #[cfg(any(feature = "board-292", feature = "board-303"))]
+    #[cfg(any(feature = "board-292", feature = "board-303", feature = "board-529"))]
     #[inline(never)]
     fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
         inner!(self, b => b.cpu_read_override(memory, address))
@@ -694,7 +701,7 @@ impl Mapper for IrqBoard {
 
     /// The side-effect-free counterpart, for the same board and the same reason: without it
     /// `Mapper::cpu_read_override`'s own default would route a host peek through the fill.
-    #[cfg(any(feature = "board-292", feature = "board-303"))]
+    #[cfg(any(feature = "board-292", feature = "board-303", feature = "board-529"))]
     #[inline(never)]
     fn cpu_peek_override(&self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
         inner!(self, b => b.cpu_peek_override(memory, address))

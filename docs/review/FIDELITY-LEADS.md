@@ -937,6 +937,17 @@ CHR-RAM) and puNES (`mapper_198.c`, banks from `$50` folding onto `$40-$4F`). Th
 password screen cleanly; the later `[T+ChSFIX2]` and `[T+ChTFIX2]` patches show stray glyphs on
 the password screen, not investigated (translation hacks; their CHR use may differ).
 
+### J30. Mapper 529: Mesen2's T230 is another board, and the 93C56 is not emulated
+nesdev ("NES 2.0 Mapper 529") and puNES (`mapper_529.c`) agree: a VRC4e whose `$A00x` register
+is one 16 KiB bank at `$8000`, the last bank at `$C000`, `$800x` without effect, and a 93C56
+EEPROM (`$8800` mask writes: D0 data, D1 clock, D2 chip select; `$5000` read on D0) when the
+NES 2.0 header declares 256 bytes of PRG-NVRAM. Mesen2's `T230.h` reads a different board (an
+`$A000` pair of 8 KiB banks, a PRG mode, an outer bank on CHR-RAM carts) and is not followed.
+**Open:** the 93C56 (x16 organisation, nesdev: "ORG pin is unconnected") is not emulated; the
+existing `Eeprom93C66` is the x8 part of mapper 164 and its nine address bits would desync an
+x16 stream. With no EEPROM, `$5000` answers 1, as puNES does for an image without one, and a
+game that saves there cannot. No dump at hand.
+
 ### J29. Mapper 530: puNES's whole VRC4 against Mesen2's subset
 puNES (`mapper_530.c`) runs the AX5705 as a full VRC4 (VRC4f wiring after `A |= (A & 8) << 9`,
 IRQ and the `$9000` mirroring included) with the two data-line crossings; Mesen2 (`Ax5705.h`)

@@ -99,6 +99,8 @@ use super::mappers::Waixing253;
 use super::mappers::WaixingFs305;
 #[cfg(feature = "board-246")]
 use super::mappers::G0151;
+#[cfg(feature = "board-529")]
+use super::mappers::T230;
 use super::mappers::{
     Action52, Action53, AxRom, BandaiFcg, Caltron6In1, CnRom, Codemasters, ColorDreams, CpRom,
     Daou306, Fme7, GxRom, IremG101, IremH3001, IrqBoard, JalecoJ87, JalecoSs88006, Mapper015,
@@ -683,6 +685,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     521,
     #[cfg(feature = "board-522")]
     522,
+    #[cfg(feature = "board-529")]
+    529,
     #[cfg(feature = "board-530")]
     530,
     #[cfg(feature = "board-taito-x1")]
@@ -2178,6 +2182,8 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         303 => Board::IrqBoard(IrqBoard::Kaiser7017(Box::new(Kaiser7017::new(memory)))),
         #[cfg(feature = "board-530")]
         530 => Board::IrqBoard(IrqBoard::Ax5705(Box::new(Ax5705::new(memory)))),
+        #[cfg(feature = "board-529")]
+        529 => Board::IrqBoard(IrqBoard::T230(Box::new(T230::new(memory)))),
         #[cfg(feature = "board-252")]
         252 => Board::IrqBoard(IrqBoard::Waixing252(Box::new(Waixing252::new(memory)))),
         #[cfg(feature = "board-253")]
