@@ -183,6 +183,7 @@ default = [
     "board-254",
     "board-165",
     "board-198",
+    "board-199",
     "board-265",
     "board-283",
     "board-285",
@@ -333,6 +334,7 @@ board-217 = ["board-mmc3-clones"]
 board-254 = ["board-mmc3-clones"]
 board-165 = ["board-mmc3-clones"]
 board-198 = ["board-mmc3-clones"]
+board-199 = ["board-mmc3-clones"]
 board-265 = ["board-latch-multi"]
 board-283 = ["board-latch-multi"]
 board-285 = ["board-latch-multi"]

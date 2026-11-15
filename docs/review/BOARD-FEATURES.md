@@ -713,6 +713,7 @@ dispatch is the generic path of the exotic ones only.
 | `board-latch-multi` + `board-NNN` | 46, 51, 57-63, 104, 108, 113, 120, 125, 170, 174, 177, 179, 200, 201-204, 212-214, 216, 221, 226, 227, 229-231, 233, 235, 236, 240-242, 244, 255, 261, 274, 286 | `LatchMulti` (in `DecodeBoard`): discrete multicarts | ~600 | see below | **on** |
 | `board-165` | 165 | `Mmc3Clone` kind M165: MMC3 with MMC2-style CHR latches, 4 KiB CHR-RAM page | ~60 | watches PPU reads (A12 + latch) | **on** |
 | `board-198` | 198 | `Mmc3Clone` kind M198: 640 KiB PRG fold, 4 KiB RAM at `$5000` | ~40 | — | **on** |
+| `board-199` | 199 | `Mmc3Clone` kind M199: unbanked 8 KiB CHR-RAM, 32 KiB PRG-RAM with `$5000` | ~30 | — | **on** (not verified on a game) |
 | `board-252` | 252 | `Waixing252` (in `IrqBoard`): Waixing VRC4 clone, CHR-RAM by mask/compare | ~200 | CPU-clocked (VRC IRQ) | **on** |
 | `board-234` | 234 | `Maxi15` (in `DecodeBoard`): AVE Maxi 15, registers latched on reads | ~130 | no cached window; only this board reads through the forwarded `cpu_read_override` | **on** |
 | `board-200` | 200 | `LatchMulti` | 5 | — | **on** since the owner accepted `AMD-MAPPERS-N-200.md` (2026-11-15) |

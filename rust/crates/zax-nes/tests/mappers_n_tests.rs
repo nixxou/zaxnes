@@ -685,3 +685,25 @@ fn mappers_n_198_folds_its_banks_and_has_ram_at_5000() {
     assert_eq!(0x11, core.read_memory(0x5123));
     assert_eq!(0x22, core.read_memory(0x6123));
 }
+
+/// nesdev ("INES Mapper 199"): the FS309's 8 KiB of CHR-RAM are unbanked, and `$5000-$5FFF` is
+/// page 2 of its 32 KiB of PRG-RAM (puNES `wram_fix_mmc3_199`). No genuine dump was at hand: the
+/// Hackset's "199" images are mapper-176 games, as the page warns some are.
+#[cfg(feature = "board-199")]
+#[test]
+fn mappers_n_199_has_unbanked_chr_ram_and_ram_at_5000() {
+    let mut core = MapperRom::new(199)
+        .prg(64)
+        .chr(0)
+        .chr_ram(8192)
+        .battery()
+        .load();
+    core.mmc3_bank(0, 0x10);
+    core.cartridge_mut().unwrap().ppu_write(0x0000, 0x77);
+    core.mmc3_bank(0, 0x20);
+    assert_eq!(0x77, core.chr_bank(0x0000));
+    core.mapper_write(0xA001, 0x80);
+    core.mapper_write(0x5010, 0x33);
+    assert_eq!(0x33, core.read_memory(0x5010));
+    assert_eq!(0x33, core.cartridge().unwrap().battery_ram()[0x2010]);
+}

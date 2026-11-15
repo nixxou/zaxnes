@@ -82,6 +82,10 @@ pub enum Mmc3CloneKind {
     /// Mapper 198, nesdev "INES Mapper 198" / puNES `mapper_198.c`: 640 KiB of PRG, 8 KiB of
     /// battery WRAM at `$6000` and 4 KiB more, not backed, at `$5000-$5FFF`.
     M198,
+    /// Mapper 199, nesdev "INES Mapper 199" (Waixing FS309) / puNES `mapper_199.c`: 8 KiB of
+    /// unbanked CHR-RAM, 32 KiB of battery PRG-RAM of which `$6000-$7FFF` and `$5000-$5FFF`
+    /// (its 4 KiB page 2) are mapped.
+    M199,
 }
 
 impl Mmc3CloneKind {
@@ -115,6 +119,7 @@ impl Mmc3CloneKind {
             366 => Self::M366,
             165 => Self::M165,
             198 => Self::M198,
+            199 => Self::M199,
             _ => return None,
         })
     }
@@ -147,6 +152,7 @@ impl Mmc3CloneKind {
             Self::M366 => 366,
             Self::M165 => 165,
             Self::M198 => 198,
+            Self::M199 => 199,
         }
     }
 }
@@ -199,12 +205,16 @@ impl Mmc3Clone {
     /// Mapper 198's non-backed 4 KiB at `$5000-$5FFF`, the head of the PRG-RAM.
     pub const RAM_198_LOW: usize = 0x1000;
 
-    /// The PRG-RAM offset of a mapper-198 `$5000-$5FFF` access, `None` otherwise.
+    /// The PRG-RAM offset of a mapper-198 or -199 `$5000-$5FFF` access, `None` otherwise: the
+    /// head of 198's RAM, page 2 (offset 8 KiB) of 199's 32 KiB (puNES `wram_fix_mmc3_199`).
     fn ram_198(&self, memory: &CartridgeMemory, address: u16) -> Option<usize> {
-        (self.kind == Mmc3CloneKind::M198
-            && (0x5000..=0x5FFF).contains(&address)
-            && memory.prg_ram().len() > Self::RAM_198_LOW)
-            .then(|| usize::from(address & 0x0FFF))
+        let base = match self.kind {
+            Mmc3CloneKind::M198 => 0,
+            Mmc3CloneKind::M199 => 0x2000,
+            _ => return None,
+        };
+        ((0x5000..=0x5FFF).contains(&address) && memory.prg_ram().len() >= base + Self::RAM_198_LOW)
+            .then(|| base + usize::from(address & 0x0FFF))
     }
 
     /// The CHR-RAM offset of a mapper-165 window on page 0, `None` otherwise.
@@ -469,6 +479,9 @@ impl Mmc3Clone {
                 }
                 self.outer[3] = ram;
             }
+            // nesdev ("INES Mapper 199"): "The 8 KiB of CHR RAM are unbanked"; puNES
+            // `chr_swap_mmc3_199` maps window n to page n.
+            Mmc3CloneKind::M199 => chr = [0, 1, 2, 3, 4, 5, 6, 7],
             // `MMC3_196.h:20-27`: once `$6000-$6FFF` is written, one 32 KiB bank, bypassing the
             // chip's PRG mapping (`SelectPrgPage4x(0, _exRegs[1] << 2)`).
             Mmc3CloneKind::M196 if self.outer[0] != 0 => {

@@ -937,6 +937,16 @@ CHR-RAM) and puNES (`mapper_198.c`, banks from `$50` folding onto `$40-$4F`). Th
 password screen cleanly; the later `[T+ChSFIX2]` and `[T+ChTFIX2]` patches show stray glyphs on
 the password screen, not investigated (translation hacks; their CHR use may differ).
 
+### J21. Mapper 199: implemented from nesdev and puNES, **not verified**
+nesdev ("INES Mapper 199", Waixing FS309): 8 KiB of unbanked CHR-RAM and 32 KiB of battery PRG-RAM
+of which 12 KiB are mapped at `$5000-$7FFF`; puNES (`mapper_199.c`) places `$5000-$5FFF` on 4 KiB
+page 2. Mesen2's `MMC3_199.h` is a different board (CHR-RAM per page below 8, extra PRG
+registers); the page says some Chinese emulators confuse 199 with 176. The Hackset's three "199"
+dumps (`ED481B7C`, `D871D3E6`, `44C20420`) are exactly that: the cartridge database gives them 176
+submapper 2, and run as 176 they boot (Dragon Ball Z Gaiden, Dragon Ball Z II, Sangokushi II), which
+also verifies `Fk23c` on three more games. No genuine FS309 dump (Chéngjísīhán, Tāngmǔ Lìxiǎn jì,
+Tūnshí Tiāndì: Sānguó Wàizhuàn) was at hand.
+
 ### J15. Mapper 15: CHR-RAM write protection only on the K-1029
 MR-15-1 (from nesdev: "CHR-RAM is write-protected in PRG banking modes 0 and 3") write-protected
 every mapper-15 image. The same nesdev page says the K-1029 multicarts are the only genuine
