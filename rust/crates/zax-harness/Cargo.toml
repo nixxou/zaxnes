@@ -19,8 +19,6 @@ default = ["ppu-2007-render-read"]
 parked-boards = ["vs-system", "zax-nes/parked-boards"]
 # Lot FIDPLUS-2: the `dot-trace` subcommand (the PPU dot by dot). Diagnostics only.
 dot-trace = ["zax-nes/ppu-dot-trace"]
-# Lot FIDPLUS-2: the netlist's `$2007` read merge rules (off by default in `zax-nes`).
-ppu-2007-read-merge = ["zax-nes/ppu-2007-read-merge"]
 
 # The wgpu renderer (`render --backend vulkan|dx12`), desktop only.
 wgpu = ["zax-render/wgpu"]

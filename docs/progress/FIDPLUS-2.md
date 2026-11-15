@@ -7,7 +7,7 @@ Branch `feat/fidplus-2`, from `feat/fidplus-1` (6289064d). Details: `docs/review
 | Per-dot trace (`ppu-dot-trace`, harness `dot-trace`) | done, diagnostics only, never in `default` |
 | `INC $2007` double write (first address gets the final value) | done, all regions |
 | Dot-257 copy after a `$2001` switch on dot 256 (alignments 2-3) | done, NTSC/Multi |
-| `$2007` render-read merge rules | done behind feature `ppu-2007-read-merge`, off: moves Zelda II Europe frame 600 (owner's eye) |
+| `$2007` render-read merge rules | done, on: confirmed on Zelda II's title split replayed on the netlist; changes Zelda II Europe golden frame 600 |
 | Tile latch of the first fetch after a switch on | open lead |
 
 ## Validation (7ee71a40)

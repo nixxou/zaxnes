@@ -296,10 +296,13 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
     included (natural X and Y, plus the read's Y: fine Y steps twice);
   - when X is 257 (odd: the residue case), the horizontal copy of 257 overrides the read's X
     increment: only its Y is left.
-  **Done** in `read_buffer_from_fetch`, **behind the Cargo feature `ppu-2007-read-merge`, off by
-  default**: `emu.ppu_bus_conflicts` (C1) is on by default, and with it these rules move the
-  golden pictures (pixels and tiles) of Zelda II Europe (the golden harness runs it with NTSC
-  timing), which waits for the owner's eye, as Q-139 did. Visible lines then agree with the
+  **Done** in `read_buffer_from_fetch`, on by default. With C1 (on by default) they change Zelda
+  II Europe's title screen (golden frame 600, ~9 400 pixels: the landscape below the split). The
+  title does, on line 141, `$2006` = `$2A`, `$00` then two `$2007` reads 12 dots apart, the reads
+  landing between dots 247 and 275 (600 frames traced). `mkz2.py` replays that sequence on the
+  netlist, sliding over dots 245-287, alignments 2 and 3: **without** the rules, Zaxnes diverges
+  on the two frames whose reads latch on dots 254-257 (33 847 and 2 383 dots); **with** them, every
+  frame matches (only the 1-2 dot recording instants). Owner: "je te fais confiance". Visible lines then agree with the
   netlist in every whole frame (no run longer than the 1-2 dot recording instant of an
   increment). Lines 240-261 still differ: the program never writes `$2000` and the netlist powers
   on with PPUCTRL's +32 increment (seen with `INC $2007` too), so its vblank reads step by 32 — a

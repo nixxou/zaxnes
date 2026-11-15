@@ -2595,10 +2595,8 @@ impl Ppu2C02 {
             // Lot FIDPLUS-2 (A5, netlist): the read's X and Y increments are the pipeline's own
             // signals, so on a dot that increments coarse X anyway (every eighth, 328, 336) they
             // merge with it: one X increment, plus Y; on dot 256, which makes both, nothing more.
-            // Feature `ppu-2007-read-merge`, off by default: it moves Zelda II Europe's golden
-            // pictures, which waits for the owner's eye.
-            if cfg!(feature = "ppu-2007-read-merge")
-                && matches!(latch_dot, 8..=256 | 328 | 336)
+            // Checked on Zelda II's title split, replayed on the netlist (A5).
+            if matches!(latch_dot, 8..=256 | 328 | 336)
                 && latch_dot % 8 == 0
                 && self.netlist_measured_region()
             {
@@ -2616,10 +2614,7 @@ impl Ppu2C02 {
         let residue = self.fetch_bus_value(cart.as_deref());
         self.read_buffer = residue;
         self.run_dots(1, cart);
-        if cfg!(feature = "ppu-2007-read-merge")
-            && latch_dot == 257
-            && self.netlist_measured_region()
-        {
+        if latch_dot == 257 && self.netlist_measured_region() {
             // Lot FIDPLUS-2 (A5, netlist): on dot 257 the horizontal copy overrides the read's
             // coarse X increment; only its Y increment is left.
             self.increment_y();
