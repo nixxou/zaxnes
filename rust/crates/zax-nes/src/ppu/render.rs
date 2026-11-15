@@ -83,12 +83,6 @@ impl Ppu2C02 {
         let dot = self.dot;
         let visible = self.scanline < VISIBLE_SCANLINES;
 
-        if dot == 257 {
-            if let Some(renders) = self.copy_257_renders.take() {
-                self.copy_257_late_switch(renders, visible);
-            }
-        }
-
         if self.rendering_enabled() {
             if visible {
                 self.run_rendering_dot::<K, true>(dot, cart);
@@ -501,21 +495,7 @@ impl Ppu2C02 {
         self.v = (self.v & !0x03E0) | (coarse_y << 5);
     }
 
-    /// Dot 257 after a `$2001` switch on dot 256: the copy follows the state before the switch
-    /// (`copy_257_renders`, A5). Switched off: the copy is still made; switched on: it is not.
-    fn copy_257_late_switch(&mut self, renders_before: bool, visible: bool) {
-        let rendering_line = visible || self.scanline == self.pre_render_scanline();
-        if !rendering_line {
-            return;
-        }
-        if renders_before && !self.rendering_enabled() {
-            self.transfer_address_x();
-        } else if !renders_before && self.rendering_enabled() {
-            self.copy_257_suppressed = true;
-        }
-    }
-
-    fn transfer_address_x(&mut self) {
+    pub(super) fn transfer_address_x(&mut self) {
         self.v = (self.v & !0x041F) | (self.t & 0x041F);
 
         // R2-005: the horizontal reload of dot 257 — and the vertical increment of dot 256

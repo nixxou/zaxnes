@@ -231,12 +231,9 @@ pub struct Ppu2C02 {
     /// stored to (lot FIDPLUS-2, [`Self::rewrite_pending_vram_write`]). Not part of the state:
     /// the two writes it pairs belong to one instruction, and a state is never taken inside one.
     last_data_write: (i64, u16),
-    /// The rendering state the horizontal copy of the next dot 257 must use, when a `$2001`
-    /// switch landed on dot 256 (lot FIDPLUS-2, A5): the copy follows the state of one dot
-    /// earlier than the fetches and increments do. Consumed on dot 257; not part of the state
-    /// (a `$2001` write is the last access of its instruction, and the dot follows at once).
-    copy_257_renders: Option<bool>,
-    /// Set by [`Self::copy_257_late_switch`]: this dot 257 makes no horizontal copy.
+    /// The next dot 257 makes no horizontal copy: rendering was switched on with the switch
+    /// landing on dot 256 (lot FIDPLUS-2, A5, [`Self::switch_rendering`]). Consumed on dot 257;
+    /// not part of the state (a `$2001` write ends its instruction and the dot follows at once).
     copy_257_suppressed: bool,
     /// Per-dot trace (feature `ppu-dot-trace`): on, the PPU runs every dot through
     /// [`Self::step_dot`] (no span, no idle skip) and records it. Not part of the state.
@@ -644,7 +641,6 @@ impl Ppu2C02 {
             oam_seed_row: 0,
             oamaddr_bug: true,
             last_data_write: (i64::MIN, 0),
-            copy_257_renders: None,
             copy_257_suppressed: false,
             #[cfg(feature = "ppu-dot-trace")]
             dot_trace: None,
@@ -932,12 +928,22 @@ impl Ppu2C02 {
         }
         let ran_ahead = renders && self.prepaid_dots == delay;
         let write_dot = self.dot - if ran_ahead { delay } else { 0 };
-        // A switch on dot 256 (written on 254): the horizontal copy of dot 257 still sees the
+        // A switch on dot 256 (written on 254): the horizontal copy of dot 257 still follows the
         // old state — the netlist copies after a switch off and does not after a switch on, in
-        // alignments 2 and 3 (A5; alignments 0 and 1 hit the switch-on race of step 33).
-        self.copy_257_renders =
-            (ran_ahead && self.dot == 256 && self.alignment >= 2).then(|| self.rendering_enabled());
+        // alignments 2 and 3 (A5; alignments 0 and 1 hit the switch-on race of step 33). Both are
+        // settled here, on the write, so that nothing is tested per dot.
+        let late_switch = ran_ahead && self.dot == 256 && self.alignment >= 2;
+        let was_rendering = self.rendering_enabled();
         self.mask = value;
+        if late_switch {
+            let now_rendering = self.rendering_enabled();
+            if was_rendering && !now_rendering {
+                // Nothing reads `v` on dot 257 with rendering off: copying now is the same.
+                self.transfer_address_x();
+            } else if !was_rendering && now_rendering {
+                self.copy_257_suppressed = true;
+            }
+        }
         let on = (value & 0x18) != 0;
         self.rendering_switched(on);
         if ran_ahead {
@@ -2585,6 +2591,17 @@ impl Ppu2C02 {
             self.run_dots(1, cart);
             self.prepaid_dots = latch_dots;
             self.read_buffer = self.fetch_bus_value(cart.as_deref());
+            // Lot FIDPLUS-2 (A5, netlist): the read's X and Y increments are the pipeline's own
+            // signals, so on a dot that increments coarse X anyway (every eighth, 328, 336) they
+            // merge with it: one X increment, plus Y; on dot 256, which makes both, nothing more.
+            if matches!(latch_dot, 8..=256 | 328 | 336) && latch_dot % 8 == 0 {
+                if latch_dot != 256 {
+                    self.increment_y();
+                    self.v_row_next = self.v;
+                }
+                self.notify_address_bus(self.v & 0x3FFF, cart);
+                return true;
+            }
             return false;
         }
 
@@ -2592,7 +2609,15 @@ impl Ppu2C02 {
         let residue = self.fetch_bus_value(cart.as_deref());
         self.read_buffer = residue;
         self.run_dots(1, cart);
-        self.increment_vram_address(cart);
+        if latch_dot == 257 {
+            // Lot FIDPLUS-2 (A5, netlist): on dot 257 the horizontal copy overrides the read's
+            // coarse X increment; only its Y increment is left.
+            self.increment_y();
+            self.v_row_next = self.v;
+            self.notify_address_bus(self.v & 0x3FFF, cart);
+        } else {
+            self.increment_vram_address(cart);
+        }
         self.run_dots(1, cart);
         self.prepaid_dots = latch_dots + 1;
         if self.fetching() {
