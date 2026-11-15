@@ -974,6 +974,10 @@ places where puNES itself is incomplete are copied, not invented around:
   fires. `IrqP` counts while enabled, asserts at `$1000` and clears when disabled; no dump in the
   Hackset to settle it.
 * 357 runs its *SMB2J* layout only (DIP switch 0); the other three games are selected by the DIP.
+* 422/534 (puNES `mapper_126.c`): the DIP read over `$8000-$FFFF` (`$6001` D0, low two bits
+  from the switches) is not modelled, since the switches are 0 and the ROM windows stay cached;
+  534's two-cycle A12 IRQ delay (`irqA12_delay = 2`) is not either; the "old dumps" CHR XOR is
+  read the non-old way. No dump in the Hackset.
 * 281/282/295 apply puNES's outer bank to ROM nametables too (`mirroring_swap_jyasic_28x`); with
   no dump in the Hackset this is untested on a real image.
 

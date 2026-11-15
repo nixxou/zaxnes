@@ -107,7 +107,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 417 | `mapper_417.c` | 131 | 1 | 0 | done (batch 18, `IrqP`) |
 | 420 | `mapper_420.c` | 96 | 1 | 0 | done (batch 13, `Mmc3P`) |
 | 421 | `mapper_421.c` | 72 | 1 | 0 | done (batch 7, `JyCompany` + `JyMulticart`) |
-| 422 | `mapper_126.c` | 153 | 7 | 0 | todo |
+| 422 | `mapper_126.c` | 153 | 7 | 0 | done (batch 21, `Mmc3P`) |
 | 428 | `mapper_428.c` | 95 | 6 | 0 | done (batch 7, `MultiP`) |
 | 429 | `mapper_429.c` | 56 | 1 | 0 | done (batch 7, `MultiP`) |
 | 431 | `mapper_431.c` | 81 | 1 | 0 | done (batch 7, `MultiP`) |
@@ -136,7 +136,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 527 | `mapper_527.c` | 61 | 0 | 0 | todo |
 | 528 | `mapper_528.c` | 118 | 0 | 0 | todo |
 | 532 | `mapper_532.c` | 411 | 0 | 0 | todo |
-| 534 | `mapper_126.c` | 153 | 10 | 0 | todo |
+| 534 | `mapper_126.c` | 153 | 10 | 0 | done (batch 21, `Mmc3P`) |
 | 536 | `mapper_195.c` | 148 | 0 | 0 | done (batch 20, alias, `registry::board_number`) |
 | 538 | `mapper_538.c` | 64 | 2 | 0 | done (batch 9, `MultiP`) |
 | 539 | `mapper_539.c` | 113 | 1 | 0 | todo |
@@ -233,3 +233,5 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 * Batch 20: `registry::board_number` — puNES dispatches 248 to `map_init_115` and 536 to
   `map_init_195`; `Cartridge::create` builds the board, its memory sizes, bus conflicts and latch
   lists from that number and keeps the header's as `mapper_number`. The mf_3b sweep lists both.
+* Batch 21: 422 and 534 in `Mmc3P`, puNES's own `mapper_126.c` model (Zaxnes's 126 follows
+  Mesen2's `MMC3_126.h` and is left as it is). 534 inverts `$C000`/`$C001` data.

@@ -77,6 +77,12 @@ pub enum Mmc3PKind {
     /// 412, `mapper_412.c` (Intellivision 10-in-1 PVP): `$5000-$7FFF` four registers until a lock,
     /// an NROM and CNROM-like mode.
     M412,
+    /// 422, `mapper_126.c` (BS-300/BS-400/BS-4040 multicarts): four registers at `$6000-$6003`
+    /// with a lock, NROM modes and a CNROM-like CHR mode; puNES's own reading of the TEC9719
+    /// family, with 422's CHR outer bank from `$6000` D3-D5.
+    M422,
+    /// 534, `mapper_126.c` (ING003C): 422's board whose `$C000`/`$C001` data is inverted.
+    M534,
 }
 
 impl Mmc3PKind {
@@ -107,6 +113,8 @@ impl Mmc3PKind {
             516 => Self::M516,
             393 => Self::M393,
             412 => Self::M412,
+            422 => Self::M422,
+            534 => Self::M534,
             _ => return None,
         })
     }
@@ -136,6 +144,8 @@ impl Mmc3PKind {
             Self::M516 => 516,
             Self::M393 => 393,
             Self::M412 => 412,
+            Self::M422 => 422,
+            Self::M534 => 534,
         }
     }
 }
@@ -151,6 +161,8 @@ pub struct Mmc3P {
     index: u8,
     /// Whether the cartridge has CHR-RAM rather than CHR-ROM.
     chr_ram: bool,
+    /// The NES 2.0 submapper (0 on iNES 1.0), which 422's PRG A20 doubling reads.
+    submapper: u8,
 }
 
 impl Mmc3P {
@@ -161,6 +173,14 @@ impl Mmc3P {
             outer: [0; 4],
             index: 0,
             chr_ram: memory.rom().chr_rom().is_empty(),
+            submapper: {
+                let header = memory.rom().header();
+                if header.is_nes20 {
+                    u8::try_from(header.submapper).unwrap_or(0)
+                } else {
+                    0
+                }
+            },
         }
     }
 
@@ -353,8 +373,52 @@ impl Mmc3P {
                     ((((o[1] & 0x40) >> 2) | ((o[1] & 0x04) << 3)) & !mask) | (page & mask)
                 }
             }
+            Mmc3PKind::M422 | Mmc3PKind::M534 => self.prg_page_126(slot, page),
             _ => page,
         }
+    }
+
+    /// `prg_swap_mmc3_126` for 422 and 534: `$6000` D6 halves the mask, D4-D5 and D0-D2 the
+    /// outer bank, `$6003` D0-D1 the NROM modes built from R6.
+    fn prg_page_126(&self, slot: usize, page: i32) -> i32 {
+        let o = self.outer.map(i32::from);
+        let window = i32::try_from(slot).unwrap_or(0);
+        let mut mask = ((!o[0] & 0x40) >> 2) | 0x0F;
+        let mut base = (((o[0] & 0x30) << 3) | ((o[0] & 0x07) << 4)) & !mask;
+        if self.submapper == 1 {
+            base |= (base & 0x100) >> 1;
+        }
+        let r6 = i32::from(self.mmc3.bank_register(6));
+        let value = match o[3] & 0x03 {
+            0 => page,
+            3 => {
+                base |= r6 & mask;
+                mask = 0x03;
+                window
+            }
+            _ => {
+                base |= r6 & mask;
+                mask = 0x01;
+                window & 0x01
+            }
+        };
+        (base & !mask) | (value & mask)
+    }
+
+    /// `chr_swap_mmc3_126` for 422 and 534 (`reg0 ^ $20`, the non-"old dump" reading); `slot` is
+    /// the 1 KiB window, which the CNROM-like mode (`$6003` D4) uses as the page.
+    fn chr_page_126(&self, slot: usize, page: i32) -> i32 {
+        let o = self.outer.map(i32::from);
+        let reg0 = o[0] ^ 0x20;
+        let mut base = (reg0 & 0x38) << 4;
+        let mut mask = (!reg0 & 0x80) | 0x7F;
+        let mut value = page;
+        if o[3] & 0x10 != 0 {
+            base = ((o[2] & (mask >> 3)) | (base >> 3)) << 3;
+            mask = 0x07;
+            value = i32::try_from(slot).unwrap_or(0);
+        }
+        (base & !mask) | (value & mask)
     }
 
     /// `chr_swap_mmc3_NNN`: the 1 KiB bank `page` becomes.
@@ -484,6 +548,8 @@ impl Mmc3P {
             // `chr_swap_mmc3_412` in the NROM mode: an 8 KiB bank from `reg[0]` D2 up.
             let base = (i32::from(self.outer[0]) >> 2) << 3;
             std::array::from_fn(|slot| base | i32::try_from(slot).unwrap_or(0))
+        } else if matches!(self.kind, Mmc3PKind::M422 | Mmc3PKind::M534) {
+            std::array::from_fn(|slot| self.chr_page_126(slot, raw_chr[slot]))
         } else if self.kind == Mmc3PKind::M399 {
             // `chr_fix_mmc3_399`: two 4 KiB banks, `reg[2]` and `reg[3]`.
             let (low, high) = (i32::from(self.outer[2]) << 2, i32::from(self.outer[3]) << 2);
@@ -519,6 +585,18 @@ impl Mmc3P {
             } else {
                 NametableMirroring::SingleScreenA
             });
+        }
+    }
+
+    /// `extcl_cpu_wr_mem_126`: `$6000-$6003` until `$6003` D7 locks them; locked, `$6002` still
+    /// takes its low one or two bits (one when its D4 is set).
+    fn write_126(r: &mut [u16; 4], address: u16, data: u16) {
+        let index = usize::from(address & 0x03);
+        if r[3] & 0x80 == 0 {
+            r[index] = data;
+        } else if index == 2 {
+            let mask = 0x03 >> u16::from(r[2] & 0x10 != 0);
+            r[2] = (r[2] & !mask) | (data & mask);
         }
     }
 
@@ -606,6 +684,10 @@ impl Mmc3P {
                     r[usize::from(self.index)] = data;
                     self.index = (self.index + 1) & 0x03;
                 }
+            }
+            // `extcl_cpu_wr_mem_126`.
+            Mmc3PKind::M422 | Mmc3PKind::M534 if (0x6000..=0x7FFF).contains(&address) => {
+                Self::write_126(r, address, data);
             }
             // `extcl_cpu_wr_mem_372`: four registers in turn.
             Mmc3PKind::M372 if (0x6000..=0x7FFF).contains(&address) => {
@@ -701,6 +783,12 @@ impl Mapper for Mmc3P {
         if self.kind == Mmc3PKind::M516 && address & 0x0010 != 0 {
             self.outer[0] = address & 0x0F;
         }
+        // `extcl_cpu_wr_mem_126`: 534 inverts the data of `$C000`/`$C001` (the IRQ latch).
+        let value = if self.kind == Mmc3PKind::M534 && address & 0xE000 == 0xC000 {
+            !value
+        } else {
+            value
+        };
         if self.kind == Mmc3PKind::M399 && address < 0xA000 {
             let index = (usize::from(address & 0x0001 == 0) << 1) | usize::from(value >> 7);
             self.outer[index] = u16::from(value);

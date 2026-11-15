@@ -901,3 +901,27 @@ fn mappers_p_551_banks_chr_through_4803() {
     core.mapper_write(0x4881, 0x02);
     assert_eq!([4, 5, 14, 15], core.prg_windows());
 }
+
+/// `mapper_126.c` as 422: `$6000` D0-D2 the outer 128 KiB bank; `$6003` D0-D1 = 3 is NROM-256.
+#[cfg(feature = "board-422")]
+#[test]
+fn mappers_p_422_has_an_outer_bank_and_nrom_modes() {
+    let mut core = MapperRom::new(422).prg(64).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    // D6 set: a 128 KiB inner mask, D0 the outer bank.
+    core.mapper_write(0x6000, 0x41);
+    assert_eq!([17, 18, 30, 31], core.prg_windows());
+    core.mapper_write(0x6003, 0x03);
+    assert_eq!([16, 17, 18, 19], core.prg_windows());
+}
+
+/// `mapper_126.c` as 534: the same outer bank.
+#[cfg(feature = "board-534")]
+#[test]
+fn mappers_p_534_has_an_outer_bank() {
+    let mut core = MapperRom::new(534).prg(64).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    // D6 clear: a 256 KiB inner mask, D1 the outer 256 KiB bank.
+    core.mapper_write(0x6000, 0x02);
+    assert_eq!([33, 34, 62, 63], core.prg_windows());
+}
