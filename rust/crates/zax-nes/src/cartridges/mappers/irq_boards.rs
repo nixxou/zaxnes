@@ -743,7 +743,8 @@ impl Mapper for IrqBoard {
     #[cfg(any(
         feature = "board-68-chr-nametables",
         feature = "board-jy-asic",
-        feature = "board-512"
+        feature = "board-512",
+        feature = "board-560"
     ))]
     fn read_nametable(&self, memory: &CartridgeMemory, address: u16) -> u8 {
         inner!(self, b => b.read_nametable(memory, address))
@@ -840,7 +841,7 @@ impl Mapper for IrqBoard {
     }
 
     /// Forwarded for mapper 682 alone: its nametables in CHR-RAM and FPGA RAM take `$2007` writes.
-    #[cfg(any(feature = "board-682", feature = "board-512"))]
+    #[cfg(any(feature = "board-682", feature = "board-512", feature = "board-560"))]
     fn write_nametable(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         inner!(self, b => b.write_nametable(memory, address, value));
     }

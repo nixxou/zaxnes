@@ -848,6 +848,7 @@ dispatch is the generic path of the exotic ones only.
 | `board-556` | 556 | `ChipSwitch` kind M556 (IrqBoard): MMC3 or VRC4 by its outer register (puNES; MAPPERS-P). Requires `board-chip-switch` | — | — (unit test) | **on** |
 | `board-351` | 351 | `ChipSwitch` kind M351 (IrqBoard): Techline XB, MMC3 / MMC1 / VRC4 by its outer register (puNES; MAPPERS-P). Requires `board-chip-switch` | — | — (unit test) | **on** |
 | `board-512` | 512 | `Mmc3P` kind M512 (IrqBoard): SL-12, CHR-RAM windows and four-screen tables (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-560` | 560 | `IrqP` kind M560 (IrqBoard): CHR from the nametable through an extension RAM (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
 | `board-53` | 53 | `MiscN` M53: Supervision 16-in-1, outer register at `$6000`, ROM at `$6000-$7FFF`, optional EPROM by CRC (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-487` | 487 | `MiscN` M487: NINA-03 and outer registers at `$4100`/`$4180`, Color Dreams register in the second half (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-518` | 518 | `MiscN` M518: Dance 2000, `$5000`/`$5200`, open bus over `$8000-$FFFF`, CHR page 0 from the nametable address (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |

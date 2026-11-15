@@ -152,7 +152,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 557 | `mapper_557.c` | 58 | 1 | 0 | done (batch 31, `MultiP`) |
 | 558 | `mapper_558.c` | 135 | 14 | 0 | done (batch 36, `IrqP`) |
 | 559 | `mapper_559.c` | 108 | 1 | 0 | done (batch 30, `VrcP`) |
-| 560 | `mapper_560.c` | 83 | 1 | 0 | todo |
+| 560 | `mapper_560.c` | 83 | 1 | 0 | done (batch 48, `IrqP`) |
 | 561 | `mapper_561.c` | 276 | 203 | 0 | todo |
 | 562 | `mapper_562.c` | 538 | 290 | 0 | todo |
 | 564 | `mapper_564.c` | 77 | 0 | 0 | done (batch 9, `MultiP`) |
@@ -338,3 +338,11 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   RAM's second 4 KiB, served by the board (`nametable_page` = `SERVED_BY_CARTRIDGE`,
   `read_nametable`/`write_nametable`, now forwarded by `IrqBoard` behind `board-512`; in
   `nametable_pages_vary`). The decision is taken where the chip's mirroring is settled.
+* Perf, batches 1-46 (52c21a15) against e4596884, with smb3 added (an MMC3 in `IrqBoard`, for the
+  `rom_windows` forward): mm2 core +0.000 %, total +0.000 %; zelda2 core +0.000 %, total
+  -0.006 %; smb3 core +0.000 %, total +0.018 % (all of it in the `convert` and `lua_hooks`
+  stages, +2.75 M each, outside the core). Script: `cleanroom/verify/rust-v2/cgs.sh`.
+* Batch 48: `IrqP` 560: the board serves the console's two nametables itself (by the header's
+  mirroring, `SERVED_BY_CARTRIDGE`) so that it sees the writes to tables 1 and 3 it copies to its
+  1 KiB extension RAM; the nametable address latched on A13's rise (`watches_ppu_reads`, the
+  mf_3b sweep) picks that RAM's byte as the CHR bank of the next pattern fetch in bank 1.

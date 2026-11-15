@@ -1513,3 +1513,24 @@ fn mappers_p_512_maps_chr_ram_and_four_screen_tables() {
         cartridge.nametable_page(2)
     );
 }
+
+/// `mapper_560.c`: any write toggles the 32 KiB bank (power-on 1); a write to table 1 is copied
+/// to the extension RAM, whose byte for the latched tile is the CHR bank of the pattern fetches
+/// in bank 1; in bank 0 the fetch's plane bit A3 becomes CHR A16.
+#[cfg(feature = "board-560")]
+#[test]
+fn mappers_p_560_reads_chr_through_the_nametable() {
+    let mut core = MapperRom::new(560).prg(32).chr(128).load();
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    core.mapper_write(0x8000, 0);
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    assert_eq!(64, core.chr_bank(0x0008));
+    core.write_memory(0x2006, 0x24);
+    core.write_memory(0x2006, 0x05);
+    core.write_memory(0x2007, 0x03);
+    core.mapper_write(0x8000, 0);
+    let cartridge = core.cartridge_mut().unwrap();
+    cartridge.on_ppu_address_bus(0x0000, 0);
+    cartridge.on_ppu_address_bus(0x2405, 2);
+    assert_eq!(6, core.chr_bank(0x0000));
+}

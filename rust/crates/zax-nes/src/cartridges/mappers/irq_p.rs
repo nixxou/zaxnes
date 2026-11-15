@@ -12,6 +12,9 @@ use crate::cartridges::{A12Watcher, BankWindows, CartridgeMemory, ChrFetch, ChrV
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
 
+/// 560's nametable memory: the console's 2 KiB it serves itself, then the 1 KiB extension RAM.
+const NT_560: usize = 0xC00;
+
 /// The boards of this module.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IrqPKind {
@@ -61,6 +64,10 @@ pub enum IrqPKind {
     /// written in one go at `$A000`/`$C000` (A0-A3 the command, `$C000` adding an outer bank),
     /// with a VRC7's IRQ on commands `$D`-`$F` and command `$B` ignored.
     M528,
+    /// 560, `mapper_560.c` (a *Mahjong* board): any write toggles the 32 KiB bank; a write to
+    /// tables 1 or 3 is copied to a 1 KiB extension RAM, and with the bank at 1 each pattern
+    /// fetch reads the CHR-ROM bank that RAM holds for the tile the last nametable fetch named.
+    M560,
 }
 
 impl IrqPKind {
@@ -81,6 +88,7 @@ impl IrqPKind {
             359 => Self::M359,
             540 => Self::M540,
             528 => Self::M528,
+            560 => Self::M560,
             _ => return None,
         })
     }
@@ -100,6 +108,7 @@ impl IrqPKind {
             Self::M359 => 359,
             Self::M540 => 540,
             Self::M528 => 528,
+            Self::M560 => 560,
         }
     }
 }
@@ -125,6 +134,10 @@ pub struct IrqP {
     /// and the last A12 level; saved for those kinds only. `regs` hold `prg[0..4]`, `chr` the
     /// eight CHR registers, `irq_counter` the 16-bit counter.
     ext_359: [u8; 8],
+    /// 560's nametables and extension RAM ([`NT_560`] bytes), empty for the other kinds; saved
+    /// for that kind only. `regs[0]` is its bank toggle, `regs[1]` the PPU A13 latch, and
+    /// `irq_counter` the nametable address latched on A13's rise.
+    nt_560: Vec<u8>,
     /// 528's VRC7 IRQ (`init_VRC7(0x01, 0x00)`), saved for that kind only.
     vrc_irq: VrcIrq,
     /// Whether the image has CHR-ROM, which 359's CHR banking needs (`chrrom_size()`).
@@ -148,6 +161,11 @@ impl IrqP {
             ext_359: [0, 0x3F, 0, 0xFF, 0, 0, 0, 0],
             chr_rom: !memory.rom().chr_rom().is_empty(),
             vrc_irq: VrcIrq::new(),
+            nt_560: if kind == IrqPKind::M560 {
+                vec![0; NT_560]
+            } else {
+                Vec::new()
+            },
             eeprom: (kind == IrqPKind::M558 && memory.prg_ram().len() == Self::EEPROM_RAM_SIZE)
                 .then(Eeprom93C66::new),
         };
@@ -156,6 +174,10 @@ impl IrqP {
         if matches!(kind, IrqPKind::M359 | IrqPKind::M540) {
             board.regs = [0xFC, 0xFD, 0xFF, 0x00];
             board.chr = [0, 1, 2, 3, 4, 5, 6, 7];
+        }
+        // `map_init_560`: `reg = 1`.
+        if kind == IrqPKind::M560 {
+            board.regs[0] = 1;
         }
         // `init_FME7`: `prg[0..4]` = 0, 0, 1, `$FE`; CHR 0-7. `nametables[0]` is the FME-7's
         // mirroring command, `nametables[1]` the outer bank (`m528.reg`).
@@ -230,18 +252,12 @@ impl IrqP {
                 b.map_chr_8k((r[1] & 0x06) >> 1);
             }
             IrqPKind::M359 | IrqPKind::M540 => self.map_359(),
-            // `prg_swap_fme7_528`/`chr_swap_fme7_528`: `outer + (value & (outer | $0F))`, the
-            // last window `~0`; CHR `outer << 4 | value`.
-            IrqPKind::M528 => {
-                let outer = i32::from(self.nametables[1]);
-                let mask = outer | 0x0F;
-                for (slot, value) in [r[1], r[2], r[3], 0xFF].into_iter().enumerate() {
-                    b.map_prg_8k(slot, outer + (value & mask));
-                }
-                for (slot, bank) in self.chr.iter().enumerate() {
-                    b.map_chr_1k(slot, (outer << 4) | i32::from(*bank));
-                }
+            // `prg_fix_560`.
+            IrqPKind::M560 => {
+                b.map_prg_32k(r[0]);
+                b.map_chr_8k(0);
             }
+            IrqPKind::M528 => self.map_528(),
             // `prg_fix_442`: `reg[0]` D6 above D0-D4.
             IrqPKind::M442 => {
                 b.map_prg_32k(((r[0] & 0x40) >> 1) | (r[0] & 0x1F));
@@ -459,6 +475,33 @@ impl IrqP {
         self.ext_359[6] = 5;
     }
 
+    /// Where a nametable address falls in 560's copy of the console's 2 KiB, by the header's
+    /// mirroring.
+    fn nt_offset_560(memory: &CartridgeMemory, address: u16) -> usize {
+        let page = match memory.mirroring() {
+            NametableMirroring::Horizontal => (address >> 11) & 0x01,
+            NametableMirroring::SingleScreenA => 0,
+            NametableMirroring::SingleScreenB => 1,
+            _ => (address >> 10) & 0x01,
+        };
+        usize::from(page) * 0x400 + usize::from(address & 0x03FF)
+    }
+
+    /// `prg_swap_fme7_528`/`chr_swap_fme7_528`: `outer + (value & (outer | $0F))`, the last
+    /// window `~0`; CHR `outer << 4 | value`.
+    fn map_528(&mut self) {
+        let r = self.regs.map(i32::from);
+        let b = &mut self.banks;
+        let outer = i32::from(self.nametables[1]);
+        let mask = outer | 0x0F;
+        for (slot, value) in [r[1], r[2], r[3], 0xFF].into_iter().enumerate() {
+            b.map_prg_8k(slot, outer + (value & mask));
+        }
+        for (slot, bank) in self.chr.iter().enumerate() {
+            b.map_chr_1k(slot, (outer << 4) | i32::from(*bank));
+        }
+    }
+
     /// The mirroring a kind drives, if any (`mirroring_fix_357`: vertical with the DIP at 0;
     /// `mirroring_fix_416`: `$8000` D2).
     fn mirroring(&self) -> Option<NametableMirroring> {
@@ -612,6 +655,12 @@ impl IrqP {
             IrqPKind::M272 => self.latch_272(address, value),
             IrqPKind::M359 | IrqPKind::M540 => self.latch_359(address, value),
             IrqPKind::M528 => self.latch_528(address, value),
+            // `extcl_cpu_wr_mem_560`: any write toggles the bank.
+            IrqPKind::M560 => {
+                if address >= 0x8000 {
+                    r[0] ^= 1;
+                }
+            }
             // `extcl_cpu_wr_mem_442`: `$5000-$5FFF`, A8-A10 the register, of which only the
             // first is read.
             IrqPKind::M442 => {
@@ -648,6 +697,9 @@ impl Mapper for IrqP {
         if self.kind == IrqPKind::M528 {
             self.vrc_irq.save_state(writer);
         }
+        if self.kind == IrqPKind::M560 {
+            writer.write_raw(&self.nt_560);
+        }
         if self.kind == IrqPKind::M471 {
             self.a12.save_state(writer);
         }
@@ -668,6 +720,9 @@ impl Mapper for IrqP {
         }
         if self.kind == IrqPKind::M528 {
             self.vrc_irq.load_state(reader)?;
+        }
+        if self.kind == IrqPKind::M560 {
+            reader.read_into(&mut self.nt_560)?;
         }
         if self.kind == IrqPKind::M471 {
             self.a12.load_state(reader)?;
@@ -755,7 +810,7 @@ impl Mapper for IrqP {
                 }
             }
             IrqPKind::M528 => self.vrc_irq.step_cpu_cycle(),
-            IrqPKind::M471 | IrqPKind::M558 | IrqPKind::M272 | IrqPKind::M442 => {}
+            IrqPKind::M471 | IrqPKind::M558 | IrqPKind::M272 | IrqPKind::M442 | IrqPKind::M560 => {}
         }
     }
 
@@ -772,6 +827,18 @@ impl Mapper for IrqP {
                 self.clock_359();
             }
             self.ext_359[7] = a12;
+        }
+        // `extcl_rd_nmt_560`/`extcl_rd_chr_560`: the first nametable fetch after a pattern fetch
+        // latches its address.
+        if self.kind == IrqPKind::M560 {
+            if address >= 0x2000 {
+                if self.regs[1] == 0 {
+                    self.irq_counter = u32::from(address & 0x03FF);
+                }
+                self.regs[1] = 1;
+            } else {
+                self.regs[1] = 0;
+            }
         }
         // `mode1_bpp`: PPU A0 and A9 on the rise of A13 (`regs[1]`, `regs[2]`; `regs[3]` the
         // previous A13).
@@ -865,7 +932,7 @@ impl Mapper for IrqP {
 
     /// 442's 1 bpp mode reads its own CHR address, so the peek view is not the windows'.
     fn chr_peek_view<'m>(&self, memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
-        if self.kind == IrqPKind::M442 {
+        if matches!(self.kind, IrqPKind::M442 | IrqPKind::M560) {
             return None;
         }
         let chr_rom = memory.rom().chr_rom();
@@ -880,6 +947,19 @@ impl Mapper for IrqP {
     /// `extcl_rd_chr_442`: in the 1 bpp mode (`reg[0]` D7) CHR A12 and A3 are the latched PPU A9
     /// and A0.
     fn ppu_peek(&self, memory: &CartridgeMemory, address: u16, _fetch: ChrFetch) -> u8 {
+        // `extcl_rd_chr_560`: `A12-A10 → 11-9`, `A9-A4 → 8-3`, `A2-A0`, plane A3 dropped; above
+        // them the extension RAM's byte for the latched tile (bank 1) or A3 as A16 (bank 0).
+        if self.kind == IrqPKind::M560 && address < 0x2000 {
+            let a = usize::from(address);
+            let base = ((a >> 10) << 9) | ((a & 0x03F0) >> 1) | (a & 0x07);
+            let high = if self.regs[0] != 0 {
+                let tile = usize::try_from(self.irq_counter & 0x03FF).unwrap_or(0);
+                (usize::from(self.nt_560[0x800 + tile]) << 11) & 0x1_F800
+            } else {
+                ((a & 0x03FF) << 13) & 0x1_0000
+            };
+            return memory.read_chr_direct(high | base);
+        }
         let address = if self.kind == IrqPKind::M442 && self.regs[0] & 0x80 != 0 {
             (u16::from(self.regs[2]) << 12) | (address & 0x0FF7) | (u16::from(self.regs[1]) << 3)
         } else {
@@ -896,10 +976,33 @@ impl Mapper for IrqP {
         )
     }
 
+    /// 560 serves the console's nametables itself, to see the writes `extcl_wr_nmt_560` copies.
+    fn read_nametable(&self, memory: &CartridgeMemory, address: u16) -> u8 {
+        self.nt_560
+            .get(Self::nt_offset_560(memory, address))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// `extcl_wr_nmt_560`: a write to table 1 or 3 is also the extension RAM's byte.
+    fn write_nametable(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        let offset = Self::nt_offset_560(memory, address);
+        if let Some(byte) = self.nt_560.get_mut(offset) {
+            *byte = value;
+        }
+        if address & 0x0400 != 0 {
+            if let Some(byte) = self.nt_560.get_mut(0x800 + usize::from(address & 0x03FF)) {
+                *byte = value;
+            }
+        }
+    }
+
     /// `mirroring_fix_417`: a CIRAM page per table from each register's D0.
     fn nametable_page(&self, table: i32) -> i32 {
         if self.kind == IrqPKind::M417 {
             i32::from(self.nametables[usize::try_from(table & 0x03).unwrap_or(0)] & 0x01)
+        } else if self.kind == IrqPKind::M560 {
+            super::super::Cartridge::SERVED_BY_CARTRIDGE
         } else {
             super::super::Cartridge::FOLLOW_MIRRORING
         }

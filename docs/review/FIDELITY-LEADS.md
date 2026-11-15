@@ -1027,6 +1027,10 @@ places where puNES itself is incomplete are copied, not invented around:
   the PPU sees CHR-RAM. This core's PRG windows wrap on the PRG-ROM alone and its CHR memory is
   one chip, so that mode maps the image's own CHR and PRG banks past the PRG-ROM wrap. The DIP
   switches read 0 (J33 for the open-bus bits).
+* 560 (`mapper_560.c`): in bank 0 puNES's read is `chrrom_byte(((address & $3FF) << 13) &
+  $10000) | base`, the closing parenthesis putting `| base` outside the read; the evident
+  intent, the byte at `(A3 as A16) | base`, is what this board reads. The nametables are the
+  board's own copy of the console's 2 KiB, mirrored as the header says.
 
 ### J36. Mapper 682 (Rainbow): the ESP is modelled from the protocol document
 The ESP (`rainbow_esp.rs`) follows Broke Studio's `rainbow-net.md` and `mapper-doc.md`; no

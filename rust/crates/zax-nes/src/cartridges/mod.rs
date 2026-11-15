@@ -558,6 +558,8 @@ const fn nametable_pages_vary(mapper: i32) -> bool {
             | 527
             // MAPPERS-P: 512, four-screen tables in CHR-RAM while `$4100` holds 1.
             | 512
+            // MAPPERS-P: 560 serves the console's tables itself.
+            | 560
             // MAPPERS-P: 559, a 1 KiB nametable register per table.
             | 559
             // MAPPERS-P: 353, game 0 pages CIRAM from the CHR registers' D7.
@@ -877,6 +879,8 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             // (`extcl_rd_chr_362`/`_398`, reads only).
             | 362
             | 398
+            // MAPPERS-P: 560 latches the nametable address its pattern fetches use.
+            | 560
     ) || mmc3_p_board(mapper)
 }
 
@@ -2320,7 +2324,8 @@ mod tests {
             // in `VrcP`.
             471, 442, 359, 540, 362, 398,
             // MAPPERS-P: 556 and 351 hold an `Mmc3`, in use at power-on (`ChipSwitch`).
-            556, 351,
+            556, 351, // MAPPERS-P: 560's A13 latch (`IrqP`).
+            560,
             // MAPPERS-P: 272 is latched too but absent here: its counter only moves once a game
             // enables it, and the sweep enables nothing.
             369, 512,
