@@ -1053,6 +1053,8 @@ pub(crate) enum JyMulticart {
     /// in the 512 KiB mode. The board's jumper inhibits ROM nametables and Extended Mirroring
     /// (`init_JYASIC(FALSE, ...)`), as on mapper 90.
     M388,
+    /// `mapper_397.c`: 282's PRG decode and 295's CHR decode.
+    M397,
 }
 
 impl JyMulticart {
@@ -1065,6 +1067,7 @@ impl JyMulticart {
             386 => Some(Self::M386),
             387 => Some(Self::M387),
             388 => Some(Self::M388),
+            397 => Some(Self::M397),
             _ => None,
         }
     }
@@ -1074,7 +1077,7 @@ impl JyMulticart {
         let outer = i32::from(outer);
         match self {
             Self::M281 => (outer << 5) | (bank_8k & 0x1F),
-            Self::M282 | Self::M358 => ((outer << 4) & !0x1F) | (bank_8k & 0x1F),
+            Self::M282 | Self::M358 | Self::M397 => ((outer << 4) & !0x1F) | (bank_8k & 0x1F),
             Self::M295 => (outer << 4) | (bank_8k & 0x0F),
             Self::M386 => ((outer & 0x02) << 4) | ((outer & 0x08) << 3) | (bank_8k & 0x1F),
             Self::M387 => ((outer & 0x02) << 3) | ((outer & 0x08) << 2) | (bank_8k & 0x0F),
@@ -1107,7 +1110,7 @@ impl JyMulticart {
                     (base & 0x0600) | (bank_1k & 0x1FF)
                 }
             }
-            Self::M295 => (outer << 7) | (bank_1k & 0x7F),
+            Self::M295 | Self::M397 => (outer << 7) | (bank_1k & 0x7F),
         }
     }
 }

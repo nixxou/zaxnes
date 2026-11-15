@@ -958,6 +958,8 @@ places where puNES itself is incomplete are copied, not invented around:
   allows the reset-detecting multicarts; a power cycle starts again at 0.
 * 380 (submapper 0) reads `(A0-A7) | DIP` with A8 latched; the DIP is 0, so a menu that offers
   a choice by switch shows its first one.
+* 400's `$8000-$BFFF` register drives an LED on the cartridge; puNES stores it and draws nothing,
+  Zaxnes does not store it.
 * 281/282/295 apply puNES's outer bank to ROM nametables too (`mirroring_swap_jyasic_28x`); with
   no dump in the Hackset this is untested on a real image.
 

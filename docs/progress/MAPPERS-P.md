@@ -87,16 +87,16 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 393 | `mapper_393.c` | 123 | 1 | 0 | todo |
 | 394 | `mapper_394.c` | 193 | 0 | 0 | todo |
 | 395 | `mapper_395.c` | 88 | 4 | 0 | todo |
-| 396 | `mapper_396.c` | 68 | 5 | 0 | todo |
-| 397 | `mapper_397.c` | 69 | 1 | 0 | todo |
+| 396 | `mapper_396.c` | 68 | 5 | 0 | done (batch 6, `MultiP`) |
+| 397 | `mapper_397.c` | 69 | 1 | 0 | done (batch 6, `JyCompany` + `JyMulticart`) |
 | 398 | `mapper_398.c` | 89 | 1 | 0 | todo |
 | 399 | `mapper_399.c` | 79 | 1 | 0 | todo |
-| 400 | `mapper_400.c` | 105 | 1 | 0 | todo |
+| 400 | `mapper_400.c` | 105 | 1 | 0 | done (batch 6, `MultiP`) |
 | 401 | `mapper_401.c` | 97 | 1 | 0 | todo |
-| 403 | `mapper_403.c` | 96 | 4 | 0 | todo |
+| 403 | `mapper_403.c` | 96 | 4 | 0 | done (batch 6, `MultiP`) |
 | 404 | `mapper_404.c` | 71 | 1 | 0 | todo |
 | 406 | `mapper_406.c` | 120 | 2 | 0 | todo |
-| 409 | `mapper_409.c` | 56 | 1 | 0 | todo |
+| 409 | `mapper_409.c` | 56 | 1 | 0 | done (batch 6, `MultiP`) |
 | 410 | `mapper_410.c` | 96 | 1 | 0 | todo |
 | 411 | `mapper_411.c` | 103 | 7 | 0 | todo |
 | 412 | `mapper_412.c` | 106 | 1 | 0 | todo |
@@ -185,3 +185,5 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   total -0.004 %.
 * Batch 5: `MultiP` 382 (bus conflicts through `has_bus_conflicts`) and 390; `JyMulticart` 386,
   387 and 388 (388 carries mapper 90's nametable jumper, puNES `init_JYASIC(FALSE, ...)`).
+* Batch 6: `MultiP` 396, 400 (bus conflicts; `$80` keeps the header's mirroring), 403 (registers
+  at `$4100-$4103`), 409; `JyMulticart::M397`. 400's LED is not modelled (FIDELITY-LEADS J37).

@@ -68,6 +68,16 @@ pub enum MultiPKind {
     M382,
     /// 390, `mapper_390.c` (Realtec 8031): two address registers chosen by A14.
     M390,
+    /// 396, `mapper_396.c` (YY850437C): `$A000-$BFFF` the outer bank and mirroring, elsewhere the
+    /// UNROM inner bank.
+    M396,
+    /// 400, `mapper_400.c` (8-BIT XMAS 2017): `$7800-$7FFF` the outer bank, `$C000-$FFFF` the
+    /// inner PRG and CHR bank with bus conflicts, `$8000-$BFFF` an LED.
+    M400,
+    /// 403, `mapper_403.c` (89433): three registers at `$4100-$4103`, CHR from `$8000` when enabled.
+    M403,
+    /// 409, `mapper_409.c` (retroUSB DPCMcart): `$C000-$CFFF` the address is the 16 KiB bank.
+    M409,
 }
 
 impl MultiPKind {
@@ -96,6 +106,10 @@ impl MultiPKind {
             380 => Self::M380,
             382 => Self::M382,
             390 => Self::M390,
+            396 => Self::M396,
+            400 => Self::M400,
+            403 => Self::M403,
+            409 => Self::M409,
             _ => return None,
         })
     }
@@ -123,6 +137,10 @@ impl MultiPKind {
             Self::M380 => 380,
             Self::M382 => 382,
             Self::M390 => 390,
+            Self::M396 => 396,
+            Self::M400 => 400,
+            Self::M403 => 403,
+            Self::M409 => 409,
         }
     }
 
@@ -130,6 +148,8 @@ impl MultiPKind {
     const fn decodes_low(self, address: u16) -> bool {
         match self {
             Self::M122 => address >= 0x6000,
+            Self::M400 => address >= 0x7800,
+            Self::M403 => address < 0x6000 && address & 0x0100 != 0,
             _ => false,
         }
     }
@@ -156,6 +176,8 @@ pub struct MultiP {
     prg_size: usize,
     /// The NES 2.0 submapper (0 on an iNES 1.0 image), which 354's and 380's decodes read.
     submapper: u8,
+    /// The header's mirroring, which 400 returns to while its outer register holds `$80`.
+    header_mirroring: NametableMirroring,
 }
 
 impl MultiP {
@@ -166,12 +188,13 @@ impl MultiP {
             // `map_init_343`: the latch powers on as `$FF` (inverted, bank 0 of the last game).
             regs: match kind {
                 MultiPKind::M343 => [0xFF, 0, 0, 0],
-                // `map_init_350`: register 0 powers on as `$80`.
-                MultiPKind::M350 => [0x80, 0, 0, 0],
+                // `map_init_350` and `map_init_400`: register 0 powers on as `$80`.
+                MultiPKind::M350 | MultiPKind::M400 => [0x80, 0, 0, 0],
                 _ => [0; 4],
             },
             adc: [0; 3],
             prg_size: memory.rom().prg_rom().len(),
+            header_mirroring: memory.rom().header().mirroring,
             submapper: {
                 let header = memory.rom().header();
                 if header.is_nes20 {
@@ -234,6 +257,30 @@ impl MultiP {
                 r[1] = u16::from(value);
             }
             MultiPKind::M390 => r[usize::from((address >> 14) & 0x01)] = address & 0xFF,
+            MultiPKind::M396 => {
+                r[usize::from((0xA000..=0xBFFF).contains(&address))] = u16::from(value);
+            }
+            // `extcl_cpu_wr_mem_400`: the data latch's value is already ANDed with the ROM
+            // (`has_bus_conflicts`); the LED (`$8000-$BFFF`) is not modelled.
+            MultiPKind::M400 => match address & 0xF000 {
+                0x7000 => r[0] = u16::from(value),
+                0xC000..=0xF000 => r[1] = u16::from(value),
+                _ => {}
+            },
+            // `extcl_cpu_wr_mem_403`: `$4100-$4103` the registers, `$8000-$FFFF` the CHR bank
+            // while `$4102` bit 2 allows it.
+            MultiPKind::M403 => {
+                if address < 0x8000 {
+                    r[usize::from(address & 0x03)] = u16::from(value);
+                } else if r[2] & 0x04 != 0 {
+                    r[1] = u16::from(value);
+                }
+            }
+            MultiPKind::M409 => {
+                if (0xC000..=0xCFFF).contains(&address) {
+                    r[0] = address;
+                }
+            }
             MultiPKind::M354 => {
                 let start = if self.submapper == 1 { 0xE000 } else { 0xF000 };
                 if address >= start {
@@ -542,6 +589,55 @@ impl MultiP {
                 }
                 b.map_chr_8k(r[0]);
                 mirror(r[0] & 0x20 == 0)
+            }
+            _ => self.map_b6(),
+        }
+    }
+
+    /// [`MultiP::map`] for the kinds of batch 6 (`docs/progress/MAPPERS-P.md`).
+    fn map_b6(&mut self) -> Option<NametableMirroring> {
+        let r = self.regs.map(i32::from);
+        let b = &mut self.banks;
+        let mirror = |vertical: bool| {
+            Some(if vertical {
+                NametableMirroring::Vertical
+            } else {
+                NametableMirroring::Horizontal
+            })
+        };
+        match self.kind {
+            MultiPKind::M396 => {
+                let base = (r[1] & 0x0F) << 3;
+                b.map_prg_16k(0, base | (r[0] & 0x07));
+                b.map_prg_16k(2, base | 0x07);
+                mirror(r[1] & 0x60 == 0)
+            }
+            // `mirroring_fix_400`: `$80` in the outer register leaves the header's mirroring.
+            MultiPKind::M400 => {
+                b.map_prg_16k(0, (r[0] & 0xF8) | (r[1] & 0x07));
+                b.map_prg_16k(2, (r[0] & 0xF8) | 0x07);
+                b.map_chr_8k(r[1] >> 5);
+                if r[0] == 0x80 {
+                    Some(self.header_mirroring)
+                } else {
+                    mirror(r[0] & 0x20 == 0)
+                }
+            }
+            MultiPKind::M403 => {
+                let bank = (r[0] & 0x7E) >> 1;
+                if r[2] & 0x01 != 0 {
+                    b.map_prg_16k(0, bank);
+                    b.map_prg_16k(2, bank);
+                } else {
+                    b.map_prg_32k(bank >> 1);
+                }
+                b.map_chr_8k(r[1] & 0x03);
+                mirror(r[2] & 0x10 == 0)
+            }
+            MultiPKind::M409 => {
+                b.map_prg_16k(0, r[0]);
+                b.map_prg_16k(2, -1);
+                None
             }
             _ => None,
         }

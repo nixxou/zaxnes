@@ -196,6 +196,11 @@ default = [
     "board-266",
     "board-284",
     "board-682",
+    "board-397",
+    "board-409",
+    "board-403",
+    "board-400",
+    "board-396",
     "board-388",
     "board-387",
     "board-386",
@@ -303,6 +308,11 @@ board-168 = []
 board-latch-multi = ["board-decode-boards"]
 # MAPPERS-P umbrella: the discrete boards of `multicart_p.rs`.
 board-multi-p = ["board-decode-boards"]
+board-397 = ["board-jy-asic"]
+board-409 = ["board-multi-p"]
+board-403 = ["board-multi-p"]
+board-400 = ["board-multi-p"]
+board-396 = ["board-multi-p"]
 board-388 = ["board-jy-asic"]
 board-387 = ["board-jy-asic"]
 board-386 = ["board-jy-asic"]

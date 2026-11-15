@@ -300,3 +300,46 @@ fn mappers_p_388_places_prg_from_d003_bits_2_and_3() {
     core.mapper_write(0xD003, 0x04);
     assert_eq!([33, 32, 32, 63], core.prg_windows());
 }
+
+/// `mapper_396.c`: `$A000` the outer 128 KiB bank, elsewhere the UNROM inner bank.
+#[cfg(feature = "board-396")]
+#[test]
+fn mappers_p_396_has_an_outer_bank_at_a000() {
+    let mut core = MapperRom::new(396).prg(64).load();
+    core.mapper_write(0xA000, 0x01);
+    core.mapper_write(0x8000, 0x02);
+    assert_eq!([20, 21, 30, 31], core.prg_windows());
+}
+
+/// `mapper_400.c`: `$7800` the outer bank, `$C000` the inner bank (bank 0's zeros ANDed in).
+#[cfg(feature = "board-400")]
+#[test]
+fn mappers_p_400_takes_its_outer_bank_at_7800() {
+    let mut core = MapperRom::new(400).prg(64).chr(32).load();
+    core.mapper_write(0x7800, 0x08);
+    assert_eq!([16, 17, 30, 31], core.prg_windows());
+}
+
+/// `mapper_403.c`: `$4100` the PRG bank, `$4102` the mode and the CHR enable.
+#[cfg(feature = "board-403")]
+#[test]
+fn mappers_p_403_takes_its_registers_at_4100() {
+    let mut core = MapperRom::new(403).prg(32).chr(32).load();
+    core.mapper_write(0x4100, 0x04);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    core.mapper_write(0x4102, 0x05);
+    assert_eq!([4, 5, 4, 5], core.prg_windows());
+    core.mapper_write(0x8000, 0x02);
+    assert_eq!(16, core.chr_windows()[0]);
+}
+
+/// `mapper_409.c`: a write to `$C000-$CFFF` makes its address the 16 KiB bank.
+#[cfg(feature = "board-409")]
+#[test]
+fn mappers_p_409_banks_from_c000_addresses() {
+    let mut core = MapperRom::new(409).prg(64).load();
+    core.mapper_write(0xC003, 0);
+    assert_eq!([6, 7, 62, 63], core.prg_windows());
+    core.mapper_write(0x8005, 0);
+    assert_eq!([6, 7, 62, 63], core.prg_windows());
+}
