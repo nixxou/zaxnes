@@ -2996,7 +2996,7 @@ impl Ppu2C02 {
     }
 
     /// [`Self::write`] with the board reached through `K` (lot CORE-2).
-    #[cfg_attr(feature = "ppu-dot-trace", allow(clippy::too_many_lines))] // The trace's mark.
+    #[allow(clippy::too_many_lines)] // One arm per register, as the chip; the trace adds its mark.
     pub fn write_as<K: BoardKind>(
         &mut self,
         register: u16,
@@ -3159,7 +3159,7 @@ impl Ppu2C02 {
     /// after the CPU's, from its data latch, and the second CPU write, three dots after the first,
     /// has already replaced that latch, so **the first address receives the second value** too
     /// (lot FIDPLUS-2, transistor netlist, the four alignments: `INC $2007` over 03 04 leaves
-    /// 01 01, not 00 01; TriCNES agrees in its alignments 0 and 1;
+    /// 01 01, not 00 01; `TriCNES` agrees in its alignments 0 and 1;
     /// `docs/review/FIDELITY-LEADS.md` A5). Rendering off only: during rendering the write path
     /// is another one (C1), not measured here; palette entries are internal to the PPU and
     /// not measured either, so they keep one write each.
