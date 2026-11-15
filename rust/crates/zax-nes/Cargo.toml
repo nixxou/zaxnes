@@ -175,6 +175,7 @@ default = [
     "board-142",
     "board-302",
     "board-305",
+    "board-306",
 ]
 
 # MAPPERS-N umbrella (docs/progress/MAPPERS-N.md).
@@ -288,6 +289,7 @@ board-142 = ["board-irq-latch"]
 board-fine-rom = ["board-decode-boards"]
 board-302 = ["board-fine-rom"]
 board-305 = ["board-fine-rom"]
+board-306 = ["board-latch-multi"]
 # MAPPERS-N end
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four

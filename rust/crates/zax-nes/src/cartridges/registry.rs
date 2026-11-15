@@ -559,6 +559,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     302,
     #[cfg(feature = "board-305")]
     305,
+    #[cfg(feature = "board-306")]
+    306,
     #[cfg(feature = "board-312")]
     312,
     #[cfg(feature = "board-313")]
@@ -2277,6 +2279,11 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         305 => Board::DecodeBoard(DecodeBoard::FineRom(FineRom::new(
             memory,
             FineRomKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-306")]
+        306 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
         ))),
         _ => return None,
     })

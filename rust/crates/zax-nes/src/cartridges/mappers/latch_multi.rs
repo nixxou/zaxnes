@@ -137,6 +137,8 @@ pub enum LatchKind {
     M171,
     /// 312, `Kaiser/Kaiser7013B.h`.
     M312,
+    /// 306, `Kaiser/Kaiser7016.h` (KS7016).
+    M306,
 }
 
 impl LatchKind {
@@ -193,6 +195,7 @@ impl LatchKind {
             148 => Self::M148,
             171 => Self::M171,
             312 => Self::M312,
+            306 => Self::M306,
             _ => return None,
         })
     }
@@ -248,6 +251,7 @@ impl LatchKind {
             Self::M148 => 148,
             Self::M171 => 171,
             Self::M312 => 312,
+            Self::M306 => 306,
         }
     }
 
@@ -826,6 +830,17 @@ impl LatchMulti {
                 self.banks.map_chr_8k(0);
                 Some(pick(r1 & 0x01 != 0, H, V))
             }
+            // `Kaiser7016.h`: 8 KiB pages $0C-$0F at `$8000`, the register's page at `$6000`
+            // (power-on 8).
+            LatchKind::M306 => {
+                self.banks.map_prg_8k(0, 0x0C);
+                self.banks.map_prg_8k(1, 0x0D);
+                self.banks.map_prg_8k(2, 0x0E);
+                self.banks.map_prg_8k(3, 0x0F);
+                self.rom_6000 = Some(r0);
+                self.banks.map_chr_8k(0);
+                None
+            }
             // `Bmc255.h:14-21`.
             LatchKind::M255 => {
                 let bit = i32::from(a & 0x1000 == 0);
@@ -964,6 +979,27 @@ impl LatchMulti {
                 0xF080 => self.regs[1] = value,
                 _ => {}
             },
+            // `Kaiser7016.h` `WriteRegister`, mask `$D943`.
+            LatchKind::M306 => {
+                let mode = address & 0x30 == 0x30;
+                match address & 0xD943 {
+                    0xD943 => {
+                        self.regs[0] = if mode {
+                            0x0B
+                        } else {
+                            low_byte((address >> 2) & 0x0F)
+                        };
+                    }
+                    0xD903 => {
+                        self.regs[0] = if mode {
+                            0x08 | low_byte((address >> 2) & 0x03)
+                        } else {
+                            0x0B
+                        };
+                    }
+                    _ => {}
+                }
+            }
             LatchKind::M312 => {
                 if address < 0x8000 {
                     self.regs[0] = value;
@@ -994,6 +1030,8 @@ impl LatchMulti {
             LatchKind::M51 => self.regs[1] = 1,
             // `Bb.h:17`: "_prgReg = -1".
             LatchKind::M108 => self.regs[0] = 0xFF,
+            // `Kaiser7016.h`: "_prgReg = 8".
+            LatchKind::M306 => self.regs[0] = 8,
             // `Bs5.h:16-19`: every slot -1.
             LatchKind::M286 => self.regs = [0xFF; 8],
             _ => {}
@@ -1157,6 +1195,7 @@ impl Mapper for LatchMulti {
             LatchKind::M46
                 | LatchKind::M212
                 | LatchKind::M312
+                | LatchKind::M306
                 | LatchKind::M51
                 | LatchKind::M108
                 | LatchKind::M120
