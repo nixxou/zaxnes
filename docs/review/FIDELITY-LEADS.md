@@ -347,6 +347,22 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
     worse (5 100 -> 5 700 unmatched a frame) and missed the cases it targeted (dot 173 `00E0`).
     The real rule needs the netlist's tile-register node and AD-bus node logged per half-step
     (`benchdot` logs only the ALE address), not inferred from the address column.
+    **Measured (2026-11-15, `benchdot2`: AD bus `db0-7` per dot; `inbuf0-7` turned out to be the
+    CPU-side buffer, not the tile register)**, alignment 3, `g2001px`:
+    - the AD bus keeps a value while the rendering is off; switch-off right after an ALE whose
+      read did not come (line 0, ALE `$200E` on 153): the bus holds `$0E`, and the first pattern
+      fetch after the switch-on uses tile `$0E`: **the tile register latches the bus on the
+      nametable dot (170) although the rendering is off**;
+    - but the value the bus holds is not simply "the last ALE low byte or the last read byte":
+      switch-off after the ALE `$0008` of dot 199, the bus shows `$11` (the low byte of the
+      nametable address of dot 193) for the whole off stretch: charge left on the pins by an
+      earlier phase, which a zero-delay netlist reproduces only by accident;
+    - a switch-on on an odd dot reads its stale fetch with the **whole** stale address (`$0008`,
+      a pattern byte `$CA` used as the tile), not the stale low byte under the current fetch's
+      high lines that step 39 models.
+    Not ported: the bus value is a floating-node effect (not trustworthy at transistor level
+    without analogue charge), and the effect needs a mid-line rendering switch inside a 4-dot
+    window. Kept as an open lead for the half-cycle stepper, which will hold the AD bus as state.
 - **Next**: that tile-latch lead; `g2006px` with rendering on; C1 against the SMB3 Japan
   line-193 video.
 
