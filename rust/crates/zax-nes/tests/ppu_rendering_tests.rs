@@ -1370,6 +1370,32 @@ fn fidplus_c3c_pal_rendering_switch_takes_four_dots() {
     assert!(!increments(false), "NTSC: the switch is in force by dot 16");
 }
 
+/// Lot FIDPLUS-C C3c (Visual 2C07 netlist, `g2006x`): the second `$2006` write's delayed load
+/// lands two dots after the write on the PAL 2C07's phase-0 cycle, three on the others (and always
+/// three on the 2C02): the write runs that many dots, plus the one after, before returning.
+#[test]
+fn fidplus_c3c_pal_2006_load_delay_follows_the_cycle_phase() {
+    fn dots_run(pal: bool, phase: i32) -> i32 {
+        let mut fixture = TileFixture::new();
+        if pal {
+            fixture.core.set_region(zax_nes::NesRegion::Pal);
+        }
+        fixture.set_mask(0x0A);
+        fixture.core.run_frame(0);
+        park_on_dot(&mut fixture, 100);
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        ppu.set_dot_accumulator_phase(phase);
+        ppu.write(6, 0x21, None);
+        ppu.write(6, 0x08, None);
+        ppu.dot() - 100
+    }
+    assert_eq!(3, dots_run(true, 0), "PAL, phase 0");
+    for phase in 1..5 {
+        assert_eq!(4, dots_run(true, phase), "PAL, phase {phase}");
+    }
+    assert_eq!(4, dots_run(false, 0), "NTSC");
+}
+
 /// Lot FIDPLUS-C C3c (Visual 2C07 netlist, `g2005`, `g2005px`): a first `$2005` write landing on
 /// the dot-257 copy takes the written coarse X on the PAL 2C07, the CPU's open bus only on the
 /// cycle whose dot accumulator is 4 (alignment 3, the default).

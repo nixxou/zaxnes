@@ -2816,8 +2816,14 @@ impl Ppu2C02 {
             return;
         }
         // Three dots in every alignment (transistor netlist with the CPU's hold time, step 33;
-        // TriCNES's fourth dot in alignment 2 does not appear there).
-        let delay = 3;
+        // TriCNES's fourth dot in alignment 2 does not appear there). The PAL 2C07 loads two
+        // dots after the write on the cycle whose dot accumulator is 0, three on the others
+        // (Visual 2C07 netlist, lot FIDPLUS-C C3c, `g2006x`: 2 in 20 % of the loads, 3 in 80 %).
+        let delay = if matches!(self.timing.region, NesRegion::Pal) && self.dot_accumulator == 0 {
+            2
+        } else {
+            3
+        };
         self.run_dots(i64::from(delay), cart);
         self.prepaid_dots = delay;
         if self.glitch_2006 {
@@ -2856,7 +2862,10 @@ impl Ppu2C02 {
     fn increment_after_delayed_load(&mut self) {
         let dot = self.dot;
         let increments = (dot % 8 == 0 && (8..=256).contains(&dot)) || dot == 328 || dot == 336;
-        if !increments || !self.fetching() || !self.netlist_measured_region() {
+        if !increments
+            || !self.fetching()
+            || !(self.netlist_measured_region() || matches!(self.timing.region, NesRegion::Pal))
+        {
             return;
         }
         self.increment_coarse_x();
@@ -3230,7 +3239,9 @@ impl Ppu2C02 {
                         self.delay_backdrop_address(&mut cartridge);
                     }
                     let previous = self.v;
-                    let delayed = self.prepaid_dots == 4;
+                    // Three dots and the one run after them, or two on a PAL phase-0 cycle.
+                    let delayed = self.prepaid_dots == 4
+                        || (self.prepaid_dots == 3 && matches!(self.timing.region, NesRegion::Pal));
                     self.v = self.t;
                     if delayed {
                         self.increment_after_delayed_load();

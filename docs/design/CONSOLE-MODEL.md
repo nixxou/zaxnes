@@ -95,6 +95,18 @@ Revision A fails `5-MMC3` (both suites) and `6.MMC3_rev_B`: no single model pass
   PAL too. Rendered lines: one long run left over five frames. Test
   `fidplus_c3c_pal_2007_read_latch_follows_the_cycle_phase`. Left: on lines 240-310 the
   increment of a read with rendering off shows 4-5 dots later than in Zaxnes (for `rmw`).
+  Step 7, `g2005` / `g2005px` and `g2006x`, the same five-cycle pattern again:
+  * a first `$2005` write on the dot-257 copy takes the CPU's open bus only on the cycle whose dot
+    accumulator is 4 (of the 32 sets of phases, {4} fits best; the written value otherwise):
+    both programs 0-1 differing dots a frame (`Ppu2C02::open_bus_on_copies`). The `$2000` glitch
+    stays absent on every phase ({4} alone: 330-659 dots a frame against 1);
+  * the second `$2006` write's load comes 2 dots after the write on phase 0, 3 on the others (2 in
+    20 % of the loads, 3 in 80 %; the 2C02 always 3, `w2006lat.py`), and the A5 increment after a
+    delayed load holds on PAL: `g2006x` 14 700 -> 4 900 differing dots a frame, long runs on
+    rendered lines 2 113 -> 42 (left: a `$2006` load landing on the dot-257 copy, which the
+    2C07 takes from the written byte; only Fidelite+'s `post_address_load` models that case).
+  Tests `fidplus_c3c_pal_2005_on_dot_257_takes_the_open_bus_one_cycle_in_five`,
+  `fidplus_c3c_pal_2006_load_delay_follows_the_cycle_phase`.
   Still open from the earlier steps:
   the first frame's `$2007` increments seen 4-5 dots later on the netlist (line 241).
   Corpus at reset phase e3 so far (alignment 3 against 0, differing dots, whole frames): `g2005`
