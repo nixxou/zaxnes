@@ -1000,7 +1000,9 @@ impl NesCore {
 
         self.bus.ppu_mut().clear_frame_boundary();
         if self.fidelity_plus {
-            // Fidélité+: no batching, its own loop (one test a frame on the standard path).
+            // Fidélité+: no batching, its own loop (one test a frame on the standard path). The
+            // PPU is told every frame: a load builds it afresh.
+            self.bus.ppu_mut().set_fidelity_plus(true);
             loop {
                 let done = match self.bus.cartridge().filter(|_| !self.generic_path) {
                     Some(cartridge) => with_board_kind!(cartridge.board(), K => {
@@ -1080,8 +1082,11 @@ impl NesCore {
 
     /// Runs every frame through the Fidélité+ loop (`docs/design/HALF-CYCLE.md`), off by
     /// default. Takes effect at the next frame.
-    pub const fn set_fidelity_plus(&mut self, enabled: bool) {
+    pub fn set_fidelity_plus(&mut self, enabled: bool) {
         self.fidelity_plus = enabled;
+        if !enabled {
+            self.bus.ppu_mut().set_fidelity_plus(false);
+        }
     }
 
     /// Whether the Fidélité+ loop runs the frames.

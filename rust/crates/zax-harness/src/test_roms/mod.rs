@@ -579,6 +579,8 @@ fn run_one_zaxnes(
     // `ZAXNES_PPU_RESET_LINE=1`: the PPU ignores register writes until the pre-render line after a
     // reset (step 34, off by default).
     core.set_ppu_reset_line(std::env::var("ZAXNES_PPU_RESET_LINE").is_ok_and(|value| value != "0"));
+    // `ZAXNES_FIDELITY_PLUS=1`: every frame through the Fidelite+ loop (FIDPLUS-A, off by default).
+    core.set_fidelity_plus(std::env::var("ZAXNES_FIDELITY_PLUS").is_ok_and(|value| value != "0"));
     // `ZAXNES_ALIGNMENT=0..3`: the CPU/PPU alignment of the read-side timings (step 28, 3 by
     // default).
     core.set_cpu_ppu_alignment(

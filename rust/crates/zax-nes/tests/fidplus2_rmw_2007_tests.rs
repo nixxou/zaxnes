@@ -22,12 +22,24 @@ const PROGRAM: [u8; 53] = [
 
 #[test]
 fn fidplus2_inc_2007_stores_the_final_value_at_both_addresses() {
+    inc_2007(false);
+}
+
+/// Fidélité+ part A step 2: the same result from the data latch and the delayed store, with no
+/// rule written for it (`ppu/edges.rs`).
+#[test]
+fn fidplus_a2_inc_2007_follows_from_the_delayed_store() {
+    inc_2007(true);
+}
+
+fn inc_2007(fidelity_plus: bool) {
     // The read at $2002 returns the buffer and moves v to $2003; the dummy write of the old value
     // and the write of the new one follow on the next two cycles. The netlist stores the second
     // value at both addresses in all four alignments.
     for alignment in 0..4 {
         let image = minimal_rom(0x00, Some(&PROGRAM), None);
         let mut machine = machine_with(&image, "rmw.nes");
+        machine.set_fidelity_plus(fidelity_plus);
         machine.set_cpu_ppu_alignment(alignment);
         machine.reset();
         for _ in 0..4 {

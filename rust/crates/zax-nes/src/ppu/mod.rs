@@ -18,6 +18,7 @@
 //! **Cartridge.** The bus owns the cartridge, so every PPU call that may reach it takes it
 //! as an `Option<&mut Cartridge>` instead of holding a reference.
 
+mod edges;
 mod palette_corruption;
 mod ppu_bus_access;
 mod render;
@@ -235,6 +236,15 @@ pub struct Ppu2C02 {
     /// landing on dot 256 (lot FIDPLUS-2, A5, [`Self::switch_rendering`]). Consumed on dot 257;
     /// not part of the state (a `$2001` write ends its instruction and the dot follows at once).
     copy_257_suppressed: bool,
+    /// Fidélité+ (`edges`): register effects through edges. Set by the core for each Fidélité+
+    /// frame; not part of the state (step 4).
+    fidelity_plus: bool,
+    /// The edges pending (`edges`), the first `edge_count` of them. Not part of the state yet
+    /// (step 4); cleared by a load.
+    edges: [edges::Edge; edges::EDGE_SLOTS],
+    edge_count: u8,
+    /// The PPU's data latch of a `$2007` write (`edges`): the byte the store takes when it comes.
+    data_latch: u8,
     /// Per-dot trace (feature `ppu-dot-trace`): on, the PPU runs every dot through
     /// [`Self::step_dot`] (no span, no idle skip) and records it. Not part of the state.
     #[cfg(feature = "ppu-dot-trace")]
@@ -642,6 +652,10 @@ impl Ppu2C02 {
             oamaddr_bug: true,
             last_data_write: (i64::MIN, 0),
             copy_257_suppressed: false,
+            fidelity_plus: false,
+            edges: [edges::Edge::NONE; edges::EDGE_SLOTS],
+            edge_count: 0,
+            data_latch: 0,
             #[cfg(feature = "ppu-dot-trace")]
             dot_trace: None,
             #[cfg(feature = "ppu-dot-trace")]
@@ -2138,24 +2152,17 @@ impl Ppu2C02 {
     /// Runs `count` dots, skipping in one go the stretches where a dot does nothing but
     /// move the counters (or, on a visible line with rendering off, draw the backdrop).
     fn run_dots<K: BoardKind>(&mut self, mut count: i64, cart: Cart<'_, '_, K>) {
+        if self.edge_count != 0 {
+            // Fidélité+ only: an edge is pending (`edges`).
+            self.run_dots_with_edges(count, cart);
+            return;
+        }
         #[cfg(feature = "ppu-dot-trace")]
         if self.dot_trace.is_some() {
             while count > 0 {
                 self.dot_trace_bus.set(0xFFFF);
                 self.step_dot(cart);
-                let record = DotRecord {
-                    #[allow(clippy::cast_possible_truncation)] // Below 312.
-                    scanline: self.scanline as i16,
-                    #[allow(clippy::cast_possible_truncation)] // Below 341.
-                    dot: self.dot as i16,
-                    v: self.v,
-                    t: self.t,
-                    bus: self.dot_trace_bus.get(),
-                    access: 0,
-                };
-                if let Some(trace) = self.dot_trace.as_mut() {
-                    trace.push(record);
-                }
+                self.record_traced_dot();
                 count -= 1;
             }
             return;
@@ -2185,6 +2192,24 @@ impl Ppu2C02 {
                 self.step_dot(cart);
                 count -= 1;
             }
+        }
+    }
+
+    /// Records the dot just run in the per-dot trace, when one is on.
+    #[cfg(feature = "ppu-dot-trace")]
+    fn record_traced_dot(&mut self) {
+        let record = DotRecord {
+            #[allow(clippy::cast_possible_truncation)] // Below 312.
+            scanline: self.scanline as i16,
+            #[allow(clippy::cast_possible_truncation)] // Below 341.
+            dot: self.dot as i16,
+            v: self.v,
+            t: self.t,
+            bus: self.dot_trace_bus.get(),
+            access: 0,
+        };
+        if let Some(trace) = self.dot_trace.as_mut() {
+            trace.push(record);
         }
     }
 
@@ -3115,7 +3140,10 @@ impl Ppu2C02 {
                     // The reset line still holds the register (`emu.ppu_reset_line`).
                     return;
                 }
-                if self.write_toggle {
+                if self.write_toggle && self.edges_on() {
+                    self.t = (self.t & 0xFF00) | u16::from(value);
+                    self.post_address_load();
+                } else if self.write_toggle {
                     self.t = (self.t & 0xFF00) | u16::from(value);
                     if (self.address_load_delay || self.bus_conflicts) && self.fetching() {
                         self.delay_address_load(&mut cartridge);
@@ -3154,6 +3182,10 @@ impl Ppu2C02 {
             7 => {
                 // A `$2007` access is an ALE of `v` (step 39).
                 self.ale_low = self.v.to_le_bytes()[0];
+                if self.edges_on() && !self.rendering_now() {
+                    self.post_data_store(value);
+                    return;
+                }
                 self.rewrite_pending_vram_write(value, &mut cartridge);
                 self.write_vram_inner(self.v & 0x3FFF, value, PpuBusAccess::Cpu, &mut cartridge);
                 self.increment_vram_address(&mut cartridge);
@@ -3162,6 +3194,12 @@ impl Ppu2C02 {
             // $2002 is read-only; the write only loaded the bus latch.
             _ => {}
         }
+    }
+
+    /// Rendering on, on a line that renders (visible or pre-render).
+    const fn rendering_now(&self) -> bool {
+        self.rendering_enabled()
+            && (self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline())
     }
 
     /// Whether the rules measured on the NTSC 2C02 netlist apply (lot FIDPLUS-2, A5): the PAL
@@ -3181,8 +3219,7 @@ impl Ppu2C02 {
     /// is another one (C1), not measured here; palette entries are internal to the PPU and
     /// not measured either, so they keep one write each.
     fn rewrite_pending_vram_write<K: BoardKind>(&mut self, value: u8, cart: Cart<'_, '_, K>) {
-        let rendering = self.rendering_enabled()
-            && (self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline());
+        let rendering = self.rendering_now();
         let now = self.ppu_clock;
         let (then, address) = self.last_data_write;
         // One CPU cycle is 3 dots (3.2 on PAL): "the previous cycle" is 4 dots at most.

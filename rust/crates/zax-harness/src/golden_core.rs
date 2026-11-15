@@ -112,6 +112,8 @@ pub fn golden_row(rel: &str, image: &[u8], frames: u32) -> Result<Value, Harness
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_default();
     let mut core = NesCore::new();
+    // `ZAXNES_FIDELITY_PLUS=1`: every frame through the Fidelite+ loop (FIDPLUS-A, off by default).
+    core.set_fidelity_plus(std::env::var("ZAXNES_FIDELITY_PLUS").is_ok_and(|value| value != "0"));
     // The golden rows (`rust/goldens/core-goldens.jsonl`) were taken with the PPU powering on in
     // vblank, so this command keeps that power-on; `ZAXNES_POWER_ON_TOP=1` measures the one the
     // app uses by default since lot FIDELITY step 27.

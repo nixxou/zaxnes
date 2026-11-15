@@ -512,6 +512,10 @@ impl Host {
         let profile = startup.profile;
         let mut core = NesCore::new();
         core.set_advanced_patches(startup.advanced);
+        // `ZAXNES_FIDELITY_PLUS=1`: every frame through the Fidelite+ loop (FIDPLUS-A, off by default).
+        core.set_fidelity_plus(
+            std::env::var("ZAXNES_FIDELITY_PLUS").is_ok_and(|value| value != "0"),
+        );
         // `ZAXNES_ALIGNMENT=0..3`: render in another CPU/PPU alignment (step 28).
         core.set_cpu_ppu_alignment(
             std::env::var("ZAXNES_ALIGNMENT")

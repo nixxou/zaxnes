@@ -20,7 +20,7 @@ use crate::HarnessError;
 
 /// The command's usage line.
 pub const USAGE: &str =
-    "  zax-harness dot-trace <rom.nes> --frames <first>-<last> [--alignment <0-3>] [--phase <dots>] [--flip-parity] [--bus-conflicts] --out <file>
+    "  zax-harness dot-trace <rom.nes> --frames <first>-<last> [--alignment <0-3>] [--phase <dots>] [--flip-parity] [--bus-conflicts] [--fidelity-plus] --out <file>
       (per dot: frame, scanline, dot, v, t, PPU bus address; needs the `dot-trace` feature)";
 
 struct Options {
@@ -31,6 +31,7 @@ struct Options {
     phase: i32,
     flip_parity: bool,
     bus_conflicts: bool,
+    fidelity_plus: bool,
     out: PathBuf,
 }
 
@@ -42,6 +43,7 @@ fn parse(args: &[String]) -> Result<Options, HarnessError> {
     let mut phase = 0;
     let mut flip_parity = false;
     let mut bus_conflicts = false;
+    let mut fidelity_plus = false;
     let mut out = None;
     let mut index = 0;
     while index < args.len() {
@@ -51,6 +53,9 @@ fn parse(args: &[String]) -> Result<Options, HarnessError> {
             index += 1;
         } else if arg == "--bus-conflicts" {
             bus_conflicts = true;
+            index += 1;
+        } else if arg == "--fidelity-plus" {
+            fidelity_plus = true;
             index += 1;
         } else if arg.starts_with("--") {
             let value = args.get(index + 1).ok_or_else(usage)?;
@@ -85,6 +90,7 @@ fn parse(args: &[String]) -> Result<Options, HarnessError> {
         phase,
         flip_parity,
         bus_conflicts,
+        fidelity_plus,
         out: out.ok_or_else(usage)?,
     })
 }
@@ -116,6 +122,7 @@ pub fn command(args: &[String]) -> Result<(), HarnessError> {
     // `emu.ppu_bus_conflicts` (FIDELITY-LEADS C1), off in the application by default; after
     // the load, which builds the PPU afresh.
     core.set_bus_conflicts(options.bus_conflicts);
+    core.set_fidelity_plus(options.fidelity_plus);
     if options.flip_parity {
         core.bus_mut().ppu_mut().flip_frame_parity();
     }
