@@ -487,7 +487,7 @@ fn mappers_n_305_maps_2_kib_pages() {
     assert_eq!(2, core.read_memory(0x6900));
 }
 
-/// `MMC3_254.h:15-28`: work RAM reads are XORed with `$A001` until `$8000` is written.
+/// `MMC3_254.h:15-28`: work RAM reads are exclusive-ored with `$A001` until `$8000` is written.
 #[cfg(feature = "board-254")]
 #[test]
 fn mappers_n_254_xors_work_ram_reads() {
