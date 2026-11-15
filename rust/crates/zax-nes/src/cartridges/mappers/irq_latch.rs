@@ -19,6 +19,10 @@ pub enum IrqLatchKind {
     M8,
     /// 17, the FFE F8xxx copier format (`Unlicensed/FrontFareast.h`).
     M17,
+    /// 56, `Kaiser/Kaiser202.h` (KS202, *SMB3* bootleg with its own CHR registers).
+    M56,
+    /// 142, `Kaiser/Kaiser202.h` (KS7032, FDS conversions).
+    M142,
     /// 40, `Whirlwind/Mapper40.h` (NTDEC 2722, *SMB2J* conversion).
     M40,
     /// 42, `Unlicensed/Mapper42.h` (*Ai Senshi Nicol* / *Mario Baby* conversions).
@@ -46,6 +50,8 @@ impl IrqLatchKind {
             8 => Self::M8,
             17 => Self::M17,
             40 => Self::M40,
+            56 => Self::M56,
+            142 => Self::M142,
             42 => Self::M42,
             43 => Self::M43,
             50 => Self::M50,
@@ -63,6 +69,8 @@ impl IrqLatchKind {
             Self::M8 => 8,
             Self::M17 => 17,
             Self::M40 => 40,
+            Self::M56 => 56,
+            Self::M142 => 142,
             Self::M42 => 42,
             Self::M43 => 43,
             Self::M50 => 50,
@@ -79,6 +87,12 @@ impl IrqLatchKind {
             self,
             Self::M40 | Self::M42 | Self::M43 | Self::M50 | Self::M183
         )
+    }
+
+    /// Whether `$6000-$7FFF` may show PRG-ROM, depending on a register (`Kaiser202.h`'s
+    /// `_useRom`).
+    const fn switches_6000(self) -> bool {
+        matches!(self, Self::M56 | Self::M142)
     }
 
     /// Whether the counter follows PPU A12 rather than the CPU clock.
@@ -126,6 +140,11 @@ impl IrqLatch {
         }
     }
 
+    /// Whether `$6000-$7FFF` shows PRG-ROM now.
+    const fn rom_6000_now(&self) -> bool {
+        self.kind.rom_at_6000() || (self.kind.switches_6000() && self.second)
+    }
+
     fn map(&mut self) {
         let p = |i: usize| i32::from(self.prg[i]);
         let prg: [i32; 4] = match self.kind {
@@ -146,7 +165,8 @@ impl IrqLatch {
             | IrqLatchKind::M106
             | IrqLatchKind::M117 => [p(0), p(1), p(2), p(3)],
             // `Mapper183.h` `UpdatePrg` and the `$8800`/`$A800`/`$A000` ports.
-            IrqLatchKind::M183 => [p(0), p(1), p(2), -1],
+            // and `Kaiser202.h`: three 8 KiB registers and the last bank fixed.
+            IrqLatchKind::M56 | IrqLatchKind::M142 | IrqLatchKind::M183 => [p(0), p(1), p(2), -1],
             // `Mapper222.h:17` (`SelectPrgPage2x(1, -2)`) and `$8000`/`$A000`.
             IrqLatchKind::M222 => [p(0), p(1), -2, -1],
         };
@@ -157,6 +177,8 @@ impl IrqLatch {
             IrqLatchKind::M6
             | IrqLatchKind::M8
             | IrqLatchKind::M17
+            | IrqLatchKind::M56
+            | IrqLatchKind::M142
             | IrqLatchKind::M106
             | IrqLatchKind::M117
             | IrqLatchKind::M183
@@ -183,6 +205,7 @@ impl IrqLatch {
                 }
             }
             IrqLatchKind::M50 => 0x0F,
+            IrqLatchKind::M56 | IrqLatchKind::M142 => i32::from(self.prg[3]),
             _ => i32::from(self.prg[4]),
         }
     }
@@ -252,6 +275,55 @@ impl IrqLatch {
                             std::array::from_fn(|i| ((value & 0x07) << 3) + i.to_le_bytes()[0]);
                     }
                     _ => return (0x42FE..=0x4517).contains(&address) || address >= 0x8000,
+                }
+            }
+            // `Kaiser202.h` `WriteRegister`: a 16-bit reload value a nibble at a time, the control
+            // at `$C000`, a register index at `$E000` and its data at `$F000`. `scaler` holds the
+            // reload value, `reload` the index, `second` the `_useRom` bit.
+            IrqLatchKind::M56 | IrqLatchKind::M142 => {
+                if address < 0x8000 {
+                    return false;
+                }
+                let nibble = u16::from(value & 0x0F);
+                match address & 0xF000 {
+                    0x8000 => self.scaler = (self.scaler & 0xFFF0) | nibble,
+                    0x9000 => self.scaler = (self.scaler & 0xFF0F) | (nibble << 4),
+                    0xA000 => self.scaler = (self.scaler & 0xF0FF) | (nibble << 8),
+                    0xB000 => self.scaler = (self.scaler & 0x0FFF) | (nibble << 12),
+                    0xC000 => {
+                        self.enabled = value & 0x02 != 0;
+                        if self.enabled {
+                            self.counter = self.scaler;
+                        }
+                        self.pending = false;
+                    }
+                    0xD000 => self.pending = false,
+                    0xE000 => self.reload = (value & 0x07).wrapping_sub(1),
+                    _ => {
+                        match self.reload {
+                            index @ 0..=3 => {
+                                let index = usize::from(index);
+                                self.prg[index] = (self.prg[index] & 0x10) | (value & 0x0F);
+                            }
+                            4 => self.second = value & 0x04 != 0,
+                            _ => {}
+                        }
+                        if self.kind == IrqLatchKind::M56 {
+                            match address & 0xFC00 {
+                                0xF000 => {
+                                    let bank = usize::from(address & 0x03);
+                                    self.prg[bank] = (value & 0x10) | (self.prg[bank] & 0x0F);
+                                }
+                                0xF800 => memory.set_mirroring(if value & 0x01 != 0 {
+                                    NametableMirroring::Vertical
+                                } else {
+                                    NametableMirroring::Horizontal
+                                }),
+                                0xFC00 => self.chr[usize::from(address & 0x07)] = value,
+                                _ => {}
+                            }
+                        }
+                    }
                 }
             }
             // `Mapper40.h:29-41`.
@@ -482,6 +554,10 @@ impl Mapper for IrqLatch {
                 self.prg[..4].copy_from_slice(&[0xFC, 0xFD, 0xFE, 0xFF]);
                 self.second = true;
             }
+            // `Kaiser202.h` maps no CHR register for 142 (CHR-RAM): the eight windows in order.
+            IrqLatchKind::M56 | IrqLatchKind::M142 => {
+                self.chr = std::array::from_fn(|i| i.to_le_bytes()[0]);
+            }
             // `Mapper106.h:15-18`: every PRG window -1.
             IrqLatchKind::M106 => self.prg[..4].fill(0xFF),
             // `Mapper117.h:17`: `SelectPrgPage4x(0, -4)`, the last 32 KiB.
@@ -502,7 +578,7 @@ impl Mapper for IrqLatch {
     }
 
     fn prg_ram_enabled(&self) -> bool {
-        !self.kind.rom_at_6000()
+        !self.rom_6000_now()
     }
 
     fn intercept_cpu_write(
@@ -535,7 +611,7 @@ impl Mapper for IrqLatch {
     }
 
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
-        if (0x6000..=0x7FFF).contains(&address) && self.kind.rom_at_6000() {
+        if (0x6000..=0x7FFF).contains(&address) && self.rom_6000_now() {
             return Self::rom_byte(memory, self.page_6000(), address & 0x1FFF);
         }
         // `Mapper43.h:20`: `$5000-$5FFF` is the first 4 KiB of PRG-ROM page 8.
@@ -549,6 +625,17 @@ impl Mapper for IrqLatch {
     /// The CPU-clocked counters.
     fn on_cpu_cycle(&mut self, _memory: &mut CartridgeMemory) {
         match self.kind {
+            // `Kaiser202.h` `ProcessCpuClock`: up to `$FFFF`, then reload and fire once.
+            IrqLatchKind::M56 | IrqLatchKind::M142 => {
+                if self.enabled {
+                    self.counter = self.counter.wrapping_add(1);
+                    if self.counter == 0xFFFF {
+                        self.counter = self.scaler;
+                        self.enabled = false;
+                        self.pending = true;
+                    }
+                }
+            }
             // `Mapper40.h:20-28`.
             IrqLatchKind::M40 => {
                 if self.counter > 0 {

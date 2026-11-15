@@ -453,3 +453,24 @@ fn mappers_n_176_outer_bank_and_banked_wram() {
     core.mapper_write(0xA001, 0x22);
     assert_eq!(0x66, core.read_memory(0x6100));
 }
+
+/// `Kaiser202.h`: register 4 switches `$6000` to PRG-ROM bank R3; the counter fires at `$FFFF`.
+#[cfg(feature = "board-142")]
+#[test]
+fn mappers_n_142_switches_6000_to_rom_and_counts() {
+    let mut core = MapperRom::new(142).prg(16).chr_ram(8192).load();
+    core.mapper_write(0xE000, 4); // register 3
+    core.mapper_write(0xF000, 9);
+    core.mapper_write(0xE000, 5); // register 4: use ROM
+    core.mapper_write(0xF000, 0x04);
+    assert_eq!(9, core.read_memory(0x6100));
+    core.mapper_write(0xB000, 0x0F);
+    core.mapper_write(0xA000, 0x0F);
+    core.mapper_write(0x9000, 0x0F);
+    core.mapper_write(0x8000, 0x08); // reload $FFF8
+    core.mapper_write(0xC000, 0x02);
+    for _ in 0..16 {
+        core.bus_mut().tick();
+    }
+    assert!(core.cartridge().unwrap().irq_asserted());
+}

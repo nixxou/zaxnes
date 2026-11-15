@@ -920,6 +920,8 @@ impl Cartridge {
                     // MAPPERS-N: mapper 253's IRQ counts CPU cycles (Mesen2 `Mapper253.h:71`).
                     | 253
                     // MAPPERS-N: the CPU-clocked counters of `IrqLatch`.
+                    | 56
+                    | 142
                     | 6
                     | 8
                     | 17
