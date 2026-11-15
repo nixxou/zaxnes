@@ -222,6 +222,7 @@ ext, capture path, bus hooks; 3 Wi-Fi option; 4 flash. Each phase committed on i
 | bc828851 (682 phase 2) | +0.046 % | +0.046 % |
 | 274ff3e9 (682 complete) | +0.046 % | +0.046 % |
 | 3e7e6570 (284 off, 682 on) | +0.025 % | +0.025 % |
+| a8eb1aab (both off, the default) | +0.001 % | +0.001 % |
 
 Both are over the +0.02 % per board of the mapper rule, on MMC1 games that use neither: the cost
 is code layout in the MMC5 ext-attr dispatches (`Board::read_nametable_from_vram` and its
