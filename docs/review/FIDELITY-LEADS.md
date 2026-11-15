@@ -1001,10 +1001,12 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 - Now: the PPU logs each write that changes the bits with the first pixel it reaches (delay
   2/1/1/2 dots by alignment, TriCNES's, not yet measured on the netlist), resets at the frame wrap;
   the host expands it into a plane only for a frame with emphasis (nothing per pixel otherwise).
-  Colours: the chosen 64-colour palette scaled per channel by the composite decoder's ratio
-  (`palette::nes_color_emphasized`), so third-party tables darken as the signal does.
-- Open: the 3D view (tiles) shows no emphasis (REQ-CORE-047 for the records; a tint of the scene
-  would be the owner's call); the delay against the netlist's video pins; 512-entry palettes
+  Colours: the chosen 64-colour palette scaled per channel by TriCNES's ratio (its 512-colour
+  table, MIT, `zax-engine3d/src/emphasis_table.rs`; `palette::nes_color_emphasized`). Our own
+  composite decoder's ratio was tried first and was too far from it (red emphasis on ``: green
+  0.89 and blue 0.31, TriCNES 0.75 and 0.67). Option `video.emphasis_3d` (owner, off): the 3D
+  scene takes the frame's most common emphasis.
+- Open: the delay against the netlist's video pins; 512-entry palettes
   (Mesen's, FirebrandX's own emphasis rows) as tables instead of the ratio.
 
 ### H2. The 2C02's composite signal — generator and reference decoder done (FIDPLUS-D2a, 2026-11-15)

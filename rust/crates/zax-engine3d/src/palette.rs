@@ -309,10 +309,12 @@ pub fn scene_color(index: usize) -> Rgb24 {
 /// (PPUMASK bits 5-7 as 0 to 7: red, green, blue on NTSC), in the palette chosen (lot
 /// FIDPLUS-D2b). Emphasis 0 is [`nes_color`] itself.
 ///
-/// The palettes are 64-colour tables; the emphasis is applied to them as the 2C02 applies it to
-/// its signal: per channel, the ratio of the colour decoded from the attenuated signal to the one
-/// decoded from the plain signal (`zax_nes::composite::decode_uniform`), so that a measured or
-/// third-party table keeps its own colours and darkens the way the console does.
+/// The palettes are 64-colour tables; the emphasis is applied to them per channel by the ratio
+/// `TriCNES`'s 512-colour table gives for that colour and emphasis (`crate::emphasis_table`), so
+/// that a measured or third-party table keeps its own colours and is tinted the way the console
+/// tints its signal. (The ratio of our own composite decoder was tried first and found too far
+/// from it: red emphasis left green at 0.89 and blue at 0.31 on colour `$37`, `TriCNES` 0.75 and
+/// 0.67.)
 #[must_use]
 pub fn nes_color_emphasized(index: usize, emphasis: u8) -> Rgb24 {
     let base = nes_color(index);
@@ -331,21 +333,27 @@ pub fn nes_color_emphasized(index: usize, emphasis: u8) -> Rgb24 {
     )
 }
 
-/// Per emphasis (0-7) and colour index (0-63), the factor each channel takes.
+/// Per emphasis (0-7) and colour index (0-63), the factor each channel takes: the ratio of
+/// `TriCNES`'s emphasized colour to its plain one (`crate::emphasis_table`), the reference closest to
+/// the hardware at hand. A channel the plain colour leaves near zero takes no ratio larger than 1
+/// (a ratio of two near-zero values is noise).
 fn emphasis_factors() -> &'static [[f32; 3]; 512] {
     static FACTORS: std::sync::OnceLock<[[f32; 3]; 512]> = std::sync::OnceLock::new();
     FACTORS.get_or_init(|| {
-        // Keeps a channel the plain decode leaves near zero from blowing up.
-        const FLOOR: f32 = 0.02;
+        let channels = |packed: u32| -> [f32; 3] {
+            let [_, r, g, b] = packed.to_be_bytes();
+            [f32::from(r), f32::from(g), f32::from(b)]
+        };
         let mut table = [[1.0; 3]; 512];
         for (slot, factors) in table.iter_mut().enumerate() {
-            #[allow(clippy::cast_possible_truncation)] // slot < 512
-            let (emphasis, pixel) = ((slot >> 6) as u8, (slot & 0x3F) as u8);
-            let plain = zax_nes::composite::decode_uniform(pixel, 0, 0.0);
-            let dimmed = zax_nes::composite::decode_uniform(pixel, emphasis, 0.0);
+            let plain = channels(crate::emphasis_table::TRICNES_EMPHASIS[slot & 0x3F]);
+            let tinted = channels(crate::emphasis_table::TRICNES_EMPHASIS[slot]);
             for channel in 0..3 {
-                factors[channel] =
-                    ((dimmed[channel] + FLOOR) / (plain[channel] + FLOOR)).clamp(0.0, 1.5);
+                factors[channel] = if plain[channel] < 16.0 {
+                    ((tinted[channel] + 4.0) / (plain[channel] + 4.0)).min(1.0)
+                } else {
+                    (tinted[channel] / plain[channel]).clamp(0.0, 2.0)
+                };
             }
         }
         table
