@@ -282,6 +282,7 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   in both, which leaves the wrong coarse X and nametable for the rest of the line and the next
   one (visible). **Done** in `switch_rendering` (alignments 2 and 3, settled on the write, nothing
   tested per dot); test `fidplus2_dot_257_copy_follows_the_state_before_a_switch_on_dot_256`.
+  Golden unchanged.
   After it: **0 dots differ** in every whole frame, both alignments. Alignments 0 and 1: the
   switch-on race of step 33 (a mid-line horizontal copy, present or not with the hold time) makes
   the comparison diverge; not trusted, not ported.
@@ -295,12 +296,18 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
     included (natural X and Y, plus the read's Y: fine Y steps twice);
   - when X is 257 (odd: the residue case), the horizontal copy of 257 overrides the read's X
     increment: only its Y is left.
-  **Done** in `read_buffer_from_fetch`. Visible lines then agree with the netlist in every whole
-  frame (no run longer than the 1-2 dot recording instant of an increment). Lines 240-261 still
-  differ: the program never writes `$2000` and the netlist powers on with PPUCTRL's +32
-  increment (seen with `INC $2007` too), so its vblank reads step by 32 — a bench artefact.
-  C1 stays off by default (SMB3 line 193, C1 above); whether these two rules settle that line is
-  the next question (golden SMB3 Japan with C1 on).
+  **Done** in `read_buffer_from_fetch`, **behind the Cargo feature `ppu-2007-read-merge`, off by
+  default**: `emu.ppu_bus_conflicts` (C1) is on by default, and with it these rules move the
+  golden pictures (pixels and tiles) of Zelda II Europe (the golden harness runs it with NTSC
+  timing), which waits for the owner's eye, as Q-139 did. Visible lines then agree with the
+  netlist in every whole frame (no run longer than the 1-2 dot recording instant of an
+  increment). Lines 240-261 still differ: the program never writes `$2000` and the netlist powers
+  on with PPUCTRL's +32 increment (seen with `INC $2007` too), so its vblank reads step by 32 — a
+  bench artefact.
+- **Regions**: every rule of A5 that depends on dots (dot 257, the read merge) applies to NTSC
+  and Multi only (`Ppu2C02::netlist_measured_region`): the netlist is a 2C02; the PAL 2C07 (3.2
+  dots a cycle) and the clones keep the previous model until a measurement of their own. The
+  `INC $2007` rule (a data latch, dots 1 to 4 apart) applies everywhere.
 - **Bench artefacts to keep in mind**: PPUCTRL/PPUMASK power-on values of the netlist (write
   `$2000` after the warm-up); the PPU ignores writes during the warm-up; the `bus` column also
   shows the netlist's pattern-table select of its power-on PPUCTRL.
