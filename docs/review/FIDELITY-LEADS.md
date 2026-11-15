@@ -706,7 +706,14 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   whether OAM goes all at once or row by row, they answer: **random bits decay, more of them the
   longer rendering stays off**. Zaxnes's `emu.oam_decay` drops a whole row at once after 8 frames
   without access: a gradual, per-bit model (a per-bit retention time drawn once per console, bits
-  past it lost) would be closer; what a decayed bit becomes (0, 1, either) is still to ask.
+  past it lost) would be closer. Asked what a decayed bit becomes: **each bit has a "resting
+  state", 0 or 1, it ends in** (a DRAM cell's discharged level, true or complement cell), and **the
+  first 8 bytes never decay** in that test. Likely reason, from its source: with rendering off the
+  PPU keeps reading OAM at OAMADDR, which refreshes that row, and OAMADDR is 0 there (after the DMA
+  and after the readout's 256 writes); proposed check: `$40` to `$2003` before turning rendering
+  off should keep bytes `$40-$47` instead. One console, by hand: to confirm. Model it would give:
+  per bit, a resting value and a retention time drawn once per console; past it without an access
+  the bit takes its resting value; the row at OAMADDR exempt while rendering is off.
 
 ### D2b. Performance lead found on the way (lot FIDELITY, not fidelity) — tried and dropped (FIDPLUS-1)
 - Callgrind `f4185fa8` vs `27e2c3e2`: the APU stage costs +0.8 to +0.9 % on every game (+17 to
