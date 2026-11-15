@@ -58,6 +58,12 @@ pub enum MultiPKind {
     /// 375, `mapper_375.c` (135-in-1): a lockable address latch and a data latch, CHR-RAM
     /// write protection.
     M375,
+    /// 354, `mapper_354.c` (FAM250 / 810139C): address and data latch at `$F000` (`$E000` on
+    /// submapper 1), seven PRG modes, PRG-ROM at `$6000` in mode 5, CHR-RAM write protection.
+    M354,
+    /// 380, `mapper_380.c` (970630C / KN-35A): address latch, a DIP read (submapper 0), CHR-RAM
+    /// write protection, submapper-dependent last bank and mirroring bit.
+    M380,
 }
 
 impl MultiPKind {
@@ -82,6 +88,8 @@ impl MultiPKind {
             337 => Self::M337,
             350 => Self::M350,
             375 => Self::M375,
+            354 => Self::M354,
+            380 => Self::M380,
             _ => return None,
         })
     }
@@ -105,6 +113,8 @@ impl MultiPKind {
             Self::M337 => 337,
             Self::M350 => 350,
             Self::M375 => 375,
+            Self::M354 => 354,
+            Self::M380 => 380,
         }
     }
 
@@ -120,7 +130,7 @@ impl MultiPKind {
     const fn owns_6000(self) -> bool {
         matches!(
             self,
-            Self::M55 | Self::M122 | Self::M517 | Self::M337 | Self::M350
+            Self::M55 | Self::M122 | Self::M517 | Self::M337 | Self::M350 | Self::M354
         )
     }
 }
@@ -136,6 +146,8 @@ pub struct MultiP {
     adc: [i16; 3],
     /// The PRG-ROM size in bytes, which 338's and 341's decodes depend on.
     prg_size: usize,
+    /// The NES 2.0 submapper (0 on an iNES 1.0 image), which 354's and 380's decodes read.
+    submapper: u8,
 }
 
 impl MultiP {
@@ -152,6 +164,14 @@ impl MultiP {
             },
             adc: [0; 3],
             prg_size: memory.rom().prg_rom().len(),
+            submapper: {
+                let header = memory.rom().header();
+                if header.is_nes20 {
+                    u8::try_from(header.submapper).unwrap_or(0)
+                } else {
+                    0
+                }
+            },
         };
         let _ = board.map();
         board
@@ -195,7 +215,16 @@ impl MultiP {
                 0x8000 | 0xA000 => r[0] = u16::from(value),
                 _ => r[1] = u16::from(value),
             },
-            MultiPKind::M81 | MultiPKind::M338 | MultiPKind::M341 => r[0] = address,
+            MultiPKind::M81 | MultiPKind::M338 | MultiPKind::M341 | MultiPKind::M380 => {
+                r[0] = address;
+            }
+            MultiPKind::M354 => {
+                let start = if self.submapper == 1 { 0xE000 } else { 0xF000 };
+                if address >= start {
+                    r[0] = address;
+                    r[1] = u16::from(value);
+                }
+            }
             MultiPKind::M343 => r[0] = u16::from(!value),
             // `extcl_cpu_wr_mem_337`: `$8000-$BFFF` the high five bits, `$C000-$FFFF` the low three.
             MultiPKind::M337 => {
@@ -415,13 +444,78 @@ impl MultiP {
                 b.map_prg_16k(2, ((bank | bit0) & !low_clear) | (bit7 * bit9 * 7));
                 mirror(a & 0x02 == 0)
             }
+            _ => self.map_b4(),
+        }
+    }
+
+    /// [`MultiP::map`] for the kinds of batch 4 (`docs/progress/MAPPERS-P.md`).
+    fn map_b4(&mut self) -> Option<NametableMirroring> {
+        let r = self.regs.map(i32::from);
+        let b = &mut self.banks;
+        let mirror = |vertical: bool| {
+            Some(if vertical {
+                NametableMirroring::Vertical
+            } else {
+                NametableMirroring::Horizontal
+            })
+        };
+        match self.kind {
+            // `prg_fix_354`: A12, A4 and D0-D5 the 16 KiB bank, D7 the 8 KiB half, A0-A2 the mode.
+            MultiPKind::M354 => {
+                let bank = Self::bank_354(r[0], r[1]);
+                let half = (bank << 1) | (r[1] >> 7);
+                match r[0] & 0x07 {
+                    1 => {
+                        b.map_prg_16k(0, bank);
+                        b.map_prg_16k(2, bank | 0x07);
+                    }
+                    2 | 6 => {
+                        for slot in 0..4 {
+                            b.map_prg_8k(slot, half);
+                        }
+                    }
+                    3 | 7 => {
+                        b.map_prg_16k(0, bank);
+                        b.map_prg_16k(2, bank);
+                    }
+                    5 => b.map_prg_32k((bank >> 1) | 0x03),
+                    _ => b.map_prg_32k(bank >> 1),
+                }
+                mirror(r[1] & 0x40 == 0)
+            }
+            // `prg_fix_380`, its bit arithmetic kept as puNES writes it.
+            MultiPKind::M380 => {
+                let bit0 = i32::from(r[0] & 0x0001 == 0);
+                let bit8 = (r[0] & 0x0100) >> 8;
+                let bit9 = (r[0] & 0x0200) >> 9;
+                let not9 = i32::from(bit9 == 0);
+                let bank = ((r[0] & 0x007C) >> 2) & !(bit0 * bit9);
+                b.map_prg_16k(0, bank);
+                let extra = if self.submapper == 1 {
+                    8 * not9 * bit8
+                } else {
+                    0
+                };
+                b.map_prg_16k(2, bank | (bit0 * bit9) | (7 * not9) | extra);
+                let bit = if self.submapper == 2 { 0x040 } else { 0x002 };
+                mirror(r[0] & bit == 0)
+            }
             _ => None,
         }
     }
 
+    /// Mapper 354's 16 KiB bank: A12 → bit 7, A4 → bit 6, D0-D5.
+    const fn bank_354(address: i32, data: i32) -> i32 {
+        ((address & 0x1000) >> 5) | ((address & 0x10) << 2) | (data & 0x3F)
+    }
+
     /// Whether CHR-RAM writes are blocked now (`memmap_vram_wp_8k`'s write-enable argument).
     const fn chr_write_protected(&self) -> bool {
-        matches!(self.kind, MultiPKind::M375) && self.regs[0] & 0x80 != 0
+        match self.kind {
+            MultiPKind::M375 | MultiPKind::M380 => self.regs[0] & 0x80 != 0,
+            MultiPKind::M354 => self.regs[0] & 0x08 != 0,
+            _ => false,
+        }
     }
 
     /// Whether reads of `$8000-$FFFF` cannot come from the cached windows now.
@@ -434,6 +528,8 @@ impl MultiP {
                 let latched = self.regs[0] & 0xFF0F;
                 latched == 0xF008 || (latched == 0xF004 && self.prg_size <= 0x1_0000)
             }
+            // `extcl_cpu_rd_mem_380`: submapper 0 with A8 latched reads `(A0-A7) | DIP`.
+            MultiPKind::M380 => self.submapper == 0 && self.regs[0] & 0x100 != 0,
             _ => false,
         }
     }
@@ -460,6 +556,22 @@ impl MultiP {
                 (!ram.is_empty()).then(|| Some(ram[usize::from(address & 0x0FFF) % ram.len()]))
             }
             MultiPKind::M122 => Some(None),
+            // `wram_fix_354`: mode 5 shows the 8 KiB half bank, every other mode disables it.
+            MultiPKind::M354 => {
+                let (a, d) = (i32::from(self.regs[0]), i32::from(self.regs[1]));
+                if a & 0x07 != 5 {
+                    return Some(None);
+                }
+                let rom = memory.rom().prg_rom();
+                if rom.is_empty() {
+                    return Some(None);
+                }
+                let bank = usize::try_from((Self::bank_354(a, d) << 1) | (d >> 7)).unwrap_or(0);
+                Some(
+                    rom.get((bank * 0x2000 + usize::from(address & 0x1FFF)) % rom.len())
+                        .copied(),
+                )
+            }
             // `wram_fix_337`/`wram_fix_350`: `$6000-$7FFF` is PRG-ROM 8 KiB bank 1.
             MultiPKind::M337 | MultiPKind::M350 => {
                 let rom = memory.rom().prg_rom();
@@ -621,6 +733,10 @@ impl Mapper for MultiP {
         // `extcl_cpu_rd_mem_237`: with A0 of the address register set, `$8000-$FFFF` reads the
         // DIP switches (none set here: J37); 338's two DIP reads the same way.
         if address >= 0x8000 && self.reads_are_special() {
+            // 380's DIP read returns the low address byte ORed with the switches (0: J37).
+            if self.kind == MultiPKind::M380 {
+                return Some(Some(address.to_le_bytes()[0]));
+            }
             return Some(Some(0));
         }
         None

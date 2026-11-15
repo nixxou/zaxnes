@@ -956,6 +956,8 @@ places where puNES itself is incomplete are copied, not invented around:
   *is* the game selector, so only the first game runs) and 338's two DIP reads. 352 and 381 pick
   the game by counting resets: `Mapper::soft_reset` is the hook, and its default doc already
   allows the reset-detecting multicarts; a power cycle starts again at 0.
+* 380 (submapper 0) reads `(A0-A7) | DIP` with A8 latched; the DIP is 0, so a menu that offers
+  a choice by switch shows its first one.
 * 281/282/295 apply puNES's outer bank to ROM nametables too (`mirroring_swap_jyasic_28x`); with
   no dump in the Hackset this is untested on a real image.
 

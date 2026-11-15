@@ -59,7 +59,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 351 | `mapper_351.c` | 305 | 0 | 0 | todo |
 | 352 | `mapper_352.c` | 66 | 0 | 0 | done (batch 2, `MultiP`) |
 | 353 | `mapper_353.c` | 149 | 1 | 0 | todo |
-| 354 | `mapper_354.c` | 111 | 0 | 0 | todo |
+| 354 | `mapper_354.c` | 111 | 0 | 0 | done (batch 4, `MultiP`) |
 | 355 | `mapper_355.c` | 258 | 4 | 1 | todo |
 | 356 | `mapper_356.c` | 106 | 1 | 0 | todo |
 | 357 | `mapper_357.c` | 118 | 1 | 0 | todo |
@@ -75,7 +75,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 374 | `mapper_374.c` | 56 | 4 | 0 | todo |
 | 375 | `mapper_375.c` | 77 | 1 | 0 | done (batch 3, `MultiP`) |
 | 377 | `mapper_377.c` | 86 | 3 | 0 | todo |
-| 380 | `mapper_380.c` | 89 | 9 | 0 | todo |
+| 380 | `mapper_380.c` | 89 | 9 | 0 | done (batch 4, `MultiP`) |
 | 381 | `mapper_381.c` | 60 | 0 | 0 | done (batch 2, `MultiP`) |
 | 382 | `mapper_382.c` | 70 | 1 | 0 | todo |
 | 384 | `mapper_384.c` | 65 | 0 | 0 | todo |
@@ -177,3 +177,6 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 * Batch 3: `MultiP` 337, 350 (PRG-ROM bank 1 at `$6000`) and 375 (CHR-RAM write protection,
   `MultiP::ppu_write`); `JyMulticart::M358`. `MultiP::map` is split per batch (`map_b2`, `map_b3`)
   to stay under clippy's line limit.
+* Batch 4: `MultiP` 354 and 380, the first two kinds that read the NES 2.0 submapper
+  (`MultiP::submapper`): 354's latch window (`$F000`/`$E000`), 380's DIP read, last bank and
+  mirroring bit.

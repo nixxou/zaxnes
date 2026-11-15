@@ -233,3 +233,31 @@ fn mappers_p_358_places_prg_from_d003_bit_1() {
     core.mapper_write(0xD003, 2);
     assert_eq!([33, 32, 32, 63], core.prg_windows());
 }
+
+/// `mapper_354.c`: the latch answers from `$F000`; mode 1 is UNROM, mode 5 adds PRG-ROM at
+/// `$6000`.
+#[cfg(feature = "board-354")]
+#[test]
+fn mappers_p_354_latches_at_f000_and_maps_6000_in_mode_5() {
+    let mut core = MapperRom::new(354).prg(64).load();
+    core.mapper_write(0xE001, 0x02);
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    core.mapper_write(0xF001, 0x02);
+    assert_eq!([4, 5, 14, 15], core.prg_windows());
+    core.mapper_write(0xF005, 0x83);
+    assert_eq!([12, 13, 14, 15], core.prg_windows());
+    assert_eq!(7, core.read_memory(0x6000));
+}
+
+/// `mapper_380.c`: A2-A6 the bank, A9 UNROM vs NROM; A8 (submapper 0) reads the DIP switches.
+#[cfg(feature = "board-380")]
+#[test]
+fn mappers_p_380_banks_from_the_address_and_reads_its_dip() {
+    let mut core = MapperRom::new(380).prg(64).load();
+    core.mapper_write(0x8008, 0);
+    assert_eq!([4, 5, 14, 15], core.prg_windows());
+    core.mapper_write(0x8208, 0);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    core.mapper_write(0x8100, 0);
+    assert_eq!(0x34, core.read_memory(0x8134));
+}
