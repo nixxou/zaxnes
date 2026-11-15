@@ -186,3 +186,50 @@ fn mappers_p_381_rotates_its_bank_and_counts_resets() {
     core.mapper_write(0x8000, 0x01);
     assert_eq!([36, 37, 62, 63], core.prg_windows());
 }
+
+/// `mapper_337.c`: `$8000` writes the high five bits, `$C000` the low three; mode 1 is NROM-256;
+/// `$6000` is PRG-ROM bank 1.
+#[cfg(feature = "board-337")]
+#[test]
+fn mappers_p_337_splits_its_register_and_shows_rom_at_6000() {
+    let mut core = MapperRom::new(337).prg(32).load();
+    core.mapper_write(0x8000, 0x40);
+    core.mapper_write(0xC000, 0x02);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    assert_eq!(1, core.read_memory(0x6000));
+}
+
+/// `mapper_350.c`: modes 2-3 with bit 5 use the second chip's 128 KiB.
+#[cfg(feature = "board-350")]
+#[test]
+fn mappers_p_350_reaches_its_second_chip() {
+    let mut core = MapperRom::new(350).prg(128).load();
+    core.mapper_write(0x8000, 0x60);
+    core.mapper_write(0xC000, 0x02);
+    // Base `$20` (A19), inner bank 2 and its last bank 7.
+    assert_eq!([68, 69, 78, 79], core.prg_windows());
+}
+
+/// `mapper_375.c`: A11 locks the address latch; A7 write-protects CHR-RAM.
+#[cfg(feature = "board-375")]
+#[test]
+fn mappers_p_375_locks_its_latch_and_protects_chr_ram() {
+    let mut core = MapperRom::new(375).prg(64).load();
+    // A11 set: the first window takes the data's bank (3), the second the latched one.
+    core.mapper_write(0x8880, 0x03);
+    assert_eq!([6, 7, 0, 1], core.prg_windows());
+    // Locked: only the data moves.
+    core.mapper_write(0x8000, 0x01);
+    assert_eq!([2, 3, 0, 1], core.prg_windows());
+}
+
+/// `mapper_358.c`: 282's PRG decode on the J.Y. ASIC.
+#[cfg(feature = "board-358")]
+#[test]
+fn mappers_p_358_places_prg_from_d003_bit_1() {
+    let mut core = MapperRom::new(358).prg(128).chr(256).load();
+    core.mapper_write(0xD000, 0x02);
+    core.mapper_write(0x8000, 1);
+    core.mapper_write(0xD003, 2);
+    assert_eq!([33, 32, 32, 63], core.prg_windows());
+}

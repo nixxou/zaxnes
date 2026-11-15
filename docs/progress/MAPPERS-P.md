@@ -45,7 +45,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 327 | `mapper_327.c` | 89 | 0 | 0 | todo |
 | 334 | `mapper_334.c` | 95 | 1 | 0 | todo |
 | 335 | `mapper_335.c` | 85 | 1 | 0 | done (batch 2, `MultiP`) |
-| 337 | `mapper_337.c` | 92 | 0 | 0 | todo |
+| 337 | `mapper_337.c` | 92 | 0 | 0 | done (batch 3, `MultiP`) |
 | 338 | `mapper_338.c` | 86 | 1 | 0 | done (batch 2, `MultiP`) |
 | 339 | `mapper_339.c` | 97 | 1 | 0 | todo |
 | 340 | `mapper_340.c` | 79 | 1 | 0 | todo |
@@ -55,7 +55,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 344 | `mapper_344.c` | 125 | 3 | 0 | todo |
 | 345 | `mapper_345.c` | 102 | 0 | 0 | todo |
 | 347 | `mapper_347.c` | 122 | 2 | 0 | todo |
-| 350 | `mapper_350.c` | 99 | 0 | 0 | todo |
+| 350 | `mapper_350.c` | 99 | 0 | 0 | done (batch 3, `MultiP`) |
 | 351 | `mapper_351.c` | 305 | 0 | 0 | todo |
 | 352 | `mapper_352.c` | 66 | 0 | 0 | done (batch 2, `MultiP`) |
 | 353 | `mapper_353.c` | 149 | 1 | 0 | todo |
@@ -63,7 +63,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 355 | `mapper_355.c` | 258 | 4 | 1 | todo |
 | 356 | `mapper_356.c` | 106 | 1 | 0 | todo |
 | 357 | `mapper_357.c` | 118 | 1 | 0 | todo |
-| 358 | `mapper_358.c` | 76 | 4 | 0 | todo |
+| 358 | `mapper_358.c` | 76 | 4 | 0 | done (batch 3, `JyCompany` + `JyMulticart`) |
 | 359 | `mapper_359.c` | 293 | 3 | 0 | todo |
 | 360 | `mapper_360.c` | 54 | 1 | 0 | done (batch 2, `MultiP`) |
 | 361 | `mapper_361.c` | 85 | 5 | 0 | todo |
@@ -73,7 +73,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 370 | `mapper_370.c` | 117 | 1 | 0 | todo |
 | 372 | `mapper_372.c` | 96 | 1 | 0 | todo |
 | 374 | `mapper_374.c` | 56 | 4 | 0 | todo |
-| 375 | `mapper_375.c` | 77 | 1 | 0 | todo |
+| 375 | `mapper_375.c` | 77 | 1 | 0 | done (batch 3, `MultiP`) |
 | 377 | `mapper_377.c` | 86 | 3 | 0 | todo |
 | 380 | `mapper_380.c` | 89 | 9 | 0 | todo |
 | 381 | `mapper_381.c` | 60 | 0 | 0 | done (batch 2, `MultiP`) |
@@ -174,3 +174,6 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   `JyMulticart` decode of `$D003` (puNES replaces the same two bank functions); they join 209's
   latch lists in `cartridges/mod.rs`. `MultiP` gains 271, 335, 338, 341, 343, 352, 360 and 381
   (`MultiP::map_b2`); 352 and 381 count the console's resets through `Mapper::soft_reset`.
+* Batch 3: `MultiP` 337, 350 (PRG-ROM bank 1 at `$6000`) and 375 (CHR-RAM write protection,
+  `MultiP::ppu_write`); `JyMulticart::M358`. `MultiP::map` is split per batch (`map_b2`, `map_b3`)
+  to stay under clippy's line limit.

@@ -121,6 +121,8 @@ mod mmc3_txc189;
 mod mmc3_unl8237;
 mod mmc5;
 mod multicart;
+#[cfg(feature = "board-multi-p")]
+mod multicart_p;
 mod namco163;
 #[cfg(feature = "board-namcot108")]
 mod namcot108;
@@ -135,8 +137,6 @@ mod oeka_kids;
 mod pec9588;
 #[cfg(feature = "board-168")]
 mod racermate;
-#[cfg(feature = "board-multi-p")]
-mod multicart_p;
 #[cfg(feature = "board-682")]
 mod rainbow;
 #[cfg(feature = "board-682")]
@@ -310,6 +310,8 @@ pub use mmc5::Mmc5Ext;
 pub use multicart::{
     Action52, Action53, Caltron6In1, JalecoJ87, Mapper015, Mapper034, Multicart225,
 };
+#[cfg(feature = "board-multi-p")]
+pub use multicart_p::{MultiP, MultiPKind};
 pub use namco163::{Namco163, NamcoVariant};
 #[cfg(feature = "board-namcot108")]
 pub use namcot108::Namcot108;
@@ -324,8 +326,6 @@ pub use oeka_kids::OekaKids;
 pub use pec9588::Pec9588;
 #[cfg(feature = "board-168")]
 pub use racermate::Racermate;
-#[cfg(feature = "board-multi-p")]
-pub use multicart_p::{MultiPKind, MultiP};
 #[cfg(feature = "board-682")]
 pub use rainbow::Rainbow;
 #[cfg(feature = "board-158")]

@@ -50,6 +50,14 @@ pub enum MultiPKind {
     M360,
     /// 381, `mapper_381.c` (KN-42): UNROM data latch with scrambled bits, outer bank by reset.
     M381,
+    /// 337, `mapper_337.c` (CTC-12IN1): two half registers, three PRG modes, PRG-ROM at `$6000`.
+    M337,
+    /// 350, `mapper_350.c` (Super 15-in-1): two registers, a second 128 KiB chip, PRG-ROM at
+    /// `$6000`.
+    M350,
+    /// 375, `mapper_375.c` (135-in-1): a lockable address latch and a data latch, CHR-RAM
+    /// write protection.
+    M375,
 }
 
 impl MultiPKind {
@@ -71,6 +79,9 @@ impl MultiPKind {
             352 => Self::M352,
             360 => Self::M360,
             381 => Self::M381,
+            337 => Self::M337,
+            350 => Self::M350,
+            375 => Self::M375,
             _ => return None,
         })
     }
@@ -91,6 +102,9 @@ impl MultiPKind {
             Self::M352 => 352,
             Self::M360 => 360,
             Self::M381 => 381,
+            Self::M337 => 337,
+            Self::M350 => 350,
+            Self::M375 => 375,
         }
     }
 
@@ -104,7 +118,10 @@ impl MultiPKind {
 
     /// Whether `$6000-$7FFF` is something else than work RAM.
     const fn owns_6000(self) -> bool {
-        matches!(self, Self::M55 | Self::M122 | Self::M517)
+        matches!(
+            self,
+            Self::M55 | Self::M122 | Self::M517 | Self::M337 | Self::M350
+        )
     }
 }
 
@@ -127,10 +144,11 @@ impl MultiP {
             banks: windows_for(memory),
             kind,
             // `map_init_343`: the latch powers on as `$FF` (inverted, bank 0 of the last game).
-            regs: if matches!(kind, MultiPKind::M343) {
-                [0xFF, 0, 0, 0]
-            } else {
-                [0; 4]
+            regs: match kind {
+                MultiPKind::M343 => [0xFF, 0, 0, 0],
+                // `map_init_350`: register 0 powers on as `$80`.
+                MultiPKind::M350 => [0x80, 0, 0, 0],
+                _ => [0; 4],
             },
             adc: [0; 3],
             prg_size: memory.rom().prg_rom().len(),
@@ -179,6 +197,25 @@ impl MultiP {
             },
             MultiPKind::M81 | MultiPKind::M338 | MultiPKind::M341 => r[0] = address,
             MultiPKind::M343 => r[0] = u16::from(!value),
+            // `extcl_cpu_wr_mem_337`: `$8000-$BFFF` the high five bits, `$C000-$FFFF` the low three.
+            MultiPKind::M337 => {
+                r[0] = if address < 0xC000 {
+                    (r[0] & 0x07) | u16::from(value & !0x07)
+                } else {
+                    (r[0] & !0x07) | u16::from(value & 0x07)
+                };
+            }
+            MultiPKind::M350 => match address & 0xE000 {
+                0x8000 | 0xA000 => r[0] = u16::from(value),
+                _ => r[1] = u16::from(value),
+            },
+            // `extcl_cpu_wr_mem_375`: A11 of the latched address locks it.
+            MultiPKind::M375 => {
+                if r[0] & 0x0800 == 0 {
+                    r[0] = address;
+                }
+                r[1] = u16::from(value);
+            }
             MultiPKind::M55 | MultiPKind::M352 | MultiPKind::M360 => {}
         }
     }
@@ -315,8 +352,76 @@ impl MultiP {
                 b.map_prg_16k(2, outer | 0x0F);
                 None
             }
+            _ => self.map_b3(),
+        }
+    }
+
+    /// [`MultiP::map`] for the kinds of batch 3 (`docs/progress/MAPPERS-P.md`).
+    fn map_b3(&mut self) -> Option<NametableMirroring> {
+        let r = self.regs.map(i32::from);
+        let b = &mut self.banks;
+        let mirror = |vertical: bool| {
+            Some(if vertical {
+                NametableMirroring::Vertical
+            } else {
+                NametableMirroring::Horizontal
+            })
+        };
+        match self.kind {
+            MultiPKind::M337 => {
+                match (r[0] >> 6) & 0x03 {
+                    0 => {
+                        b.map_prg_16k(0, r[0]);
+                        b.map_prg_16k(2, r[0]);
+                    }
+                    1 => b.map_prg_32k(r[0] >> 1),
+                    _ => {
+                        b.map_prg_16k(0, r[0]);
+                        b.map_prg_16k(2, r[0] | 0x07);
+                    }
+                }
+                mirror(r[0] & 0x20 == 0)
+            }
+            // `prg_fix_350`: modes 2-3 use the second chip (128 KiB, A20 from bit 5).
+            MultiPKind::M350 => {
+                let mut bank = (r[0] & 0x18) | (r[1] & 0x07);
+                match (r[0] >> 5) & 0x03 {
+                    0 => {
+                        b.map_prg_16k(0, bank);
+                        b.map_prg_16k(2, bank);
+                    }
+                    1 => b.map_prg_32k(bank >> 1),
+                    _ => {
+                        if r[0] & 0x20 != 0 {
+                            bank &= 0x07;
+                        }
+                        let base = r[0] & 0x20;
+                        b.map_prg_16k(0, base | bank);
+                        b.map_prg_16k(2, base | bank | 0x07);
+                    }
+                }
+                mirror(r[0] & 0x80 == 0)
+            }
+            // `prg_fix_375`, its bit arithmetic kept as puNES writes it.
+            MultiPKind::M375 => {
+                let a = r[0];
+                let bank = ((a & 0x400) >> 4) | ((a & 0x100) >> 3) | ((a & 0xF80) >> 2);
+                let bit0 = a & 0x0001;
+                let bit7 = (a & 0x0080) >> 7;
+                let bit9 = (a & 0x0200) >> 9;
+                let bit11 = (a & 0x0800) >> 11;
+                let low_clear = i32::from(bit7 == 0 && bit9 == 0) * 7;
+                b.map_prg_16k(0, ((bank & !bit0) & !(bit11 * 7)) | (bit11 * r[1]));
+                b.map_prg_16k(2, ((bank | bit0) & !low_clear) | (bit7 * bit9 * 7));
+                mirror(a & 0x02 == 0)
+            }
             _ => None,
         }
+    }
+
+    /// Whether CHR-RAM writes are blocked now (`memmap_vram_wp_8k`'s write-enable argument).
+    const fn chr_write_protected(&self) -> bool {
+        matches!(self.kind, MultiPKind::M375) && self.regs[0] & 0x80 != 0
     }
 
     /// Whether reads of `$8000-$FFFF` cannot come from the cached windows now.
@@ -355,6 +460,17 @@ impl MultiP {
                 (!ram.is_empty()).then(|| Some(ram[usize::from(address & 0x0FFF) % ram.len()]))
             }
             MultiPKind::M122 => Some(None),
+            // `wram_fix_337`/`wram_fix_350`: `$6000-$7FFF` is PRG-ROM 8 KiB bank 1.
+            MultiPKind::M337 | MultiPKind::M350 => {
+                let rom = memory.rom().prg_rom();
+                if rom.is_empty() {
+                    return Some(None);
+                }
+                Some(
+                    rom.get((0x2000 + usize::from(address & 0x1FFF)) % rom.len())
+                        .copied(),
+                )
+            }
             // `extcl_cpu_rd_mem_517`: the ADC's serial read-out.
             MultiPKind::M517 if address < 0x7000 => {
                 let bit = if address == 0x6000 {
@@ -472,6 +588,13 @@ impl Mapper for MultiP {
         if let Some(mirroring) = self.map() {
             memory.set_mirroring(mirroring);
         }
+    }
+
+    fn ppu_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        if self.chr_write_protected() || !memory.rom().chr_rom().is_empty() {
+            return;
+        }
+        self.banks.write_chr(address, value, memory.chr_ram_mut());
     }
 
     fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {

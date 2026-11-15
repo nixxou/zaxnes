@@ -1042,6 +1042,9 @@ pub(crate) enum JyMulticart {
     M282,
     /// `mapper_295.c`: 128 KiB outer PRG and CHR banks.
     M295,
+    /// `mapper_358.c`: 282's PRG decode; CHR bit 0 at A18 and bits 2-3 at A19-A20, widened to
+    /// 512 KiB when bit 5 is set.
+    M358,
 }
 
 impl JyMulticart {
@@ -1050,6 +1053,7 @@ impl JyMulticart {
             281 => Some(Self::M281),
             282 => Some(Self::M282),
             295 => Some(Self::M295),
+            358 => Some(Self::M358),
             _ => None,
         }
     }
@@ -1059,7 +1063,7 @@ impl JyMulticart {
         let outer = i32::from(outer);
         match self {
             Self::M281 => (outer << 5) | (bank_8k & 0x1F),
-            Self::M282 => ((outer << 4) & !0x1F) | (bank_8k & 0x1F),
+            Self::M282 | Self::M358 => ((outer << 4) & !0x1F) | (bank_8k & 0x1F),
             Self::M295 => (outer << 4) | (bank_8k & 0x0F),
         }
     }
@@ -1069,8 +1073,12 @@ impl JyMulticart {
         let outer = i32::from(outer);
         match self {
             Self::M281 => (outer << 8) | (bank_1k & 0xFF),
-            Self::M282 => {
-                let base = ((outer & 0x01) << 8) | ((outer & 0x18) << 6);
+            Self::M282 | Self::M358 => {
+                let base = if self == Self::M282 {
+                    ((outer & 0x01) << 8) | ((outer & 0x18) << 6)
+                } else {
+                    ((outer & 0x01) << 8) | ((outer & 0x0C) << 7)
+                };
                 if outer & 0x20 == 0 {
                     base | (bank_1k & 0xFF)
                 } else {
