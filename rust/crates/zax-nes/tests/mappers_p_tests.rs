@@ -1680,3 +1680,42 @@ fn mappers_p_547_reads_kanji_through_its_qt_ram() {
         cartridge.ppu_peek(0x0000, zax_nes::cartridges::ChrFetch::Sprite)
     );
 }
+
+/// `mapper_561.c`: the misc ROM (load `$0300`, init `$0300`) is run at power-on from `$0700`;
+/// the latch selects 16 KiB banks in mode 0, `$42FC` turns the latch off so that `$8000-$FFFF`
+/// writes land in the copier RAM, `$43FC` D0 clear the four 8 KiB registers; `$4025` D7 runs
+/// the FDS-style timer (D6 restarting it), asserting after 150 cycles (3 a cycle, 448).
+#[cfg(feature = "board-561")]
+#[test]
+fn mappers_p_561_boots_its_trainer_and_writes_its_ram() {
+    let mut image = MapperRom::new(561).prg(16).chr(8).image();
+    image.extend_from_slice(&[0x00, 0x03, 0x00, 0x03, 0x60]);
+    let mut core = zax_nes::NesCore::new();
+    assert!(core.load_rom(&image, "Mapper561.nes").success);
+    assert_eq!(0x60, core.read_memory(0x0300));
+    assert_eq!(
+        [0x20, 0x00, 0x03, 0x6C, 0xFC, 0xFF],
+        std::array::from_fn::<u8, 6, _>(|i| core.read_memory(0x0700 + u16::try_from(i).unwrap()))
+    );
+
+    assert_eq!([0, 1, 14, 15], core.prg_windows());
+    core.mapper_write(0x8000, 0x0C);
+    assert_eq!([8, 9, 14, 15], core.prg_windows());
+    core.mapper_write(0x42FC, 0x00);
+    core.mapper_write(0x8100, 0x99);
+    assert_eq!([0x99, 9, 14, 15], core.prg_windows());
+    core.mapper_write(0x43FC, 0x00);
+    assert_eq!(
+        [3, 0x1D & 0x0F, 0x1E & 0x0F, 0x1F & 0x0F],
+        core.prg_windows()
+    );
+
+    core.mapper_write(0x4025, 0xC0);
+    let cartridge = core.cartridge_mut().unwrap();
+    for _ in 0..149 {
+        cartridge.step_cpu_cycle();
+    }
+    assert!(!cartridge.irq_asserted());
+    cartridge.step_cpu_cycle();
+    assert!(cartridge.irq_asserted());
+}

@@ -7,7 +7,7 @@
 //! The PRG-ROM these boards show at `$5000`/`$6000` is answered by [`Mapper::try_read_prg`], with
 //! the work RAM disabled ([`Mapper::prg_ram_enabled`]).
 use super::vrc_irq::VrcIrq;
-use super::{windows_for, Eeprom93C66, Mapper};
+use super::{windows_for, BootProgram, Eeprom93C66, Mapper};
 use crate::cartridges::{A12Watcher, BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
@@ -87,6 +87,13 @@ pub enum IrqPKind {
     /// shadowing the nametables whose byte for each tile turns that tile's background fetch to
     /// the kanji CHR-ROM or a CHR-RAM bank.
     M547,
+    /// 561, `mapper_561.c` (Bung Super Game Doctor / Venus Turbo Game Doctor, the 4M and 6M
+    /// copiers' game format): PRG and CHR are the copier's RAM, loaded from the image and
+    /// writable while the copier's mode says so; `$42FC-$42FF` the mode, `$43FC-$43FF` the
+    /// 8 KiB/large-bank switch and the CHR bank, `$8000-$FFFF` the game's latch, an FDS-style
+    /// timer at `$4024/$4025` and a count-up at `$4100/$4101`; the NES 2.0 misc ROM is the
+    /// copier's trainer, run at power-on ([`Mapper::boot_program`]).
+    M561,
 }
 
 impl IrqPKind {
@@ -110,6 +117,7 @@ impl IrqPKind {
             560 => Self::M560,
             413 => Self::M413,
             547 => Self::M547,
+            561 => Self::M561,
             _ => return None,
         })
     }
@@ -132,6 +140,7 @@ impl IrqPKind {
             Self::M560 => 560,
             Self::M413 => 413,
             Self::M547 => 547,
+            Self::M561 => 561,
         }
     }
 }
@@ -170,6 +179,18 @@ pub struct IrqP {
     /// 547's sixteen registers (`m547.reg`), then the latched QT byte and the IRQ's "after" flag;
     /// saved for that kind only. Its nametables and QT RAM are `nt_560` ([`NT_547`] bytes).
     ext_547: [u8; 18],
+    /// 561's copier RAM: the PRG (the image's PRG-ROM, at least 256 KiB on submapper 3) and the
+    /// CHR (the image's CHR-ROM, at least 8 KiB and the header's CHR-RAM), empty for the other
+    /// kinds; saved for that kind only.
+    prg_561: Vec<u8>,
+    chr_561: Vec<u8>,
+    /// 561's `chr`, `reg`, `reg1m`, `reg4m` and `irq.reg`, then its two timers (`count_fds`,
+    /// `count_sgd`, signed 16-bit as puNES keeps them); `regs` hold `prg[0..4]`. Saved for that
+    /// kind only.
+    ext_561: [u8; 5],
+    timers_561: [i16; 2],
+    /// The NES 2.0 misc ROM 561 boots from, empty for the other kinds; derived from the image.
+    misc_561: Vec<u8>,
     /// 528's VRC7 IRQ (`init_VRC7(0x01, 0x00)`), saved for that kind only.
     vrc_irq: VrcIrq,
     /// Whether the image has CHR-ROM, which 359's CHR banking needs (`chrrom_size()`).
@@ -204,6 +225,11 @@ impl IrqP {
             },
             serial_413: 0,
             ext_547: [0; 18],
+            prg_561: Vec::new(),
+            chr_561: Vec::new(),
+            ext_561: [0; 5],
+            timers_561: [0; 2],
+            misc_561: Vec::new(),
             nt_560: match kind {
                 IrqPKind::M560 => vec![0; NT_560],
                 IrqPKind::M547 => vec![0; NT_547],
@@ -217,6 +243,9 @@ impl IrqP {
         if matches!(kind, IrqPKind::M359 | IrqPKind::M540) {
             board.regs = [0xFC, 0xFD, 0xFF, 0x00];
             board.chr = [0, 1, 2, 3, 4, 5, 6, 7];
+        }
+        if kind == IrqPKind::M561 {
+            board.power_on_561(memory);
         }
         // `map_init_560`: `reg = 1`.
         if kind == IrqPKind::M560 {
@@ -299,6 +328,8 @@ impl IrqP {
             // `prg_fix_547`: three 8 KiB banks, `$E000` bank `$4F`; the CHR is read by
             // `ppu_peek`.
             IrqPKind::M547 => self.map_547(),
+            // `prg_fix_561`/`chr_fix_561` read the copier RAM in `try_read_prg`/`ppu_peek`.
+            IrqPKind::M561 => {}
             // `prg_fix_560`.
             IrqPKind::M560 => {
                 b.map_prg_32k(r[0]);
@@ -534,6 +565,136 @@ impl IrqP {
         self.banks.map_prg_8k(3, 0x4F);
     }
 
+    /// `map_init_561`/`extcl_after_mapper_init_561`: the copier RAM loaded from the image, `reg1m`
+    /// from the submapper and the header's mirroring, the 8 KiB mode off, PRG `$1C-$1F`.
+    fn power_on_561(&mut self, memory: &CartridgeMemory) {
+        let rom = memory.rom();
+        let header = rom.header();
+        let submapper = if header.is_nes20 {
+            u8::try_from(header.submapper & 0x07).unwrap_or(0)
+        } else {
+            0
+        };
+        let mut prg = rom.prg_rom().to_vec();
+        if submapper == 3 && prg.len() < 0x4_0000 {
+            prg.resize(0x4_0000, 0);
+        }
+        let chr_rom = rom.chr_rom();
+        let mut chr = vec![0; chr_rom.len().max(memory.chr_ram().len()).max(0x2000)];
+        chr[..chr_rom.len()].copy_from_slice(chr_rom);
+        self.prg_561 = prg;
+        self.chr_561 = chr;
+        self.misc_561 = rom
+            .raw()
+            .get(header.announced_size()..)
+            .unwrap_or_default()
+            .to_vec();
+        let vertical = header.mirroring == NametableMirroring::Vertical;
+        self.ext_561 = [
+            0,
+            0,
+            (submapper << 5) | if vertical { 0x01 } else { 0x11 } | 0x02,
+            0x03,
+            0,
+        ];
+        self.timers_561 = [0; 2];
+        self.regs = [0x1C, 0x1D, 0x1E, 0x1F];
+    }
+
+    /// `extcl_cpu_wr_mem_561`.
+    fn latch_561(&mut self, address: u16, value: u8) {
+        match address {
+            0x4024 => self.irq_pending = false,
+            0x4025 => {
+                self.ext_561[4] = value;
+                if value & 0x42 != 0 {
+                    self.timers_561[0] = 0;
+                }
+                self.irq_pending = false;
+            }
+            0x4100 => {
+                let [_, high] = self.timers_561[1].to_le_bytes();
+                self.timers_561[1] = if value == 0 {
+                    0
+                } else {
+                    i16::from_le_bytes([value, high])
+                };
+                self.irq_pending = false;
+            }
+            0x4101 => {
+                let [low, _] = self.timers_561[1].to_le_bytes();
+                self.timers_561[1] = i16::from_le_bytes([low, value]);
+                self.irq_pending = false;
+            }
+            0x42FC..=0x42FF => {
+                self.ext_561[2] = (value & 0xF0) | address.to_le_bytes()[0] & 0x03;
+            }
+            0x43FC..=0x43FF => {
+                self.ext_561[3] = address.to_le_bytes()[0] & 0x01;
+                self.ext_561[0] = value & 0x03;
+            }
+            0x8000..=0xFFFF if self.ext_561[2] & 0x02 != 0 => {
+                self.ext_561[1] = value;
+                match self.ext_561[2] >> 5 {
+                    0 | 2 => self.ext_561[0] = 0,
+                    1 | 4 | 5 => self.ext_561[0] = value & 0x03,
+                    3 => self.ext_561[0] = (value & 0x30) >> 4,
+                    _ => {}
+                }
+                self.regs[usize::from((address >> 13) & 0x03)] = value >> 2;
+            }
+            _ => {}
+        }
+    }
+
+    /// `prg_fix_561`: the 8 KiB bank of a `$8000-$FFFF` window, from the four registers in the
+    /// 8 KiB mode (`reg4m` D0 clear), else from the latch by the copier's mode.
+    fn prg_bank_561(&self, slot: usize) -> usize {
+        let reg = usize::from(self.ext_561[1]);
+        let banks = if self.ext_561[3] & 0x01 == 0 {
+            return usize::from(self.regs[slot]);
+        } else {
+            // Each mode as its 8 KiB banks: a 16 KiB bank `b` is `2b, 2b+1`, 32 KiB `4b..4b+3`.
+            let (low, high) = match self.ext_561[2] >> 5 {
+                0 => (reg & 0x07, 0x07),
+                1 => ((reg & 0x3C) >> 2, 0x07),
+                2 => (reg & 0x0F, 0x0F),
+                3 => (0x0F, reg & 0x0F),
+                4 => return (((reg & 0x30) >> 4) << 2) | slot,
+                5 => return (0x03 << 2) | slot,
+                6 => {
+                    return match slot {
+                        0 => reg & 0x0F,
+                        1 => reg >> 4,
+                        _ => (0x07 << 1) | (slot & 0x01),
+                    }
+                }
+                _ => {
+                    return match slot {
+                        0 => reg & 0x0E,
+                        1 => (reg >> 4) | 0x01,
+                        _ => (0x07 << 1) | (slot & 0x01),
+                    }
+                }
+            };
+            [low, high]
+        };
+        (banks[slot >> 1] << 1) | (slot & 0x01)
+    }
+
+    /// The copier RAM offset of a `$8000-$FFFF` address.
+    fn prg_offset_561(&self, address: u16) -> usize {
+        let slot = usize::from((address >> 13) & 0x03);
+        let offset = (self.prg_bank_561(slot) << 13) | usize::from(address & 0x1FFF);
+        offset % self.prg_561.len().max(1)
+    }
+
+    /// `chr_fix_561`: the 8 KiB CHR bank `chr`.
+    fn chr_offset_561(&self, address: u16) -> usize {
+        let offset = (usize::from(self.ext_561[0]) << 13) | usize::from(address & 0x1FFF);
+        offset % self.chr_561.len().max(1)
+    }
+
     /// `extcl_cpu_wr_mem_547`: `$D000-$DFFF`, A8-A11 the register.
     fn latch_547(&mut self, address: u16, value: u8) {
         if address & 0xF000 != 0xD000 {
@@ -738,6 +899,13 @@ impl IrqP {
                 _ if self.regs[3] != 0 => NametableMirroring::Horizontal,
                 _ => NametableMirroring::Vertical,
             }),
+            // `mirroring_fix_561`: `reg1m` D0 and D4.
+            IrqPKind::M561 => Some(match self.ext_561[2] & 0x11 {
+                0x00 => NametableMirroring::SingleScreenA,
+                0x01 => NametableMirroring::Vertical,
+                0x10 => NametableMirroring::SingleScreenB,
+                _ => NametableMirroring::Horizontal,
+            }),
             // `mirroring_fix_547`.
             IrqPKind::M547 => Some(if self.ext_547[10] & 0x02 != 0 {
                 NametableMirroring::Horizontal
@@ -877,6 +1045,7 @@ impl IrqP {
             IrqPKind::M528 => self.latch_528(address, value),
             IrqPKind::M413 => self.latch_413(address, value),
             IrqPKind::M547 => self.latch_547(address, value),
+            IrqPKind::M561 => self.latch_561(address, value),
             // `extcl_cpu_wr_mem_560`: any write toggles the bank.
             IrqPKind::M560 => {
                 if address >= 0x8000 {
@@ -925,6 +1094,14 @@ impl Mapper for IrqP {
         if self.kind == IrqPKind::M547 {
             writer.write_raw(&self.ext_547);
         }
+        if self.kind == IrqPKind::M561 {
+            writer.write_raw(&self.ext_561);
+            for timer in self.timers_561 {
+                writer.write_u16(u16::from_le_bytes(timer.to_le_bytes()));
+            }
+            writer.write_raw(&self.prg_561);
+            writer.write_raw(&self.chr_561);
+        }
         if self.kind == IrqPKind::M413 {
             writer.write_u32(self.serial_413);
             self.a12.save_state(writer);
@@ -955,6 +1132,14 @@ impl Mapper for IrqP {
         }
         if self.kind == IrqPKind::M547 {
             reader.read_into(&mut self.ext_547)?;
+        }
+        if self.kind == IrqPKind::M561 {
+            reader.read_into(&mut self.ext_561)?;
+            for timer in &mut self.timers_561 {
+                *timer = i16::from_le_bytes(reader.read_u16()?.to_le_bytes());
+            }
+            reader.read_into(&mut self.prg_561)?;
+            reader.read_into(&mut self.chr_561)?;
         }
         if self.kind == IrqPKind::M413 {
             self.serial_413 = reader.read_u32()?;
@@ -1046,6 +1231,23 @@ impl Mapper for IrqP {
                 }
             }
             IrqPKind::M528 => self.vrc_irq.step_cpu_cycle(),
+            // `extcl_cpu_every_cycle_561`: the FDS-style timer gains 3 a cycle and asserts every
+            // 448 while `irq.reg` D7 is set; the count-up asserts on reaching 0 from below.
+            IrqPKind::M561 => {
+                let fds = &mut self.timers_561[0];
+                *fds = fds.wrapping_add(3);
+                while *fds >= 448 && self.ext_561[4] & 0x80 != 0 {
+                    *fds -= 448;
+                    self.irq_pending = true;
+                }
+                let sgd = &mut self.timers_561[1];
+                if *sgd < 0 {
+                    *sgd += 1;
+                    if *sgd == 0 {
+                        self.irq_pending = true;
+                    }
+                }
+            }
             // `extcl_cpu_every_cycle_547`: a 16-bit up-counter, reloaded and asserting on its wrap.
             IrqPKind::M547 => {
                 if self.irq_enabled {
@@ -1137,7 +1339,7 @@ impl Mapper for IrqP {
 
     /// `memmap_prgrom_*(0, MMCPU(0x5000/0x6000), …)`: ROM where the work RAM would be.
     fn prg_ram_enabled(&self) -> bool {
-        matches!(self.kind, IrqPKind::M417 | IrqPKind::M558)
+        matches!(self.kind, IrqPKind::M417 | IrqPKind::M558 | IrqPKind::M561)
             || (self.kind == IrqPKind::M528 && self.regs[0] == 0x01)
     }
 
@@ -1159,6 +1361,9 @@ impl Mapper for IrqP {
                 let ram = memory.prg_ram();
                 return (!ram.is_empty()).then(|| ram[self.ram_offset_547(address) % ram.len()]);
             }
+        }
+        if self.kind == IrqPKind::M561 && address >= 0x8000 {
+            return self.prg_561.get(self.prg_offset_561(address)).copied();
         }
         // `extcl_cpu_rd_mem_311`: `$4042-$4055` read `$FF`.
         if self.kind == IrqPKind::M311 && (0x4042..=0x4055).contains(&address) {
@@ -1216,13 +1421,24 @@ impl Mapper for IrqP {
         if address < 0x8000 {
             return;
         }
+        // `memmap_auto_wp_8k(…, !(reg1m & 2))`: with the latch off the copier RAM takes the write.
+        if self.kind == IrqPKind::M561 && self.ext_561[2] & 0x02 == 0 {
+            let offset = self.prg_offset_561(address);
+            if let Some(byte) = self.prg_561.get_mut(offset) {
+                *byte = value;
+            }
+            return;
+        }
         self.latch(address, value);
         self.settle(memory);
     }
 
     /// 442's 1 bpp mode reads its own CHR address, so the peek view is not the windows'.
     fn chr_peek_view<'m>(&self, memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
-        if matches!(self.kind, IrqPKind::M442 | IrqPKind::M560 | IrqPKind::M547) {
+        if matches!(
+            self.kind,
+            IrqPKind::M442 | IrqPKind::M560 | IrqPKind::M547 | IrqPKind::M561
+        ) {
             return None;
         }
         let chr_rom = memory.rom().chr_rom();
@@ -1239,6 +1455,13 @@ impl Mapper for IrqP {
     fn ppu_peek(&self, memory: &CartridgeMemory, address: u16, fetch: ChrFetch) -> u8 {
         if self.kind == IrqPKind::M547 && address < 0x2000 {
             return self.chr_547(memory, address, fetch);
+        }
+        if self.kind == IrqPKind::M561 && address < 0x2000 {
+            return self
+                .chr_561
+                .get(self.chr_offset_561(address))
+                .copied()
+                .unwrap_or(0);
         }
         // `extcl_rd_chr_560`: `A12-A10 → 11-9`, `A9-A4 → 8-3`, `A2-A0`, plane A3 dropped; above
         // them the extension RAM's byte for the latched tile (bank 1) or A3 as A16 (bank 0).
@@ -1274,6 +1497,16 @@ impl Mapper for IrqP {
         if address >= 0x2000 {
             return;
         }
+        // `memmap_vram_wp_8k(…, !(reg1m >= $80))`.
+        if self.kind == IrqPKind::M561 {
+            if self.ext_561[2] < 0x80 {
+                let offset = self.chr_offset_561(address);
+                if let Some(byte) = self.chr_561.get_mut(offset) {
+                    *byte = value;
+                }
+            }
+            return;
+        }
         if self.kind == IrqPKind::M547 {
             let bank = if address & 0x1000 != 0 {
                 1
@@ -1290,6 +1523,28 @@ impl Mapper for IrqP {
         if memory.rom().chr_rom().is_empty() {
             self.banks.write_chr(address, value, memory.chr_ram_mut());
         }
+    }
+
+    /// `extcl_cpu_init_pc_561`: a 512-byte misc ROM is a trainer at `$7000` entered at `$7003`;
+    /// any other of at least 4 bytes starts with its load and init addresses.
+    fn boot_program(&self, _memory: &CartridgeMemory) -> Option<BootProgram> {
+        let misc = &self.misc_561;
+        if self.kind != IrqPKind::M561 || misc.len() < 4 {
+            return None;
+        }
+        Some(if misc.len() == 512 {
+            BootProgram {
+                address: 0x7000,
+                init: 0x7003,
+                data: misc.clone(),
+            }
+        } else {
+            BootProgram {
+                address: u16::from_le_bytes([misc[0], misc[1]]),
+                init: u16::from_le_bytes([misc[2], misc[3]]),
+                data: misc[4..].to_vec(),
+            }
+        })
     }
 
     fn cpu_read_override(&mut self, _memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
@@ -1309,6 +1564,10 @@ impl Mapper for IrqP {
         let mut windows = self.banks.rom_windows(memory.rom().prg_rom().len());
         if matches!(self.kind, IrqPKind::M413 | IrqPKind::M547) {
             windows[2] = super::NO_ROM_WINDOW;
+        }
+        // 561's PRG is its own copier RAM.
+        if self.kind == IrqPKind::M561 {
+            windows = [super::NO_ROM_WINDOW; 4];
         }
         windows
     }

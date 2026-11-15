@@ -840,6 +840,12 @@ impl Mapper for IrqBoard {
         inner!(self, b => b.write_register(memory, address, value));
     }
 
+    /// Forwarded for the copier loaders (lot MAPPERS-P), asked once at power-on.
+    #[cfg(feature = "board-561")]
+    fn boot_program(&self, memory: &CartridgeMemory) -> Option<super::BootProgram> {
+        inner!(self, b => b.boot_program(memory))
+    }
+
     /// Forwarded for mapper 682 alone (lot MAPPERS-N): the Rainbow's sprite extended mode reads
     /// the sprite size from `$2000`.
     #[cfg(feature = "board-682")]

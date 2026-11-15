@@ -954,10 +954,46 @@ impl NesCore {
         }
 
         self.cpu.reset(&mut self.bus);
+        self.run_boot_program();
         self.frame_count = 0;
         // REQ-LOOP-066: a reset or a change of game starts the next real frame afresh, with the
         // same N; the state of the machine that is gone is never put back.
         self.forget_real_frame();
+    }
+
+    /// Lot MAPPERS-P: a copier loader's boot (puNES `extcl_cpu_init_pc_561`), at power-on only.
+    /// The data goes to CPU RAM (`$0000-$1FFF`, mirrored every 2 KiB) or to the work RAM (its
+    /// `address & $1FFF`); with an `init` address the CPU starts at `$0700` on `JSR init`,
+    /// `JMP ($FFFC)`, so the game's own reset vector follows.
+    fn run_boot_program(&mut self) {
+        let Some(boot) = self
+            .bus
+            .cartridge()
+            .and_then(crate::cartridges::Cartridge::boot_program)
+        else {
+            return;
+        };
+        let start = usize::from(boot.address & 0x1FFF);
+        if boot.address < 0x2000 {
+            let ram = self.bus.ram_mut();
+            for (index, byte) in boot.data.iter().enumerate() {
+                ram[(start + index) % ram.len()] = *byte;
+            }
+        } else if let Some(cartridge) = self.bus.cartridge_mut() {
+            let ram = cartridge.memory_mut().prg_ram_mut();
+            if !ram.is_empty() {
+                let len = ram.len();
+                for (index, byte) in boot.data.iter().enumerate() {
+                    ram[(start + index) % len] = *byte;
+                }
+            }
+        }
+        if boot.init != 0 {
+            let [init_low, init_high] = boot.init.to_le_bytes();
+            let stub = [0x20, init_low, init_high, 0x6C, 0xFC, 0xFF];
+            self.bus.ram_mut()[0x700..0x706].copy_from_slice(&stub);
+            self.cpu.pc = 0x0700;
+        }
     }
 
     /// TV region in force (REQ-CORE-016).

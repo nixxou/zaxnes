@@ -802,6 +802,23 @@ pub trait Mapper {
     fn expansion_audio_output(&self) -> Option<i32> {
         None
     }
+
+    /// The program a copier's BIOS would have loaded before the game starts, run at power-on
+    /// only (lot MAPPERS-P, puNES `EXTCL_CPU_INIT_PC`); `None` for every board but the copier
+    /// loaders, so a power-on asks once and does nothing more.
+    fn boot_program(&self, _memory: &CartridgeMemory) -> Option<BootProgram> {
+        None
+    }
+}
+
+/// A copier loader's boot (puNES `extcl_cpu_init_pc_561`): `data` copied to `address` (CPU RAM
+/// below `$2000`, work RAM above), then, when `init` is not 0, the CPU started at `$0700` on
+/// `JSR init` / `JMP ($FFFC)` written there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BootProgram {
+    pub address: u16,
+    pub init: u16,
+    pub data: Vec<u8>,
 }
 
 /// A window of [`Mapper::rom_windows`] that is not a plain PRG-ROM read.

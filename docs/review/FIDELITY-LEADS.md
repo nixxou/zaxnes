@@ -1046,6 +1046,16 @@ places where puNES itself is incomplete are copied, not invented around:
   where puNES would read the CHR-RAM. The QT byte is latched by every nametable read below
   `$x3C0` the PPU bus carries, `$2007` reads included, as `extcl_rd_nmt_547` does. The work RAM
   is the header's, wrapped (puNES sizes it the same way).
+* 561 (`mapper_561.c`, `extcl_cpu_init_pc_561`): puNES runs the copier's trainer by writing
+  `JSR init` / `JMP ($FFFC)` at `$0700` and starting the CPU there; this board does the same
+  through `Mapper::boot_program`, after the CPU's reset sequence, so the seven reset cycles
+  happen before the stub instead of being skipped. puNES also clears `$4015` D6 and the APU IRQ
+  line at that point; the APU here has just been reset and both are already clear. The FDS-style
+  timer is puNES's signed 16-bit counter, which wraps while `irq.reg` D7 is clear exactly as
+  puNES's does. A soft reset keeps the copier RAM (puNES reloads it on power-up only).
+* 562 (`mapper_562.c`): not implemented. puNES embeds the Venus Turbo Game Doctor's 4 KiB BIOS
+  as a byte table and runs it; that table is a firmware dump, not puNES's own code, so it is
+  not copied here (owner decision pending, MAPPERS-P status table).
 
 ### J36. Mapper 682 (Rainbow): the ESP is modelled from the protocol document
 The ESP (`rainbow_esp.rs`) follows Broke Studio's `rainbow-net.md` and `mapper-doc.md`; no

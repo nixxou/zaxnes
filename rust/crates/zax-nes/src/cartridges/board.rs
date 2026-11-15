@@ -400,6 +400,10 @@ impl Mapper for Board {
         dispatch!(self, b => b.expansion_audio_output())
     }
 
+    fn boot_program(&self, memory: &CartridgeMemory) -> Option<super::mappers::BootProgram> {
+        dispatch!(self, b => b.boot_program(memory))
+    }
+
     fn ppu_irq_horizon(&self) -> Option<i64> {
         dispatch!(self, b => b.ppu_irq_horizon())
     }

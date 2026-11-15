@@ -153,8 +153,8 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 558 | `mapper_558.c` | 135 | 14 | 0 | done (batch 36, `IrqP`) |
 | 559 | `mapper_559.c` | 108 | 1 | 0 | done (batch 30, `VrcP`) |
 | 560 | `mapper_560.c` | 83 | 1 | 0 | done (batch 48, `IrqP`) |
-| 561 | `mapper_561.c` | 276 | 203 | 0 | todo |
-| 562 | `mapper_562.c` | 538 | 290 | 0 | todo |
+| 561 | `mapper_561.c` | 276 | 203 | 0 | done (batch 52, `IrqP`) |
+| 562 | `mapper_562.c` | 538 | 290 | 0 | blocked: needs the copier's 4 KiB BIOS dump (owner) |
 | 564 | `mapper_564.c` | 77 | 0 | 0 | done (batch 9, `MultiP`) |
 
 ## Plan
@@ -366,3 +366,11 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   latches the QT byte (`watches_ppu_reads`), and the next background pattern fetch reads the
   kanji CHR-ROM (D6, plane 1 from D7) or a CHR-RAM bank (D0); sprites see the 8 KiB CHR-RAM
   (`board_memory_sizes`, `IrqP::ppu_write`).
+* Batch 52: `IrqP` 561 (Bung Super Game Doctor / Venus Turbo Game Doctor format): PRG and CHR in
+  the board's own copier RAM (loaded from the image, 256 KiB PRG on submapper 3, saved in the
+  state), writable while the copier mode says so; the eight bank modes of `prg_fix_561` as 8 KiB
+  banks; both timers on `on_cpu_cycle` (in the mf_5a sweep, the FDS-style one runs from
+  power-on). New core hook `Mapper::boot_program` (forwarded by `Board`, and by `IrqBoard` behind
+  `board-561`), asked by `NesCore::power_on` after the CPU reset: the misc ROM's load address,
+  data and init, run through a `JSR init` / `JMP ($FFFC)` stub at `$0700`. 562 stays blocked: its
+  puNES file carries the copier's BIOS as a firmware dump.

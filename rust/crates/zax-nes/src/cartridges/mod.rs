@@ -628,6 +628,8 @@ const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
             | 529
             // MAPPERS-N: mapper 266's VRC4 IRQ (nesdev "NES 2.0 Mapper 266").
             | 266
+            // MAPPERS-P: mapper 561, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
+            | 561
             // MAPPERS-P: mapper 547, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
             | 547
             // MAPPERS-P: mapper 351, `ChipSwitch` (its VRC4 IRQ, puNES `EXTCL_CPU_EVERY_CYCLE`).
@@ -1309,6 +1311,12 @@ impl Cartridge {
     #[must_use]
     pub fn irq_asserted_as<K: BoardKind>(&self) -> bool {
         K::board(&self.board).irq_asserted()
+    }
+
+    /// The program a copier loader runs before its game, at power-on ([`Mapper::boot_program`]).
+    #[must_use]
+    pub fn boot_program(&self) -> Option<mappers::BootProgram> {
+        self.board.boot_program(&self.memory)
     }
 
     /// `M` of REQ-CORE-073: the board's expansion audio in the mixer's integer units
@@ -2443,6 +2451,10 @@ mod tests {
         // MAPPERS-P: mapper 526's counter runs from power-on (`extcl_cpu_every_cycle_526`).
         if Cartridge::is_supported(526) {
             expected.extend_from_slice(&[526, 526]);
+        }
+        // MAPPERS-P: mapper 561's FDS-style timer gains 3 a cycle from power-on.
+        if Cartridge::is_supported(561) {
+            expected.extend_from_slice(&[561, 561]);
         }
         // MAPPERS-N: mapper 682's jitter counter runs on every CPU cycle (`Rainbow.cpp`).
         if Cartridge::is_supported(682) {
