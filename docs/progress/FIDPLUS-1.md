@@ -21,3 +21,14 @@ Details, sources and what stays unknown: `docs/review/FIDELITY-LEADS.md`, C5, D2
 FCEUX and NesHawk run PAL-M as NTSC and PAL-N as Dendy (their geometries). The existing regions
 are untouched (`swaps_pulse_duty` false, same table rows): no change for any game outside the two
 new regions.
+
+## Measurement (callgrind, clean builds, 8045427f against feat/core-3 6d252c10)
+
+Every ROM of the PR-1 set within ±0.001 % (m1, m0, m4, mmc5, vblnmi, oamstr, readbuf, duelito,
+mm2, smb1, z2, smb3, metroid): the two new regions add a test on the `$4000`/`$4004` write only.
+
+## Validation
+
+Test-ROM campaign 215 pass / 4 fail (as CORE-3), AccuracyCoin 147/147 in the four alignments,
+golden-core identical to CORE-3 (the three SMB3 Japan pictures listed by `check.sh` against its old
+base move since FIDELITY step 31, unchanged here).
