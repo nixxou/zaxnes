@@ -913,6 +913,24 @@ impl NesCore {
         self.bus.apu().speed()
     }
 
+    /// Lot FIDPLUS-B (`docs/design/REALTIME-PACING.md`): the sound follows the console's own frame
+    /// rate, for a host that chains frames at [`Self::frame_rate`]`(true)`.
+    pub fn set_exact_rate(&mut self, exact: bool) {
+        self.bus.apu_mut().set_exact_rate(exact);
+    }
+
+    /// The frame rate a host chains frames at for this core's region: the console's own with the
+    /// exact rate (lot FIDPLUS-B), else the nominal one (DEC-R2-T3).
+    #[must_use]
+    pub fn frame_rate(&self, exact: bool) -> f64 {
+        let timing = self.bus.ppu().timing();
+        if exact {
+            timing.exact_frames_per_second()
+        } else {
+            f64::from(timing.nominal_frames_per_second)
+        }
+    }
+
     /// Sets the speed factor (REQ-CORE-072).
     ///
     /// # Errors

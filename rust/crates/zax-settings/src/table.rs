@@ -1268,6 +1268,7 @@ fn emulation_cartridge(out: &mut Vec<SettingDescriptor>) {
         .with_label("Power on at the top of the picture"),
     );
     ppu_write_timings(out);
+    fidelity_plus(out);
 }
 
 /// The emulation settings of the Rust port alone, in their place in the catalogue.
@@ -2239,6 +2240,11 @@ fn ppu_write_timings(out: &mut Vec<SettingDescriptor>) {
         ]))
         .with_label("CPU/PPU alignment"),
     );
+}
+
+/// The Fidélité+ options (lots FIDPLUS-A and FIDPLUS-B), each its own switch (owner,
+/// 2026-11-15).
+fn fidelity_plus(out: &mut Vec<SettingDescriptor>) {
     // Lot FIDPLUS-A (docs/design/HALF-CYCLE.md): the Fidelite+ machine, register effects on
     // their measured edges. Off by default: its own frame loop costs speed.
     out.push(
@@ -2252,6 +2258,21 @@ fn ppu_write_timings(out: &mut Vec<SettingDescriptor>) {
         )
         .with_domain(Domain::switch())
         .with_label("Fidelity+"),
+    );
+    // Lot FIDPLUS-B step 1 (docs/design/REALTIME-PACING.md): frames chained at the console's own
+    // rate (60.0988 Hz NTSC, 50.0070 Hz PAL) and the sound with them. Off: the nominal 60 and 50
+    // of DEC-R2-T3.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuExactRate,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Console frame rate"),
     );
 }
 

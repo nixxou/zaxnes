@@ -519,6 +519,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.ppu_reset_line", "PPU reset line"),
     ("setting.emu.cpu_ppu_alignment", "CPU/PPU alignment"),
     ("setting.emu.fidelity_plus", "Fidelity+"),
+    ("setting.emu.exact_rate", "Console frame rate"),
     ("option.Alignment 0", "Alignment 0"),
     ("option.Alignment 1", "Alignment 1"),
     ("option.Alignment 2", "Alignment 2"),
@@ -1228,6 +1229,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         "detail.emu.ppu_2000_glitch",
         "A defect of the video chip: a write to its control register that starts on one precise dot of a line can make the next line drawn from the left screen half, and a write to its scroll register that lands on the copy of the scroll can scroll a line or a frame by what was last on the data bus instead. It happens only on some consoles, depending on how the chips lined up when switched on. Games written for the console avoid it. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.exact_rate",
+        "Runs the games at the console's own frame rate, 60.0988 images a second on an NTSC console and 50.0070 on a PAL one, instead of a round 60 or 50, and the sound with it, at its true pitch. On a 60 Hz screen an image is shown twice about every ten seconds; a variable refresh rate screen shows every one. Takes effect at once. Default: off.",
     ),
     (
         "detail.emu.fidelity_plus",

@@ -211,3 +211,19 @@ fn req_core_010_region_timing_rejects_an_unknown_region() {
     // savestate or of the settings, and that is refused.
     assert_eq!(None, NesRegion::from_u8(42));
 }
+
+/// Lot FIDPLUS-B step 1: the console's own frame rates, from the CPU clock and the average
+/// cycles of a frame (half a dot less where odd frames skip one).
+#[test]
+fn fidplus_b1_exact_frame_rates_are_the_consoles() {
+    let ntsc = RegionTiming::for_region(NesRegion::Ntsc);
+    assert!((ntsc.cycles_per_frame() - 29_780.5).abs() < 1e-9);
+    assert!((ntsc.exact_frames_per_second() - 60.098_8).abs() < 1e-4);
+    let pal = RegionTiming::for_region(NesRegion::Pal);
+    assert!((pal.cycles_per_frame() - 33_247.5).abs() < 1e-9);
+    assert!((pal.exact_frames_per_second() - 50.007).abs() < 1e-3);
+    for region in [NesRegion::Dendy, NesRegion::PalM, NesRegion::PalN] {
+        let rate = RegionTiming::for_region(region).exact_frames_per_second();
+        assert!((49.0..61.0).contains(&rate), "{region:?}: {rate}");
+    }
+}

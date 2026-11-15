@@ -217,6 +217,9 @@ pub struct Apu2A03 {
     sample_rate: i32,
     speed: f64,
     ratio_adjustment: f64,
+    /// Lot FIDPLUS-B: the samples follow the console's clock (`RegionTiming::exact_frames_per_second`)
+    /// rather than the nominal frame rate, for a host that chains frames at the exact rate.
+    exact_rate: bool,
 
     cycles: i64,
     apu_cycle: bool,
@@ -279,6 +282,7 @@ impl Clone for Apu2A03 {
             sample_rate: self.sample_rate,
             speed: self.speed,
             ratio_adjustment: self.ratio_adjustment,
+            exact_rate: self.exact_rate,
             cycles: self.cycles,
             apu_cycle: self.apu_cycle,
             frame_counter: self.frame_counter,
@@ -338,6 +342,7 @@ impl Apu2A03 {
             sample_rate: Self::DEFAULT_SAMPLE_RATE,
             speed: 1.0,
             ratio_adjustment: 0.0,
+            exact_rate: false,
             cycles: 0,
             apu_cycle: false,
             frame_counter: 0,
@@ -529,6 +534,15 @@ impl Apu2A03 {
     #[must_use]
     pub const fn ratio_adjustment(&self) -> f64 {
         self.ratio_adjustment
+    }
+
+    /// Lot FIDPLUS-B: samples at the console's own frame rate (`true`) or at the nominal one the
+    /// host chains frames at by default (REQ-CORE-070).
+    pub fn set_exact_rate(&mut self, exact: bool) {
+        if self.exact_rate != exact {
+            self.exact_rate = exact;
+            self.recompute_ratio();
+        }
     }
 
     /// Sets the fine ratio adjustment.
@@ -1087,8 +1101,12 @@ impl Apu2A03 {
         // REQ-CORE-070: a frame at speed 1 yields sampleRate / nominalFps samples (800 at
         // 48 kHz in NTSC, 960 in PAL; DEC-R2-T3). REQ-CORE-072 divides that by the speed
         // factor; the frontend's fine adjustment rides on top.
-        let samples_per_frame = f64::from(self.sample_rate)
-            / (f64::from(timing.nominal_frames_per_second) * self.speed);
+        let frames_per_second = if self.exact_rate {
+            timing.exact_frames_per_second()
+        } else {
+            f64::from(timing.nominal_frames_per_second)
+        };
+        let samples_per_frame = f64::from(self.sample_rate) / (frames_per_second * self.speed);
         let samples_per_cycle =
             samples_per_frame * (1.0 + self.ratio_adjustment) / cycles_per_frame;
 
@@ -1106,8 +1124,10 @@ impl Apu2A03 {
         self.console_profile = index
             .checked_sub(1)
             .and_then(|slot| console_profile::CONSOLE_AUDIO_PROFILES.get(slot));
-        self.noise
-            .set_letterless(self.console_profile.is_some_and(|profile| profile.letterless));
+        self.noise.set_letterless(
+            self.console_profile
+                .is_some_and(|profile| profile.letterless),
+        );
         self.resampler
             .set_profile(self.console_profile, self.sample_rate);
         self.level_key = -1;

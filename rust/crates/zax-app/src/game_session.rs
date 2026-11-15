@@ -727,6 +727,18 @@ impl GameSession {
         self.core.timing().nominal_frames_per_second
     }
 
+    /// The rate frames are chained at: the console's own with `emu.exact_rate` on a Zaxnes core
+    /// (lot FIDPLUS-B, whose sound follows it), else the nominal one.
+    #[must_use]
+    pub fn frame_rate(&self, exact: bool) -> f64 {
+        let timing = self.core.timing();
+        if exact && self.core.kind() == zax_core_api::EngineKind::Zaxnes {
+            timing.exact_frames_per_second()
+        } else {
+            f64::from(timing.nominal_frames_per_second)
+        }
+    }
+
     /// Loads a ROM image into the core (REQ-LOOP-021 step 4). The core patches a ROM a
     /// built-in patch was made for (the file is left alone).
     pub fn load_rom(&mut self, image: &[u8], name: &str) -> RomLoadResult {

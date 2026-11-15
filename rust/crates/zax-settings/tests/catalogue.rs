@@ -102,6 +102,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "emu.catch_up_last_3d",
             "emu.cpu_ppu_alignment",
             "emu.engine",
+            "emu.exact_rate",
             "emu.fidelity_plus",
             "emu.forced_patch",
             "emu.hack_options",

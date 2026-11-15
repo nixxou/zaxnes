@@ -170,6 +170,27 @@ impl RegionTiming {
     pub fn samples_per_frame(&self, sample_rate: i32) -> f64 {
         f64::from(sample_rate) / f64::from(self.nominal_frames_per_second)
     }
+
+    /// CPU cycles in one frame, on average: the frame's dots over the dots of a cycle, less half a
+    /// dot where the odd frames skip one with the rendering on (NTSC, PAL-N). 29 780.5 in NTSC,
+    /// 33 247.5 in PAL.
+    #[must_use]
+    pub fn cycles_per_frame(&self) -> f64 {
+        let dots = f64::from(Self::DOTS_PER_SCANLINE) * f64::from(self.scanlines_per_frame)
+            - if self.skips_dot_on_odd_frames {
+                0.5
+            } else {
+                0.0
+            };
+        dots * f64::from(self.dots_per_cycle_denominator) / f64::from(self.dots_per_cycle_numerator)
+    }
+
+    /// The console's own frame rate (lot FIDPLUS-B, `docs/design/REALTIME-PACING.md`): 60.0988 Hz
+    /// in NTSC, 50.0070 Hz in PAL, against the nominal 60 and 50 the host chains frames at.
+    #[must_use]
+    pub fn exact_frames_per_second(&self) -> f64 {
+        f64::from(self.cpu_clock_hz) / self.cycles_per_frame()
+    }
 }
 
 impl Default for RegionTiming {

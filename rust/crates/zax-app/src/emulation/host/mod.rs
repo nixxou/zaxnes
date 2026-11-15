@@ -1510,8 +1510,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             self.settings.speed_factor()
         } * self.speed_boost;
         self.pacer.speed = factor;
+        let exact_rate = self.settings.get(SettingId::EmuExactRate).as_bool();
         if let Some(session) = &mut self.session {
-            self.pacer.nominal_rate = f64::from(session.nominal_frame_rate());
+            self.pacer.nominal_rate = session.frame_rate(exact_rate);
+            session.core_mut().set_exact_rate(exact_rate);
             // REQ-AUD-011: the audio follows k by time compression with a proportional pitch
             // change; the core retimes its resampler, it never drops samples for that.
             if session.core_mut().set_speed(factor).is_err() {

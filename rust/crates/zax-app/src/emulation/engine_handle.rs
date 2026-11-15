@@ -872,6 +872,13 @@ impl EngineHandle {
         }
     }
 
+    /// `emu.exact_rate` (lot FIDPLUS-B): the sound at the console's own frame rate; Zaxnes only.
+    pub fn set_exact_rate(&mut self, exact: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_exact_rate(exact);
+        }
+    }
+
     /// `emu.fidelity_plus` (lot FIDPLUS-A); Zaxnes only.
     pub fn set_fidelity_plus(&mut self, enabled: bool) {
         if let Some(core) = self.zaxnes_mut() {
