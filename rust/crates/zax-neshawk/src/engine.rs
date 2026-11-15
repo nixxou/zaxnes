@@ -230,12 +230,13 @@ impl NesHawkEngine {
         }
     }
 
-    /// `DisplayType` for a region the host chose. NesHawk has no `Multi`, which runs NTSC
+    /// `DisplayType` for a region the host chose. NesHawk has no `Multi`, which runs NTSC, nor
+    /// the famiclone regions: PAL-M runs NTSC and PAL-N Dendy (their geometries)
     /// (REQ-CORE-015).
     const fn display_type(region: NesRegion) -> DisplayType {
         match region {
             NesRegion::Pal => DisplayType::Pal,
-            NesRegion::Dendy => DisplayType::Dendy,
+            NesRegion::Dendy | NesRegion::PalN => DisplayType::Dendy,
             _ => DisplayType::Ntsc,
         }
     }
@@ -438,6 +439,8 @@ const fn region_byte(region: NesRegion) -> u8 {
         NesRegion::Pal => 1,
         NesRegion::Dendy => 2,
         NesRegion::Multi => 3,
+        NesRegion::PalM => 4,
+        NesRegion::PalN => 5,
     }
 }
 
@@ -448,6 +451,8 @@ const fn region_of_byte(value: u8) -> Option<NesRegion> {
         1 => Some(NesRegion::Pal),
         2 => Some(NesRegion::Dendy),
         3 => Some(NesRegion::Multi),
+        4 => Some(NesRegion::PalM),
+        5 => Some(NesRegion::PalN),
         _ => None,
     }
 }

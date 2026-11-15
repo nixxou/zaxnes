@@ -251,12 +251,13 @@ impl FceuxEngine {
     }
 
     /// The region FCEUX runs for `region`: `Multi` is NTSC timing (REQ-CORE-015), and FCEUX has
-    /// no `Multi` of its own.
+    /// no `Multi` of its own. FCEUX has no famiclone regions either: PAL-M runs NTSC (its
+    /// geometry) and PAL-N runs Dendy (its geometry), without their clocks or duty swap.
     const fn core_region(region: NesRegion) -> Region {
         match region {
-            NesRegion::Ntsc | NesRegion::Multi => Region::Ntsc,
+            NesRegion::Ntsc | NesRegion::Multi | NesRegion::PalM => Region::Ntsc,
             NesRegion::Pal => Region::Pal,
-            NesRegion::Dendy => Region::Dendy,
+            NesRegion::Dendy | NesRegion::PalN => Region::Dendy,
         }
     }
 
@@ -461,8 +462,8 @@ impl Engine for FceuxEngine {
         // number a lie on either engine. NTSC 29 780.5 is reported as 29 781 and PAL 33 247.5 as
         // 33 248, the ceiling, which is what `zax-nes` averages to over two frames.
         match self.region {
-            NesRegion::Pal | NesRegion::Dendy => 33_248,
-            NesRegion::Ntsc | NesRegion::Multi => 29_781,
+            NesRegion::Pal | NesRegion::Dendy | NesRegion::PalN => 33_248,
+            NesRegion::Ntsc | NesRegion::Multi | NesRegion::PalM => 29_781,
         }
     }
 

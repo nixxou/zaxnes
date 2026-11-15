@@ -19,6 +19,9 @@ workspace = true
 # `docs/review/BOARD-FEATURES.md` is the table: a row per feature, with the measured cost per
 # ROM on both runs and the one command that flips it.
 [features]
+# Lot FIDPLUS-2: per-dot trace of the PPU (`Ppu2C02::start_dot_trace`) for the differential
+# against the transistor netlist. Diagnostics only; never in `default`.
+ppu-dot-trace = []
 default = [
     # Q-139 closed 2026-11-12: the owner validated SMB3 and Zelda II by eye (lot ACCURACY-1).
     "ppu-2007-render-read",
@@ -84,6 +87,13 @@ default = [
     # In `default` since 2026-11-09 (R0, on the owner's go): MF-LEG-3 arms the two modes at run
     # time, worst ROM +0.011 %, Castlevania III -0.030 %. See the feature's own note.
     "board-mmc5-exattr-split",
+    # Lot CORE-3 (2026-11-14): back in `default` once the popular boards run their own
+    # specialised paths (lot CORE-2), which these features cannot reach. See
+    # `docs/progress/CORE-3.md` for the measurement.
+    "board-292",
+    "board-143-open-bus",
+    "mmc1-snrom-e-bit",
+    "board-jy-asic-tile-latch",
 ]
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four

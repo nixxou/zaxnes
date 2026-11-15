@@ -77,6 +77,12 @@ pub(crate) struct BandLimitedResampler {
     /// A console profile's filters, which replace the DC blocker when set
     /// (`console_profile::ProfileFilter`). Not in the state: a load restarts them at rest.
     profile_filter: Option<super::console_profile::ProfileFilter>,
+    /// With a console profile, the cartridge's expansion audio as a band-limited signal of its
+    /// own, which the profile's chain adds between its second and third high-pass (owner,
+    /// 2026-11-15, an exception to AMD-061 §6.2 inside the profile option; `BeesNES` `PostHpf`).
+    /// Not in the state: a load restarts it at silence, as the expansion level itself.
+    expansion_ring: [f64; RING_SIZE],
+    expansion_signal: f64,
 }
 
 impl BandLimitedResampler {
@@ -95,6 +101,8 @@ impl BandLimitedResampler {
             high_pass_previous: 0.0,
             high_pass_output: 0.0,
             profile_filter: None,
+            expansion_ring: [0.0; RING_SIZE],
+            expansion_signal: 0.0,
         }
     }
 
@@ -164,23 +172,30 @@ impl BandLimitedResampler {
         self.level = 0.0;
         self.high_pass_previous = 0.0;
         self.high_pass_output = 0.0;
+        self.expansion_ring = [0.0; RING_SIZE];
+        self.expansion_signal = 0.0;
+    }
+
+    /// With a console profile: a step of the expansion audio, at the current position.
+    pub fn add_expansion_step(&mut self, delta: f64) {
+        accumulate_step(
+            self.kernel,
+            self.fraction,
+            self.position,
+            &mut self.expansion_ring,
+            delta,
+        );
     }
 
     /// Adds a band-limited step of `delta` at the current fractional position.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // Masked ring index.
     fn add_step(&mut self, delta: f64) {
-        let phase = (self.fraction >> (32 - PHASE_BITS)) as usize;
-        let interpolation = f64::from((self.fraction >> (32 - PHASE_BITS - 16)) & 0xFFFF) / 65536.0;
-
-        let low = phase * TAPS;
-        let high = low + TAPS;
-        let start = ((self.position - LEADING_TAPS) & (RING_MASK)) as usize;
-
-        for tap in 0..TAPS {
-            let weight = self.kernel[low + tap]
-                + ((self.kernel[high + tap] - self.kernel[low + tap]) * interpolation);
-            self.ring[(start + tap) & (RING_SIZE - 1)] += weight * delta;
-        }
+        accumulate_step(
+            self.kernel,
+            self.fraction,
+            self.position,
+            &mut self.ring,
+            delta,
+        );
     }
 
     /// Emits every output sample no future step can still reach. A step at source position
@@ -195,8 +210,12 @@ impl BandLimitedResampler {
             self.emitted += 1;
 
             if let Some(filter) = self.profile_filter.as_mut() {
-                // A console profile's own high-passes block the DC instead.
-                sink(filter.process(self.signal).clamp(-1.0, 1.0) as f32);
+                // A console profile's own high-passes block the DC instead; the expansion audio
+                // joins between the second and the third.
+                self.expansion_signal += self.expansion_ring[slot];
+                self.expansion_ring[slot] = 0.0;
+                let sample = filter.process_with_expansion(self.signal, self.expansion_signal);
+                sink(sample.clamp(-1.0, 1.0) as f32);
                 continue;
             }
 
@@ -208,6 +227,31 @@ impl BandLimitedResampler {
 
             sink(self.high_pass_output.clamp(-1.0, 1.0) as f32);
         }
+    }
+}
+
+/// Adds a band-limited step of `delta` into `ring`, at output position `position` and
+/// fractional position `fraction`.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // Masked ring index.
+#[allow(clippy::inline_always)] // The per-step path: kept as inlined as before the split.
+#[inline(always)]
+fn accumulate_step(
+    kernel: &[f64],
+    fraction: u32,
+    position: i64,
+    ring: &mut [f64; RING_SIZE],
+    delta: f64,
+) {
+    let phase = (fraction >> (32 - PHASE_BITS)) as usize;
+    let interpolation = f64::from((fraction >> (32 - PHASE_BITS - 16)) & 0xFFFF) / 65536.0;
+
+    let low = phase * TAPS;
+    let high = low + TAPS;
+    let start = ((position - LEADING_TAPS) & (RING_MASK)) as usize;
+
+    for tap in 0..TAPS {
+        let weight = kernel[low + tap] + ((kernel[high + tap] - kernel[low + tap]) * interpolation);
+        ring[(start + tap) & (RING_SIZE - 1)] += weight * delta;
     }
 }
 

@@ -2,7 +2,7 @@ use crate::apu::{Apu2A03, AudioError, AudioReader};
 use crate::cartridges::{with_board_kind, AnyBoard, BoardKind, Cartridge};
 use crate::cpu::{Cpu6502, CpuBus};
 use crate::input::{ControllerPortType, InputPorts, InvalidPort, ZapperPosition};
-use crate::nes_bus::KindBus;
+use crate::nes_bus::{FidelityBus, KindBus};
 use crate::ppu::{Ppu2C02, MAX_TILE_RECORD_STATE_SIZE, OAM_SIZE, PALETTE_SIZE, VRAM_SIZE};
 use crate::rom::{InesHeader, RomImage, RomLoadResult};
 use crate::state::{CoreState, InvalidState, StateLoadFailure, StateReader, StateWriter};
@@ -50,6 +50,8 @@ pub struct NesCore {
     power_on_ram: crate::PowerOnRam,
     /// What the PPU's palette RAM, OAM and nametable RAM hold at power-on (lot FIDELITY step 36).
     power_on_ppu_ram: crate::PowerOnPpuRam,
+    /// The console model's MMC3 revision (lot FIDPLUS-C), applied when a ROM is loaded.
+    mmc3_revision: crate::Mmc3Revision,
     advanced_patches_enabled: bool,
     /// The built-in patch applied to a ROM none is made for (Rust-only, owner request: forced).
     forced_patch: Option<&'static crate::builtin_patches::BuiltinPatch>,
@@ -104,6 +106,13 @@ pub struct NesCore {
     /// Lot CORE-2: every frame through the path of every board, even for a specialised board
     /// (the equivalence test's reference). Not a setting, not in the state.
     generic_path: bool,
+    /// Fidélité+ (`docs/design/HALF-CYCLE.md`): every frame through its own loop
+    /// ([`NesCore::run_fidelity_plus_steps`]). Off by default; not in the state (step 4).
+    fidelity_plus: bool,
+    /// The frame a sliced run (`NesCore::run_frame_slice`, lot FIDPLUS-B) has started and not
+    /// finished: its first cycle, margin decoder and idle loop. Not part of the state: a state is
+    /// taken between frames.
+    slice: Option<SliceFrame>,
     /// The margin decoder of the ROM loaded, found by [`NesCore::find_margin_decoder`] when the
     /// ROM, the pack or `emu.builtin_patches` changes, and read by `end_frame` every frame.
     decoder: Option<&'static dyn crate::wide_decode::MarginDecoder>,
@@ -120,6 +129,24 @@ pub struct NesCore {
     real_frame: CoreState,
     /// Whether `real_frame` holds a state [`NesCore::restore_real_frame`] still owes a restore.
     real_frame_held: bool,
+}
+
+/// How a slice's instructions stopped.
+enum SliceOutcome {
+    /// The frame ended (vblank began).
+    FrameDone,
+    /// The slice's cycle budget is spent, the frame goes on.
+    Budget,
+    /// The board changed variant: go on through `with_board_kind!` again.
+    KindChanged,
+}
+
+/// A frame a sliced run has started (lot FIDPLUS-B, `docs/design/REALTIME-PACING.md`).
+#[derive(Clone, Copy)]
+struct SliceFrame {
+    start_cycle: i64,
+    decoder: Option<&'static dyn crate::wide_decode::MarginDecoder>,
+    idle_loop: Option<(u16, u16)>,
 }
 
 impl Default for NesCore {
@@ -146,6 +173,7 @@ impl NesCore {
             cartridge_db: true,
             power_on_ram: crate::PowerOnRam::Pattern,
             power_on_ppu_ram: crate::PowerOnPpuRam::Zero,
+            mmc3_revision: crate::Mmc3Revision::Cartridge,
             advanced_patches_enabled: false,
             forced_patch: None,
             rom_crc: None,
@@ -165,6 +193,8 @@ impl NesCore {
             smooth_scroll_live: false,
             idle_loop: None,
             generic_path: false,
+            fidelity_plus: false,
+            slice: None,
             decoder: None,
             steady_sprites: Vec::new(),
             steady_places: Vec::new(),
@@ -202,6 +232,17 @@ impl NesCore {
     /// at the next one.
     pub fn set_power_on_ppu_ram(&mut self, pattern: crate::PowerOnPpuRam) {
         self.power_on_ppu_ram = pattern;
+    }
+
+    /// The console model's CPU (lot FIDPLUS-C): a letterless RP2A03, whose noise channel has no
+    /// short mode and its own period table. At once.
+    pub fn set_letterless_cpu(&mut self, letterless: bool) {
+        self.bus.apu_mut().set_letterless_cpu(letterless);
+    }
+
+    /// The console model's MMC3 revision (lot FIDPLUS-C): read when the next ROM is loaded.
+    pub fn set_mmc3_revision(&mut self, revision: crate::Mmc3Revision) {
+        self.mmc3_revision = revision;
     }
 
     /// Whether the PPU corrupts a row of OAM when the rendering is switched off inside a line and
@@ -413,8 +454,11 @@ impl NesCore {
         // here and the host would stop recognising it, which is the one way bumping the format
         // could have broken a file it still loads.
         match i32::from_le_bytes([header[4], header[5], header[6], header[7]]) {
-            Self::STATE_VERSION | Self::STATE_VERSION_8 => Some(false),
+            Self::STATE_VERSION | Self::STATE_VERSION_8 | Self::FIDPLUS_STATE_VERSION => {
+                Some(false)
+            }
             Self::WIDE_STATE_VERSION
+            | Self::FIDPLUS_WIDE_STATE_VERSION
             | Self::WIDE_STATE_VERSION_9
             | Self::WIDE_STATE_VERSION_6
             | Self::WIDE_STATE_VERSION_5 => Some(true),
@@ -481,6 +525,14 @@ impl NesCore {
     /// The earlier widescreen block, without the flash chip's changed sectors; still read.
     pub const WIDE_STATE_VERSION_9: i32 = 9;
 
+    /// [`Self::STATE_VERSION`] followed by the PPU's pending Fidélité+ edges
+    /// (`Ppu2C02::save_edge_state`): written only when a state is taken with edges pending, so
+    /// every other block keeps the version earlier builds read.
+    pub const FIDPLUS_STATE_VERSION: i32 = 12;
+
+    /// [`Self::WIDE_STATE_VERSION`] followed by the PPU's pending Fidélité+ edges.
+    pub const FIDPLUS_WIDE_STATE_VERSION: i32 = 13;
+
     /// The earlier widescreen block, without the MMC5's sound registers; still read.
     pub const WIDE_STATE_VERSION_7: i32 = 7;
 
@@ -500,6 +552,7 @@ impl NesCore {
         matches!(
             version,
             Self::WIDE_STATE_VERSION
+                | Self::FIDPLUS_WIDE_STATE_VERSION
                 | Self::WIDE_STATE_VERSION_9
                 | Self::WIDE_STATE_VERSION_7
                 | Self::WIDE_STATE_VERSION_6
@@ -510,6 +563,7 @@ impl NesCore {
     /// Whether `version` is one this build reads at all.
     const fn is_known_state_version(version: i32) -> bool {
         version == Self::STATE_VERSION
+            || version == Self::FIDPLUS_STATE_VERSION
             || version == Self::STATE_VERSION_8
             || version == Self::STATE_VERSION_4
             || Self::is_wide_state_version(version)
@@ -615,13 +669,22 @@ impl NesCore {
             note
         };
 
-        let cartridge = match Cartridge::create(rom) {
+        let mut cartridge = match Cartridge::create(rom) {
             Ok(cartridge) => cartridge,
             Err(error) => {
                 self.close_rom();
                 return RomLoadResult::fail(error.failure, error.message);
             }
         };
+        match self.mmc3_revision {
+            crate::Mmc3Revision::Cartridge => {}
+            crate::Mmc3Revision::A => {
+                cartridge.set_mmc3_irq_revision_a(true);
+            }
+            crate::Mmc3Revision::B => {
+                cartridge.set_mmc3_irq_revision_a(false);
+            }
+        }
 
         // The header's region, unless the dump is known to be of another one.
         let region =
@@ -896,6 +959,24 @@ impl NesCore {
         self.bus.apu().speed()
     }
 
+    /// Lot FIDPLUS-B (`docs/design/REALTIME-PACING.md`): the sound follows the console's own frame
+    /// rate, for a host that chains frames at [`Self::frame_rate`]`(true)`.
+    pub fn set_exact_rate(&mut self, exact: bool) {
+        self.bus.apu_mut().set_exact_rate(exact);
+    }
+
+    /// The frame rate a host chains frames at for this core's region: the console's own with the
+    /// exact rate (lot FIDPLUS-B), else the nominal one (DEC-R2-T3).
+    #[must_use]
+    pub fn frame_rate(&self, exact: bool) -> f64 {
+        let timing = self.bus.ppu().timing();
+        if exact {
+            timing.exact_frames_per_second()
+        } else {
+            f64::from(timing.nominal_frames_per_second)
+        }
+    }
+
     /// Sets the speed factor (REQ-CORE-072).
     ///
     /// # Errors
@@ -951,6 +1032,11 @@ impl NesCore {
         if self.bus.cartridge().is_none() {
             return 0;
         }
+        if self.slice.is_some() {
+            // Lot FIDPLUS-B: a frame begun in slices (the host has just stopped slicing) is
+            // finished, rather than a second frame begun on top of it.
+            return self.finish_sliced_frame(input_word);
+        }
 
         self.bus.input_mut().begin_frame(input_word);
 
@@ -995,6 +1081,153 @@ impl NesCore {
         let idle_loop = self.idle_loop.filter(|_| self.bus.ppu().wide().unlocked());
 
         self.bus.ppu_mut().clear_frame_boundary();
+        if self.fidelity_plus || self.bus.ppu().edges_pending() {
+            // Fidélité+: its own loop (one test a frame on the standard path). The PPU is told
+            // every frame: a load builds it afresh. The PPU and the APU are batched as in the
+            // standard frame: every register access still catches the PPU up first, and the
+            // edges count dots, not catch-ups. A Fidélité+ state loaded with the option off runs
+            // this loop too while its edges are pending, posting none.
+            self.bus.ppu_mut().set_fidelity_plus(self.fidelity_plus);
+            self.bus.defer_ppu();
+            loop {
+                let done = match self.bus.cartridge().filter(|_| !self.generic_path) {
+                    Some(cartridge) => with_board_kind!(cartridge.board(), K => {
+                        self.run_fidelity_plus_steps::<K>(idle_loop)
+                    }),
+                    None => self.run_fidelity_plus_steps::<AnyBoard>(idle_loop),
+                };
+                if done {
+                    break;
+                }
+            }
+            self.bus.end_deferred_ppu();
+        } else {
+            self.run_standard_frame(idle_loop);
+        }
+        if let Some(decoder) = decoder {
+            self.decode_margins(decoder);
+        }
+        self.finish_frame(decoder, start_cycle)
+    }
+
+    /// Runs the frame in slices (lot FIDPLUS-B step 2, `docs/design/REALTIME-PACING.md`): from
+    /// where the last slice stopped, or from a new frame, up to the first CPU instruction boundary
+    /// at or after cycle `until` (the bus's cycle count), or to the frame's end. `input_word` is
+    /// the pad's state now: a new frame starts with it, a frame in progress takes it at the next
+    /// `$4016` strobe. Returns the frame's cycles when it ended in this slice (the video callback
+    /// has fired, as after [`Self::run_frame`]), `None` when it goes on. A machine run only by
+    /// whole frames and one run by slices of any size are the same machine.
+    pub fn run_frame_slice(&mut self, input_word: u16, until: i64) -> Option<i64> {
+        if self.bus.cartridge().is_none() {
+            return Some(0);
+        }
+        let frame = if let Some(frame) = self.slice {
+            self.bus.input_mut().set_live_word(input_word);
+            frame
+        } else {
+            self.bus.input_mut().begin_frame(input_word);
+            if let Some(source) = self.zapper_position_source.as_mut() {
+                self.bus.input_mut().aim_zappers(source);
+            }
+            let start_cycle = self.bus.cycle_count();
+            let decoder = self.margin_decoder();
+            self.bus.ppu_mut().wide_mut().set_decoded(decoder.is_some());
+            let idle_loop = self.idle_loop.filter(|_| self.bus.ppu().wide().unlocked());
+            self.bus.ppu_mut().clear_frame_boundary();
+            let frame = SliceFrame {
+                start_cycle,
+                decoder,
+                idle_loop,
+            };
+            self.slice = Some(frame);
+            frame
+        };
+
+        let fidelity = self.fidelity_plus || self.bus.ppu().edges_pending();
+        if fidelity {
+            self.bus.ppu_mut().set_fidelity_plus(self.fidelity_plus);
+        }
+        self.bus.defer_ppu();
+        let done = loop {
+            let outcome = match self.bus.cartridge().filter(|_| !self.generic_path) {
+                Some(cartridge) => with_board_kind!(cartridge.board(), K => {
+                    self.run_slice_steps::<K>(frame.idle_loop, until, fidelity)
+                }),
+                None => self.run_slice_steps::<AnyBoard>(frame.idle_loop, until, fidelity),
+            };
+            match outcome {
+                SliceOutcome::FrameDone => break true,
+                SliceOutcome::Budget => break false,
+                SliceOutcome::KindChanged => {}
+            }
+        };
+        self.bus.end_deferred_ppu();
+        if !done {
+            return None;
+        }
+        self.slice = None;
+        if let Some(decoder) = frame.decoder {
+            self.decode_margins(decoder);
+        }
+        Some(self.finish_frame(frame.decoder, frame.start_cycle))
+    }
+
+    /// The rest of a frame begun in slices, in one go; its cycles. Out of line: the whole-frame
+    /// path only tests that a slice is in progress.
+    #[inline(never)]
+    fn finish_sliced_frame(&mut self, input_word: u16) -> i64 {
+        loop {
+            if let Some(cycles) = self.run_frame_slice(input_word, i64::MAX) {
+                return cycles;
+            }
+        }
+    }
+
+    /// Whether a sliced run has a frame in progress ([`Self::run_frame_slice`]).
+    #[must_use]
+    pub const fn frame_in_progress(&self) -> bool {
+        self.slice.is_some()
+    }
+
+    /// The instructions of a slice on the board kind `K`: as [`Self::run_frame_steps`] (or the
+    /// Fidélité+ loop's), and a stop at the first instruction boundary at or after cycle `until`.
+    /// A loop of its own, so that the whole-frame loops carry no budget test.
+    fn run_slice_steps<K: BoardKind>(
+        &mut self,
+        idle_loop: Option<(u16, u16)>,
+        until: i64,
+        fidelity: bool,
+    ) -> SliceOutcome {
+        loop {
+            if fidelity {
+                self.cpu.step(&mut FidelityBus::<K>::new(&mut self.bus));
+            } else {
+                self.cpu.step(&mut KindBus::<K>::new(&mut self.bus));
+            }
+            if let Some((first, last)) = idle_loop {
+                if (first..=last).contains(&self.cpu.pc) && self.bus.ppu().wide().stalling() {
+                    self.bus.ppu_mut().wide_mut().end_stall();
+                }
+            }
+            if self.bus.ppu().vblank_just_started() {
+                return SliceOutcome::FrameDone;
+            }
+            if K::SWITCHES
+                && !self
+                    .bus
+                    .cartridge()
+                    .is_some_and(|cartridge| K::matches(cartridge.board()))
+            {
+                return SliceOutcome::KindChanged;
+            }
+            if self.bus.cycle_count() >= until {
+                return SliceOutcome::Budget;
+            }
+        }
+    }
+
+    /// The standard frame: the PPU and the APU batched, the board's path (lot CORE-2).
+    fn run_standard_frame(&mut self, idle_loop: Option<(u16, u16)>) {
         self.bus.defer_ppu();
         // The frame's path (lot CORE-2, `docs/design/CORE-TIERS.md`): the board is looked at once
         // here, and the frame runs through the code compiled for it, or for every board when it
@@ -1011,9 +1244,15 @@ impl NesCore {
             }
         }
         self.bus.end_deferred_ppu();
-        if let Some(decoder) = decoder {
-            self.decode_margins(decoder);
-        }
+    }
+
+    /// What follows a frame's instructions on every path: smooth scrolling, the frame count, the
+    /// video callback. Returns the cycles the frame took.
+    fn finish_frame(
+        &mut self,
+        decoder: Option<&'static dyn crate::wide_decode::MarginDecoder>,
+        start_cycle: i64,
+    ) -> i64 {
         // **One `or` of three booleans per frame for every game that wants none of this**, and
         // the whole of the smooth scrolling behind it (lot KIRBY-MERGE step 4). The branch asked
         // the question per frame instead, and the question was expensive: `hack_option_on`
@@ -1042,6 +1281,46 @@ impl NesCore {
     #[doc(hidden)]
     pub const fn set_generic_path(&mut self, generic: bool) {
         self.generic_path = generic;
+    }
+
+    /// Runs every frame through the Fidélité+ loop (`docs/design/HALF-CYCLE.md`), off by
+    /// default. Takes effect at the next frame.
+    pub fn set_fidelity_plus(&mut self, enabled: bool) {
+        self.fidelity_plus = enabled;
+        if !enabled {
+            self.bus.ppu_mut().set_fidelity_plus(false);
+        }
+    }
+
+    /// Whether the Fidélité+ loop runs the frames.
+    #[must_use]
+    pub const fn fidelity_plus(&self) -> bool {
+        self.fidelity_plus
+    }
+
+    /// The instructions of one Fidélité+ frame on the board kind `K`: the CPU steps a
+    /// [`FidelityBus`], the PPU runs on every cycle. Same returns as
+    /// [`NesCore::run_frame_steps`].
+    fn run_fidelity_plus_steps<K: BoardKind>(&mut self, idle_loop: Option<(u16, u16)>) -> bool {
+        loop {
+            self.cpu.step(&mut FidelityBus::<K>::new(&mut self.bus));
+            if let Some((first, last)) = idle_loop {
+                if (first..=last).contains(&self.cpu.pc) && self.bus.ppu().wide().stalling() {
+                    self.bus.ppu_mut().wide_mut().end_stall();
+                }
+            }
+            if self.bus.ppu().vblank_just_started() {
+                return true;
+            }
+            if K::SWITCHES
+                && !self
+                    .bus
+                    .cartridge()
+                    .is_some_and(|cartridge| K::matches(cartridge.board()))
+            {
+                return false;
+            }
+        }
     }
 
     /// The instructions of one frame, on the board kind `K` (lot CORE-2): the bus is lent to the
@@ -1102,7 +1381,8 @@ impl NesCore {
     /// # Panics
     /// Never: the capture can only fail with no ROM loaded, which is checked first.
     pub fn run_frame_ahead(&mut self, input_word: u16, ahead: u8) -> i64 {
-        if ahead == 0 {
+        // A frame begun in slices (lot FIDPLUS-B) is finished first, without run-ahead.
+        if ahead == 0 || self.slice.is_some() {
             return self.run_frame(input_word);
         }
 
@@ -1174,6 +1454,8 @@ impl NesCore {
     /// next real frame then starts a sequence of its own (REQ-LOOP-066).
     fn forget_real_frame(&mut self) {
         self.real_frame_held = false;
+        // A sliced frame in progress belongs to the machine that was replaced (lot FIDPLUS-B).
+        self.slice = None;
     }
 
     /// Whether a frame has any smooth scrolling to do: the game's own aid, the host's option for
@@ -1985,12 +2267,14 @@ impl NesCore {
         let rom = cartridge.rom();
 
         let wide = self.bus.ppu().wide();
+        let edges = self.bus.ppu().edges_pending();
         let mut writer = StateWriter::reusing(std::mem::take(buffer));
         writer.write_u32(Self::STATE_MAGIC);
-        writer.write_i32(if wide.unlocked() {
-            Self::WIDE_STATE_VERSION
-        } else {
-            Self::STATE_VERSION
+        writer.write_i32(match (wide.unlocked(), edges) {
+            (true, false) => Self::WIDE_STATE_VERSION,
+            (false, false) => Self::STATE_VERSION,
+            (true, true) => Self::FIDPLUS_WIDE_STATE_VERSION,
+            (false, true) => Self::FIDPLUS_STATE_VERSION,
         });
         writer.write_string(Self::CORE_NAME);
         writer.write_bool(include_rom_image);
@@ -2008,6 +2292,9 @@ impl NesCore {
         cartridge.save_state(&mut writer);
         if wide.unlocked() {
             wide.save_state(&mut writer);
+        }
+        if edges {
+            self.bus.ppu().save_edge_state(&mut writer);
         }
 
         *buffer = writer.into_vec();
@@ -2080,6 +2367,8 @@ impl NesCore {
         self.bus.input().save_state(&mut writer);
         cartridge.save_state(&mut writer);
         self.bus.ppu().wide().save_state(&mut writer);
+        // Fidélité+: the edges pending (an empty block otherwise); run-ahead must stay exact.
+        self.bus.ppu().save_edge_state(&mut writer);
 
         state.end(writer);
         Ok(())
@@ -2132,6 +2421,7 @@ impl NesCore {
             .ppu_mut()
             .wide_mut()
             .load_state(&mut reader, true, true)?;
+        self.bus.ppu_mut().load_edge_state(&mut reader)?;
 
         self.frame_count = frame_count;
         if region != self.region {
@@ -2161,6 +2451,34 @@ impl NesCore {
         }
 
         loaded
+    }
+
+    /// The widescreen block of a state and, after it, the Fidélité+ edges. When the widescreen
+    /// block is skipped (a hack's state restored without the hack) the edges cannot be found and
+    /// are dropped with it.
+    fn restore_wide_and_edges(
+        &mut self,
+        reader: &mut StateReader,
+        version: i32,
+        unpatched_hack: bool,
+    ) -> Result<(), InvalidState> {
+        let wide = self.bus.ppu_mut().wide_mut();
+        let wide_read = Self::is_wide_state_version(version) && !unpatched_hack;
+        if wide_read {
+            wide.load_state(
+                reader,
+                version != Self::WIDE_STATE_VERSION_5,
+                version >= Self::WIDE_STATE_VERSION_7,
+            )?;
+        } else {
+            wide.reset();
+        }
+        if version == Self::FIDPLUS_STATE_VERSION
+            || (version == Self::FIDPLUS_WIDE_STATE_VERSION && wide_read)
+        {
+            self.bus.ppu_mut().load_edge_state(reader)?;
+        }
+        Ok(())
     }
 
     fn restore_state(&mut self, data: &[u8], offset: usize) -> Result<StateLoaded, InvalidState> {
@@ -2255,16 +2573,7 @@ impl NesCore {
         // A state of the hack restored without it: the original ROM never unlocks the
         // extension, which must not stay as the hack left it (four nametables, margins).
         let unpatched_hack = patch.1.is_none() && patchable;
-        let wide = self.bus.ppu_mut().wide_mut();
-        if Self::is_wide_state_version(version) && !unpatched_hack {
-            wide.load_state(
-                &mut reader,
-                version != Self::WIDE_STATE_VERSION_5,
-                version >= Self::WIDE_STATE_VERSION_7,
-            )?;
-        } else {
-            wide.reset();
-        }
+        self.restore_wide_and_edges(&mut reader, version, unpatched_hack)?;
 
         // A state made the other way (the patch ran and does not now, or the reverse).
         let made_with_patch = Self::is_wide_state_version(version);

@@ -8,7 +8,6 @@ use zax_core_api::{EngineKind, NesRegion};
 use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::state_codec;
 use zax_nes::NesCore;
-use zax_profiles::enums::TvRegionMode;
 use zax_settings::catalogue::SettingId;
 use zax_settings::values::SettingValue;
 
@@ -112,6 +111,8 @@ struct ConsoleHardware {
     power_on_ppu_ram: zax_nes::PowerOnPpuRam,
     pre_g_revision: bool,
     oamaddr_write_corruption: bool,
+    mmc3_revision: zax_nes::Mmc3Revision,
+    letterless_cpu: bool,
 }
 
 impl ConsoleHardware {
@@ -120,6 +121,8 @@ impl ConsoleHardware {
         core.set_power_on_ppu_ram(self.power_on_ppu_ram);
         core.set_ppu_pre_g_revision(self.pre_g_revision);
         core.set_oamaddr_write_corruption(self.oamaddr_write_corruption);
+        core.set_mmc3_revision(self.mmc3_revision);
+        core.set_letterless_cpu(self.letterless_cpu);
     }
 }
 
@@ -572,6 +575,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 .settings
                 .get(SettingId::EmuOamaddrWriteCorruption)
                 .as_bool(),
+            mmc3_revision: match self.settings.get(SettingId::EmuMmc3Revision).as_int() {
+                1 => zax_nes::Mmc3Revision::A,
+                2 => zax_nes::Mmc3Revision::B,
+                _ => zax_nes::Mmc3Revision::Cartridge,
+            },
+            letterless_cpu: self.settings.get(SettingId::EmuCpuRevision).as_int() == 1,
         }
     }
 
@@ -624,12 +633,14 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let fidelity = self.fidelity_switches();
                 let console_profile = self.console_audio_profile();
                 let alignment = self.cpu_ppu_alignment();
+                let fidelity_plus = self.settings.get(SettingId::EmuFidelityPlus).as_bool();
                 let console = self.console_hardware();
                 let result = match self.session.as_mut() {
                     Some(session) => {
                         session.core_mut().set_cartridge_db(cartridge_db);
                         apply_fidelity_switches(session.core_mut(), fidelity);
                         session.core_mut().set_cpu_ppu_alignment(alignment);
+                        session.core_mut().set_fidelity_plus(fidelity_plus);
                         session
                             .core_mut()
                             .set_console_audio_profile(console_profile);
@@ -913,12 +924,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             self.settings.apply_detected_region(detected);
         } else if profile_reloaded {
             if let Some(settings) = game.profile.settings.as_ref() {
-                let mode = match settings.tv_mode {
-                    TvRegionMode::Pal => TvRegionSetting::Pal,
-                    TvRegionMode::Dendy => TvRegionSetting::Dendy,
-                    TvRegionMode::Multi => TvRegionSetting::Multi,
-                    _ => TvRegionSetting::Ntsc,
-                };
+                // The profile keeps the raw number (`TvRegionMode::Other`), so the famiclone
+                // regions (4, 5) come back too; unknown numbers read as NTSC.
+                let mode = TvRegionSetting::from_raw(settings.tv_mode.raw());
                 self.settings.set_tv_mode(mode);
             }
         }

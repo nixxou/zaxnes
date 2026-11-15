@@ -26,6 +26,10 @@ fn req_core_015_average_cpu_cycles_per_frame() {
         (NesRegion::Pal, 33247.5, 0.5),
         (NesRegion::Dendy, 35464.0, 1.0),
         (NesRegion::Multi, 29780.5, 0.5),
+        // PAL-M: NTSC geometry without the odd-frame skip, 262 x 341 / 3.
+        (NesRegion::PalM, 29780.67, 0.5),
+        // PAL-N: Dendy geometry with the odd-frame skip, 312 x 341 / 3 - 1/6.
+        (NesRegion::PalN, 35463.83, 0.5),
     ] {
         let mut core = machine_with(&minimal(), "Minimal.nes");
         core.set_region(region);
@@ -52,6 +56,8 @@ fn req_core_015_timing_table() {
         (NesRegion::Pal, 1_662_607, 312, 241, 50, false),
         (NesRegion::Dendy, 1_773_448, 312, 291, 50, false),
         (NesRegion::Multi, 1_789_773, 262, 241, 60, true),
+        (NesRegion::PalM, 1_787_806, 262, 241, 60, false),
+        (NesRegion::PalN, 1_791_028, 312, 291, 50, true),
     ] {
         let timing = RegionTiming::for_region(region);
 
@@ -72,6 +78,31 @@ fn req_core_015_noise_and_dmc_period_tables_are_pal_only_for_pal() {
     assert!(!RegionTiming::for_region(NesRegion::Ntsc).uses_pal_noise_and_dmc_periods);
     assert!(!RegionTiming::for_region(NesRegion::Multi).uses_pal_noise_and_dmc_periods);
     assert!(!RegionTiming::for_region(NesRegion::Dendy).uses_pal_noise_and_dmc_periods);
+    assert!(!RegionTiming::for_region(NesRegion::PalM).uses_pal_noise_and_dmc_periods);
+    assert!(!RegionTiming::for_region(NesRegion::PalN).uses_pal_noise_and_dmc_periods);
+}
+
+#[test]
+fn fidplus_g2_only_famiclone_regions_swap_pulse_duty() {
+    for region in [
+        NesRegion::Ntsc,
+        NesRegion::Pal,
+        NesRegion::Multi,
+        NesRegion::Dendy,
+    ] {
+        assert!(
+            !RegionTiming::for_region(region).swaps_pulse_duty,
+            "{region:?}"
+        );
+    }
+    for region in [NesRegion::PalM, NesRegion::PalN] {
+        assert!(
+            RegionTiming::for_region(region).swaps_pulse_duty,
+            "{region:?}"
+        );
+        assert_eq!(Some(region), NesRegion::from_u8(region as u8));
+    }
+    assert_eq!(None, NesRegion::from_u8(6));
 }
 
 #[test]
@@ -179,4 +210,51 @@ fn req_core_010_region_timing_rejects_an_unknown_region() {
     // A Rust enum cannot hold an unknown region; the only way in is the numeric value of a
     // savestate or of the settings, and that is refused.
     assert_eq!(None, NesRegion::from_u8(42));
+}
+
+/// Lot FIDPLUS-B step 1: the console's own frame rates, from the CPU clock and the average
+/// cycles of a frame (half a dot less where odd frames skip one).
+#[test]
+fn fidplus_b1_exact_frame_rates_are_the_consoles() {
+    let ntsc = RegionTiming::for_region(NesRegion::Ntsc);
+    assert!((ntsc.cycles_per_frame() - 29_780.5).abs() < 1e-9);
+    assert!((ntsc.exact_frames_per_second() - 60.098_8).abs() < 1e-4);
+    let pal = RegionTiming::for_region(NesRegion::Pal);
+    assert!((pal.cycles_per_frame() - 33_247.5).abs() < 1e-9);
+    assert!((pal.exact_frames_per_second() - 50.007).abs() < 1e-3);
+    for region in [NesRegion::Dendy, NesRegion::PalM, NesRegion::PalN] {
+        let rate = RegionTiming::for_region(region).exact_frames_per_second();
+        assert!((49.0..61.0).contains(&rate), "{region:?}: {rate}");
+    }
+}
+
+/// Lot FIDPLUS-B step 4: at the console's rate the APU makes the samples of real time, so the
+/// sound neither drifts nor changes pitch: N frames give N / 60.0988 seconds of samples, where the
+/// nominal rate gives N / 60.
+#[test]
+fn fidplus_b4_the_exact_rate_makes_the_samples_of_real_time() {
+    for (exact, rate) in [(false, 60.0), (true, 60.098_8)] {
+        let mut core = machine_with(&minimal_rom(0x00, None, None), "audio.nes");
+        core.set_sample_rate(48_000).unwrap();
+        core.set_exact_rate(exact);
+        core.reset();
+        let mut buffer = vec![0.0_f32; 4096];
+        let reader = core.audio_reader();
+        let frames = 3600_u32;
+        let mut samples = 0_usize;
+        for _ in 0..frames {
+            core.run_frame(0);
+            let waiting = reader.available_samples().min(buffer.len());
+            if waiting > 0 {
+                samples += reader.read_samples(&mut buffer[..waiting], false).unwrap();
+            }
+        }
+        let expected = f64::from(frames) * 48_000.0 / rate;
+        #[allow(clippy::cast_precision_loss)]
+        let got = samples as f64;
+        assert!(
+            (got - expected).abs() < 48.0,
+            "exact {exact}: {got} samples for {expected}"
+        );
+    }
 }

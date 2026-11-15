@@ -13,6 +13,8 @@ pub const MENU_SAVE_STATE: &str = "menu.save_state";
 pub const MENU_DELETE_STATE: &str = "menu.delete_state";
 pub const MENU_SPEED: &str = "menu.speed";
 pub const MENU_REGION: &str = "menu.region";
+/// The console model submenu (lot FIDPLUS-1, G1).
+pub const MENU_CONSOLE_MODEL: &str = "menu.console_model";
 pub const MENU_PORTS: &str = "menu.ports";
 pub const MENU_CAMERA_MODE: &str = "menu.camera_mode";
 pub const MENU_VOLUME: &str = "menu.volume";
@@ -609,6 +611,7 @@ pub const PUBLISHED: &[&str] = &[
     MENU_DELETE_STATE,
     MENU_SPEED,
     MENU_REGION,
+    MENU_CONSOLE_MODEL,
     MENU_PORTS,
     MENU_CAMERA_MODE,
     MENU_VOLUME,

@@ -211,12 +211,17 @@ pub struct Apu2A03 {
     /// The console whose analog audio path is imitated (`console_profile`); `None`, the default,
     /// keeps the output as it always was.
     console_profile: Option<&'static console_profile::ConsoleAudioProfile>,
+    /// The console model's letterless RP2A03 (lot FIDPLUS-C), a setting, not state.
+    letterless_cpu: bool,
     ring: Arc<Mutex<SampleRing>>,
 
     timing: RegionTiming,
     sample_rate: i32,
     speed: f64,
     ratio_adjustment: f64,
+    /// Lot FIDPLUS-B: the samples follow the console's clock (`RegionTiming::exact_frames_per_second`)
+    /// rather than the nominal frame rate, for a host that chains frames at the exact rate.
+    exact_rate: bool,
 
     cycles: i64,
     apu_cycle: bool,
@@ -256,6 +261,9 @@ pub struct Apu2A03 {
     /// The expansion level the cached [`Self::level`] was computed with: the `M` of the cycle
     /// just mixed, which is the test point [`Self::mixer_expansion`] reports.
     level_expansion: i32,
+    /// The `M` the clip takes: the expansion level, or 0 when a console profile filters it
+    /// apart (`profile_expansion_step`). A setting's consequence, not state.
+    mixed_expansion: i32,
     /// `A` of REQ-CORE-073 on the cycle just mixed (the test point of REQ-CORE-076).
     mixer_apu: i32,
     /// `S` of REQ-CORE-073 on the cycle just mixed (the test point of REQ-CORE-076).
@@ -274,11 +282,13 @@ impl Clone for Apu2A03 {
             dmc: self.dmc.clone(),
             resampler: self.resampler.clone(),
             console_profile: self.console_profile,
+            letterless_cpu: self.letterless_cpu,
             ring: Arc::new(Mutex::new(ring)),
             timing: self.timing,
             sample_rate: self.sample_rate,
             speed: self.speed,
             ratio_adjustment: self.ratio_adjustment,
+            exact_rate: self.exact_rate,
             cycles: self.cycles,
             apu_cycle: self.apu_cycle,
             frame_counter: self.frame_counter,
@@ -296,6 +306,7 @@ impl Clone for Apu2A03 {
             level_dirty: self.level_dirty,
             expansion_level: self.expansion_level,
             level_expansion: self.level_expansion,
+            mixed_expansion: self.mixed_expansion,
             mixer_apu: self.mixer_apu,
             mixer_output: self.mixer_output,
         }
@@ -333,11 +344,13 @@ impl Apu2A03 {
             dmc: DmcChannel::default(),
             resampler: BandLimitedResampler::new(),
             console_profile: None,
+            letterless_cpu: false,
             ring: Arc::new(Mutex::new(SampleRing::new(Self::MIN_BUFFER_SAMPLES))),
             timing: RegionTiming::default(),
             sample_rate: Self::DEFAULT_SAMPLE_RATE,
             speed: 1.0,
             ratio_adjustment: 0.0,
+            exact_rate: false,
             cycles: 0,
             apu_cycle: false,
             frame_counter: 0,
@@ -355,6 +368,7 @@ impl Apu2A03 {
             level_dirty: true,
             expansion_level: 0,
             level_expansion: 0,
+            mixed_expansion: 0,
             mixer_apu: 0,
             mixer_output: 0,
         };
@@ -408,10 +422,26 @@ impl Apu2A03 {
     /// the comparison is on a per-cycle path (see [`Self::current_level`]).
     pub fn set_expansion_level(&mut self, level: i32) {
         if level != self.expansion_level {
+            if self.console_profile.is_some() {
+                self.profile_expansion_step(level);
+            } else {
+                self.mixed_expansion = level;
+            }
             self.expansion_level = level;
             self.level_dirty = true;
             self.level_key = NO_LEVEL_KEY;
         }
+    }
+
+    /// With a console profile, the expansion audio takes the profile chain's own path (owner,
+    /// 2026-11-15): a step of its band-limited signal, and nothing in the clip. Out of line: the
+    /// MMC5 pushes its level often, and the standard path only tests the profile.
+    #[cold]
+    #[inline(never)]
+    fn profile_expansion_step(&mut self, level: i32) {
+        self.resampler
+            .add_expansion_step(mixer::to_float(-level) - mixer::to_float(-self.expansion_level));
+        self.mixed_expansion = 0;
     }
 
     /// Whether the DMC's memory reader wants a byte (nesdev, "DMA").
@@ -531,6 +561,15 @@ impl Apu2A03 {
         self.ratio_adjustment
     }
 
+    /// Lot FIDPLUS-B: samples at the console's own frame rate (`true`) or at the nominal one the
+    /// host chains frames at by default (REQ-CORE-070).
+    pub fn set_exact_rate(&mut self, exact: bool) {
+        if self.exact_rate != exact {
+            self.exact_rate = exact;
+            self.recompute_ratio();
+        }
+    }
+
     /// Sets the fine ratio adjustment.
     ///
     /// # Errors
@@ -593,6 +632,7 @@ impl Apu2A03 {
         // bus pushes the real value again before the next cycle runs.
         self.expansion_level = 0;
         self.level_expansion = 0;
+        self.mixed_expansion = 0;
         self.mixer_apu = 0;
         self.mixer_output = 0;
 
@@ -626,9 +666,15 @@ impl Apu2A03 {
         self.frame_irq_status = false;
         self.frame_irq_clear_at = 0;
         self.frame_irq_pending = false;
-        self.frame_counter = 0;
-        self.frame_step = 0;
-        self.pending_sequencer_reset = 0;
+        // Q-078 keeps the 2A03G's reset of the frame sequencer; the letterless RP2A03 leaves it
+        // running (nesdev "CPU power up state", BeesNES `LSNApu2A0X.h:576`, which excludes the
+        // PAL chip). Owner, 2026-11-15: that chip, when chosen (`emu.cpu_revision` or a letterless
+        // audio profile), keeps its own behaviour (FIDELITY-LEADS G4).
+        if !self.letterless_reset() {
+            self.frame_counter = 0;
+            self.frame_step = 0;
+            self.pending_sequencer_reset = 0;
+        }
 
         // Every channel output may have moved, and the status byte a read would see with it.
         // The level is recomputed on the next cycle, test point included.
@@ -1073,6 +1119,8 @@ impl Apu2A03 {
     fn apply_timing(&mut self) {
         self.noise.set_timing(&self.timing);
         self.dmc.set_timing(&self.timing);
+        self.pulse1.set_swaps_duty(self.timing.swaps_pulse_duty);
+        self.pulse2.set_swaps_duty(self.timing.swaps_pulse_duty);
     }
 
     fn recompute_ratio(&mut self) {
@@ -1085,8 +1133,12 @@ impl Apu2A03 {
         // REQ-CORE-070: a frame at speed 1 yields sampleRate / nominalFps samples (800 at
         // 48 kHz in NTSC, 960 in PAL; DEC-R2-T3). REQ-CORE-072 divides that by the speed
         // factor; the frontend's fine adjustment rides on top.
-        let samples_per_frame = f64::from(self.sample_rate)
-            / (f64::from(timing.nominal_frames_per_second) * self.speed);
+        let frames_per_second = if self.exact_rate {
+            timing.exact_frames_per_second()
+        } else {
+            f64::from(timing.nominal_frames_per_second)
+        };
+        let samples_per_frame = f64::from(self.sample_rate) / (frames_per_second * self.speed);
         let samples_per_cycle =
             samples_per_frame * (1.0 + self.ratio_adjustment) / cycles_per_frame;
 
@@ -1094,6 +1146,32 @@ impl Apu2A03 {
             .set_ratio(samples_per_cycle, self.sample_rate);
         self.resampler
             .set_profile(self.console_profile, self.sample_rate);
+    }
+
+    /// The console model's CPU (lot FIDPLUS-C, FIDELITY-LEADS G4): a letterless RP2A03 chosen
+    /// by itself, whatever the audio profile. The noise channel takes the letterless chip when
+    /// either says so.
+    pub fn set_letterless_cpu(&mut self, letterless: bool) {
+        self.letterless_cpu = letterless;
+        self.apply_letterless();
+    }
+
+    /// Whether a reset leaves the frame sequencer running: a letterless NTSC RP2A03.
+    fn letterless_reset(&self) -> bool {
+        !self.timing.uses_pal_noise_and_dmc_periods
+            && (self.letterless_cpu
+                || self
+                    .console_profile
+                    .is_some_and(|profile| profile.letterless))
+    }
+
+    fn apply_letterless(&mut self) {
+        self.noise.set_letterless(
+            self.letterless_cpu
+                || self
+                    .console_profile
+                    .is_some_and(|profile| profile.letterless),
+        );
     }
 
     /// Imitates the analog audio path of one measured console (`console_profile`): `index` 0 for
@@ -1104,8 +1182,12 @@ impl Apu2A03 {
         self.console_profile = index
             .checked_sub(1)
             .and_then(|slot| console_profile::CONSOLE_AUDIO_PROFILES.get(slot));
-        self.noise
-            .set_letterless(self.console_profile.is_some_and(|profile| profile.letterless));
+        self.apply_letterless();
+        self.mixed_expansion = if self.console_profile.is_some() {
+            0
+        } else {
+            self.expansion_level
+        };
         self.resampler
             .set_profile(self.console_profile, self.sample_rate);
         self.level_key = -1;
@@ -1153,7 +1235,8 @@ impl Apu2A03 {
             None => mixer::mix(pulse1, pulse2, triangle, noise, dmc),
             Some(profile) => profile_mix(profile, [pulse1, pulse2, triangle, noise, dmc]),
         };
-        self.mixer_output = mixer::clip(self.mixer_apu, self.expansion_level);
+        // With a console profile the expansion audio takes its own path (`set_expansion_level`).
+        self.mixer_output = mixer::clip(self.mixer_apu, self.mixed_expansion);
         self.level = mixer::to_float(self.mixer_output);
         self.level
     }
@@ -1262,6 +1345,7 @@ impl Apu2A03 {
         // is unchanged.
         self.expansion_level = 0;
         self.level_expansion = 0;
+        self.mixed_expansion = 0;
         // The three derived fields are rebuilt here and now, from the channel outputs just read
         // back, so that the test point of REQ-CORE-076 agrees with the restored level instead of
         // reading 0 until a channel next moves. `level_key` is left exactly as the block gave
@@ -1303,4 +1387,34 @@ impl Apu2A03 {
 #[allow(clippy::cast_possible_truncation)] // At most FULL_SCALE.
 fn profile_mix(profile: &console_profile::ConsoleAudioProfile, levels: [i32; 5]) -> i32 {
     (mixer::NORMALISATION * profile.mix(levels)).round() as i32
+}
+
+#[cfg(test)]
+mod letterless_tests {
+    use super::*;
+
+    #[test]
+    fn fidplus_c_a_reset_leaves_the_letterless_sequencer_running() {
+        for (letterless, kept) in [(false, false), (true, true)] {
+            let mut apu = Apu2A03::new();
+            apu.set_letterless_cpu(letterless);
+            apu.run_cpu_cycles(5000);
+            let before = (apu.frame_counter, apu.frame_step);
+            assert_ne!((0, 0), before);
+            apu.soft_reset();
+            let after = (apu.frame_counter, apu.frame_step);
+            assert_eq!(
+                kept,
+                after == before,
+                "letterless {letterless}: {before:?} -> {after:?}"
+            );
+        }
+        // The PAL chip has no letterless revision.
+        let mut apu = Apu2A03::new();
+        apu.set_timing(RegionTiming::for_region(crate::NesRegion::Pal));
+        apu.set_letterless_cpu(true);
+        apu.run_cpu_cycles(5000);
+        apu.soft_reset();
+        assert_eq!((0, 0), (apu.frame_counter, apu.frame_step));
+    }
 }

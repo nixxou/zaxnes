@@ -681,6 +681,10 @@ pub trait BoardKind {
     /// every instruction and hands the rest of the frame back to `with_board_kind!`.
     const SWITCHES: bool = false;
 
+    /// Whether this is the Fidélité+ copy of the path ([`Fid`], lot FIDPLUS-A): a constant, so
+    /// the standard copies carry no test and no call of the Fidélité+ code.
+    const FIDELITY_PLUS: bool = false;
+
     /// Whether `board` is this kind's variant.
     fn matches(board: &Board) -> bool;
 
@@ -689,6 +693,38 @@ pub trait BoardKind {
 
     /// The board, for a call that changes it.
     fn board_mut(board: &mut Board) -> &mut Self::B;
+}
+
+/// The Fidélité+ copy of the path of the board kind `K` (lot FIDPLUS-A,
+/// `docs/design/HALF-CYCLE.md`): the same board, reached as `K` reaches it, with
+/// [`BoardKind::FIDELITY_PLUS`] set. The Fidélité+ frame loop lends the CPU a bus of this kind,
+/// and the compiler makes a copy of the bus and PPU code for it; the standard copies are what
+/// they were before the lot, which `Ppu2C02::run_dots` showed is the only way to keep them so
+/// (every runtime test or extra call site there cost 0.5 to 3.7 %, callgrind).
+pub struct Fid<K>(std::marker::PhantomData<K>);
+
+impl<K: BoardKind> BoardKind for Fid<K> {
+    type B = K::B;
+    const SWITCHES: bool = K::SWITCHES;
+    const FIDELITY_PLUS: bool = true;
+
+    #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
+    #[inline(always)]
+    fn matches(board: &Board) -> bool {
+        K::matches(board)
+    }
+
+    #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
+    #[inline(always)]
+    fn board(board: &Board) -> &Self::B {
+        K::board(board)
+    }
+
+    #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
+    #[inline(always)]
+    fn board_mut(board: &mut Board) -> &mut Self::B {
+        K::board_mut(board)
+    }
 }
 
 /// Every board, through the [`Board`] dispatch.

@@ -87,6 +87,12 @@ pub fn region() -> String {
     strings::get(keys::MENU_REGION)
 }
 
+/// The console model submenu (lot FIDPLUS-1, G1).
+#[must_use]
+pub fn console_model() -> String {
+    strings::get(keys::MENU_CONSOLE_MODEL)
+}
+
 /// Label of the port submenu.
 #[must_use]
 pub fn ports() -> String {

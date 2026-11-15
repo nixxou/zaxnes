@@ -1,7 +1,7 @@
 use crate::apu::Apu2A03;
 #[cfg(feature = "board-vs-system")]
 use crate::cartridges::mappers::VsBoard;
-use crate::cartridges::{AnyBoard, BoardKind, Cartridge};
+use crate::cartridges::{AnyBoard, BoardKind, Cartridge, Fid};
 use crate::cpu::CpuBus;
 use crate::input::InputPorts;
 use crate::ppu::Ppu2C02;
@@ -1908,6 +1908,62 @@ impl<K: BoardKind> CpuBus for KindBus<'_, K> {
     #[inline(always)]
     fn irq_asserted(&self) -> bool {
         self.bus.cpu_irq_asserted_as::<K>()
+    }
+
+    fn cycle_count(&self) -> i64 {
+        self.bus.cycles
+    }
+
+    fn dma_gave_back_at(&self) -> i64 {
+        self.bus.dma_gave_back
+    }
+}
+
+/// The bus as the Fidélité+ frame loop steps it (`docs/design/HALF-CYCLE.md`, part A): the board
+/// reached through `K` as [`KindBus`], the PPU run on every CPU cycle (the loop does not call
+/// [`NesBus::defer_ppu`]).
+///
+/// Step 1 forwards every access unchanged, so the mode is the standard core exactly; step 2
+/// splits each cycle at its M2 and /CS edges ([`crate::fidplus::MasterClock`]) here, out of the
+/// standard path.
+pub struct FidelityBus<'a, K> {
+    bus: &'a mut NesBus,
+    kind: PhantomData<K>,
+}
+
+impl<'a, K: BoardKind> FidelityBus<'a, K> {
+    /// Borrows `bus` for a Fidélité+ frame on the board kind `K`.
+    pub fn new(bus: &'a mut NesBus) -> Self {
+        Self {
+            bus,
+            kind: PhantomData,
+        }
+    }
+}
+
+impl<K: BoardKind> CpuBus for FidelityBus<'_, K> {
+    fn read(&mut self, address: u16) -> u8 {
+        self.bus.cpu_read_as::<Fid<K>>(address)
+    }
+
+    fn read_code(&mut self, address: u16) -> u8 {
+        self.bus.cpu_read_code_as::<Fid<K>>(address)
+    }
+
+    fn write(&mut self, address: u16, value: u8) {
+        self.bus.cpu_write_as::<Fid<K>>(address, value);
+    }
+
+    fn peek(&self, address: u16) -> u8 {
+        self.bus.cpu_peek(address)
+    }
+
+    fn nmi_asserted(&self) -> bool {
+        self.bus.ppu.nmi_line_sample()
+    }
+
+    fn irq_asserted(&self) -> bool {
+        self.bus.cpu_irq_asserted_as::<Fid<K>>()
     }
 
     fn cycle_count(&self) -> i64 {

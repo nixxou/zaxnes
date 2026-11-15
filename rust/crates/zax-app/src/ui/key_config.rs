@@ -33,7 +33,7 @@ pub struct KeyConfigSection {
 }
 
 /// The commands a binding cannot run, because they need an argument a key cannot carry.
-pub const COMMANDS_NEEDING_ARGUMENTS: [Command; 11] = [
+pub const COMMANDS_NEEDING_ARGUMENTS: [Command; 12] = [
     Command::OpenRecentRom,
     Command::LaunchGame,
     Command::SaveSlot,
@@ -41,6 +41,7 @@ pub const COMMANDS_NEEDING_ARGUMENTS: [Command; 11] = [
     Command::DeleteSlot,
     Command::SetSpeed,
     Command::SetRegion,
+    Command::SetConsoleModel,
     Command::SetPortType,
     Command::SetCameraMode,
     Command::SetSkybox,

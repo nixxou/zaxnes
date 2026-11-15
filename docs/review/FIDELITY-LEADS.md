@@ -240,7 +240,164 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   `$2000` glitch now follow the netlist in all four alignments.
 - Still open: random alignment at power-on.
 
+### A5. Per-dot differential against the netlist — in progress (lot FIDPLUS-2, 2026-11-15)
+- **Instrument.** Zaxnes: feature `ppu-dot-trace` (never in `default`), harness `dot-trace`
+  (`v`, `t`, PPU bus address and CPU register access after every dot; the PPU runs every dot
+  through `step_dot`, no span). Netlist: `ext-tools/visualnes-bench/benchdot.cpp` (hold-time
+  bench of step 33, one line per dot at the end of the dot, accesses at the /CS-fall dot),
+  `mkines.py` (the bench's cartridge as an iNES image), `dotcmp.py` (frames paired by their
+  access sequence, then `v`/`t` compared at every dot). Outside the repo: VisualNes has no licence.
+- **Phase**: the netlist's power-on puts the CPU 7 dots later against the PPU than Zaxnes's;
+  `dot-trace --phase 7` (or -14) makes every access land on the same dot (4 412 of 4 412 in
+  `g2006px`, TriCNES alignment 3 = a4). The other alignments use their own reset hold.
+- **`g2006px` (rendering on and off, `$2006`/`$2007`), alignment 3**: once the access dot itself
+  is set aside (Zaxnes records it before applying the access), 370 dots of 89 342 differ a frame,
+  all with rendering off and none observable:
+  - `$2006` second write: the netlist loads `v` on D+3 with rendering off too; Zaxnes on D+1. A
+    CPU access can only follow 3 dots later, and the rendering-off pixel at `v` was already
+    matched on D+2 in step 32 (`emu.ppu_2006_delay` covers rendering on).
+  - `$2007` write: the netlist moves `v` and stores to VRAM about 4 dots after the CPU write;
+    Zaxnes at once. Observable only by a second `$2007` access 3 dots later, i.e. a
+    read-modify-write instruction — measured below.
+  - Line 241 of the first frame: the netlist's `v` = `$0802` from its power-on, not a model point.
+- **`INC $2007`, rendering off, measured** (`mkrmw.py`: `$2000-$2007` = 0..7, `v` = `$2002`,
+  `INC $2007`, read back): the netlist leaves **00 01 02 01 01 05 06 07** in all four alignments:
+  the read moves `v` to `$2003`, the dummy write (00) and the write (01) come 3 dots apart, and
+  the PPU stores each one ~4 dots after its CPU write from its data latch, which the second write
+  has already replaced, so `$2003` gets 01 too. TriCNES: the same in alignments 0 and 1, `$2004`
+  unchanged in alignment 2, garbled in 3 (its latch chain, `Emulator.cs:2484-2594`). Zaxnes
+  before: 00 01. **Done**: `Ppu2C02::rewrite_pending_vram_write` (two `$2007` writes 1 to 4 dots
+  apart outside rendering: the first address gets the second value), on, no option: a cold path
+  (one test per `$2007` write), no state change; test `fidplus2_rmw_2007_tests.rs`.
+  Not measured: palette addresses (internal RAM, kept one write each), rendering on (C1's path),
+  the `$2007` read + write pairs of other RMW opcodes (same mechanism expected), PAL.
+- **Frame parity.** Which frame is odd is a power-on fact, not the program's: the netlist's and
+  Zaxnes's were opposite, which moves the CPU one dot against the PPU at every pre-render line
+  where rendering is on (the skipped dot). `dot-trace --flip-parity` (diagnostics only) matches
+  them; with it and the phase, every access of every frame lands on the same dot.
+- **`g2001px` (`$2001` switched every ~20 dots, rendering on), alignments 2 and 3**: 33 runs a
+  frame, all starting on dot 257 after a write landing on dot 254: the switch reaches the
+  fetches and increments on D+3 = 257, but **the horizontal copy of dot 257 still follows the old
+  state**: switched off, the netlist copies; switched on, it does not. Zaxnes did the opposite
+  in both, which leaves the wrong coarse X and nametable for the rest of the line and the next
+  one (visible). **Done** in `switch_rendering` (alignments 2 and 3, settled on the write, nothing
+  tested per dot); test `fidplus2_dot_257_copy_follows_the_state_before_a_switch_on_dot_256`.
+  Golden unchanged.
+  After it: **0 dots differ** in every whole frame, both alignments. Alignments 0 and 1: the
+  switch-on race of step 33 (a mid-line horizontal copy, present or not with the hold time) makes
+  the comparison diverge; not trusted, not ported.
+- **`g2005px`**: 1 dot a frame in alignments 1, 2 and 3 (line 239, dot 256: the netlist's Y
+  carry still settling at the end of the dot; the next dot agrees). The netlist bench crashes
+  (VisualNes segfault) in alignment 0 on this program. **`g3e01px`**: 0 dots.
+- **`r2007` (`$2007` read on every 21st dot, rendering on), alignment 3, `emu.ppu_bus_conflicts`
+  (C1) on**: two rules missing from step 25's read model, both visible (the next fetches):
+  - when X (the latch dot, D+6 here) is a dot that increments coarse X anyway (every eighth, 328,
+    336), the read's X increment **merges** with it: one X increment, plus the read's Y. Dot 256
+    included (natural X and Y, plus the read's Y: fine Y steps twice);
+  - when X is 257 (odd: the residue case), the horizontal copy of 257 overrides the read's X
+    increment: only its Y is left.
+  **Done** in `read_buffer_from_fetch`, on by default. With C1 (on by default) they change Zelda
+  II Europe's title screen (golden frame 600, ~9 400 pixels: the landscape below the split). The
+  title does, on line 141, `$2006` = `$2A`, `$00` then two `$2007` reads 12 dots apart, the reads
+  landing between dots 247 and 275 (600 frames traced). `mkz2.py` replays that sequence on the
+  netlist, sliding over dots 245-287, alignments 2 and 3: **without** the rules, Zaxnes diverges
+  on the two frames whose reads latch on dots 254-257 (33 847 and 2 383 dots); **with** them, every
+  frame matches (only the 1-2 dot recording instants). Owner: "je te fais confiance". Visible lines then agree with the
+  netlist in every whole frame (no run longer than the 1-2 dot recording instant of an
+  increment). Lines 240-261 still differ: the program never writes `$2000` and the netlist powers
+  on with PPUCTRL's +32 increment (seen with `INC $2007` too), so its vblank reads step by 32 — a
+  bench artefact.
+- **`g2006x` (second `$2006` writes alternating `$2108`/`$2AD7`, rendering on), alignments 2 and
+  3**: the netlist loads `v` in the middle of D+3, so when D+4 is a coarse-X increment dot the new
+  address is incremented; Zaxnes loaded after running D+4 and lost that increment (the rest of
+  the line one tile left, visible). **Done**: `Ppu2C02::increment_after_delayed_load` (cold, NTSC).
+  Long runs 639 -> 20 a frame. Left: a write landing on dot 257 (load on 260): `v` differs on
+  dots 258-261 only (netlist 3100 / 3117 per alignment, Zaxnes 3108), in the garbage nametable
+  fetches of the sprite phase; no picture effect, not ported.
+- **`g2005`**: whole frames agree in alignments 2 and 3 (the third netlist frame pairs badly, a
+  pairing artefact of the sliding program).
+- **Regions**: every rule of A5 that depends on dots (dot 257, the read merge) applies to NTSC
+  and Multi only (`Ppu2C02::netlist_measured_region`): the netlist is a 2C02; the PAL 2C07 (3.2
+  dots a cycle) and the clones keep the previous model until a measurement of their own. The
+  `INC $2007` rule (a data latch, dots 1 to 4 apart) applies everywhere.
+- **Bench artefacts to keep in mind**: PPUCTRL/PPUMASK power-on values of the netlist (write
+  `$2000` after the warm-up); the PPU ignores writes during the warm-up; the `bus` column also
+  shows the netlist's pattern-table select of its power-on PPUCTRL.
+- **Cost** (callgrind, clean builds, `3d5319ab` against FIDPLUS-1 `6289064d`): +0.02 % to +0.10 %
+  on the PR-1 set (metroid +0.10 %, mm2 +0.09 %, smb1 +0.08 %, smb3 +0.04 %). A first version
+  testing dot 257 on every dot of `run_render_dot` cost +2 to +2.9 % (it changed the inlining of
+  `run_dots`); moving the rule to the `$2001` write removed it.
+- **`g2000`, `oam`** (alignments 2 and 3): 0 or 1 dot a frame once the power-on frame is past.
+- **PPU bus addresses (`buscmp.py`, `g2001px`, alignment 3)**: about 5 100 of 24 700 ALE
+  addresses a frame are not the address Zaxnes reads on that dot or the next, in three families:
+  - the garbage nametable fetches of dots 257-320 (and dots 1, 337-340): Zaxnes does not put them
+    on its bus. No picture effect; only a board snooping the bus there would see it (MMC5's
+    in-frame detection counts the dot-337/339 pair, which Zaxnes models separately);
+  - the pattern rows of empty sprite slots (tile `$FF`, row 6 on the netlist, 7 in Zaxnes on
+    line 0): no A12 effect;
+  - **open lead**: the first pattern fetch after a `$2001` switch on (3 or 6 dots after the write,
+    ~310 a frame) uses as tile number what lies on the multiplexed AD bus — the low byte of the
+    last address latched (`$15`, `$10`, `$18`: the nametable column of the last fetch before the
+    switch off) or the last byte read (`$CA`, the high plane) — where Zaxnes keeps the tile of the
+    last real nametable fetch. Probably visible (one wrong 8-pixel group after a mid-line switch
+    on, alignments 2 and 3); the same mechanism as step 39's stale low byte, for the tile latch.
+    To model with its own measurement (which bytes, which dots, per alignment) before porting.
+    **First attempt (2026-11-15), dropped**: "the tile register latches the AD bus value held at
+    the switch-off on every nametable dot passed with the rendering off" made the bus comparison
+    worse (5 100 -> 5 700 unmatched a frame) and missed the cases it targeted (dot 173 `00E0`).
+    The real rule needs the netlist's tile-register node and AD-bus node logged per half-step
+    (`benchdot` logs only the ALE address), not inferred from the address column.
+    **Measured (2026-11-15, `benchdot2`: AD bus `db0-7` per dot; `inbuf0-7` turned out to be the
+    CPU-side buffer, not the tile register)**, alignment 3, `g2001px`:
+    - the AD bus keeps a value while the rendering is off; switch-off right after an ALE whose
+      read did not come (line 0, ALE `$200E` on 153): the bus holds `$0E`, and the first pattern
+      fetch after the switch-on uses tile `$0E`: **the tile register latches the bus on the
+      nametable dot (170) although the rendering is off**;
+    - but the value the bus holds is not simply "the last ALE low byte or the last read byte":
+      switch-off after the ALE `$0008` of dot 199, the bus shows `$11` (the low byte of the
+      nametable address of dot 193) for the whole off stretch: charge left on the pins by an
+      earlier phase, which a zero-delay netlist reproduces only by accident;
+    - a switch-on on an odd dot reads its stale fetch with the **whole** stale address (`$0008`,
+      a pattern byte `$CA` used as the tile), not the stale low byte under the current fetch's
+      high lines that step 39 models.
+    Not ported: the bus value is a floating-node effect (not trustworthy at transistor level
+    without analogue charge), and the effect needs a mid-line rendering switch inside a 4-dot
+    window. Kept as an open lead for the half-cycle stepper, which will hold the AD bus as state.
+- **Next**: that tile-latch lead; `g2006px` with rendering on; C1 against the SMB3 Japan
+  line-193 video.
+
 ---
+
+### A6. M2 duty and edge placement outside NTSC — open, Fidélité+ (2026-11-15)
+- Fidélité+ places every access on the M2 and /CS edges (`fidplus::MasterClock`): M2 low for 9/24
+  of the CPU cycle, high for 15/24 (2A03G, nesdev "CPU pin out"; BeesNES's phi1/phi2 slots use the
+  same split). The 2A07 (PAL, 16 master clocks a cycle) and the Dendy clone (15) are given the
+  same duty for lack of a measurement; their netlist or a scope capture would settle it.
+- Earlier 2A03 letters are reported with a different duty (to check against nesdev before use:
+  the 2A03E and earlier); part C's console model should carry it per revision.
+
+### A8. A second `$2006` write on a copy dot takes the CPU's open bus in alignment 3 — done in Fidélité+, open for the standard core (2026-11-15)
+- Netlist, `g2006x` (`$2006` written alternately `$08` and `$D7` on dots 257 and 304), alignments
+  2 and 3: the copy of that dot (horizontal on 257, the last vertical one on the pre-render line's
+  304) takes, for the bits the write's low byte drives, the **written byte** in alignment 2 and
+  the **CPU data bus as it stood before the write** (`$20`, the high byte of `$2006`) in
+  alignment 3. The same open bus as the `$2005` write on these dots and the `$2000` glitch (A4).
+  (A first reading as "the old `t` AND the written byte" fitted dot 257 only.)
+- Fidélité+: `post_address_load`, under `emu.ppu_2000_glitch`; `g2006x` 0 dots in both
+  alignments. The standard core does not apply it yet: a cold rule on the write, a candidate for
+  the common base.
+
+### A7. The coarse-Y wrap takes two phases — open, Fidélité+ step 3 (2026-11-15)
+- Netlist, `r2007`, alignments 2 and 3: when a Y increment wraps coarse Y from 29 (fine Y 7), `v`
+  shows for **one dot** coarse Y 30 with the vertical nametable bit already flipped (`$7FAF` ->
+  `$07D0` -> `$0410`), then coarse Y 0: the increment ripples first, the "30" detection clears it
+  in the next phase. Seen on the natural increment of dot 256 and on a `$2007` read's increment.
+- Only a fetch made during that dot can see it: the refetch of an odd-X `$2007` read latch
+  (`ALE + Read`) takes its high address lines from that `v`, so it would read row 30 (the attribute
+  table's rows). Not modelled; step 3 (AD bus and address latch per half dot) is where it belongs.
+- Also seen with the same bench: `r2007` never writes `$2000`, and the netlist's PPUCTRL powers on
+  with bit 2 set (+32 increments in vblank) where Zaxnes has 0: the post-render lines of that
+  program are not comparable.
 
 ## B. Power-on and reset
 
@@ -379,9 +536,14 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 - Open: sprite-overflow bit difference in *The Legend of Zelda* vs Mesen (to recheck since exact
   eval is in default).
 
-### C5. `$2002` / PPU open bus decay — partial
+### C5. `$2002` / PPU open bus decay — settled, no change (FIDPLUS-1)
 - Zaxnes: per-bit decay stamps (`DECAY_DOTS`, `ppu/mod.rs:82`, `apply_decay`). Differs from Mesen on
   some reads (NMI-MESEN.md). To settle against the doc.
+- **FIDPLUS-1 (2026-11-14)**: the differences NMI-MESEN.md lists are the five low bits of `$2002` in
+  eight ROMs, values the programs drop. nesdev gives the decay as "about 600 ms" and console-dependent
+  (`ppu_open_bus` only asks for it within a second); Zaxnes decays after 3.2 M dots (about 600 ms),
+  Mesen after its own frame count, both inside that range, both passing `ppu_open_bus` and
+  AccuracyCoin's open-bus rows. No reference tells them apart: nothing to change.
 
 ### C6. Palette read on pre-G PPUs — done as an option (`emu.ppu_revision`, 2C02G default, step 37)
 - Hardware (nesdev "PPU registers": palette read "supported by the 2C02G, 2C02H, and PAL PPUs"): before 2C02G, `$2007` reads at `$3F00-$3FFF` do not return palette RAM (BeesNES TODO,
@@ -528,7 +690,7 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   (console-dependent; maybe a setting). nesdev also: the 2C07 (PAL) "forcibly refreshes OAM during
   scanlines 265 through 310", so no decay on PAL while rendering stays enabled.
 
-### D2b. Performance lead found on the way (lot FIDELITY, not fidelity)
+### D2b. Performance lead found on the way (lot FIDELITY, not fidelity) — tried and dropped (FIDPLUS-1)
 - Callgrind `f4185fa8` vs `27e2c3e2`: the APU stage costs +0.8 to +0.9 % on every game (+17 to
   +21 M instructions per 600 frames) while the PPU stage gains 0.24 %; totals are -0.03 to
   -0.14 %. The APU changes of the lot are frame-counter (`Frame Counter IRQ` I-M) and DMC
@@ -539,6 +701,12 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   the rest flat: register allocation of the per-CPU-cycle path, not the new code itself. Leads:
   bit 6 branchless (`u8::from(..) << 6`); compose `readable_status` only when a `$4015` read is
   coming instead of every cycle (bigger change).
+- **FIDPLUS-1 (2026-11-14), dropped.** The batch idea holds (a `$4015` read only sees the value
+  latched on the last cycle of the APU batch run before it), but avoiding the other compositions
+  costs more than they do: two inlined copies of the step (`step_cycle::<LATCH>`) took the APU stage
+  **+3.2 to +4.4 %** (games +0.3 to +0.7 %); one call site with a `bool` still **+0.24 to +0.29 %**
+  (games +0.03 to +0.06 %), callgrind against `6d252c10`. The composition is a handful of loads and
+  ORs the per-cycle path absorbs; nothing to gain here.
 
 ### D3. 2C02G/H OAMADDR bug at pre-render — done (option `emu.oamaddr_bug`, on, step 19)
 - Hardware: at dot 1 of the pre-render line with rendering on, if OAMADDR >= 8 the 8 bytes at
@@ -657,7 +825,11 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   sample box applies HPF0 inside its windowed-sinc resampler, ours after our own resampler (same
   one-pole formula, a few samples of phase apart); (4) the expansion audio (VRC6, MMC5, N163...)
   is added after the gains and is not weighted per console, while BeesNES lets the mapper
-  post-process between HPF1 and HPF2 (`PostHpf`, `LSNApu2A0X.h:1919-1931`); (5) filter state is
+  post-process between HPF1 and HPF2 (`PostHpf`, `LSNApu2A0X.h:1919-1931`) — **done 2026-11-15
+  (owner, an exception to AMD-061 §6.2 inside the profile option, FIDPLUS-D1a)**: with a profile,
+  the expansion level is a band-limited signal of its own (`expansion_ring`), added between the
+  second and the third high-pass; without one, the clip of AMD-061 is unchanged (golden identical,
+  audio included); (5) filter state is
   not in the savestate (a load restarts it at rest: inaudible click at most); (6) the
   N20914398 profile was measured with a Sunsoft 5B cartridge and has no low-pass and no
   inversion — kept as BeesNES lists it.
@@ -704,19 +876,78 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 
 ## G. Hardware variants
 
-### G1. PPU / CPU revisions — open
+### G1. PPU / CPU revisions — done as a menu (console model, FIDPLUS-1)
 - BeesNES exposes none of its hardware-bug behaviours as user settings (only video, audio profile,
   region); OAM decay is a compile-time define (`LSN_INT_OAM_DECAY`, `LSNPpu2C0X.h:33`), OAM corruption
   is always on, despite the README's "buggy and fixed states".
 - 2C02 letter revisions (pre-G palette read C6, G/H OAMADDR bug D3, OAM corruption differences),
   RP2A03 letter revisions (BeesNES flag `bRp2A02` in audio profiles), 2C07 PAL, 2C05 Vs.
 - Zaxnes: none selectable. A "console model" setting would group C6, D3, E1, E2.
+- **FIDPLUS-1 (2026-11-15)**: menu bar, Emulation > Console model
+  (`zax-app/src/persistence/console_model.rs`). A model is a shortcut, not a new setting: it sets
+  the region (detection off), `emu.ppu_revision` (C6) and `emu.oamaddr_bug` (D3), only where a
+  reference names the value (nesdev: palette reads on 2C02G, 2C02H and PAL PPUs; the OAMADDR defect
+  on the 2C02G/H). NES/Famicom 2C02G-H: G, defect on; 2C02 before G: before G, defect off; PAL NES
+  2C07: G (palette reads), defect off; Dendy, PAL-M, PAL-N: region only. The menu ticks the model
+  whose values are all in force, so a hand change leaves none ticked; nothing is persisted.
+  Left out: E1 (`audio.console_profile` is one measured console, not a model; the player picks it
+  separately), E2 (rejected), the RP2A03 letter revisions (only the "letterless" noise of the
+  audio profiles, already tied to those). The PAL 2C07's OAMADDR behaviour is not documented here:
+  "off" is the absence of the 2C02G/H defect, not a measured 2C07 behaviour.
 
-### G2. Regions PAL-M and PAL-N famiclones — open (free)
+### G2. Regions PAL-M and PAL-N famiclones — done (FIDPLUS-1)
 - BeesNES: per-region cycle tables (`Src/Ppu/LSNCreateCycleTablePalM.inl`, `...PalN.inl`) and
   master clocks (`LSNSystem.h:1182-1190`). Zaxnes: NTSC, PAL, Dendy, Multi (`region_timing.rs:45-47`).
+- **FIDPLUS-1 (2026-11-15)**: `NesRegion::PalM = 4` and `PalN = 5` (persisted numbers), one timing
+  row each in `region_timing.rs`, from BeesNES (MIT):
+  - PAL-M: master 3 067 875 000 / 143 Hz, CPU / 12 = **1 787 806 Hz**, PPU / 4 (3 dots per cycle),
+    NTSC geometry (262 lines, vblank 241, `LSNLSpiroNes.h:213-221`), **no** odd-frame dot skip
+    (`CPalMPpu`, `LSNPpu2C0X.h:2823`), 60 fps nominal;
+  - PAL-N: master 42 984 675 / 2 Hz, CPU / 12 = **1 791 028 Hz**, PPU / 4, PAL's 312 lines with the
+    Dendy's 51 post-render lines (vblank 291, `LSNLSpiroNes.h:224-232`), **with** the odd-frame dot
+    skip (`CPalNPpu`, `LSNPpu2C0X.h:2830`), 50 fps nominal;
+  - both: NTSC frame-counter steps (`LSNApu2A0X.h:152-176`) and NTSC noise/DMC periods
+    (`LSNApuUnit.cpp:27-28`); pulse duty sequences 1 (25 %) and 2 (50 %) **swapped**
+    (`_bSwapDuty`, `LSNSystem.h:1182,1190`; `GetDuty`, `LSNApu2A0X.h:1891`), applied on the
+    `$4000`/`$4004` write (`PulseChannel::set_swaps_duty`). The MMC5 squares keep the normal order.
+  - FCEUX and NesHawk have neither region: PAL-M runs their NTSC and PAL-N their Dendy (the
+    geometries), without the clock or duty differences; NesHawk blocks keep the host's choice.
+  - Single source: BeesNES. The odd-frame skip of PAL-N and the duty swap have no second
+    reference here. The handheld options row still offers Auto/NTSC/PAL only; the menu bar offers
+    all five.
 
 ---
+
+### G3. MMC3 revision A / MMC6 as a console-model choice — done (FIDPLUS-C, 2026-11-15)
+
+- Revision A (NEC / Sharp MMC3A, and the MMC6's counter) asserts on a reload to zero only when
+  the counter was moving (non-zero before the clock or a `$C001` reload pending); revision B at
+  every clock that leaves it at zero. The core had both (NES 2.0 submapper 4 = revision A, Mesen's
+  `(count > 0 || _irqReload)`); FIDPLUS-C makes the revision a choice (`emu.mmc3_revision`,
+  `NesCore::set_mmc3_revision`, harness `ZAXNES_MMC3_REVISION`).
+- Judge: revision A passes `5.MMC3_rev_A`, `6-MMC6`, `6-MMC3_alt` and fails `5-MMC3` (both suites)
+  and `6.MMC3_rev_B`, revision B the reverse. With each row under its own console
+  (`ZAXNES_CONSOLE_MODEL=rom`, blargg's power-on palette for `power_up_palette`) the campaign is
+  219 pass, 0 fail.
+- Open: the MMC6's other differences (its 1 KiB PRG-RAM with per-half protection) already follow
+  NES 2.0 submapper 1; an iNES 1.0 MMC6 game (StarTropics) needs the cartridge database, which has
+  it. Not yet modelled: the MMC3's A12 filter differences between revisions, if any (no test ROM
+  separates them).
+
+### G4. Letterless RP2A03: the noise channel's last period — done; the reset of `$4017` — open (FIDPLUS-C, 2026-11-15)
+
+- BeesNES (MIT, `LSNApuUnit.cpp` `m_ui16NoisePeriodsOld`) gives the letterless RP2A03 a noise
+  period table whose last entry is 2046 CPU cycles, not 4068, and no short mode
+  (`Write400E`, `OldNoiseTable`). Zaxnes had the missing short mode only (`audio.console_profile`'s
+  letterless consoles, the N0260073). Done: `LETTERLESS_PERIODS` in `apu/noise_channel.rs`, taken
+  with the flag; a reset keeps the chip's table (it used to fall back to the default).
+- Done (owner, 2026-11-15, an exception to Q-078): a reset leaves the frame sequencer running on
+  a letterless NTSC chip when that chip is chosen (`emu.cpu_revision` or a letterless audio
+  profile), as nesdev "CPU power up state" and BeesNES (`LSNApu2A0X.h:576`) have it; every other
+  chip keeps Q-078's 2A03G reset. Test `fidplus_c_a_reset_leaves_the_letterless_sequencer_running`.
+- Open: the letterless chip is reached only through the audio profile of one measured console; a
+  console-model choice of its own (with the other RP2A03 letter differences, DMA timings) is part
+  of C3.
 
 ## H. Video output (shaders lot, not core)
 
@@ -725,6 +956,21 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   decay, signal noise (README "Visual Samples"); palette generator palgen-persune.
 - Zaxnes: librashader slang shaders (branch feat/librashader). These are generic shaders, not a
   signal model. Candidate shaders/palettes to port; not a core item.
+
+### H2. The 2C02's composite signal — generator and reference decoder done (FIDPLUS-D2a, 2026-11-15)
+- nesdev "NTSC video": per pixel, 8 half-clock samples of a square wave at the colour subcarrier
+  (12 phases per cycle), high or low level of the pixel's row; hue 0 always high, 13 always low,
+  `$xE`/`$xF` row 1's low (black); emphasis bits attenuate the samples in their colour's half
+  cycle. Levels used (volts): low 0.228 0.312 0.552 0.880, high 0.616 0.840 1.100 1.100,
+  attenuated low 0.192 0.256 0.448 0.712, high 0.484 0.668 0.896 0.896. **To check against the
+  page and the 2C02 netlist's video pins** (written from the page's figures; a mistake would show as
+  a palette shift).
+- `zax-nes/src/composite.rs`: `signal`, `pixel_samples`, the phase per dot (+8) and per line (+4,
+  +8 on the odd frame's short line), `decode_uniform` (YIQ over a subcarrier cycle, FCC matrix).
+  Tests: grey rows carry no chroma, every hue is high half a cycle, decoded white / black / red /
+  green / blue are what their names say, emphasis darkens.
+- Next (D2b): the picture through the generator and a line decoder (colour artefacts, dot crawl),
+  Fidélité+ only; D2c the PAL 2C07 (its phase alternation).
 
 ---
 

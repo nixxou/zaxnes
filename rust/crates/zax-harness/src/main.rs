@@ -5,6 +5,8 @@
 use std::path::Path;
 use std::process::ExitCode;
 
+#[cfg(feature = "dot-trace")]
+use zax_harness::dot_trace;
 #[cfg(feature = "vs-system")]
 use zax_harness::vs;
 use zax_harness::{
@@ -116,6 +118,8 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
         [command, rest @ ..] if command == "movie-sync" => movie_sync::command(rest),
         [command, rest @ ..] if command == "frame-trace" => frame_trace::command(rest),
         [command, rest @ ..] if command == "exec-trace" => exec_trace::command(rest),
+        #[cfg(feature = "dot-trace")]
+        [command, rest @ ..] if command == "dot-trace" => dot_trace::command(rest),
         [command, rest @ ..] if command == "cartdb-survey" => cartdb_survey::command(rest),
         [command, rest @ ..] if command == "neshawk-tiles" => neshawk_tiles::command(rest),
         [command, rest @ ..] if command == "compare" => {

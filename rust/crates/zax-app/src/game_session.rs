@@ -285,6 +285,10 @@ pub struct GameSession {
     overscan: crate::overscan::Overscan,
     /// The movie being recorded or played (see `zax_nes::movie`).
     movie: Option<MovieRun>,
+    /// Lot FIDPLUS-B (B3): the scripts' pad of the frame being run in slices, taken at its start
+    /// by the input hook (the mask and the player it goes to), so that each slice merges it with
+    /// the pad's state of its own time.
+    slice_script_pad: (InputAction, i32),
     /// The resets and power cycles of a played `.bk2`, each at the movie frame it comes before,
     /// in order: Zaxnes's movie format has no column for them (`bk2_movies.rs`).
     movie_commands: Vec<(u32, zax_nes::movie::tas::FrameCommand)>,
@@ -491,6 +495,7 @@ impl GameSession {
             strict_wide_edges: false,
             overscan: crate::overscan::Overscan::default(),
             movie: None,
+            slice_script_pad: (InputAction::NONE, 0),
             movie_commands: Vec::new(),
             run_ahead: 0,
             run_ahead_forced_to_zero: false,
@@ -725,6 +730,18 @@ impl GameSession {
     #[must_use]
     pub fn nominal_frame_rate(&self) -> i32 {
         self.core.timing().nominal_frames_per_second
+    }
+
+    /// The rate frames are chained at: the console's own with `emu.exact_rate` on a Zaxnes core
+    /// (lot FIDPLUS-B, whose sound follows it), else the nominal one.
+    #[must_use]
+    pub fn frame_rate(&self, exact: bool) -> f64 {
+        let timing = self.core.timing();
+        if exact && self.core.kind() == zax_core_api::EngineKind::Zaxnes {
+            timing.exact_frames_per_second()
+        } else {
+            f64::from(timing.nominal_frames_per_second)
+        }
     }
 
     /// Loads a ROM image into the core (REQ-LOOP-021 step 4). The core patches a ROM a
@@ -1447,12 +1464,6 @@ impl GameSession {
         frame: SessionFrame,
         clock: &mut StageClock,
     ) -> u16 {
-        let SessionFrame {
-            player_one,
-            player_two,
-            zapper_byte,
-            zapper_position,
-        } = frame;
         let counter = self.frame_counter;
         let started = clock.start();
         #[allow(clippy::cast_precision_loss)] // the C# `FrameCounter / 60f`
@@ -1466,12 +1477,29 @@ impl GameSession {
             })
             .unwrap_or((0, 0));
         clock.stop(Stage::Lua, started);
-        let (first, second) = routing::merge_script_pad(
-            player_one,
-            player_two,
+        self.slice_script_pad = (
             InputAction::from_bits(u32::try_from(pad).unwrap_or(0)),
             pad_index,
         );
+        let word = self.frame_word(frame);
+        self.apply_movie_command();
+        let frame_count = self.core.frame_count();
+        self.movie
+            .as_mut()
+            .map_or(word, |movie| movie.input(frame_count, word))
+    }
+
+    /// The core's input word for `frame`'s physical pads merged with the scripts' pad of the
+    /// frame ([`GameSession::begin_frame_lent`] takes it; a frame run in slices keeps it).
+    fn frame_word(&mut self, frame: SessionFrame) -> u16 {
+        let SessionFrame {
+            player_one,
+            player_two,
+            zapper_byte,
+            zapper_position,
+        } = frame;
+        let (pad, pad_index) = self.slice_script_pad;
+        let (first, second) = routing::merge_script_pad(player_one, player_two, pad, pad_index);
         self.input.players = [
             i32::try_from(first.bits()).unwrap_or(0),
             i32::try_from(second.bits()).unwrap_or(0),
@@ -1482,18 +1510,59 @@ impl GameSession {
                 .set_zapper_position_source(Some(Box::new(move |_| zapper_position)));
         }
         // REQ-INP-004: a Zapper port carries the Zapper byte and no controller button at all.
-        let word = routing::core_word(
+        routing::core_word(
             first,
             second,
             self.core.port_type(0).unwrap_or_default(),
             self.core.port_type(1).unwrap_or_default(),
             zapper_byte,
-        );
-        self.apply_movie_command();
-        let frame_count = self.core.frame_count();
-        self.movie
-            .as_mut()
-            .map_or(word, |movie| movie.input(frame_count, word))
+        )
+    }
+
+    /// Lot FIDPLUS-B (B3, `docs/design/REALTIME-PACING.md`): one real-time slice of a frame, up
+    /// to core cycle `until`. A slice that starts a frame runs the first half of
+    /// [`GameSession::run_frame_timed`] (the scripts' input hook, the movie word); one that ends
+    /// it runs the second half (capture, conversion, frame hooks). The slices in between take the
+    /// pads of their own time, which the game reads at its next strobe. Whether a frame ended.
+    /// Run-ahead and movies keep whole frames: the host does not slice with them on.
+    pub fn run_frame_slice_timed(
+        &mut self,
+        model: &mut SettingsModel,
+        scene: &mut SceneState,
+        frame: SessionFrame,
+        until: i64,
+        clock: &mut StageClock,
+    ) -> bool {
+        self.complete_frame_timed(model, scene, clock);
+        if clock.enabled() != self.engine.last_hook_time().is_some() {
+            self.engine.set_hook_timing(clock.enabled());
+        }
+        self.lend(model, scene, |session, scene| {
+            let word = if session.core.frame_in_progress() {
+                session.frame_word(frame)
+            } else {
+                session.begin_frame_lent(scene, frame, clock)
+            };
+            let started = clock.start();
+            let ended = session.core.run_frame_slice(word, until).is_some();
+            clock.stop(Stage::Core, started);
+            if ended {
+                session.finish_frame_lent(scene, clock);
+            }
+            ended
+        })
+    }
+
+    /// Whether a frame run in slices is in progress (lot FIDPLUS-B).
+    #[must_use]
+    pub fn frame_in_progress(&self) -> bool {
+        self.core.frame_in_progress()
+    }
+
+    /// Whether a movie is being recorded or played: its frames are whole ones (lot FIDPLUS-B).
+    #[must_use]
+    pub const fn has_movie(&self) -> bool {
+        self.movie.is_some()
     }
 
     /// The tile capture, the conversion and the frame hooks of the frame the core just ran (the

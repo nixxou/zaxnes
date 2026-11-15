@@ -60,6 +60,7 @@ fn req_ui_205_the_model_enumerates_every_menu_command() {
         SpeedDown,
         SetRegion,
         ToggleAutoRegion,
+        SetConsoleModel,
         SetPortType,
         ToggleTwoDimensional,
         ResetView,

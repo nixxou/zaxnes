@@ -986,6 +986,9 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
             opt(1, "PAL"),
             opt(2, "MULTI"),
             opt(3, "DENDY"),
+            // Lot FIDPLUS-1, G2: the famiclone regions (docs/review/FIDELITY-LEADS.md).
+            opt(4, "PAL-M"),
+            opt(5, "PAL-N"),
         ]))
         .with_lua("TVMode")
         .with_field("34")
@@ -1158,6 +1161,42 @@ fn emulation_power_on_ppu(out: &mut Vec<SettingDescriptor>) {
         ]))
         .with_label("Power-on video memory"),
     );
+    // Lot FIDPLUS-C (docs/design/CONSOLE-MODEL.md): the MMC3's scanline counter, the cartridge's
+    // (its header and the database) by default, or a chip revision chosen.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuMmc3Revision,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "The cartridge's"),
+            opt(1, "MMC3A / MMC6"),
+            opt(2, "MMC3B / MMC3C"),
+        ]))
+        .with_label("MMC3 revision"),
+    );
+    // Lot FIDPLUS-C (FIDELITY-LEADS G4): the CPU's revision, the RP2A03G and later by default, or
+    // the letterless RP2A03 of the early Famicoms (its noise channel: no short mode, its own
+    // period table).
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuCpuRevision,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "RP2A03G and later"),
+            opt(1, "Letterless RP2A03"),
+        ]))
+        .with_label("CPU revision"),
+    );
 }
 
 fn emulation_cartridge(out: &mut Vec<SettingDescriptor>) {
@@ -1265,6 +1304,7 @@ fn emulation_cartridge(out: &mut Vec<SettingDescriptor>) {
         .with_label("Power on at the top of the picture"),
     );
     ppu_write_timings(out);
+    fidelity_plus(out);
 }
 
 /// The emulation settings of the Rust port alone, in their place in the catalogue.
@@ -2235,6 +2275,54 @@ fn ppu_write_timings(out: &mut Vec<SettingDescriptor>) {
             opt(4, "Random"),
         ]))
         .with_label("CPU/PPU alignment"),
+    );
+}
+
+/// The Fidélité+ options (lots FIDPLUS-A and FIDPLUS-B), each its own switch (owner,
+/// 2026-11-15).
+fn fidelity_plus(out: &mut Vec<SettingDescriptor>) {
+    // Lot FIDPLUS-A (docs/design/HALF-CYCLE.md): the Fidelite+ machine, register effects on
+    // their measured edges. Off by default: its own frame loop costs speed.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuFidelityPlus,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Fidelity+"),
+    );
+    // Lot FIDPLUS-B step 1 (docs/design/REALTIME-PACING.md): frames chained at the console's own
+    // rate (60.0988 Hz NTSC, 50.0070 Hz PAL) and the sound with them. Off: the nominal 60 and 50
+    // of DEC-R2-T3.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuExactRate,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Console frame rate"),
+    );
+    // Lot FIDPLUS-B step 3: the machine run in slices of real time, the pads read at the game's
+    // own strobe. Off: whole frames on the frame clock. Run-ahead and movies keep whole frames.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuRealtimeInput,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Real-time pad"),
     );
 }
 

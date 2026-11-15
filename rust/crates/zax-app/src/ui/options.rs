@@ -307,6 +307,8 @@ const EMULATION: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::EmuPowerOnRam),
     LayoutEntry::Row(SettingId::EmuPowerOnPpuRam),
     LayoutEntry::Row(SettingId::EmuPpuRevision),
+    LayoutEntry::Row(SettingId::EmuMmc3Revision),
+    LayoutEntry::Row(SettingId::EmuCpuRevision),
     LayoutEntry::Row(SettingId::EmuOamaddrWriteCorruption),
     LayoutEntry::Row(SettingId::EmuOamCorruption),
     LayoutEntry::Row(SettingId::EmuPpuBusConflicts),
@@ -319,6 +321,9 @@ const EMULATION: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::EmuPaletteCorruption),
     LayoutEntry::Row(SettingId::EmuPpuResetLine),
     LayoutEntry::Row(SettingId::EmuCpuPpuAlignment),
+    LayoutEntry::Row(SettingId::EmuFidelityPlus),
+    LayoutEntry::Row(SettingId::EmuExactRate),
+    LayoutEntry::Row(SettingId::EmuRealtimeInput),
 ];
 
 /// The rows of the **Interface** tab, from the most common to the most advanced.

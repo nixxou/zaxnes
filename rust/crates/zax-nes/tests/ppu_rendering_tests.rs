@@ -1339,3 +1339,71 @@ fn fidelity_switch_on_fetch_reads_the_stale_low_byte_in_alignments_2_and_3() {
         assert_eq!(row, vec![expected; 7], "alignment {alignment}");
     }
 }
+
+/// Lot FIDPLUS-2 (A5, transistor netlist): a `$2001` write landing on dot 254 switches the
+/// fetches and increments from dot 257 on, but the horizontal copy of dot 257 still follows the
+/// old state in alignments 2 and 3: switched off, the copy is made; switched on, it is not.
+/// Nametable 0 holds tile 1, nametable 1 tile 2: a missed copy leaves `v` in the wrong column and
+/// nametable, which the next line shows.
+#[test]
+fn fidplus2_dot_257_copy_follows_the_state_before_a_switch_on_dot_256() {
+    const PALETTE: [u8; 4] = [0x0F, 0x16, 0x2A, 0x12];
+    fn run_to(fixture: &mut TileFixture, lines: std::ops::RangeInclusive<i32>, dot: i32) -> i32 {
+        let bus = fixture.core.bus_mut();
+        while !lines.contains(&bus.ppu().scanline()) || bus.ppu().dot() != dot {
+            bus.tick();
+            bus.sync_ppu();
+        }
+        bus.ppu().scanline()
+    }
+    let row = |fixture: &TileFixture, y: usize| -> Vec<u8> {
+        (0..256).map(|x| pixel_at(&fixture.core, x, y)).collect()
+    };
+    for switch_on in [false, true] {
+        for alignment in 0..4u8 {
+            let mut fixture = TileFixture::new();
+            fixture.core.set_cpu_ppu_alignment(alignment);
+            fixture.fill_vram(0x2000, 960, 0x01);
+            fixture.fill_vram(0x23C0, 64, 0x00);
+            fixture.fill_vram(0x2400, 960, 0x02);
+            fixture.fill_vram(0x27C0, 64, 0x00);
+            fixture.write_vram(0x3F00, &PALETTE);
+            fixture.write_vram(0x2000, &[]);
+            fixture.set_control(0x00);
+            fixture.set_scroll(0, 0);
+            fixture.set_mask(0x0A);
+            fixture.core.run_frame(0);
+            // The CPU reaches one dot in three: 98, 251 and 296 share a phase on one line.
+            let line = run_to(&mut fixture, 64..=66, 98);
+            if switch_on {
+                // Off well before, on with the write landing on dot 254.
+                fixture.core.bus_mut().write(0x2001, 0x00);
+                run_to(&mut fixture, line..=line, 251);
+                fixture.core.bus_mut().write(0x2001, 0x0A);
+            } else {
+                // Off with the write landing on dot 254, on again before the next line's fetches.
+                run_to(&mut fixture, line..=line, 251);
+                fixture.core.bus_mut().write(0x2001, 0x00);
+                run_to(&mut fixture, line..=line, 296);
+                fixture.core.bus_mut().write(0x2001, 0x0A);
+            }
+            // Past line + 3, whatever the dot.
+            let bus = fixture.core.bus_mut();
+            while bus.ppu().scanline() <= line + 3 {
+                bus.tick();
+                bus.sync_ppu();
+            }
+            let y = usize::try_from(line).unwrap();
+            let next = row(&fixture, y + 1);
+            let reference = row(&fixture, y + 3);
+            // Switched off: the copy happens in 2 and 3 (next line right), not in 0 and 1.
+            // Switched on: the copy is missed in 2 and 3, made in 0 and 1.
+            let copied = (alignment >= 2) != switch_on;
+            assert_eq!(
+                next == reference,
+                copied,
+                "switch on {switch_on}, alignment {alignment}"
+            );
+        }
+    }
+}

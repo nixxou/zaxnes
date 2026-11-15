@@ -12,6 +12,7 @@ use crate::emulation::notification_center::{NotificationSeverity, SHORT_SECONDS}
 use crate::emulation::speed_setting;
 use crate::game_session::GameSession;
 use crate::persistence::app_settings::{AppSettings, AppSettingsMut, TvRegionSetting};
+use crate::persistence::console_model::ConsoleModel;
 use crate::persistence::save_slots::{is_valid_slot_id, numbered_slot_id, QUICK_SLOT_ID};
 
 impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
@@ -103,6 +104,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::SetSpeed
             | Command::SetRegion
             | Command::ToggleAutoRegion
+            | Command::SetConsoleModel
             | Command::ResetView
             | Command::SetSkybox
             | Command::ToggleLocalCamera
@@ -203,6 +205,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::SpeedDown
             | Command::SetRegion
             | Command::ToggleAutoRegion
+            | Command::SetConsoleModel
             | Command::SetPortType => self.execute_emulation(command, args),
             Command::ToggleTwoDimensional
             | Command::ResetView
@@ -336,6 +339,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let value = !model.auto_tv_mode();
                 model.set_auto_tv_mode(value);
             }),
+            // Lot FIDPLUS-1, G1: region and revision options in one go.
+            Command::SetConsoleModel => {
+                if let Some(console) = ConsoleModel::from_raw(args.number) {
+                    self.update_settings(|model| console.apply(model));
+                }
+            }
             Command::SetPortType => {
                 if let (Some(session), Ok(port)) =
                     (self.session.as_mut(), usize::try_from(args.number))

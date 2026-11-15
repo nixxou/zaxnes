@@ -454,7 +454,11 @@ impl<
             // AMD-061 §8: "le sous-mappeur NES 2.0 d'une image l'emporte sur la révision par
             // défaut". Submapper 4 is "NEC MMC3 (Loading latch with 0 disables IRQ)" (nesdev,
             // "NES 2.0 submappers"), which is the revision A counter.
-            irq_revision_a: mapper_number == 4 && header.is_nes20 && header.submapper == 4,
+            // Lot FIDPLUS-C (FIDELITY-LEADS G3): the MMC6's counter is revision A's too
+            // (blargg's `6-MMC6`: no IRQ on a reload once the counter reached zero), so submapper
+            // 1 takes it with the MMC6's RAM.
+            irq_revision_a: (mapper_number == 4 && header.is_nes20 && header.submapper == 4)
+                || is_mmc6,
             irq_prescaler: 0,
             #[cfg(feature = "board-119")]
             chr_ram_windows: 0,
@@ -752,6 +756,13 @@ impl<
     ))]
     pub(crate) fn force_irq_revision_a(&mut self) {
         self.irq_revision_a = true;
+    }
+
+    /// The console model's MMC3 (lot FIDPLUS-C): the revision of the scanline counter chosen by
+    /// the player or the test campaign over the one the header implies (`true` revision A, the
+    /// NEC / Sharp MMC3A and the MMC6's counter; `false` revision B, the MMC3B / MMC3C).
+    pub(crate) fn set_irq_revision_a(&mut self, revision_a: bool) {
+        self.irq_revision_a = revision_a;
     }
 
     /// Makes `$A000` inert, for a board that holds this chip and whose own page takes the

@@ -112,6 +112,8 @@ pub fn golden_row(rel: &str, image: &[u8], frames: u32) -> Result<Value, Harness
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_default();
     let mut core = NesCore::new();
+    // `ZAXNES_FIDELITY_PLUS=1`: every frame through the Fidelite+ loop (FIDPLUS-A, off by default).
+    core.set_fidelity_plus(std::env::var("ZAXNES_FIDELITY_PLUS").is_ok_and(|value| value != "0"));
     // The golden rows (`rust/goldens/core-goldens.jsonl`) were taken with the PPU powering on in
     // vblank, so this command keeps that power-on; `ZAXNES_POWER_ON_TOP=1` measures the one the
     // app uses by default since lot FIDELITY step 27.
@@ -197,6 +199,14 @@ impl Checkpoints {
         // them is a change in the picture rather than in the layout.
         let mut indices = Vec::new();
         core.pixel_frame_indices_into(&mut indices);
+        // `ZAXNES_GOLDEN_DUMP=<dir>`: also writes each checkpoint's index image (256 x 240 bytes,
+        // 0 to 63) as `<dir>/<frame>.idx`, to look at a golden change (lot FIDPLUS-2).
+        if let Ok(dir) = std::env::var("ZAXNES_GOLDEN_DUMP") {
+            let _ = std::fs::write(
+                std::path::Path::new(&dir).join(format!("{key}.idx")),
+                &indices,
+            );
+        }
         self.pixels
             .insert(key.clone(), json!(hex(&Sha256::digest(&indices))));
         self.tiles

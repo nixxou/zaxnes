@@ -100,6 +100,8 @@ options
       emu.power_on_ram
       emu.power_on_ppu_ram
       emu.ppu_revision
+      emu.mmc3_revision
+      emu.cpu_revision
       emu.oamaddr_write_corruption
       emu.oam_corruption
       emu.ppu_bus_conflicts
@@ -112,6 +114,9 @@ options
       emu.palette_corruption
       emu.ppu_reset_line
       emu.cpu_ppu_alignment
+      emu.fidelity_plus
+      emu.exact_rate
+      emu.realtime_input
       emu.run_ahead
       emu.smooth_scroll_ahead
       emu.game_speed

@@ -315,7 +315,10 @@ impl Ppu2C02 {
                 if dot == 257 {
                     self.shift_background();
                     self.background_fetch(dot, cart);
-                    self.transfer_address_x();
+                    if !self.copy_257_suppressed {
+                        self.transfer_address_x();
+                    }
+                    self.copy_257_suppressed = false;
                 }
 
                 self.run_sprite_fetches(dot, cart);
@@ -492,7 +495,7 @@ impl Ppu2C02 {
         self.v = (self.v & !0x03E0) | (coarse_y << 5);
     }
 
-    fn transfer_address_x(&mut self) {
+    pub(super) fn transfer_address_x(&mut self) {
         self.v = (self.v & !0x041F) | (self.t & 0x041F);
 
         // R2-005: the horizontal reload of dot 257 — and the vertical increment of dot 256

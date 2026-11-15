@@ -18,6 +18,7 @@
 //! **Cartridge.** The bus owns the cartridge, so every PPU call that may reach it takes it
 //! as an `Option<&mut Cartridge>` instead of holding a reference.
 
+mod edges;
 mod palette_corruption;
 mod ppu_bus_access;
 mod render;
@@ -183,6 +184,27 @@ pub enum SpriteLimit {
     Smart,
 }
 
+/// One dot of a per-dot trace (feature `ppu-dot-trace`, lot FIDPLUS-2): where the scan is after
+/// the dot ran, the two address registers, and the last address the PPU put on its bus during
+/// the dot (`0xFFFF` when it put none). Compared with the transistor netlist dot by dot.
+#[cfg(feature = "ppu-dot-trace")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DotRecord {
+    /// Scanline after the dot.
+    pub scanline: i16,
+    /// Dot after the dot ran.
+    pub dot: i16,
+    /// `v` after the dot.
+    pub v: u16,
+    /// `t` after the dot.
+    pub t: u16,
+    /// Last address put on the PPU bus during the dot, `0xFFFF` for none.
+    pub bus: u16,
+    /// CPU access to a PPU register on this dot (the access dot, as the core places it):
+    /// `$2000-$2007`, bit 15 set for a write, with its value in bits 16-23; 0 for none.
+    pub access: u32,
+}
+
 /// The picture processing unit.
 #[derive(Debug, Clone)]
 #[allow(clippy::struct_excessive_bools)] // The chip's flags, one field each like the C#.
@@ -206,6 +228,24 @@ pub struct Ppu2C02 {
     /// Whether the 2C02's OAMADDR copy at the start of rendering is emulated
     /// ([`Self::oamaddr_row_copy`]). A core setting, on by default; not part of the state.
     oamaddr_bug: bool,
+    /// The last `$2007` write outside rendering: the PPU clock it came on and the address it
+    /// stored to (lot FIDPLUS-2, [`Self::rewrite_pending_vram_write`]). Not part of the state:
+    /// the two writes it pairs belong to one instruction, and a state is never taken inside one.
+    last_data_write: (i64, u16),
+    /// The next dot 257 makes no horizontal copy: rendering was switched on with the switch
+    /// landing on dot 256 (lot FIDPLUS-2, A5, [`Self::switch_rendering`]). Consumed on dot 257;
+    /// not part of the state (a `$2001` write ends its instruction and the dot follows at once).
+    copy_257_suppressed: bool,
+    /// Fidélité+ (`edges`): the state of its own loop, kept apart (boxed) so the standard core's
+    /// layout stays its own (lot FIDPLUS-A, perf). Not part of the state but for the edges.
+    fid: Box<edges::FidState>,
+    /// Per-dot trace (feature `ppu-dot-trace`): on, the PPU runs every dot through
+    /// [`Self::step_dot`] (no span, no idle skip) and records it. Not part of the state.
+    #[cfg(feature = "ppu-dot-trace")]
+    dot_trace: Option<Vec<DotRecord>>,
+    /// Last address put on the bus in the current dot, for [`DotRecord::bus`].
+    #[cfg(feature = "ppu-dot-trace")]
+    dot_trace_bus: std::cell::Cell<u16>,
     /// Whether OAM decays while the rendering is off ([`Self::refresh_oam_row`]). A core
     /// setting, off by default; not part of the state.
     oam_decay: bool,
@@ -604,6 +644,13 @@ impl Ppu2C02 {
             oam_corrupt_rows: 0,
             oam_seed_row: 0,
             oamaddr_bug: true,
+            last_data_write: (i64::MIN, 0),
+            copy_257_suppressed: false,
+            fid: Box::new(edges::FidState::NEW),
+            #[cfg(feature = "ppu-dot-trace")]
+            dot_trace: None,
+            #[cfg(feature = "ppu-dot-trace")]
+            dot_trace_bus: std::cell::Cell::new(0xFFFF),
             oam_decay: false,
             power_on_top: true,
             reset_line: false,
@@ -886,7 +933,23 @@ impl Ppu2C02 {
         }
         let ran_ahead = renders && self.prepaid_dots == delay;
         let write_dot = self.dot - if ran_ahead { delay } else { 0 };
+        // A switch on dot 256 (written on 254): the horizontal copy of dot 257 still follows the
+        // old state — the netlist copies after a switch off and does not after a switch on, in
+        // alignments 2 and 3 (A5; alignments 0 and 1 hit the switch-on race of step 33). Both are
+        // settled here, on the write, so that nothing is tested per dot.
+        let late_switch =
+            ran_ahead && self.dot == 256 && self.alignment >= 2 && self.netlist_measured_region();
+        let was_rendering = self.rendering_enabled();
         self.mask = value;
+        if late_switch {
+            let now_rendering = self.rendering_enabled();
+            if was_rendering && !now_rendering {
+                // Nothing reads `v` on dot 257 with rendering off: copying now is the same.
+                self.transfer_address_x();
+            } else if !was_rendering && now_rendering {
+                self.copy_257_suppressed = true;
+            }
+        }
         let on = (value & 0x18) != 0;
         self.rendering_switched(on);
         if ran_ahead {
@@ -2079,7 +2142,34 @@ impl Ppu2C02 {
 
     /// Runs `count` dots, skipping in one go the stretches where a dot does nothing but
     /// move the counters (or, on a visible line with rendering off, draw the backdrop).
-    fn run_dots<K: BoardKind>(&mut self, mut count: i64, cart: Cart<'_, '_, K>) {
+    fn run_dots<K: BoardKind>(&mut self, count: i64, cart: Cart<'_, '_, K>) {
+        if K::FIDELITY_PLUS {
+            // Fidélité+ (`edges`): its own loop, which may post an edge from a dot's own work. A
+            // constant: the standard copies of this function are `run_dots_standard` alone.
+            self.run_dots_with_edges(count, cart);
+            return;
+        }
+        self.run_dots_standard(count, cart);
+    }
+
+    /// The standard core's dots: `run_dots`'s own body. The Fidélité+ loop runs its dots through
+    /// this function too, one at a time, and through nothing else of the per-dot path: lot
+    /// FIDPLUS-A first called `step_dot`, then the spans, from that loop, and every extra caller
+    /// made LLVM outline one of them from this loop (callgrind: +2.3 % on `metroid`, and pinning
+    /// them inline moved the outlining to their own callees, +3.3 % on `duelito`).
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
+    fn run_dots_standard<K: BoardKind>(&mut self, mut count: i64, cart: Cart<'_, '_, K>) {
+        #[cfg(feature = "ppu-dot-trace")]
+        if self.dot_trace.is_some() {
+            while count > 0 {
+                self.dot_trace_bus.set(0xFFFF);
+                self.step_dot(cart);
+                self.record_traced_dot();
+                count -= 1;
+            }
+            return;
+        }
         while count > 0 {
             let idle = self.idle_dots_ahead().min(count);
             if idle > 0 {
@@ -2105,6 +2195,24 @@ impl Ppu2C02 {
                 self.step_dot(cart);
                 count -= 1;
             }
+        }
+    }
+
+    /// Records the dot just run in the per-dot trace, when one is on.
+    #[cfg(feature = "ppu-dot-trace")]
+    fn record_traced_dot(&mut self) {
+        let record = DotRecord {
+            #[allow(clippy::cast_possible_truncation)] // Below 312.
+            scanline: self.scanline as i16,
+            #[allow(clippy::cast_possible_truncation)] // Below 341.
+            dot: self.dot as i16,
+            v: self.v,
+            t: self.t,
+            bus: self.dot_trace_bus.get(),
+            access: 0,
+        };
+        if let Some(trace) = self.dot_trace.as_mut() {
+            trace.push(record);
         }
     }
 
@@ -2301,6 +2409,8 @@ impl Ppu2C02 {
     ) -> u8 {
         let mut cartridge = CartSlot::<K>::new(cartridge);
         self.apply_decay();
+        #[cfg(feature = "ppu-dot-trace")]
+        self.trace_access(0x2000 | u32::from(register & 7));
 
         match register & 0x07 {
             2 => {
@@ -2407,6 +2517,9 @@ impl Ppu2C02 {
     /// allocator, which `docs/progress/MF-5a.md` records rather than takes.
     #[inline(never)]
     fn read_data<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) -> u8 {
+        if self.edges_on_for::<K>() {
+            return self.read_data_with_edges(cart);
+        }
         let address = self.v & 0x3FFF;
         // A `$2007` access is an ALE of `v` (step 39).
         self.ale_low = address.to_le_bytes()[0];
@@ -2510,6 +2623,21 @@ impl Ppu2C02 {
             self.run_dots(1, cart);
             self.prepaid_dots = latch_dots;
             self.read_buffer = self.fetch_bus_value(cart.as_deref());
+            // Lot FIDPLUS-2 (A5, netlist): the read's X and Y increments are the pipeline's own
+            // signals, so on a dot that increments coarse X anyway (every eighth, 328, 336) they
+            // merge with it: one X increment, plus Y; on dot 256, which makes both, nothing more.
+            // Checked on Zelda II's title split, replayed on the netlist (A5).
+            if matches!(latch_dot, 8..=256 | 328 | 336)
+                && latch_dot % 8 == 0
+                && self.netlist_measured_region()
+            {
+                if latch_dot != 256 {
+                    self.increment_y();
+                    self.v_row_next = self.v;
+                }
+                self.notify_address_bus(self.v & 0x3FFF, cart);
+                return true;
+            }
             return false;
         }
 
@@ -2517,7 +2645,15 @@ impl Ppu2C02 {
         let residue = self.fetch_bus_value(cart.as_deref());
         self.read_buffer = residue;
         self.run_dots(1, cart);
-        self.increment_vram_address(cart);
+        if latch_dot == 257 && self.netlist_measured_region() {
+            // Lot FIDPLUS-2 (A5, netlist): on dot 257 the horizontal copy overrides the read's
+            // coarse X increment; only its Y increment is left.
+            self.increment_y();
+            self.v_row_next = self.v;
+            self.notify_address_bus(self.v & 0x3FFF, cart);
+        } else {
+            self.increment_vram_address(cart);
+        }
         self.run_dots(1, cart);
         self.prepaid_dots = latch_dots + 1;
         if self.fetching() {
@@ -2648,6 +2784,24 @@ impl Ppu2C02 {
         }
         self.run_dots(1, cart);
         self.prepaid_dots = delay + 1;
+    }
+
+    /// The netlist loads `v` in the middle of dot D+3 (`delay_address_load`), so the increment of
+    /// dot D+4, which this core has already run with the old `v`, belongs to the new one (lot
+    /// FIDPLUS-2, A5, `g2006x`): on a coarse-X increment dot the loaded address is incremented,
+    /// on dot 256 in X and Y. NTSC only, as the other netlist rules.
+    #[cold]
+    #[inline(never)]
+    fn increment_after_delayed_load(&mut self) {
+        let dot = self.dot;
+        let increments = (dot % 8 == 0 && (8..=256).contains(&dot)) || dot == 328 || dot == 336;
+        if !increments || !self.fetching() || !self.netlist_measured_region() {
+            return;
+        }
+        self.increment_coarse_x();
+        if dot == 256 {
+            self.increment_y();
+        }
     }
 
     /// A `$2006` load that lands on a dot whose increment of `v` it collides with.
@@ -2886,6 +3040,7 @@ impl Ppu2C02 {
     }
 
     /// [`Self::write`] with the board reached through `K` (lot CORE-2).
+    #[allow(clippy::too_many_lines)] // One arm per register, as the chip; the trace adds its mark.
     pub fn write_as<K: BoardKind>(
         &mut self,
         register: u16,
@@ -2894,6 +3049,8 @@ impl Ppu2C02 {
     ) {
         let mut cartridge = CartSlot::<K>::new(cartridge);
         self.apply_decay();
+        #[cfg(feature = "ppu-dot-trace")]
+        self.trace_access(0x2000 | 0x8000 | u32::from(register & 7) | (u32::from(value) << 16));
 
         // A write to any PPU register, $2002 included, loads the whole bus latch
         // (ppu_open_bus test 2).
@@ -2927,6 +3084,8 @@ impl Ppu2C02 {
                     let was_rendering = self.rendering_enabled();
                     if was_rendering == ((value & 0x18) != 0) {
                         self.mask = value;
+                    } else if self.edges_on_for::<K>() {
+                        self.post_switch_rendering(value);
                     } else {
                         self.switch_rendering(value, &mut cartridge);
                     }
@@ -2989,7 +3148,10 @@ impl Ppu2C02 {
                     // The reset line still holds the register (`emu.ppu_reset_line`).
                     return;
                 }
-                if self.write_toggle {
+                if self.write_toggle && self.edges_on_for::<K>() {
+                    self.t = (self.t & 0xFF00) | u16::from(value);
+                    self.post_address_load();
+                } else if self.write_toggle {
                     self.t = (self.t & 0xFF00) | u16::from(value);
                     if (self.address_load_delay || self.bus_conflicts) && self.fetching() {
                         self.delay_address_load(&mut cartridge);
@@ -3000,7 +3162,11 @@ impl Ppu2C02 {
                         self.delay_backdrop_address(&mut cartridge);
                     }
                     let previous = self.v;
+                    let delayed = self.prepaid_dots == 4;
                     self.v = self.t;
+                    if delayed {
+                        self.increment_after_delayed_load();
+                    }
                     if (previous & 0x3F00) == 0x3F00 {
                         self.palette_load_corruption(previous);
                     }
@@ -3024,6 +3190,11 @@ impl Ppu2C02 {
             7 => {
                 // A `$2007` access is an ALE of `v` (step 39).
                 self.ale_low = self.v.to_le_bytes()[0];
+                if self.edges_on_for::<K>() && !self.rendering_now() {
+                    self.post_data_store(value);
+                    return;
+                }
+                self.rewrite_pending_vram_write(value, &mut cartridge);
                 self.write_vram_inner(self.v & 0x3FFF, value, PpuBusAccess::Cpu, &mut cartridge);
                 self.increment_vram_address(&mut cartridge);
             }
@@ -3031,6 +3202,47 @@ impl Ppu2C02 {
             // $2002 is read-only; the write only loaded the bus latch.
             _ => {}
         }
+    }
+
+    /// Rendering on, on a line that renders (visible or pre-render).
+    const fn rendering_now(&self) -> bool {
+        self.rendering_enabled()
+            && (self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline())
+    }
+
+    /// Whether the rules measured on the NTSC 2C02 netlist apply (lot FIDPLUS-2, A5): the PAL
+    /// 2C07 (3.2 dots a cycle) and the clones keep the previous model, which their golden pictures
+    /// follow (Zelda II Europe moved with them), until a measurement of their own.
+    const fn netlist_measured_region(&self) -> bool {
+        matches!(self.timing.region, NesRegion::Ntsc | NesRegion::Multi)
+    }
+
+    /// Two `$2007` writes on consecutive CPU cycles (the dummy write and the write of a
+    /// read-modify-write instruction, `INC $2007`): the PPU stores a write to VRAM about four dots
+    /// after the CPU's, from its data latch, and the second CPU write, three dots after the first,
+    /// has already replaced that latch, so **the first address receives the second value** too
+    /// (lot FIDPLUS-2, transistor netlist, the four alignments: `INC $2007` over 03 04 leaves
+    /// 01 01, not 00 01; `TriCNES` agrees in its alignments 0 and 1;
+    /// `docs/review/FIDELITY-LEADS.md` A5). Rendering off only: during rendering the write path
+    /// is another one (C1), not measured here; palette entries are internal to the PPU and
+    /// not measured either, so they keep one write each.
+    fn rewrite_pending_vram_write<K: BoardKind>(&mut self, value: u8, cart: Cart<'_, '_, K>) {
+        let rendering = self.rendering_now();
+        let now = self.ppu_clock;
+        let (then, address) = self.last_data_write;
+        // One CPU cycle is 3 dots (3.2 on PAL): "the previous cycle" is 4 dots at most.
+        if !rendering
+            && then != i64::MIN
+            && (1..=4).contains(&(now - then))
+            && !is_palette_address(address)
+        {
+            self.write_vram_inner(address, value, PpuBusAccess::Inert, cart);
+        }
+        self.last_data_write = if rendering {
+            (i64::MIN, 0)
+        } else {
+            (now, self.v & 0x3FFF)
+        };
     }
 
     /// Writes one OAM byte, used by OAM DMA ($4014).
@@ -3334,6 +3546,8 @@ impl Ppu2C02 {
         let address = address & 0x3FFF;
 
         if access != PpuBusAccess::Inert {
+            #[cfg(feature = "ppu-dot-trace")]
+            self.dot_trace_bus.set(address);
             self.notify_address_bus(address, cart);
         }
 
@@ -3460,9 +3674,38 @@ impl Ppu2C02 {
         address: u16,
         cart: Cart<'_, '_, K>,
     ) {
+        #[cfg(feature = "ppu-dot-trace")]
+        self.dot_trace_bus.set(address);
         if let Some(cartridge) = cart.as_deref_mut() {
             cartridge.on_ppu_address_bus_without_read_as::<K>(address, self.ppu_clock);
         }
+    }
+
+    /// Starts a per-dot trace (feature `ppu-dot-trace`), dropping any previous one.
+    #[cfg(feature = "ppu-dot-trace")]
+    pub fn start_dot_trace(&mut self) {
+        self.dot_trace = Some(Vec::new());
+    }
+
+    /// Marks the last traced dot with a CPU register access (feature `ppu-dot-trace`).
+    #[cfg(feature = "ppu-dot-trace")]
+    fn trace_access(&mut self, access: u32) {
+        if let Some(last) = self.dot_trace.as_mut().and_then(|trace| trace.last_mut()) {
+            last.access = access;
+        }
+    }
+
+    /// Inverts the odd-frame parity (feature `ppu-dot-trace`): a console's power-on parity is
+    /// not chosen by the program, and the differential must match the netlist's.
+    #[cfg(feature = "ppu-dot-trace")]
+    pub fn flip_frame_parity(&mut self) {
+        self.odd_frame = !self.odd_frame;
+    }
+
+    /// Stops the per-dot trace and returns its records.
+    #[cfg(feature = "ppu-dot-trace")]
+    pub fn take_dot_trace(&mut self) -> Vec<DotRecord> {
+        self.dot_trace.take().unwrap_or_default()
     }
 
     /// Reads a nametable byte, from console VRAM or from the cartridge when the board

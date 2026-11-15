@@ -5,7 +5,9 @@
 pub mod apu;
 pub mod builtin_patches;
 pub mod cartridges;
+pub mod composite;
 pub mod cpu;
+pub mod fidplus;
 mod engine_impl;
 pub mod hack_pack;
 pub mod input;
@@ -17,7 +19,7 @@ mod nes_core;
 mod power_on_ram;
 pub mod ppu;
 mod region_timing;
-pub use power_on_ram::{PowerOnPpuRam, PowerOnRam, BLARGG_POWER_UP_PALETTE};
+pub use power_on_ram::{Mmc3Revision, PowerOnPpuRam, PowerOnRam, BLARGG_POWER_UP_PALETTE};
 pub mod rom;
 pub mod state;
 mod video_info;

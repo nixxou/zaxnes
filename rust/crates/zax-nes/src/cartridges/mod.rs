@@ -32,7 +32,8 @@ pub(crate) use board::with_board_kind;
 #[cfg(feature = "board-mmc5-exattr-split")]
 pub use board::Mmc5ExtKind;
 pub use board::{
-    AnyBoard, AxRomKind, BoardKind, CnRomKind, Mmc1Kind, Mmc3Kind, Mmc5Kind, NromKind, UxRomKind,
+    AnyBoard, AxRomKind, BoardKind, CnRomKind, Fid, Mmc1Kind, Mmc3Kind, Mmc5Kind, NromKind,
+    UxRomKind,
 };
 use mappers::Mapper;
 
@@ -910,6 +911,18 @@ impl Cartridge {
     #[must_use]
     pub const fn board(&self) -> &Board {
         &self.board
+    }
+
+    /// The console model's MMC3 revision (lot FIDPLUS-C): sets the scanline counter of a
+    /// mapper 4 / 118 board to revision A (`true`) or B. `false` when the board is no MMC3.
+    pub(crate) fn set_mmc3_irq_revision_a(&mut self, revision_a: bool) -> bool {
+        match &mut self.board {
+            Board::Mmc3(board) => {
+                board.set_irq_revision_a(revision_a);
+                true
+            }
+            _ => false,
+        }
     }
 
     /// The ROM image this cartridge was built from.

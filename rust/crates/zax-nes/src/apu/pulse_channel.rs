@@ -17,6 +17,8 @@ pub(super) const DUTY_SEQUENCES: [u8; 32] = [
 #[allow(clippy::struct_excessive_bools)] // Mirrors the hardware's independent flags.
 pub(crate) struct PulseChannel {
     is_first: bool,
+    /// Famiclone duty swap of the region (configuration, not state; see `set_swaps_duty`).
+    swaps_duty: bool,
     duty: usize,
     sequence_position: usize,
     timer_period: i32,
@@ -32,10 +34,16 @@ pub(crate) struct PulseChannel {
 }
 
 impl PulseChannel {
+    /// Whether `$4000`/`$4004` writes swap duty sequences 1 and 2 (PAL-M, PAL-N famiclones).
+    pub fn set_swaps_duty(&mut self, swaps: bool) {
+        self.swaps_duty = swaps;
+    }
+
     /// Creates pulse 1 (`is_first`, one's complement negate) or pulse 2.
     pub fn new(is_first: bool) -> Self {
         Self {
             is_first,
+            swaps_duty: false,
             duty: 0,
             sequence_position: 0,
             timer_period: 0,
@@ -72,7 +80,13 @@ impl PulseChannel {
     pub fn write(&mut self, index: u16, value: u8, cycle: i64) {
         match index {
             0 => {
-                self.duty = usize::from(value >> 6);
+                // Famiclone APUs (PAL-M, PAL-N) swap the 25 % and 50 % sequences.
+                let duty = value >> 6;
+                self.duty = usize::from(if self.swaps_duty && (duty == 1 || duty == 2) {
+                    duty ^ 3
+                } else {
+                    duty
+                });
                 self.length.halt = (value & 0x20) != 0;
                 self.envelope.looping = (value & 0x20) != 0;
                 self.envelope.constant_volume = (value & 0x10) != 0;
@@ -206,5 +220,29 @@ impl PulseChannel {
         self.sweep_shift = reader.read_i32()?;
         self.sweep_divider = reader.read_i32()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PulseChannel;
+
+    #[test]
+    fn fidplus_g2_famiclone_swaps_duty_one_and_two_only() {
+        for (swaps, written, expected) in [
+            (false, 0, 0),
+            (false, 1, 1),
+            (false, 2, 2),
+            (false, 3, 3),
+            (true, 0, 0),
+            (true, 1, 2),
+            (true, 2, 1),
+            (true, 3, 3),
+        ] {
+            let mut pulse = PulseChannel::new(true);
+            pulse.set_swaps_duty(swaps);
+            pulse.write(0, written << 6, 0);
+            assert_eq!(expected, pulse.duty, "swap {swaps}, duty {written}");
+        }
     }
 }

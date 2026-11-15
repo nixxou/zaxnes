@@ -46,6 +46,20 @@ impl PowerOnRam {
     }
 }
 
+/// The MMC3's scanline counter of the console model (lot FIDPLUS-C, `docs/design/CONSOLE-MODEL.md`):
+/// the one the cartridge implies, or a chosen revision. The test ROMs of each revision exclude each
+/// other (`5.MMC3_rev_A`, `6-MMC6` and `6-MMC3_alt` against `5-MMC3`), so each runs under its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Mmc3Revision {
+    /// The header's (NES 2.0 submapper 4 is revision A) and the database's: revision B otherwise.
+    #[default]
+    Cartridge,
+    /// The NEC / Sharp MMC3A and the MMC6: a reload to zero asserts once, not on every clock.
+    A,
+    /// The MMC3B / MMC3C: the counter at zero after a clock asserts.
+    B,
+}
+
 /// What the PPU's own memories — palette RAM, OAM and the 2 KiB of nametable RAM — hold at
 /// power-on (lot FIDELITY step 36, `docs/review/FIDELITY-LEADS.md` B3). Like the work RAM they
 /// start with whatever their cells settled to, and that differs from one console to another:
