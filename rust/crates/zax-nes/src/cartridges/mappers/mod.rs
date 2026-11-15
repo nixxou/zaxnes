@@ -20,6 +20,8 @@ macro_rules! banked {
     };
 }
 
+#[cfg(feature = "board-530")]
+mod ax5705;
 #[cfg(feature = "board-small-boards")]
 mod bandai74161;
 mod bandai_fcg;
@@ -181,6 +183,8 @@ mod waixing253;
 #[cfg(feature = "board-178")]
 mod waixing_fs305;
 
+#[cfg(feature = "board-530")]
+pub use ax5705::Ax5705;
 #[cfg(feature = "board-small-boards")]
 pub use bandai74161::Bandai74161;
 pub use bandai_fcg::BandaiFcg;

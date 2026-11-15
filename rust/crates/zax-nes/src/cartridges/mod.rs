@@ -576,6 +576,8 @@ const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
             | 168
             // MAPPERS-N: mapper 303's counter, `Kaiser7017.h` `ProcessCpuClock`.
             | 303
+            // MAPPERS-N: mapper 530's VRC4 IRQ (puNES `mapper_530.c`, `EXTCL_CPU_EVERY_CYCLE`).
+            | 530
             // MAPPERS-N: the CPU-clocked counters of `IrqLatch`.
             | 56
             | 142

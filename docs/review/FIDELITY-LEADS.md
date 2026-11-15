@@ -937,6 +937,13 @@ CHR-RAM) and puNES (`mapper_198.c`, banks from `$50` folding onto `$40-$4F`). Th
 password screen cleanly; the later `[T+ChSFIX2]` and `[T+ChTFIX2]` patches show stray glyphs on
 the password screen, not investigated (translation hacks; their CHR use may differ).
 
+### J29. Mapper 530: puNES's whole VRC4 against Mesen2's subset
+puNES (`mapper_530.c`) runs the AX5705 as a full VRC4 (VRC4f wiring after `A |= (A & 8) << 9`,
+IRQ and the `$9000` mirroring included) with the two data-line crossings; Mesen2 (`Ax5705.h`)
+decodes the same banks and crossings but has no IRQ and only `$8008` bit 0 for the mirroring.
+This board takes puNES's reading, through `Vrc2Vrc4` itself (a new `new_vrc4f` constructor
+behind `board-530`). No dump at hand.
+
 ### J28. Mapper 513: the 32 KiB of CHR-RAM are not saved
 Mesen2 (`Sachen9602.h`) marks the 32 KiB of CHR-RAM battery-backed (`ForceChrBattery`); this
 core saves PRG-RAM only, so the CHR-RAM starts fresh at every power-on. Mesen2 passes the chip

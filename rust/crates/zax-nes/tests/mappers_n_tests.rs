@@ -937,3 +937,15 @@ fn mappers_n_513_takes_the_prg_block_from_chr_writes() {
     let windows = core.prg_windows();
     assert_eq!((0x85, 0x3E, 0x3F), (windows[0], windows[2], windows[3]));
 }
+
+/// puNES `mapper_530.c` (and Mesen2 `Ax5705.h` for the decode): a `VRC4f` whose A12 is CPU A3 and
+/// whose PRG register sees bits 1 and 3 crossed.
+#[cfg(feature = "board-530")]
+#[test]
+fn mappers_n_530_crosses_its_lines_into_a_vrc4() {
+    let mut core = MapperRom::new(530).prg(16).chr(256).load();
+    core.mapper_write(0x8000, 0x08); // bit 3 reaches the chip as bit 1: PRG 0 = 2
+    assert_eq!(2, core.prg_windows()[0]);
+    core.mapper_write(0xA008, 0x05); // A3 is A12: $B008, CHR 0's low nibble
+    assert_eq!(5, core.chr_windows()[0]);
+}

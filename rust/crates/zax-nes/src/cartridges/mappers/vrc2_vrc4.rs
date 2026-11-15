@@ -288,6 +288,26 @@ impl Vrc2Vrc4 {
         }
     }
 
+    /// A VRC4 wired as the VRC4f, A0 on CPU A0 and A1 on CPU A1, for a board holding the chip
+    /// behind its own decode: mapper 530's AX5705 (puNES `mapper_530.c`,
+    /// `init_VRC2and4(VRC24_VRC4, 0x01, 0x02, …)`; lot MAPPERS-N). No Microwire latch, for
+    /// [`Vrc2Vrc4::new_vrc2b`]'s reason.
+    #[cfg(feature = "board-530")]
+    pub(crate) fn new_vrc4f(memory: &CartridgeMemory, mapper_number: i32) -> Self {
+        let lines = VrcVariant::Vrc4f.index_lines();
+        Self {
+            index_lines: lines,
+            index_or_lines: lines,
+            is_vrc2: false,
+            chr_shift: false,
+            chr_high_mask: 0x1F,
+            mapper_number,
+            #[cfg(feature = "board-vrc2-latch")]
+            microwire_latch: None,
+            ..Self::new(memory, 25)
+        }
+    }
+
     /// Mapper 14's VRC2 mode: [`Vrc2Vrc4::new_vrc2b`] plus the one thing that board's page adds
     /// to it, "the VRC2 PRG and mirroring registers do not respond to address mirrors" — see
     /// [`Vrc2Vrc4::exact_prg_and_mirroring_decode`] and [`Vrc2Vrc4::ignores_mirror`]

@@ -1,3 +1,5 @@
+#[cfg(feature = "board-530")]
+use super::Ax5705;
 #[cfg(feature = "board-cony")]
 use super::Cony;
 #[cfg(feature = "board-176")]
@@ -356,6 +358,9 @@ pub enum IrqBoard {
     /// Mapper 303, Kaiser KS7017 (lot MAPPERS-N).
     #[cfg(feature = "board-303")]
     Kaiser7017(Box<Kaiser7017>),
+    /// Mapper 530, the AX5705 VRC4 board (lot MAPPERS-N).
+    #[cfg(feature = "board-530")]
+    Ax5705(Box<Ax5705>),
     #[cfg(feature = "board-252")]
     Waixing252(Box<Waixing252>),
     #[cfg(feature = "board-253")]
@@ -423,6 +428,8 @@ macro_rules! inner {
             IrqBoard::Racermate($b) => $body,
             #[cfg(feature = "board-303")]
             IrqBoard::Kaiser7017($b) => $body,
+            #[cfg(feature = "board-530")]
+            IrqBoard::Ax5705($b) => $body,
             #[cfg(feature = "board-252")]
             IrqBoard::Waixing252($b) => $body,
             #[cfg(feature = "board-253")]

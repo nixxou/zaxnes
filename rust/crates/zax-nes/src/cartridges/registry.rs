@@ -6,6 +6,8 @@
 //! share a board when they are the same silicon differently wired (9 and 10, 21/22/23/25/27,
 //! 87 and 101). 156 is outside that table: it runs Metal Force (Korea), a widescreen target.
 
+#[cfg(feature = "board-530")]
+use super::mappers::Ax5705;
 #[cfg(feature = "board-188")]
 use super::mappers::BandaiKaraoke;
 #[cfg(feature = "board-111")]
@@ -681,6 +683,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     521,
     #[cfg(feature = "board-522")]
     522,
+    #[cfg(feature = "board-530")]
+    530,
     #[cfg(feature = "board-taito-x1")]
     552,
 ];
@@ -2172,6 +2176,8 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         168 => Board::IrqBoard(IrqBoard::Racermate(Box::new(Racermate::new(memory)))),
         #[cfg(feature = "board-303")]
         303 => Board::IrqBoard(IrqBoard::Kaiser7017(Box::new(Kaiser7017::new(memory)))),
+        #[cfg(feature = "board-530")]
+        530 => Board::IrqBoard(IrqBoard::Ax5705(Box::new(Ax5705::new(memory)))),
         #[cfg(feature = "board-252")]
         252 => Board::IrqBoard(IrqBoard::Waixing252(Box::new(Waixing252::new(memory)))),
         #[cfg(feature = "board-253")]

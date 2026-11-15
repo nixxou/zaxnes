@@ -189,6 +189,7 @@ default = [
     "board-519",
     "board-323",
     "board-513",
+    "board-530",
     "board-302",
     "board-305",
     "board-306",
@@ -368,6 +369,8 @@ board-165 = ["board-mmc3-clones"]
 board-198 = ["board-mmc3-clones"]
 board-199 = ["board-mmc3-clones"]
 board-513 = ["board-mmc3-clones"]
+# MAPPERS-N: the AX5705, a VRC4 behind crossed lines (`Ax5705`).
+board-530 = []
 board-265 = ["board-latch-multi"]
 board-283 = ["board-latch-multi"]
 board-285 = ["board-latch-multi"]
