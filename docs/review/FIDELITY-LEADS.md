@@ -962,6 +962,19 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   the campaign tells the two apart (all pass either way); a game that depends on it would be one
   timing an OAM DMA's length or a DMC halt's repeated read without syncing first.
 
+### G6. Open-bus bits of a controller read just after a DMC fetch — open (2026-11-15)
+
+- 2A03 netlist differential, program `dmc4016` (`docs/progress/CPU-NETLIST-DIAG.md`, step 5): when
+  a DMC DMA halts a `$4016` read (`4016R 4016R C000R 4016R`), the netlist's real read returns `$00`
+  (bits 5-7 = the sample byte `$00` the fetch left on the pins), Zaxnes `$40` (bits 5-7 from the
+  internal bus, which the fetch does not update). Seven such reads in 30 000 cycles; every other
+  `$4016` read is identical.
+- Zaxnes takes the controller ports' open bits from the internal bus on purpose (`nes_bus.rs`,
+  `AccuracyCoin` `Implied Dummy Reads`: JSR operands read from `$4016`/`$4017` "leech off" an opcode
+  read from `$4015`, which only the internal bus carries). Both observations fit a rule where the
+  halt and dummy re-reads of `$4016` load the internal bus from the pins; not changed until a model
+  satisfies both, with `AccuracyCoin` 147/147 kept.
+
 ## H. Video output (shaders lot, not core)
 
 ### H1. Composite / RF signal, CRT gamma, phosphor decay — open

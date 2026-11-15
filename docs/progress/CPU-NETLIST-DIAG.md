@@ -107,6 +107,27 @@ side-effect reads such as `$2007` / `$4016`), not the cycle count.
   console-model choice "CPU / APU alignment" (random, either) would cover both; recorded as
   FIDELITY-LEADS G5.
 
+## Step 5: the hard cases (2026-11-15)
+
+`mkprog3.py`; same settings as step 4 (alignment 3, phase -8, `--flip-get-put`, `--dmc 431,8`).
+`cmp2.py` splits the comparison: cycles with another address or R/W (timing), and cycles where
+only the byte differs.
+
+| Program | What | Cycles | Timing differences | Byte-only differences |
+|---|---|---|---|---|
+| `dmcoam` | DMC fetches colliding with OAM DMAs every loop | 29 999 (29 237 DMA) | 0 | 0 |
+| `dmc2007` | `$2007` reads halted by DMC fetches | 29 999 | 0 | 0 |
+| `illegal` | every stable illegal opcode in every mode | 3 990 | 0 | 0 |
+| `dmc4016` | controller strobes and reads under DMC fetches | 29 999 | 0 | `$4017` bit 4 on every read (the bench's port-2 peripheral, C++ not transistors); 7 `$4016` reads right after a fetch (G6) |
+| `intbranch` | frame IRQ and NMI against taken branches | 59 990 | 0 | `$2002` bit 5 (sprite overflow from the PPU's power-on OAM); `$4015` on the pins (below) |
+| `fc5` | `$4017` five-step then four-step with IRQ | 59 990 | 0 | `$4015` on the pins (below) |
+
+`$4015` is read inside the 2A03 and does not drive the pins, so the bench, which prints the pins,
+shows the open bus there (`$40`) while Zaxnes prints what the CPU got (`$00` or `$40`); the
+programs store each value read, and those stores are identical on both sides.
+
+**Across all 18 programs and 353 000 cycles, no cycle has another address or another R/W.**
+
 ## Meaning for A-bis
 
 Nothing measured needs the CPU on half-cycles: where the CPU differs, it is a timing value of the
