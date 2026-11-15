@@ -308,8 +308,23 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   on the PR-1 set (metroid +0.10 %, mm2 +0.09 %, smb1 +0.08 %, smb3 +0.04 %). A first version
   testing dot 257 on every dot of `run_render_dot` cost +2 to +2.9 % (it changed the inlining of
   `run_dots`); moving the rule to the `$2001` write removed it.
-- **Next**: `g2000`, `g2006px` with rendering on, `oam` in the four alignments; the `bus` column;
-  C1 against the SMB3 Japan line-193 video.
+- **`g2000`, `oam`** (alignments 2 and 3): 0 or 1 dot a frame once the power-on frame is past.
+- **PPU bus addresses (`buscmp.py`, `g2001px`, alignment 3)**: about 5 100 of 24 700 ALE
+  addresses a frame are not the address Zaxnes reads on that dot or the next, in three families:
+  - the garbage nametable fetches of dots 257-320 (and dots 1, 337-340): Zaxnes does not put them
+    on its bus. No picture effect; only a board snooping the bus there would see it (MMC5's
+    in-frame detection counts the dot-337/339 pair, which Zaxnes models separately);
+  - the pattern rows of empty sprite slots (tile `$FF`, row 6 on the netlist, 7 in Zaxnes on
+    line 0): no A12 effect;
+  - **open lead**: the first pattern fetch after a `$2001` switch on (3 or 6 dots after the write,
+    ~310 a frame) uses as tile number what lies on the multiplexed AD bus — the low byte of the
+    last address latched (`$15`, `$10`, `$18`: the nametable column of the last fetch before the
+    switch off) or the last byte read (`$CA`, the high plane) — where Zaxnes keeps the tile of the
+    last real nametable fetch. Probably visible (one wrong 8-pixel group after a mid-line switch
+    on, alignments 2 and 3); the same mechanism as step 39's stale low byte, for the tile latch.
+    To model with its own measurement (which bytes, which dots, per alignment) before porting.
+- **Next**: that tile-latch lead; `g2006px` with rendering on; C1 against the SMB3 Japan
+  line-193 video.
 
 ---
 
