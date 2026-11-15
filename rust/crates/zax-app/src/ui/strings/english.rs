@@ -532,6 +532,9 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("option.The cartridge's", "The cartridge's"),
     ("option.MMC3A / MMC6", "MMC3A / MMC6"),
     ("option.MMC3B / MMC3C", "MMC3B / MMC3C"),
+    ("setting.emu.cpu_revision", "CPU revision"),
+    ("option.RP2A03G and later", "RP2A03G and later"),
+    ("option.Letterless RP2A03", "Letterless RP2A03"),
     ("setting.emu.power_on_ram", "Work RAM at power-on"),
     ("setting.emu.power_on_ppu_ram", "Video memory at power-on"),
     ("setting.emu.ppu_revision", "Video chip revision"),
@@ -1254,6 +1257,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         "detail.emu.palette_corruption",
         "A defect of the video chip: switching the picture off in the middle of a line, or moving the video address out of the colour palette, can change some palette colours. Only modelled for consoles in alignment 2, the one where it was observed reliably, from the measurements of the AccuracyCoin author; the exact colours are an approximation. Games written for the console avoid it. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.cpu_revision",
+        "Which revision of the console's processor, which also makes its sound. The RP2A03G and later, the default, are in nearly every console; the letterless RP2A03 of the first Famicoms has a simpler noise channel: no metallic short mode, and a different lowest pitch. Only the noise sounds of some games change. Takes effect at the next load. Default: RP2A03G and later.",
     ),
     (
         "detail.emu.mmc3_revision",

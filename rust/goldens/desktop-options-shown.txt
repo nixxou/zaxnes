@@ -51,6 +51,7 @@ emu.power_on_ram
 emu.power_on_ppu_ram
 emu.ppu_revision
 emu.mmc3_revision
+emu.cpu_revision
 emu.oamaddr_write_corruption
 emu.run_ahead
 emu.smooth_scroll_ahead

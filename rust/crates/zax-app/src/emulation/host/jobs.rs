@@ -112,6 +112,7 @@ struct ConsoleHardware {
     pre_g_revision: bool,
     oamaddr_write_corruption: bool,
     mmc3_revision: zax_nes::Mmc3Revision,
+    letterless_cpu: bool,
 }
 
 impl ConsoleHardware {
@@ -121,6 +122,7 @@ impl ConsoleHardware {
         core.set_ppu_pre_g_revision(self.pre_g_revision);
         core.set_oamaddr_write_corruption(self.oamaddr_write_corruption);
         core.set_mmc3_revision(self.mmc3_revision);
+        core.set_letterless_cpu(self.letterless_cpu);
     }
 }
 
@@ -578,6 +580,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 2 => zax_nes::Mmc3Revision::B,
                 _ => zax_nes::Mmc3Revision::Cartridge,
             },
+            letterless_cpu: self.settings.get(SettingId::EmuCpuRevision).as_int() == 1,
         }
     }
 

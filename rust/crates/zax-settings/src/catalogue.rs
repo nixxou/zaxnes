@@ -156,6 +156,7 @@ setting_ids! {
     EmuPpuResetLine => "emu.ppu_reset_line",
     EmuPowerOnPpuRam => "emu.power_on_ppu_ram",
     EmuMmc3Revision => "emu.mmc3_revision",
+    EmuCpuRevision => "emu.cpu_revision",
     EmuPpuRevision => "emu.ppu_revision",
     EmuOamaddrWriteCorruption => "emu.oamaddr_write_corruption",
     EmuCpuPpuAlignment => "emu.cpu_ppu_alignment",

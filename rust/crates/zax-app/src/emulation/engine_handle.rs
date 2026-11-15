@@ -930,6 +930,13 @@ impl EngineHandle {
         }
     }
 
+    /// `emu.cpu_revision` (lot FIDPLUS-C): the letterless RP2A03; Zaxnes only.
+    pub fn set_letterless_cpu(&mut self, letterless: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_letterless_cpu(letterless);
+        }
+    }
+
     /// `emu.mmc3_revision` (lot FIDPLUS-C), read at the next load; Zaxnes only.
     pub fn set_mmc3_revision(&mut self, revision: zax_nes::Mmc3Revision) {
         if let Some(core) = self.zaxnes_mut() {

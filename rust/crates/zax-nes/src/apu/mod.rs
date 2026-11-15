@@ -211,6 +211,8 @@ pub struct Apu2A03 {
     /// The console whose analog audio path is imitated (`console_profile`); `None`, the default,
     /// keeps the output as it always was.
     console_profile: Option<&'static console_profile::ConsoleAudioProfile>,
+    /// The console model's letterless RP2A03 (lot FIDPLUS-C), a setting, not state.
+    letterless_cpu: bool,
     ring: Arc<Mutex<SampleRing>>,
 
     timing: RegionTiming,
@@ -277,6 +279,7 @@ impl Clone for Apu2A03 {
             dmc: self.dmc.clone(),
             resampler: self.resampler.clone(),
             console_profile: self.console_profile,
+            letterless_cpu: self.letterless_cpu,
             ring: Arc::new(Mutex::new(ring)),
             timing: self.timing,
             sample_rate: self.sample_rate,
@@ -337,6 +340,7 @@ impl Apu2A03 {
             dmc: DmcChannel::default(),
             resampler: BandLimitedResampler::new(),
             console_profile: None,
+            letterless_cpu: false,
             ring: Arc::new(Mutex::new(SampleRing::new(Self::MIN_BUFFER_SAMPLES))),
             timing: RegionTiming::default(),
             sample_rate: Self::DEFAULT_SAMPLE_RATE,
@@ -1116,6 +1120,23 @@ impl Apu2A03 {
             .set_profile(self.console_profile, self.sample_rate);
     }
 
+    /// The console model's CPU (lot FIDPLUS-C, FIDELITY-LEADS G4): a letterless RP2A03 chosen
+    /// by itself, whatever the audio profile. The noise channel takes the letterless chip when
+    /// either says so.
+    pub fn set_letterless_cpu(&mut self, letterless: bool) {
+        self.letterless_cpu = letterless;
+        self.apply_letterless();
+    }
+
+    fn apply_letterless(&mut self) {
+        self.noise.set_letterless(
+            self.letterless_cpu
+                || self
+                    .console_profile
+                    .is_some_and(|profile| profile.letterless),
+        );
+    }
+
     /// Imitates the analog audio path of one measured console (`console_profile`): `index` 0 for
     /// none, the output as it always was; `n` for `CONSOLE_AUDIO_PROFILES[n - 1]`. Out-of-range
     /// indices mean none. Nothing changes per CPU cycle: the channel gains apply when the level
@@ -1124,10 +1145,7 @@ impl Apu2A03 {
         self.console_profile = index
             .checked_sub(1)
             .and_then(|slot| console_profile::CONSOLE_AUDIO_PROFILES.get(slot));
-        self.noise.set_letterless(
-            self.console_profile
-                .is_some_and(|profile| profile.letterless),
-        );
+        self.apply_letterless();
         self.resampler
             .set_profile(self.console_profile, self.sample_rate);
         self.level_key = -1;

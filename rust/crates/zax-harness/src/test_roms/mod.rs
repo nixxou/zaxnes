@@ -623,6 +623,8 @@ fn run_one_zaxnes(
             ),
         });
     }
+    // `ZAXNES_LETTERLESS_CPU=1`: the letterless RP2A03 (lot FIDPLUS-C).
+    core.set_letterless_cpu(std::env::var("ZAXNES_LETTERLESS_CPU").is_ok_and(|value| value != "0"));
     // `ZAXNES_MMC3_REVISION=a|b`: the console model's MMC3 (lot FIDPLUS-C); the cartridge's
     // otherwise.
     if let Ok(value) = std::env::var("ZAXNES_MMC3_REVISION") {

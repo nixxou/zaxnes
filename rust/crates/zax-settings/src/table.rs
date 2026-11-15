@@ -1179,6 +1179,24 @@ fn emulation_power_on_ppu(out: &mut Vec<SettingDescriptor>) {
         ]))
         .with_label("MMC3 revision"),
     );
+    // Lot FIDPLUS-C (FIDELITY-LEADS G4): the CPU's revision, the RP2A03G and later by default, or
+    // the letterless RP2A03 of the early Famicoms (its noise channel: no short mode, its own
+    // period table).
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuCpuRevision,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "RP2A03G and later"),
+            opt(1, "Letterless RP2A03"),
+        ]))
+        .with_label("CPU revision"),
+    );
 }
 
 fn emulation_cartridge(out: &mut Vec<SettingDescriptor>) {

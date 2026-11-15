@@ -544,6 +544,9 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("option.The cartridge's", "Celle de la cartouche"),
     ("option.MMC3A / MMC6", "MMC3A / MMC6"),
     ("option.MMC3B / MMC3C", "MMC3B / MMC3C"),
+    ("setting.emu.cpu_revision", "Révision du processeur"),
+    ("option.RP2A03G and later", "RP2A03G et suivants"),
+    ("option.Letterless RP2A03", "RP2A03 sans lettre"),
     ("setting.emu.power_on_ram", "RAM à l'allumage"),
     ("setting.emu.power_on_ppu_ram", "Mémoire vidéo à l'allumage"),
     ("setting.emu.ppu_revision", "Révision de la puce vidéo"),
@@ -1228,6 +1231,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (
         "detail.emu.palette_corruption",
         "Un défaut de la puce vidéo : couper l'image au milieu d'une ligne, ou faire sortir l'adresse vidéo de la palette, peut changer certaines couleurs de la palette. Modélisé seulement pour les consoles en alignement 2, celui où il a été observé de façon fiable, d'après les mesures de l'auteur d'AccuracyCoin ; les couleurs exactes sont une approximation. Les jeux écrits pour la console l'évitent. Prend effet au prochain chargement. Par défaut : activé.",
+    ),
+    (
+        "detail.emu.cpu_revision",
+        "Quelle révision du processeur de la console, qui fait aussi son son. Les RP2A03G et suivants, par défaut, équipent presque toutes les consoles ; le RP2A03 sans lettre des premières Famicom a un canal de bruit plus simple : pas de mode court métallique, et une note la plus grave différente. Seuls les bruitages de certains jeux changent. Prend effet au prochain chargement. Par défaut : RP2A03G et suivants.",
     ),
     (
         "detail.emu.mmc3_revision",

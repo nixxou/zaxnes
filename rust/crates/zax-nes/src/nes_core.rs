@@ -234,6 +234,12 @@ impl NesCore {
         self.power_on_ppu_ram = pattern;
     }
 
+    /// The console model's CPU (lot FIDPLUS-C): a letterless RP2A03, whose noise channel has no
+    /// short mode and its own period table. At once.
+    pub fn set_letterless_cpu(&mut self, letterless: bool) {
+        self.bus.apu_mut().set_letterless_cpu(letterless);
+    }
+
     /// The console model's MMC3 revision (lot FIDPLUS-C): read when the next ROM is loaded.
     pub fn set_mmc3_revision(&mut self, revision: crate::Mmc3Revision) {
         self.mmc3_revision = revision;
