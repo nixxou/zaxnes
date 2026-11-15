@@ -820,7 +820,19 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   unchanged). **Approximations left, for Fidelity+**: (1) BeesNES's low-pass runs at the CPU rate
   as a pole-zero filter; ours at the output rate, pole pre-warped, **zero dropped** (it sits at
   144-189 kHz, above any output Nyquist) — to do properly, run it on the band-limited signal
-  before decimation (per-step cost); (2) the overall profile volume (0.34 to 4.5) is not applied,
+  before decimation (per-step cost) — **done 2026-11-15 (FIDPLUS-D1d), differently**: the
+  low-pass, its zero and BeesNES's output pole run at the output rate as a filter fitted to their
+  analog response (`console_profile::BandFilter`: the model's two poles, impulse invariant, behind
+  a 32-tap correction fitted by least squares at setup, weighted by our resampler kernel's
+  response, 14 samples of delay; the expansion audio is delayed as much). Test: within 0.002 dB and
+  0.2 degree of the model up to 0.35 of the output rate, all 14 profiles, 44.1 and 48 kHz
+  (prototype: 0.001 dB); the chain before was 1.6 to 3.9 dB off at the band's top. The output pole
+  and the forced low-pass are BeesNES's at its fitting rate, 44.1 kHz (`output / 2 + 100` =
+  22 150 Hz, default output `LSNAudioOptions.h:96`, recordings at 44 100 Hz `README.txt:63`),
+  fixed whatever our rate. Why not per step: a profile kernel (the sinc through the low-pass)
+  needs a tail of 50+ samples for the 3.7 kHz Twin Famicom (2 samples of time constant at 48 kHz,
+  4 at 96 kHz), more than the 64-sample ring of the standard state holds. Cost: about 40
+  multiply-adds per output sample, inside the profile option only; (2) the overall profile volume (0.34 to 4.5) is not applied,
   only its sign: our output is normalised to full scale, applying it would clip; (3) BeesNES's
   sample box applies HPF0 inside its windowed-sinc resampler, ours after our own resampler (same
   one-pole formula, a few samples of phase apart) — **closed 2026-11-15 (FIDPLUS-D1c), not an

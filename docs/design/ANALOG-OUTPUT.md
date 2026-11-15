@@ -71,6 +71,11 @@ immaterial for linear filters (test, < 1e-12). It found D1d's real content: Bees
 low-pass is never off (disabled or above Nyquist: `output / 2 + 100` Hz) and one extra pole at that
 corner follows it on every profile; ours drops both, and the three zeros.
 
+D1d (2026-11-15): the low-pass with its zero and BeesNES's output pole at its fitting rate
+(22 150 Hz), as one filter fitted at the output rate (FIDELITY-LEADS E1-1): within 0.002 dB of the
+model in band, 14 samples of delay, per-sample cost inside the profile option (not per step, so no
+Fidelite+ gate needed). Savestate filter block 432 bytes (format 14 / 15, unreleased).
+
 D1a's cost on the standard path (callgrind, clean builds against 6c9cb163, PR-1 set): first
 +0.89 % on `mmc5` (the profile test in the setter the MMC5 calls on every level change), then
 +0.417 % with that branch out of line, and **-0.057 %** at 7edd528e, where the setter is back to

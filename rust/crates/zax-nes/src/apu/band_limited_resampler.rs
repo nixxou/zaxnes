@@ -330,6 +330,11 @@ fn build_kernel() -> Box<[f64]> {
     kernel.into_boxed_slice()
 }
 
+/// The windowed sinc of the kernel, for the console profile's band filter fit (lot FIDPLUS-D1d).
+pub(super) fn kernel_impulse(x: f64) -> f64 {
+    impulse(x)
+}
+
 /// The windowed sinc the step response integrates, zero outside the window.
 #[allow(clippy::cast_precision_loss)] // TAPS is 32.
 fn impulse(x: f64) -> f64 {
