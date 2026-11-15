@@ -32,7 +32,8 @@ pub(crate) use board::with_board_kind;
 #[cfg(feature = "board-mmc5-exattr-split")]
 pub use board::Mmc5ExtKind;
 pub use board::{
-    AnyBoard, AxRomKind, BoardKind, CnRomKind, Mmc1Kind, Mmc3Kind, Mmc5Kind, NromKind, UxRomKind,
+    AnyBoard, AxRomKind, BoardKind, CnRomKind, Fid, Mmc1Kind, Mmc3Kind, Mmc5Kind, NromKind,
+    UxRomKind,
 };
 use mappers::Mapper;
 

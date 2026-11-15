@@ -1012,12 +1012,13 @@ impl NesCore {
         let idle_loop = self.idle_loop.filter(|_| self.bus.ppu().wide().unlocked());
 
         self.bus.ppu_mut().clear_frame_boundary();
-        if self.fidelity_plus {
+        if self.fidelity_plus || self.bus.ppu().edges_pending() {
             // Fidélité+: its own loop (one test a frame on the standard path). The PPU is told
             // every frame: a load builds it afresh. The PPU and the APU are batched as in the
             // standard frame: every register access still catches the PPU up first, and the
-            // edges count dots, not catch-ups.
-            self.bus.ppu_mut().set_fidelity_plus(true);
+            // edges count dots, not catch-ups. A Fidélité+ state loaded with the option off runs
+            // this loop too while its edges are pending, posting none.
+            self.bus.ppu_mut().set_fidelity_plus(self.fidelity_plus);
             self.bus.defer_ppu();
             loop {
                 let done = match self.bus.cartridge().filter(|_| !self.generic_path) {

@@ -161,6 +161,12 @@ impl Ppu2C02 {
         Ok(())
     }
 
+    /// [`Self::edges_on`] on the path of the board kind `K`: false at compile time on the
+    /// standard copies.
+    pub(super) const fn edges_on_for<K: BoardKind>(&self) -> bool {
+        K::FIDELITY_PLUS && self.edges_on()
+    }
+
     /// Whether edges place the register effects: Fidélité+ on the NTSC 2C02's timing.
     pub(super) const fn edges_on(&self) -> bool {
         self.fidelity_plus && matches!(self.timing.region, NesRegion::Ntsc | NesRegion::Multi)

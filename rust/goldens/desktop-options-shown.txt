@@ -42,6 +42,7 @@ emu.ppu_2000_glitch
 emu.palette_corruption
 emu.ppu_reset_line
 emu.cpu_ppu_alignment
+emu.fidelity_plus
 emu.pause_3d_in_2d
 emu.pipeline
 emu.power_on_ram

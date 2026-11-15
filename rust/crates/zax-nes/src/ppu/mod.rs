@@ -2159,8 +2159,9 @@ impl Ppu2C02 {
     /// Runs `count` dots, skipping in one go the stretches where a dot does nothing but
     /// move the counters (or, on a visible line with rendering off, draw the backdrop).
     fn run_dots<K: BoardKind>(&mut self, count: i64, cart: Cart<'_, '_, K>) {
-        if self.edge_count != 0 || self.fidelity_plus {
-            // Fidélité+ (`edges`): its own loop, which may post an edge from a dot's own work.
+        if K::FIDELITY_PLUS {
+            // Fidélité+ (`edges`): its own loop, which may post an edge from a dot's own work. A
+            // constant: the standard copies of this function are `run_dots_standard` alone.
             self.run_dots_with_edges(count, cart);
             return;
         }
@@ -2172,6 +2173,8 @@ impl Ppu2C02 {
     /// FIDPLUS-A first called `step_dot`, then the spans, from that loop, and every extra caller
     /// made LLVM outline one of them from this loop (callgrind: +2.3 % on `metroid`, and pinning
     /// them inline moved the outlining to their own callees, +3.3 % on `duelito`).
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
     fn run_dots_standard<K: BoardKind>(&mut self, mut count: i64, cart: Cart<'_, '_, K>) {
         #[cfg(feature = "ppu-dot-trace")]
         if self.dot_trace.is_some() {
@@ -2530,7 +2533,7 @@ impl Ppu2C02 {
     /// allocator, which `docs/progress/MF-5a.md` records rather than takes.
     #[inline(never)]
     fn read_data<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) -> u8 {
-        if self.edges_on() {
+        if self.edges_on_for::<K>() {
             return self.read_data_with_edges(cart);
         }
         let address = self.v & 0x3FFF;
@@ -3097,7 +3100,7 @@ impl Ppu2C02 {
                     let was_rendering = self.rendering_enabled();
                     if was_rendering == ((value & 0x18) != 0) {
                         self.mask = value;
-                    } else if self.edges_on() {
+                    } else if self.edges_on_for::<K>() {
                         self.post_switch_rendering(value);
                     } else {
                         self.switch_rendering(value, &mut cartridge);
@@ -3161,7 +3164,7 @@ impl Ppu2C02 {
                     // The reset line still holds the register (`emu.ppu_reset_line`).
                     return;
                 }
-                if self.write_toggle && self.edges_on() {
+                if self.write_toggle && self.edges_on_for::<K>() {
                     self.t = (self.t & 0xFF00) | u16::from(value);
                     self.post_address_load();
                 } else if self.write_toggle {
@@ -3203,7 +3206,7 @@ impl Ppu2C02 {
             7 => {
                 // A `$2007` access is an ALE of `v` (step 39).
                 self.ale_low = self.v.to_le_bytes()[0];
-                if self.edges_on() && !self.rendering_now() {
+                if self.edges_on_for::<K>() && !self.rendering_now() {
                     self.post_data_store(value);
                     return;
                 }

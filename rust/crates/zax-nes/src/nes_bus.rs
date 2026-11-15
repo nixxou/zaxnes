@@ -1,7 +1,7 @@
 use crate::apu::Apu2A03;
 #[cfg(feature = "board-vs-system")]
 use crate::cartridges::mappers::VsBoard;
-use crate::cartridges::{AnyBoard, BoardKind, Cartridge};
+use crate::cartridges::{AnyBoard, BoardKind, Cartridge, Fid};
 use crate::cpu::CpuBus;
 use crate::input::InputPorts;
 use crate::ppu::Ppu2C02;
@@ -1943,15 +1943,15 @@ impl<'a, K: BoardKind> FidelityBus<'a, K> {
 
 impl<K: BoardKind> CpuBus for FidelityBus<'_, K> {
     fn read(&mut self, address: u16) -> u8 {
-        self.bus.cpu_read_as::<K>(address)
+        self.bus.cpu_read_as::<Fid<K>>(address)
     }
 
     fn read_code(&mut self, address: u16) -> u8 {
-        self.bus.cpu_read_code_as::<K>(address)
+        self.bus.cpu_read_code_as::<Fid<K>>(address)
     }
 
     fn write(&mut self, address: u16, value: u8) {
-        self.bus.cpu_write_as::<K>(address, value);
+        self.bus.cpu_write_as::<Fid<K>>(address, value);
     }
 
     fn peek(&self, address: u16) -> u8 {
@@ -1963,7 +1963,7 @@ impl<K: BoardKind> CpuBus for FidelityBus<'_, K> {
     }
 
     fn irq_asserted(&self) -> bool {
-        self.bus.cpu_irq_asserted_as::<K>()
+        self.bus.cpu_irq_asserted_as::<Fid<K>>()
     }
 
     fn cycle_count(&self) -> i64 {
