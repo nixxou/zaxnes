@@ -1611,9 +1611,16 @@ impl Cartridge {
     /// frame back to `AnyBoard`, the board is already `Board::Mmc5Ext` and only the dispatch
     /// answers its tables.
     #[cfg(feature = "board-mmc5-exattr-split")]
+    ///
+    /// **`#[inline(never)]`, measured** (callgrind, Mega Man 2 and Zelda II, MMC1): inlined into
+    /// `Ppu2C02::read_nametable_inner::<Mmc1Kind>`, the `unreachable!` of
+    /// [`BoardKind::board`] put a panic call in that function and with it a stack frame
+    /// (`push`/`pop`) on **every** nametable fetch, +3.1 M instructions over 300 frames
+    /// (+0.046 % `core`), although an MMC1 never takes this branch. Out of line, the branch is
+    /// a tail `jmp` and `read_nametable_inner` has no frame, as at the base. The Drip's arm in the
+    /// `Board` dispatch cost exactly the same frame before this function existed.
     #[must_use]
-    #[allow(clippy::inline_always)] // Lot MAPPERS-N: on every served-nametable fetch.
-    #[inline(always)]
+    #[inline(never)]
     pub fn read_nametable_from_vram_as<K: BoardKind>(&self, address: u16, vram: &[u8]) -> u8 {
         if K::SWITCHES {
             self.board
