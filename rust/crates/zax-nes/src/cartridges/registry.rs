@@ -173,6 +173,10 @@ pub(crate) const fn board_number(mapper: i32) -> i32 {
         248 => 115,
         #[cfg(feature = "board-536")]
         536 => 195,
+        // MAPPERS-P: puNES `map_init_532` is `map_init_019` and the font overlay
+        // (`crate::ersan2_overlay`).
+        #[cfg(feature = "board-532")]
+        532 => 19,
         _ => mapper,
     }
 }
@@ -956,6 +960,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     529,
     #[cfg(feature = "board-530")]
     530,
+    #[cfg(feature = "board-532")]
+    532,
     #[cfg(feature = "board-534")]
     534,
     #[cfg(feature = "board-536")]

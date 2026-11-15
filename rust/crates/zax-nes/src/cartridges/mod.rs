@@ -1304,6 +1304,13 @@ impl Cartridge {
     pub const fn mapper_number(&self) -> i32 {
         self.mapper_number
     }
+
+    /// The number whose board this image runs (lot MAPPERS-P: 248 runs 115, 532 runs 19, …;
+    /// `registry::board_number`), for the questions that are about the board, not the header.
+    #[must_use]
+    pub const fn board_number(&self) -> i32 {
+        registry::board_number(self.mapper_number)
+    }
     /// Current nametable layout (SPEC-02 §2, "current mirroring").
     #[must_use]
     pub const fn mirroring(&self) -> NametableMirroring {
@@ -2506,6 +2513,10 @@ mod tests {
         // MAPPERS-P: mapper 526's counter runs from power-on (`extcl_cpu_every_cycle_526`).
         if Cartridge::is_supported(526) {
             expected.extend_from_slice(&[526, 526]);
+        }
+        // MAPPERS-P: mapper 532 runs the Namco 163, multiplexer included.
+        if Cartridge::is_supported(532) {
+            expected.extend_from_slice(&[532, 532]);
         }
         // MAPPERS-P: mapper 561's FDS-style timer gains 3 a cycle from power-on.
         if Cartridge::is_supported(561) {

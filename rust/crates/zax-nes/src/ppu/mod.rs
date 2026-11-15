@@ -1438,6 +1438,25 @@ impl Ppu2C02 {
         self.scanline
     }
 
+    /// Lot MAPPERS-P (mapper 532): the picture, lent to the font overlay and given back with
+    /// [`Self::restore_pixels`].
+    #[cfg(feature = "board-532")]
+    pub(crate) fn take_pixels(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.pixels)
+    }
+
+    /// Gives the picture back after [`Self::take_pixels`].
+    #[cfg(feature = "board-532")]
+    pub(crate) fn restore_pixels(&mut self, pixels: Vec<u8>) {
+        self.pixels = pixels;
+    }
+
+    /// The palette RAM's colours as the picture holds them, and as written (`$3F00-$3F1F`).
+    #[cfg(feature = "board-532")]
+    pub(crate) const fn palette_colors(&self) -> ([u8; PALETTE_SIZE], [u8; PALETTE_SIZE]) {
+        (self.palette, self.palette_raw)
+    }
+
     /// Index of the pre-render line of the region in force.
     #[must_use]
     pub const fn pre_render_scanline(&self) -> i32 {

@@ -321,6 +321,11 @@ d'origine, pas du code de puNES :
   EPROM du PIC de *3D Block* et de *Block Force* (mapper 355, `mapper_355.c`), utilisés quand
   l'image n'apporte pas le sien en misc ROM NES 2.0.
 
+La table des caractères de *China Ersan 2* (`rust/crates/zax-nes/src/ersan2_overlay.rs`, `txt[]`
+de `mapper_532.c`, que puNES attribue à l'équipe de Nintendulator) et la table des noms de
+cartes UNIF (`rust/crates/zax-nes/src/rom/unif.rs`, `find_board` de `unif.c`) sont reprises de
+puNES.
+
 puNES est distribué sous GNU GPL v2 ou ultérieure, compatible avec la GPL v3 de Zaxnes.
 
 ## FCEUX — second moteur d'émulation, en option (non livré par défaut)

@@ -74,7 +74,7 @@ fn the_native_dialog_replaces_the_browser_and_its_answer_is_used() {
     assert!(!test.harness.ui.state.file_browser);
     let request = test.requests.try_recv().expect("the picker was asked");
     assert!(!request.folder);
-    assert_eq!(["nes", "zip"], request.filters[0].extensions[..]);
+    assert_eq!(["nes", "unf", "unif", "zip"], request.filters[0].extensions[..]);
     assert!(request
         .filters
         .iter()

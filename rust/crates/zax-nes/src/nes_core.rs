@@ -947,7 +947,7 @@ impl NesCore {
             // all-zero power-on (FIDELITY-LEADS J14).
             if clear_prg_ram
                 && self.power_on_battery_ram != crate::PowerOnRam::Zero
-                && !matches!(cartridge.mapper_number(), 16 | 19 | 157 | 159 | 164)
+                && !matches!(cartridge.board_number(), 16 | 19 | 157 | 159 | 164)
             {
                 self.power_on_battery_ram.fill(cartridge.battery_ram_mut());
             }
@@ -1145,6 +1145,9 @@ impl NesCore {
 
         self.bus.ppu_mut().clear_frame_boundary();
         self.bus.defer_ppu();
+        // Lot MAPPERS-P: mapper 532's overlay reads CPU RAM as it stood at the pre-render line.
+        #[cfg(feature = "board-532")]
+        let ersan2_ram = self.ersan2_active().then(|| self.run_to_pre_render());
         // The frame's path (lot CORE-2, `docs/design/CORE-TIERS.md`): the board is looked at once
         // here, and the frame runs through the code compiled for it, or for every board when it
         // is not in the table. `run_frame` checked that a cartridge is loaded.
@@ -1163,6 +1166,10 @@ impl NesCore {
             }
         }
         self.bus.end_deferred_ppu();
+        #[cfg(feature = "board-532")]
+        if let Some(ram) = ersan2_ram {
+            self.paint_ersan2(&ram);
+        }
         if let Some(decoder) = decoder {
             self.decode_margins(decoder);
         }
@@ -1187,6 +1194,71 @@ impl NesCore {
         }
 
         self.bus.cycle_count() - start_cycle
+    }
+
+    /// Lot MAPPERS-P: whether the loaded image is mapper 532 with a font (*China Ersan 2*).
+    #[cfg(feature = "board-532")]
+    fn ersan2_active(&self) -> bool {
+        self.bus.cartridge().is_some_and(|cartridge| {
+            cartridge.mapper_number() == 532 && !Self::misc_rom(cartridge).is_empty()
+        })
+    }
+
+    /// The NES 2.0 misc ROM of the loaded image (the bytes past its announced ROMs).
+    #[cfg(feature = "board-532")]
+    fn misc_rom(cartridge: &crate::cartridges::Cartridge) -> &[u8] {
+        let rom = cartridge.rom();
+        rom.raw()
+            .get(rom.header().announced_size()..)
+            .unwrap_or_default()
+    }
+
+    /// Steps the CPU, the PPU in step, until the PPU reaches the pre-render line (puNES copies
+    /// RAM there, `ppu.c`), and returns CPU RAM `$00-$FF`. Only a 532 image runs this.
+    #[cfg(feature = "board-532")]
+    fn run_to_pre_render(&mut self) -> [u8; 256] {
+        loop {
+            self.bus.sync_ppu();
+            let ppu = self.bus.ppu();
+            if ppu.scanline() == ppu.pre_render_scanline() || ppu.vblank_just_started() {
+                break;
+            }
+            self.cpu
+                .step(&mut KindBus::<crate::cartridges::AnyBoard>::new(
+                    &mut self.bus,
+                ));
+        }
+        let mut ram = [0u8; 256];
+        ram.copy_from_slice(&self.bus.ram()[..256]);
+        ram
+    }
+
+    /// Paints mapper 532's glyphs on the finished picture ([`crate::ersan2_overlay`]).
+    #[cfg(feature = "board-532")]
+    fn paint_ersan2(&mut self, ram: &[u8; 256]) {
+        let mut pixels = self.bus.ppu_mut().take_pixels();
+        if let Some(cartridge) = self.bus.cartridge() {
+            let ppu = self.bus.ppu();
+            let (palette, palette_raw) = ppu.palette_colors();
+            let read = |address: u16| {
+                let address = address & 0x3FFF;
+                if address < 0x2000 {
+                    cartridge.ppu_peek(address, crate::cartridges::ChrFetch::Background)
+                } else if address < 0x3F00 {
+                    ppu.read_nametable_byte(0x2000 | (address & 0x0FFF), Some(cartridge))
+                } else {
+                    palette_raw[usize::from(address & 0x1F)]
+                }
+            };
+            crate::ersan2_overlay::apply(
+                ram,
+                Self::misc_rom(cartridge),
+                &read,
+                &palette,
+                &mut pixels,
+            );
+        }
+        self.bus.ppu_mut().restore_pixels(pixels);
     }
 
     /// Runs every frame through the path of every board, specialised board or not (lot CORE-2):

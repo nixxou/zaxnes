@@ -135,7 +135,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 526 | `mapper_526.c` | 123 | 1 | 0 | done (batch 34, `IrqP`) |
 | 527 | `mapper_527.c` | 61 | 0 | 0 | done (batch 27, `VrcP`) |
 | 528 | `mapper_528.c` | 118 | 0 | 0 | done (batch 43, `IrqP`) |
-| 532 | `mapper_532.c` | 411 | 0 | 0 | blocked (needs an external font image, see batch 36) |
+| 532 | `mapper_532.c` | 411 | 0 | 0 | done (batch 59, UNIF loader + alias of 19 + `ersan2_overlay.rs`) |
 | 534 | `mapper_126.c` | 153 | 10 | 0 | done (batch 21, `Mmc3P`) |
 | 536 | `mapper_195.c` | 148 | 0 | 0 | done (batch 20, alias, `registry::board_number`) |
 | 538 | `mapper_538.c` | 64 | 2 | 0 | done (batch 9, `MultiP`) |
@@ -447,3 +447,17 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   that splits the screen. Checked on the Hackset `[!]` dump (its misc ROM equals puNES's
   EPROM): the 3D well and the falling pieces draw, where the same PRG as mapper 0 repeats the
   top half of the screen.
+* Batch 59: 532 (*China Ersan 2*). Correction of batch 36: puNES reads the font from the image's
+  own UNIF `FONT` chunk, not from a separate file; what was missing was a UNIF loader. New
+  `rom/unif.rs` rewrites a UNIF image as the NES 2.0 image it describes before the header is
+  parsed (puNES `unif.c`: `MAPR` with its prefix stripping and puNES's 167-name board table,
+  `PRG0-F`/`CHR0-F`, `MIRR`, `BATR`, `TVCI`; `FONT` becomes the misc ROM; ROMs padded by
+  repetition to whole 16/8 KiB banks). 532 is an alias of 19 (`registry::board_number`, the
+  Namco 163) and `NesCore` paints puNES's `chinaersan2_apply_font` over the 2D picture
+  (`ersan2_overlay.rs`), with CPU RAM `$00-$FF` taken at the pre-render line: only for a 532
+  image with a font, `run_frame` steps the CPU with the PPU in sync up to that line, so other
+  games pay one test a frame. New `Cartridge::board_number`; the power-on fill of battery RAM
+  now asks it, so 532 keeps the Namco 163's internal RAM at zero as 19 does (a savestate round
+  trip found it). The app's ROM dialog and handheld list accept `.unf`/`.unif`. Mesen 2 notes
+  that no such board is known (a VirtuaNES convention); there is no dump in the Hackset to check
+  against, so only the synthetic tests cover it.

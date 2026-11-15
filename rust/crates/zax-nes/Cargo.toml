@@ -241,6 +241,7 @@ default = [
     "board-422",
     "board-536",
     "board-248",
+    "board-532",
     "board-551",
     "board-417",
     "board-416",
@@ -499,6 +500,8 @@ board-539 = ["board-multi-p"]
 board-557 = ["board-multi-p"]
 board-536 = ["board-mmc3-chrram"]
 board-248 = ["board-mmc3-scramble"]
+# MAPPERS-P: 532 (China Ersan 2), the Namco 163 with its font overlay.
+board-532 = []
 board-551 = ["board-178"]
 board-340 = ["board-multi-p"]
 board-554 = ["board-multi-p"]

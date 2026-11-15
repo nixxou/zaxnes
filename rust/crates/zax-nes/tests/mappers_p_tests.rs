@@ -1983,3 +1983,40 @@ fn mappers_p_355_runs_its_pic_on_the_cpu_address_bus() {
     }
     assert!(cartridge.irq_asserted());
 }
+
+/// puNES `unif.c`: a UNIF image is read as the NES 2.0 image it describes; `UNL-CHINA_ER_SAN2`
+/// is mapper 532 with a battery (`find_board`), its `FONT` chunk the misc ROM, and the board runs
+/// mapper 19 (`map_init_532`). An unknown board is refused by name.
+#[cfg(feature = "board-532")]
+#[test]
+fn mappers_p_532_loads_from_unif_with_its_font() {
+    fn chunk(image: &mut Vec<u8>, id: [u8; 4], data: &[u8]) {
+        image.extend_from_slice(&id);
+        image.extend_from_slice(&u32::try_from(data.len()).unwrap().to_le_bytes());
+        image.extend_from_slice(data);
+    }
+    let unif = |board: &[u8]| {
+        let mut image = b"UNIF".to_vec();
+        image.extend_from_slice(&7u32.to_le_bytes());
+        image.resize(32, 0);
+        chunk(&mut image, *b"MAPR", board);
+        let prg: Vec<u8> = (0..4u8).flat_map(|bank| vec![bank; 0x2000]).collect();
+        chunk(&mut image, *b"PRG0", &prg);
+        chunk(&mut image, *b"CHR0", &[0x11; 0x2000]);
+        chunk(&mut image, *b"FONT", &[0xAA; 0x100]);
+        chunk(&mut image, *b"MIRR", &[1]);
+        image
+    };
+    let mut core = zax_nes::NesCore::new();
+    let load = core.load_rom(&unif(b"UNL-CHINA_ER_SAN2\0"), "ersan2.unf");
+    assert!(load.success, "{:?}", load.error);
+    let cartridge = core.cartridge().unwrap();
+    assert_eq!(532, cartridge.mapper_number());
+    assert!(cartridge.rom().header().has_battery);
+    assert_eq!(0xAA, *cartridge.rom().raw().last().unwrap());
+    assert_eq!(3, core.read_memory(0xE100));
+
+    let load = core.load_rom(&unif(b"NO-SUCH-BOARD\0"), "x.unf");
+    assert!(!load.success);
+    assert!(format!("{:?}", load.error).contains("NO-SUCH-BOARD"));
+}

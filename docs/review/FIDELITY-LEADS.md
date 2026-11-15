@@ -1066,6 +1066,18 @@ places where puNES itself is incomplete are copied, not invented around:
   the CPU's address on reads and writes of `$4020-$FFFF` only, as puNES's `extcl_cpu_*_mem_355`
   hooks; the board's real address bus also carries `$0000-$401F`. Port B reads take the address
   as it was at the PIC's instruction, not at a precise cycle inside it.
+* 532 (`mapper_532.c`, UNIF `CHINA_ER_SAN2`): an emulator convention (Nintendulator, VirtuaNES;
+  Mesen 2 knows no such board), ported as puNES runs it: the RAM snapshot at the pre-render line
+  (`ppu.c`) and the glyphs painted when the frame is done (`gfx.c`). Kept as written: the
+  attribute colour is read at PPU `$03C0 + …`, in the pattern table, where an attribute table
+  was evidently meant; unsigned wraps of the row arithmetic. Not kept: puNES writes glyph rows
+  that fall before the picture before its buffer; they are not drawn here. The overlay is on the
+  2D picture only; the 3D conversion's tiles do not carry it. The RAM snapshot is taken at the
+  first CPU instruction boundary once the PPU is on the pre-render line, puNES's at dot 0.
+* UNIF (`rom/unif.rs`): puNES compares the image's board name as a prefix of its table's names
+  (`strncasecmp(table, board, strlen(board))`); this loader compares the whole name. Single-
+  screen `MIRR` values (2, 3) have no NES 2.0 header bit and are left to the board. ROM chunks
+  that are not whole 16/8 KiB banks are padded by repeating them, as a smaller chip mirrors.
 * 256, 436 (`OneBus.c`): as puNES, the VT02/VT03 are modelled in the console's ordinary 2 bpp
   rendering. In the 4 bpp modes (`$2010` D1/D2) the banks select the de-interleaved low planes
   puNES selects, but the PPU still draws two planes, so those games show what puNES shows, not

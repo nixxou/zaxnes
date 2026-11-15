@@ -7,6 +7,8 @@ pub mod builtin_patches;
 pub mod cartridges;
 pub mod cpu;
 mod engine_impl;
+#[cfg(feature = "board-532")]
+mod ersan2_overlay;
 pub mod hack_pack;
 pub mod input;
 pub mod movie;

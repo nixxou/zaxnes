@@ -54,6 +54,12 @@ impl RomImage {
     ///
     /// The typed cause and its message (REQ-CORE-011).
     pub fn try_load(image: &[u8], name: &str) -> Result<Self, RomLoadError> {
+        // Lot MAPPERS-P: a UNIF image is rewritten as the NES 2.0 image it describes, and that
+        // image is what the core keeps (savestates included).
+        if super::unif::is_unif(image) {
+            let converted = super::unif::to_nes20(image)?;
+            return Self::try_load(&converted, name);
+        }
         let header = InesHeader::try_parse(image)
             .map_err(|message| RomLoadError::new(RomLoadFailure::CorruptHeader, message))?;
 

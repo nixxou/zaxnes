@@ -4,6 +4,7 @@ pub mod cartdb;
 mod ines_header;
 mod region_exceptions;
 mod rom_image;
+mod unif;
 
 pub use ines_header::InesHeader;
 pub use region_exceptions::region_exception;
