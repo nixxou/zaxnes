@@ -33,6 +33,12 @@ polls the pad on the put cycle of the strobe (FIDELITY-LEADS A2).
    still per frame: their boundary is unchanged, so they keep working. Run-ahead keeps whole frames
    (it replays from a state), so with run-ahead on, piece 3 is off and the UI says so.
 
+## Options (owner, 2026-11-15: Fidélité+ may be split)
+
+Each piece is its own option: the exact rate (piece 1), the input at the strobe (pieces 2-3, off
+while run-ahead is on). A Fidélité+ preset turns on these and the others (machine A, console
+model, audio), as the console-model menu already presets its settings.
+
 ## Cost and placement
 
 Nothing in the core's per-cycle path: the strobe already syncs the bus; reading a cell instead of
