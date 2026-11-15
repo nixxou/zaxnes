@@ -914,6 +914,22 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 
 ---
 
+### G3. MMC3 revision A / MMC6 as a console-model choice — done (FIDPLUS-C, 2026-11-15)
+
+- Revision A (NEC / Sharp MMC3A, and the MMC6's counter) asserts on a reload to zero only when
+  the counter was moving (non-zero before the clock or a `$C001` reload pending); revision B at
+  every clock that leaves it at zero. The core had both (NES 2.0 submapper 4 = revision A, Mesen's
+  `(count > 0 || _irqReload)`); FIDPLUS-C makes the revision a choice (`emu.mmc3_revision`,
+  `NesCore::set_mmc3_revision`, harness `ZAXNES_MMC3_REVISION`).
+- Judge: revision A passes `5.MMC3_rev_A`, `6-MMC6`, `6-MMC3_alt` and fails `5-MMC3` (both suites)
+  and `6.MMC3_rev_B`, revision B the reverse. With each row under its own console
+  (`ZAXNES_CONSOLE_MODEL=rom`, blargg's power-on palette for `power_up_palette`) the campaign is
+  219 pass, 0 fail.
+- Open: the MMC6's other differences (its 1 KiB PRG-RAM with per-half protection) already follow
+  NES 2.0 submapper 1; an iNES 1.0 MMC6 game (StarTropics) needs the cartridge database, which has
+  it. Not yet modelled: the MMC3's A12 filter differences between revisions, if any (no test ROM
+  separates them).
+
 ## H. Video output (shaders lot, not core)
 
 ### H1. Composite / RF signal, CRT gamma, phosphor decay — open
