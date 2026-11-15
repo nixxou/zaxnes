@@ -131,7 +131,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 516 | `mapper_516.c` | 79 | 2 | 0 | todo |
 | 517 | `mapper_517.c` | 107 | 1 | 1 | done (batch 1, `MultiP`) |
 | 524 | `mapper_524.c` | 81 | 0 | 0 | todo |
-| 525 | `mapper_525.c` | 91 | 1 | 0 | todo |
+| 525 | `mapper_525.c` | 91 | 1 | 0 | done (batch 10, `MultiP`) |
 | 526 | `mapper_526.c` | 123 | 1 | 0 | todo |
 | 527 | `mapper_527.c` | 61 | 0 | 0 | todo |
 | 528 | `mapper_528.c` | 118 | 0 | 0 | todo |
@@ -146,7 +146,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 547 | `mapper_547.c` | 241 | 8 | 4 | todo |
 | 550 | `mapper_550.c` | 86 | 1 | 0 | todo |
 | 551 | `mapper_178.c` | 109 | 4 | 0 | todo |
-| 554 | `mapper_554.c` | 94 | 1 | 0 | todo |
+| 554 | `mapper_554.c` | 94 | 1 | 0 | done (batch 10, `MultiP`) |
 | 555 | `mapper_555.c` | 142 | 3 | 0 | todo |
 | 556 | `mapper_556.c` | 178 | 1 | 0 | todo |
 | 557 | `mapper_557.c` | 58 | 1 | 0 | todo |
@@ -194,3 +194,6 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 * Batch 9: `MultiP` 538 (FDS conversion, PRG-ROM at `$6000`), 541, 564. Deferred to their
   families: 557 (a Namcot 118 variant, with the MMC3-like boards) and 560 (CHR fetched through
   the nametable address, needs a PPU read hook).
+* Batch 10: `MultiP` 525 (eight 1 KiB CHR registers, `MultiP::chr`, in the save state) and 554
+  (latch moved by CPU **reads** of trigger addresses: its four ROM windows are `NO_ROM_WINDOW`,
+  so every `$8000-$FFFF` read reaches `cpu_read_override` on this board alone).

@@ -486,3 +486,26 @@ fn mappers_p_564_shrinks_its_latch() {
     core.mapper_write(0x8000, 0x06);
     assert_eq!([8, 9, 10, 11], core.prg_windows());
 }
+
+/// `mapper_525.c`: `$8000` D1 up the 16 KiB bank, `$B000-$B007` eight 1 KiB CHR banks.
+#[cfg(feature = "board-525")]
+#[test]
+fn mappers_p_525_banks_chr_by_the_kilobyte() {
+    let mut core = MapperRom::new(525).prg(16).chr(64).load();
+    core.mapper_write(0x8000, 0x04);
+    assert_eq!([4, 5, 14, 15], core.prg_windows());
+    core.mapper_write(0xB003, 9);
+    assert_eq!(9, core.chr_windows()[3]);
+}
+
+/// `mapper_554.c`: reading `$CAB8` latches A2-A5 (bank 14) as the CHR and `$6000` bank.
+#[cfg(feature = "board-554")]
+#[test]
+fn mappers_p_554_latches_on_a_read() {
+    let mut core = MapperRom::new(554).prg(16).chr(128).load();
+    assert_eq!([10, 11, 6, 7], core.prg_windows());
+    let bus = core.cartridge_mut().unwrap();
+    assert_eq!(Some(6), bus.try_cpu_read(0xCAB8));
+    assert_eq!(Some(14), bus.try_cpu_read(0x6000));
+    assert_eq!(112, core.chr_windows()[0]);
+}

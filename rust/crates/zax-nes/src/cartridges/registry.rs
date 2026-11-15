@@ -789,6 +789,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     521,
     #[cfg(feature = "board-522")]
     522,
+    #[cfg(feature = "board-525")]
+    525,
     #[cfg(feature = "board-529")]
     529,
     #[cfg(feature = "board-530")]
@@ -799,6 +801,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     541,
     #[cfg(feature = "board-taito-x1")]
     552,
+    #[cfg(feature = "board-554")]
+    554,
     #[cfg(feature = "board-564")]
     564,
     #[cfg(feature = "board-682")]
@@ -3026,6 +3030,16 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         ))),
         #[cfg(feature = "board-564")]
         564 => Board::DecodeBoard(DecodeBoard::MultiP(MultiP::new(
+            memory,
+            MultiPKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-525")]
+        525 => Board::DecodeBoard(DecodeBoard::MultiP(MultiP::new(
+            memory,
+            MultiPKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-554")]
+        554 => Board::DecodeBoard(DecodeBoard::MultiP(MultiP::new(
             memory,
             MultiPKind::of(mapper)?,
         ))),

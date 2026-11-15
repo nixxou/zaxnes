@@ -107,6 +107,13 @@ pub enum MultiPKind {
     /// 564, `mapper_564.c`: a data latch whose writable bits shrink once its D5 is set, four
     /// mirrorings.
     M564,
+    /// 525, `mapper_525.c` (Kaiser KS-7021A): `$8000` the 16 KiB bank (D1 up), `$9000` the
+    /// mirroring, `$B000-$B007` eight 1 KiB CHR banks.
+    M525,
+    /// 554, `mapper_554.c` (Kaiser KS-7010, an FDS conversion): no register; **reads** of a few
+    /// addresses in `$CAB6-$CAD7`, `$EBE2`, `$EE32` and `$FFFC` latch the CHR bank and the 8 KiB
+    /// bank at `$6000` from A2-A5.
+    M554,
 }
 
 impl MultiPKind {
@@ -152,6 +159,8 @@ impl MultiPKind {
             538 => Self::M538,
             541 => Self::M541,
             564 => Self::M564,
+            525 => Self::M525,
+            554 => Self::M554,
             _ => return None,
         })
     }
@@ -196,6 +205,8 @@ impl MultiPKind {
             Self::M538 => 538,
             Self::M541 => 541,
             Self::M564 => 564,
+            Self::M525 => 525,
+            Self::M554 => 554,
         }
     }
 
@@ -218,6 +229,7 @@ impl MultiPKind {
                 | Self::M122
                 | Self::M434
                 | Self::M538
+                | Self::M554
                 | Self::M517
                 | Self::M337
                 | Self::M350
@@ -237,6 +249,8 @@ pub struct MultiP {
     regs: [u16; 4],
     /// Mapper 517's ADC: state, and the two counters it reads out.
     adc: [i16; 3],
+    /// Mapper 525's eight 1 KiB CHR registers.
+    chr: [u8; 8],
     /// The PRG-ROM size in bytes, which 338's and 341's decodes depend on.
     prg_size: usize,
     /// The NES 2.0 submapper (0 on an iNES 1.0 image), which 354's and 380's decodes read.
@@ -260,6 +274,7 @@ impl MultiP {
                 _ => [0; 4],
             },
             adc: [0; 3],
+            chr: [0; 8],
             prg_size: memory.rom().prg_rom().len(),
             header_mirroring: memory.rom().header().mirroring,
             submapper: {
@@ -391,6 +406,13 @@ impl MultiP {
             }
             // `extcl_cpu_wr_mem_564`: with D5 set only D0-D2 and D4 move (D0-D1 and D4 when D3
             // is clear too).
+            // `extcl_cpu_wr_mem_525`: by the top address nibble.
+            MultiPKind::M525 => match address & 0xF000 {
+                0x8000 => r[0] = u16::from(value),
+                0x9000 => r[1] = u16::from(value),
+                0xB000 => self.chr[usize::from(address & 0x07)] = value,
+                _ => {}
+            },
             MultiPKind::M564 => {
                 let v = u16::from(value);
                 r[0] = if r[0] & 0x20 == 0 {
@@ -910,6 +932,24 @@ impl MultiP {
                 }
                 mirror(r[0] & 0x01 != 0)
             }
+            MultiPKind::M525 => {
+                b.map_prg_16k(0, r[0] >> 1);
+                b.map_prg_16k(2, -1);
+                for (slot, bank) in self.chr.iter().enumerate() {
+                    b.map_chr_1k(slot, i32::from(*bank));
+                }
+                mirror(r[1] & 0x01 == 0)
+            }
+            // `prg_fix_554`/`chr_fix_554`: PRG fixed to banks `$0A`, `$0B`, 6 and 7; the latch is
+            // the CHR bank.
+            MultiPKind::M554 => {
+                b.map_prg_8k(0, 0x0A);
+                b.map_prg_8k(1, 0x0B);
+                b.map_prg_8k(2, 0x06);
+                b.map_prg_8k(3, 0x07);
+                b.map_chr_8k(r[0]);
+                None
+            }
             MultiPKind::M564 => {
                 b.map_prg_32k(r[0]);
                 Some(match r[0] & 0x30 {
@@ -949,6 +989,8 @@ impl MultiP {
                 let latched = self.regs[0] & 0xFF0F;
                 latched == 0xF008 || (latched == 0xF004 && self.prg_size <= 0x1_0000)
             }
+            // `extcl_cpu_rd_mem_554`: every read of `$8000-$FFFF` may be a trigger.
+            MultiPKind::M554 => true,
             // `extcl_cpu_rd_mem_380`: submapper 0 with A8 latched reads `(A0-A7) | DIP`.
             MultiPKind::M380 => self.submapper == 0 && self.regs[0] & 0x100 != 0,
             _ => false,
@@ -1007,13 +1049,18 @@ impl MultiP {
                         .copied(),
                 )
             }
-            // `wram_fix_538`: `$6000-$7FFF` PRG-ROM 8 KiB bank `latch | 1`.
-            MultiPKind::M538 => {
+            // `wram_fix_538`: `$6000-$7FFF` PRG-ROM 8 KiB bank `latch | 1`; `wram_fix_554`: the
+            // latch itself.
+            MultiPKind::M538 | MultiPKind::M554 => {
                 let rom = memory.rom().prg_rom();
                 if rom.is_empty() {
                     return Some(None);
                 }
-                let bank = usize::from(self.regs[0] | 0x01);
+                let bank = usize::from(if self.kind == MultiPKind::M538 {
+                    self.regs[0] | 0x01
+                } else {
+                    self.regs[0]
+                });
                 Some(
                     rom.get((bank * 0x2000 + usize::from(address & 0x1FFF)) % rom.len())
                         .copied(),
@@ -1078,6 +1125,7 @@ impl Mapper for MultiP {
         for value in self.adc {
             writer.write_i16(value);
         }
+        writer.write_raw(&self.chr);
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -1087,6 +1135,7 @@ impl Mapper for MultiP {
         for value in &mut self.adc {
             *value = reader.read_i16()?;
         }
+        reader.read_into(&mut self.chr)?;
         let _ = self.map();
         Ok(())
     }
@@ -1164,6 +1213,24 @@ impl Mapper for MultiP {
     }
 
     fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+        // `extcl_cpu_rd_mem_554`: the trigger addresses latch A2-A5, the read is ROM.
+        if self.kind == MultiPKind::M554 && address >= 0x8000 {
+            let even = address & 0xFFFE;
+            let trigger = match address & 0xF000 {
+                0xC000 => (0xCAB6..=0xCAD7).contains(&address),
+                0xE000 => even == 0xEBE2 || even == 0xEE32,
+                0xF000 => even == 0xFFFC,
+                _ => false,
+            };
+            if trigger {
+                self.regs[0] = (address & 0x3C) >> 2;
+                let _ = self.map();
+            }
+            return Some(
+                self.banks
+                    .read_prg(address, memory.rom().prg_rom(), memory.prg_ram()),
+            );
+        }
         if (0x6000..=0x7FFF).contains(&address) && self.kind.owns_6000() {
             return self.read_6000(memory, address);
         }
@@ -1183,6 +1250,13 @@ impl Mapper for MultiP {
             // 380's DIP read returns the low address byte ORed with the switches (0: J37).
             if self.kind == MultiPKind::M380 {
                 return Some(Some(address.to_le_bytes()[0]));
+            }
+            if self.kind == MultiPKind::M554 {
+                return Some(self.banks.read_prg(
+                    address,
+                    memory.rom().prg_rom(),
+                    memory.prg_ram(),
+                ));
             }
             return Some(Some(0));
         }
