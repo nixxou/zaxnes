@@ -87,3 +87,22 @@ Owner's request (2026-11-15): implement the mappers missing compared with the ot
   had lost its `cfg` to the 6/8/17 arm in a scripted insertion, restored.
 * Next: cross-check every new board against nesdev + puNES (+ FCEUX where it has the board), log
   divergences in FIDELITY-LEADS; then the 7 remaining mappers that have Hackset dumps.
+* Old exotic boards, Hackset check (owner: "certains ont été fait avec de la théorie seule"):
+  114 old mappers with Hackset dumps, 189 ROMs ([!] first), rendered at frame 900 and reviewed on
+  contact sheets; 166 good, 19 suspects compared with FCEUX (triage only: "fceux n'est pas un
+  modèle de fiabilité") and decided on nesdev / puNES / Mesen2.
+  - 0b963dee mapper 34 NINA-001: `$7FFD` write did not refresh the cached read windows
+    (Impossible Mission II).
+  - 3431b154 mapper 15: CHR-RAM write protection only on the K-1029 (nesdev), Bao Xiao San Guo.
+  - 98ab699f battery RAM powers on as a seeded pattern without a save (owner: "fais ce qui te
+    semble le mieux"), Famicom Jump II; movie replay keeps zeros. AMD-MAPPERS-N-200 now proposes
+    84 (186 is run by FCEUX and puNES).
+  - 753ee24e cartridge database `bNNN` EEPROM sizes reach byte 10: Datach Battle Rush.
+  - 285d40ea mapper 111 with CHR-ROM = parallel MMC1 (Ninja Ryukenden Chinese, puNES).
+  - Not the board: 74_0 (mislabelled FK23C game, runs as 176 sub 2), 143 Dancing Blocks (reads
+    uninitialised work RAM), 14_0 / 15_1 (wrong headers), 153 needed the battery-RAM change,
+    42 / 244 / 254 bad dumps or hacks.
+  - Scratchpad: `old/` ROMs, `old_sel.json`, `old_sheet*.png`, `susp*.png`.
+* Next: the 7 remaining mappers with Hackset dumps (165 168 188 198 199 234 252), then the
+  nesdev/puNES/FCEUX cross-check of the 117 new boards, the 18 other remaining numbers, final
+  validation (golden will move for battery games and the 53 `bNNN` database entries: explain).
