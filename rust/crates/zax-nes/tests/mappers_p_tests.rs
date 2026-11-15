@@ -751,3 +751,26 @@ fn mappers_p_516_latches_a4_writes() {
     core.mapper_write(0x8011, 2);
     assert_eq!([17, 18, 30, 31], core.prg_windows());
 }
+
+/// `mapper_393.c`: `$6000` A5-A4 = 11 is UNROM from the chip-write latch.
+#[cfg(feature = "board-393")]
+#[test]
+fn mappers_p_393_has_an_unrom_mode() {
+    let mut core = MapperRom::new(393).prg(64).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    core.mapper_write(0x6031, 0);
+    core.mapper_write(0xC000, 0x03);
+    assert_eq!([22, 23, 30, 31], core.prg_windows());
+}
+
+/// `mapper_412.c`: `$6002` D1 the NROM mode with `reg[0]` the CHR bank.
+#[cfg(feature = "board-412")]
+#[test]
+fn mappers_p_412_has_an_nrom_mode() {
+    let mut core = MapperRom::new(412).prg(64).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    core.mapper_write(0x6000, 0x08);
+    core.mapper_write(0x6002, 0x16);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    assert_eq!(16, core.chr_windows()[0]);
+}

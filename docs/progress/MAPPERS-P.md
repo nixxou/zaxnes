@@ -84,7 +84,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 388 | `mapper_388.c` | 76 | 2 | 0 | done (batch 5, `JyCompany` + `JyMulticart`) |
 | 389 | `mapper_389.c` | 90 | 1 | 1 | done (batch 1, `MultiP`) |
 | 390 | `mapper_390.c` | 93 | 0 | 0 | done (batch 5, `MultiP`) |
-| 393 | `mapper_393.c` | 123 | 1 | 0 | todo |
+| 393 | `mapper_393.c` | 123 | 1 | 0 | done (batch 15, `Mmc3P`) |
 | 394 | `mapper_394.c` | 193 | 0 | 0 | todo |
 | 395 | `mapper_395.c` | 88 | 4 | 0 | done (batch 13, `Mmc3P`) |
 | 396 | `mapper_396.c` | 68 | 5 | 0 | done (batch 6, `MultiP`) |
@@ -99,7 +99,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 409 | `mapper_409.c` | 56 | 1 | 0 | done (batch 6, `MultiP`) |
 | 410 | `mapper_410.c` | 96 | 1 | 0 | done (batch 13, `Mmc3P`) |
 | 411 | `mapper_411.c` | 103 | 7 | 0 | done (batch 13, `Mmc3P`) |
-| 412 | `mapper_412.c` | 106 | 1 | 0 | todo |
+| 412 | `mapper_412.c` | 106 | 1 | 0 | done (batch 15, `Mmc3P`) |
 | 413 | `mapper_413.c` | 135 | 1 | 0 | todo |
 | 414 | `mapper_414.c` | 80 | 1 | 0 | done (batch 7, `MultiP`) |
 | 415 | `mapper_415.c` | 69 | 1 | 0 | done (batch 7, `MultiP`) |
@@ -215,3 +215,5 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   `mmc3_p_board` (`cartridges/mod.rs`), which both call, to keep them under clippy's line limit.
 * Batch 14: `Mmc3P` 455 and 456 (registers at `$4100`), 457, 516 (A4-latched outer bank). 432
   and 344 (DIP reads over `$8000-$FFFF`) and 436 (OneBus) wait for their own step.
+* Batch 15: `Mmc3P` 393 (UNROM latch on every chip write, CHR-RAM mode) and 412. 370 (CIRAM
+  page per table from CHR bits, like `TxSROM`) and 512 (banked WRAM, CHR-RAM nametables) wait.

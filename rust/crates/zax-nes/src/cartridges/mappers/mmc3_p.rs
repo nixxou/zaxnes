@@ -71,6 +71,12 @@ pub enum Mmc3PKind {
     M457,
     /// 516, `mapper_516.c` (Brilliant Com Cocoma Pack): a chip write with A4 set latches A0-A3.
     M516,
+    /// 393, `mapper_393.c` (820720C): the address at `$6000` the outer bank, two NROM-like
+    /// modes, a CHR-RAM mode; every chip write is also latched.
+    M393,
+    /// 412, `mapper_412.c` (Intellivision 10-in-1 PVP): `$5000-$7FFF` four registers until a lock,
+    /// an NROM and CNROM-like mode.
+    M412,
 }
 
 impl Mmc3PKind {
@@ -99,6 +105,8 @@ impl Mmc3PKind {
             456 => Self::M456,
             457 => Self::M457,
             516 => Self::M516,
+            393 => Self::M393,
+            412 => Self::M412,
             _ => return None,
         })
     }
@@ -126,6 +134,8 @@ impl Mmc3PKind {
             Self::M456 => 456,
             Self::M457 => 457,
             Self::M516 => 516,
+            Self::M393 => 393,
+            Self::M412 => 412,
         }
     }
 }
@@ -319,6 +329,30 @@ impl Mmc3P {
                 (((o[0] & 0x07) << 4) & !mask) | (page & mask)
             }
             Mmc3PKind::M516 => (((o[0] & 0x03) << 4) & !0x0F) | (page & 0x0F),
+            // `prg_swap_mmc3_393`: `reg[0]` D5 the NROM-like modes, D4 picking UNROM from the
+            // latch over a 32 KiB bank from R6.
+            Mmc3PKind::M393 => {
+                let value = if o[0] & 0x20 == 0 {
+                    page
+                } else if o[0] & 0x10 != 0 {
+                    ((if slot >= 2 { 0x07 } else { o[1] & 0x07 }) << 1) | (window & 0x01)
+                } else {
+                    (i32::from(self.mmc3.bank_register(6)) & 0x0C) | (window & 0x03)
+                };
+                (((o[0] & 0x07) << 4) & !0x0F) | (value & 0x0F)
+            }
+            // `prg_swap_mmc3_412`: `reg[2]` D1 the NROM mode, D2 NROM-256.
+            Mmc3PKind::M412 => {
+                if o[2] & 0x02 != 0 {
+                    let n256 = (o[2] & 0x04) >> 2;
+                    let base = o[2] >> 3;
+                    let base = if slot >= 2 { base | n256 } else { base & !n256 };
+                    (base << 1) | (window & 0x01)
+                } else {
+                    let mask = ((!o[1] & 0x02) << 4) | (!o[1] & 0x10) | 0x0F;
+                    ((((o[1] & 0x40) >> 2) | ((o[1] & 0x04) << 3)) & !mask) | (page & mask)
+                }
+            }
             _ => page,
         }
     }
@@ -387,6 +421,12 @@ impl Mmc3P {
                 (((o[0] & 0x07) << 7) & !mask) | (page & mask)
             }
             Mmc3PKind::M516 => (((o[0] & 0x0C) << 5) & !0x7F) | (page & 0x7F),
+            Mmc3PKind::M393 => (((o[0] & 0x07) << 8) & !0xFF) | (page & 0xFF),
+            Mmc3PKind::M412 => {
+                let base = ((o[1] & 0x08) << 5) | (o[1] & 0x80);
+                let mask = 0xFF >> ((o[1] & 0x20) >> 5);
+                (base & !mask) | (page & mask)
+            }
             _ => page,
         }
     }
@@ -427,6 +467,7 @@ impl Mmc3P {
                 Mmc3PKind::M327 => self.outer[0] & 0x10 != 0,
                 Mmc3PKind::M372 => self.outer[2] & 0x20 != 0,
                 Mmc3PKind::M410 => self.outer[2] & 0x40 != 0,
+                Mmc3PKind::M393 => self.outer[0] & 0x08 != 0,
                 _ => false,
             }
     }
@@ -439,6 +480,10 @@ impl Mmc3P {
         let raw_chr = self.mmc3_chr();
         let chr: [i32; BankWindows::CHR_WINDOWS] = if self.chr_ram_mode() {
             std::array::from_fn(|slot| i32::try_from(slot).unwrap_or(0))
+        } else if self.kind == Mmc3PKind::M412 && self.outer[2] & 0x02 != 0 {
+            // `chr_swap_mmc3_412` in the NROM mode: an 8 KiB bank from `reg[0]` D2 up.
+            let base = (i32::from(self.outer[0]) >> 2) << 3;
+            std::array::from_fn(|slot| base | i32::try_from(slot).unwrap_or(0))
         } else if self.kind == Mmc3PKind::M399 {
             // `chr_fix_mmc3_399`: two 4 KiB banks, `reg[2]` and `reg[3]`.
             let (low, high) = (i32::from(self.outer[2]) << 2, i32::from(self.outer[3]) << 2);
@@ -540,6 +585,17 @@ impl Mmc3P {
                 r[1] = data;
             }
             Mmc3PKind::M456 if address < 0x6000 && address & 0x0100 != 0 => r[0] = data,
+            Mmc3PKind::M393 if (0x6000..=0x7FFF).contains(&address) => {
+                if writable {
+                    r[0] = address & 0xFF;
+                }
+            }
+            // `extcl_cpu_wr_mem_412`: `$5000-$7FFF` under mask 3 until `reg[1]` D0 locks them.
+            Mmc3PKind::M412 if (0x5000..=0x7FFF).contains(&address) => {
+                if writable && r[1] & 0x01 == 0 {
+                    r[usize::from(address & 0x03)] = data;
+                }
+            }
             // `extcl_cpu_wr_mem_411`: `$5000-$5FFF`, A0 the register, no RAM there.
             Mmc3PKind::M411 if (0x5000..=0x5FFF).contains(&address) => {
                 r[usize::from(address & 0x0001)] = data;
@@ -637,6 +693,10 @@ impl Mapper for Mmc3P {
         }
         // `extcl_cpu_wr_mem_399`: `$8000-$9FFF` also writes its own bank registers, A0 clear
         // the CHR pair and D7 the half.
+        // `extcl_cpu_wr_mem_393`: every chip write is also the UNROM latch.
+        if self.kind == Mmc3PKind::M393 {
+            self.outer[1] = u16::from(value);
+        }
         // `extcl_cpu_wr_mem_516`: a write with A4 set also latches A0-A3.
         if self.kind == Mmc3PKind::M516 && address & 0x0010 != 0 {
             self.outer[0] = address & 0x0F;
