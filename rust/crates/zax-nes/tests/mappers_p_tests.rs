@@ -1534,3 +1534,34 @@ fn mappers_p_560_reads_chr_through_the_nametable() {
     cartridge.on_ppu_address_bus(0x2405, 2);
     assert_eq!(6, core.chr_bank(0x0000));
 }
+
+/// `mapper_413.c`: `$E000` D6-D7 pick the register (`reg[1]` the bank at `$8000`); `$C000` D7
+/// shifts the serial address in, `$D000` D1 makes reads advance it, and `$C000-$CFFF` reads
+/// the misc ROM; `$8000` the IRQ latch, `$B000` the enable, A12 rises the clock.
+#[cfg(feature = "board-413")]
+#[test]
+fn mappers_p_413_reads_its_misc_rom_serially_and_counts_a12() {
+    let mut image = MapperRom::new(413).prg(16).chr(32).image();
+    image.extend_from_slice(&[0x11, 0x22, 0x33, 0x44]);
+    let mut core = zax_nes::NesCore::new();
+    assert!(core.load_rom(&image, "Mapper413.nes").success);
+    core.mapper_write(0xE000, 0x45);
+    // `$C100` is the serial port, at address 0.
+    assert_eq!([5, 0, 0x11, 4], core.prg_windows());
+    core.mapper_write(0xC000, 0x80);
+    core.mapper_write(0xC000, 0x00);
+    core.mapper_write(0xD000, 0x02);
+    let cartridge = core.cartridge_mut().unwrap();
+    assert_eq!(Some(0x33), cartridge.try_cpu_read(0xC000));
+    assert_eq!(Some(0x44), cartridge.try_cpu_read(0xC000));
+
+    core.mapper_write(0x8000, 1);
+    core.mapper_write(0xB000, 0);
+    let cartridge = core.cartridge_mut().unwrap();
+    for (rise, clock) in [(0, 0), (1, 40)] {
+        assert!(!cartridge.irq_asserted(), "rise {rise}");
+        cartridge.on_ppu_address_bus(0x0000, clock);
+        cartridge.on_ppu_address_bus(0x1000, clock + 20);
+    }
+    assert!(cartridge.irq_asserted());
+}

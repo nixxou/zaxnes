@@ -100,7 +100,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 410 | `mapper_410.c` | 96 | 1 | 0 | done (batch 13, `Mmc3P`) |
 | 411 | `mapper_411.c` | 103 | 7 | 0 | done (batch 13, `Mmc3P`) |
 | 412 | `mapper_412.c` | 106 | 1 | 0 | done (batch 15, `Mmc3P`) |
-| 413 | `mapper_413.c` | 135 | 1 | 0 | todo |
+| 413 | `mapper_413.c` | 135 | 1 | 0 | done (batch 49, `IrqP`) |
 | 414 | `mapper_414.c` | 80 | 1 | 0 | done (batch 7, `MultiP`) |
 | 415 | `mapper_415.c` | 69 | 1 | 0 | done (batch 7, `MultiP`) |
 | 416 | `mapper_416.c` | 133 | 1 | 0 | done (batch 18, `IrqP`) |
@@ -346,3 +346,8 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   mirroring, `SERVED_BY_CARTRIDGE`) so that it sees the writes to tables 1 and 3 it copies to its
   1 KiB extension RAM; the nametable address latched on A13's rise (`watches_ppu_reads`, the
   mf_3b sweep) picks that RAM's byte as the CHR bank of the next pattern fetch in bank 1.
+* Batch 49: `IrqP` 413: four bank registers loaded by D6-D7 of a `$E000` write, an MMC3-style
+  A12 counter (both PPU-bus lists, mf_3b), and the serial read-out of the NES 2.0 misc ROM (the
+  image past its CHR-ROM, `RomImage::raw`) at `$4800-$4FFF`/`$C000-$CFFF` through
+  `cpu_read_override` (advancing) and `cpu_peek_override`, both now forwarded by `IrqBoard`
+  behind `board-413`, as is `rom_windows` (`$C000` window off the cache).

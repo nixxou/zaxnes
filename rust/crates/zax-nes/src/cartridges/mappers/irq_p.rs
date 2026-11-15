@@ -68,6 +68,10 @@ pub enum IrqPKind {
     /// tables 1 or 3 is copied to a 1 KiB extension RAM, and with the bank at 1 each pattern
     /// fetch reads the CHR-ROM bank that RAM holds for the tile the last nametable fetch named.
     M560,
+    /// 413, `mapper_413.c` (*Super Mario Bros. 3* / *Batman* bootleg): `$E000-$FFFF` loads four
+    /// bank registers (D6-D7 the register), an MMC3-style A12 counter at `$8000-$BFFF`, and a
+    /// serial read-out of the NES 2.0 misc ROM at `$4800-$4FFF` and `$C000-$CFFF`.
+    M413,
 }
 
 impl IrqPKind {
@@ -89,6 +93,7 @@ impl IrqPKind {
             540 => Self::M540,
             528 => Self::M528,
             560 => Self::M560,
+            413 => Self::M413,
             _ => return None,
         })
     }
@@ -109,6 +114,7 @@ impl IrqPKind {
             Self::M540 => 540,
             Self::M528 => 528,
             Self::M560 => 560,
+            Self::M413 => 413,
         }
     }
 }
@@ -138,6 +144,12 @@ pub struct IrqP {
     /// for that kind only. `regs[0]` is its bank toggle, `regs[1]` the PPU A13 latch, and
     /// `irq_counter` the nametable address latched on A13's rise.
     nt_560: Vec<u8>,
+    /// 413's misc ROM (the image past its CHR-ROM), empty for the other kinds; derived from the
+    /// image, so not saved.
+    misc_413: Vec<u8>,
+    /// 413's serial address (`m413.serial.address`); `nametables[0]` holds its IRQ latch and
+    /// `nametables[1]` the serial control. Saved for that kind only.
+    serial_413: u32,
     /// 528's VRC7 IRQ (`init_VRC7(0x01, 0x00)`), saved for that kind only.
     vrc_irq: VrcIrq,
     /// Whether the image has CHR-ROM, which 359's CHR banking needs (`chrrom_size()`).
@@ -161,6 +173,16 @@ impl IrqP {
             ext_359: [0, 0x3F, 0, 0xFF, 0, 0, 0, 0],
             chr_rom: !memory.rom().chr_rom().is_empty(),
             vrc_irq: VrcIrq::new(),
+            misc_413: if kind == IrqPKind::M413 {
+                let rom = memory.rom();
+                rom.raw()
+                    .get(rom.header().announced_size()..)
+                    .unwrap_or_default()
+                    .to_vec()
+            } else {
+                Vec::new()
+            },
+            serial_413: 0,
             nt_560: if kind == IrqPKind::M560 {
                 vec![0; NT_560]
             } else {
@@ -252,6 +274,7 @@ impl IrqP {
                 b.map_chr_8k((r[1] & 0x06) >> 1);
             }
             IrqPKind::M359 | IrqPKind::M540 => self.map_359(),
+            IrqPKind::M413 => self.map_413(),
             // `prg_fix_560`.
             IrqPKind::M560 => {
                 b.map_prg_32k(r[0]);
@@ -456,6 +479,39 @@ impl IrqP {
         self.nametables[1] = u8::try_from((address & 0x4000) >> 10).unwrap_or(0);
     }
 
+    /// `extcl_cpu_wr_mem_413`.
+    fn latch_413(&mut self, address: u16, value: u8) {
+        match address & 0xF000 {
+            0x8000 => self.nametables[0] = value,
+            0x9000 => self.irq_counter = 0,
+            0xA000 | 0xB000 => {
+                self.irq_enabled = address & 0x1000 != 0;
+                if !self.irq_enabled {
+                    self.irq_pending = false;
+                }
+            }
+            0xC000 => self.serial_413 = (self.serial_413 << 1) | u32::from(value >> 7),
+            0xD000 => self.nametables[1] = value,
+            0xE000 | 0xF000 => self.regs[usize::from(value >> 6)] = value & 0x3F,
+            _ => {}
+        }
+    }
+
+    /// `extcl_cpu_rd_mem_413`: a byte of the misc ROM at the serial address; `None` outside the
+    /// port. A read (not a peek) advances the address when the control's D1 is set.
+    #[allow(clippy::option_option)]
+    fn read_413(&self, address: u16) -> Option<Option<u8>> {
+        if self.kind != IrqPKind::M413 || !matches!(address & 0xF800, 0x4800 | 0xC000 | 0xC800) {
+            return None;
+        }
+        let misc = &self.misc_413;
+        // `miscrom_size() - 1` as the mask: a power-of-two misc ROM, as the board's chips are.
+        Some((!misc.is_empty()).then(|| {
+            let mask = misc.len() - 1;
+            misc[usize::try_from(self.serial_413).unwrap_or(0) & mask]
+        }))
+    }
+
     /// `irq_clock_359`: in the A12 mode, past the filter, the low counter byte reloads from the
     /// high one at 0 or on a pending reload, else counts down; at 0 it asserts while enabled.
     fn clock_359(&mut self) {
@@ -485,6 +541,19 @@ impl IrqP {
             _ => (address >> 10) & 0x01,
         };
         usize::from(page) * 0x400 + usize::from(address & 0x03FF)
+    }
+
+    /// `prg_fix_413`/`chr_fix_413`: `$C000-$CFFF` is the serial port (`low_rom` and
+    /// `rom_windows`), `$D000` 4 KiB bank 7 (the second half of 8 KiB bank 3).
+    fn map_413(&mut self) {
+        let r = self.regs.map(i32::from);
+        let b = &mut self.banks;
+        b.map_prg_8k(0, r[1]);
+        b.map_prg_8k(1, r[2]);
+        b.map_prg_8k(2, 3);
+        b.map_prg_8k(3, 4);
+        b.map_chr_4k(0, r[3]);
+        b.map_chr_4k(4, 0xFD);
     }
 
     /// `prg_swap_fme7_528`/`chr_swap_fme7_528`: `outer + (value & (outer | $0F))`, the last
@@ -553,6 +622,11 @@ impl IrqP {
                 let outer = usize::from(self.nametables[1]);
                 Some((outer + (usize::from(self.regs[0]) & (outer | 0x0F)), 0x2000))
             }
+            // `wram_fix_413`: 4 KiB bank 1 at `$5000`, `reg[0]` at `$6000`; `prg_fix_413`'s 4 KiB
+            // bank 7 at `$D000`.
+            (IrqPKind::M413, 0x5000..=0x5FFF) => Some((1, 0x1000)),
+            (IrqPKind::M413, 0x6000..=0x7FFF) => Some((usize::from(self.regs[0]), 0x2000)),
+            (IrqPKind::M413, 0xD000..=0xDFFF) => Some((7, 0x1000)),
             // `wram_fix_359`: `prg[3]` through the outer bank and mask.
             (IrqPKind::M359 | IrqPKind::M540, 0x6000..=0x7FFF) => {
                 Some((usize::from(self.prg_359(self.regs[3])), 0x2000))
@@ -655,6 +729,7 @@ impl IrqP {
             IrqPKind::M272 => self.latch_272(address, value),
             IrqPKind::M359 | IrqPKind::M540 => self.latch_359(address, value),
             IrqPKind::M528 => self.latch_528(address, value),
+            IrqPKind::M413 => self.latch_413(address, value),
             // `extcl_cpu_wr_mem_560`: any write toggles the bank.
             IrqPKind::M560 => {
                 if address >= 0x8000 {
@@ -700,6 +775,10 @@ impl Mapper for IrqP {
         if self.kind == IrqPKind::M560 {
             writer.write_raw(&self.nt_560);
         }
+        if self.kind == IrqPKind::M413 {
+            writer.write_u32(self.serial_413);
+            self.a12.save_state(writer);
+        }
         if self.kind == IrqPKind::M471 {
             self.a12.save_state(writer);
         }
@@ -723,6 +802,10 @@ impl Mapper for IrqP {
         }
         if self.kind == IrqPKind::M560 {
             reader.read_into(&mut self.nt_560)?;
+        }
+        if self.kind == IrqPKind::M413 {
+            self.serial_413 = reader.read_u32()?;
+            self.a12.load_state(reader)?;
         }
         if self.kind == IrqPKind::M471 {
             self.a12.load_state(reader)?;
@@ -810,7 +893,12 @@ impl Mapper for IrqP {
                 }
             }
             IrqPKind::M528 => self.vrc_irq.step_cpu_cycle(),
-            IrqPKind::M471 | IrqPKind::M558 | IrqPKind::M272 | IrqPKind::M442 | IrqPKind::M560 => {}
+            IrqPKind::M471
+            | IrqPKind::M558
+            | IrqPKind::M272
+            | IrqPKind::M442
+            | IrqPKind::M560
+            | IrqPKind::M413 => {}
         }
     }
 
@@ -838,6 +926,17 @@ impl Mapper for IrqP {
                 self.regs[1] = 1;
             } else {
                 self.regs[1] = 0;
+            }
+        }
+        // `extcl_irq_A12_clock_413`: the MMC3's counter without its reload flag.
+        if self.kind == IrqPKind::M413 && self.a12.rose(address, clock) {
+            self.irq_counter = if self.irq_counter == 0 {
+                u32::from(self.nametables[0])
+            } else {
+                self.irq_counter - 1
+            };
+            if self.irq_counter == 0 && self.irq_enabled {
+                self.irq_pending = true;
             }
         }
         // `mode1_bpp`: PPU A0 and A9 on the rise of A13 (`regs[1]`, `regs[2]`; `regs[3]` the
@@ -974,6 +1073,27 @@ impl Mapper for IrqP {
                 chr_rom
             },
         )
+    }
+
+    fn cpu_read_override(&mut self, _memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+        let value = self.read_413(address)?;
+        if self.nametables[1] & 0x02 != 0 {
+            self.serial_413 = self.serial_413.wrapping_add(1);
+        }
+        Some(value)
+    }
+
+    fn cpu_peek_override(&self, _memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+        self.read_413(address)
+    }
+
+    /// 413's serial port takes `$C000-$CFFF` off the ROM windows.
+    fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {
+        let mut windows = self.banks.rom_windows(memory.rom().prg_rom().len());
+        if self.kind == IrqPKind::M413 {
+            windows[2] = super::NO_ROM_WINDOW;
+        }
+        windows
     }
 
     /// 560 serves the console's nametables itself, to see the writes `extcl_wr_nmt_560` copies.

@@ -848,6 +848,8 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 222
             // MAPPERS-P: mapper 471's IRQ on every A12 rise (`IrqP`).
             | 471
+            // MAPPERS-P: mapper 413's MMC3-style A12 counter (`IrqP`).
+            | 413
             // MAPPERS-P: mapper 556's MMC3 counter while that chip is in use (`ChipSwitch`).
             | 556
             // MAPPERS-P: mapper 351's MMC3 counter while that chip is in use (`ChipSwitch`).
@@ -974,6 +976,8 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 222
             // MAPPERS-P: mapper 471's IRQ on every A12 rise (`IrqP`).
             | 471
+            // MAPPERS-P: mapper 413's MMC3-style A12 counter (`IrqP`).
+            | 413
             // MAPPERS-P: mapper 556's MMC3 counter while that chip is in use (`ChipSwitch`).
             | 556
             // MAPPERS-P: mapper 351's MMC3 counter while that chip is in use (`ChipSwitch`).
@@ -2323,12 +2327,12 @@ mod tests {
             // A13's rise), 359 and 540 (A12 IRQ) in `IrqP`; 362 and 398 (the fetched CHR window)
             // in `VrcP`.
             471, 442, 359, 540, 362, 398,
-            // MAPPERS-P: 556 and 351 hold an `Mmc3`, in use at power-on (`ChipSwitch`).
-            556, 351, // MAPPERS-P: 560's A13 latch (`IrqP`).
-            560,
+            // MAPPERS-P: 556 and 351 hold an `Mmc3` in use at power-on (`ChipSwitch`); 560 has its
+            // A13 latch and 413 an A12 counter (`IrqP`); 369 and 512 are `Mmc3P` boards.
+            556, 351, 560, 413, 369,
+            512,
             // MAPPERS-P: 272 is latched too but absent here: its counter only moves once a game
             // enables it, and the sweep enables nothing.
-            369, 512,
         ] {
             if Cartridge::is_supported(number) {
                 expected.extend_from_slice(&[number, number]);

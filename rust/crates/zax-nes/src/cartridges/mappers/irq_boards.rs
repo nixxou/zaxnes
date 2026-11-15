@@ -558,7 +558,11 @@ impl Mapper for IrqBoard {
     /// from the windows and the CPU's cached path read ROM where those boards answer otherwise.
     /// Asked after a CPU write to the cartridge, not per read; out of line for the reason
     /// [`IrqBoard::on_ppu_address_bus`] gives.
-    #[cfg(any(feature = "board-mmc3-p", feature = "board-vrc-p"))]
+    #[cfg(any(
+        feature = "board-mmc3-p",
+        feature = "board-vrc-p",
+        feature = "board-413"
+    ))]
     #[inline(never)]
     fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {
         inner!(self, b => b.rom_windows(memory))
@@ -808,7 +812,8 @@ impl Mapper for IrqBoard {
         feature = "board-303",
         feature = "board-529",
         feature = "board-284",
-        feature = "board-682"
+        feature = "board-682",
+        feature = "board-413"
     ))]
     #[inline(never)]
     fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
@@ -822,7 +827,8 @@ impl Mapper for IrqBoard {
         feature = "board-303",
         feature = "board-529",
         feature = "board-284",
-        feature = "board-682"
+        feature = "board-682",
+        feature = "board-413"
     ))]
     #[inline(never)]
     fn cpu_peek_override(&self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
