@@ -112,3 +112,7 @@ Owner's request (2026-11-15): implement the mappers missing compared with the ot
 * 168 RacerMate Challenge II (nesdev + puNES): v3.12 reaches the race screen; v3.11 and v5.01
   stay on the backdrop in Zaxnes but run in FCEUX, with FCEUX's board model as well, so the
   cause is in the core (FIDELITY-LEADS J22). Next: cartdb whitelist 199->176 / 74->176, then 188.
+* Cartridge database: the mapper number is corrected for the two mislabellings nesdev documents
+  (199 -> 176, 74 -> 176/191/192/194/195), on an exact CRC match only (docs/review/CARTDB.md).
+  The three Hackset "199" games and the two 74 dumps boot. Golden/campaign may move for a test
+  ROM with such a header: check at final validation.

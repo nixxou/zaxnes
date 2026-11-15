@@ -17,7 +17,13 @@ apart by NES 2.0 submapper; what was missing was the information for a dump with
   * a NES 2.0 header is never corrected;
   * an entry whose PRG or CHR size differs, **or whose mapper number differs**, is ignored — the
     iam8bit *Mega Man 2* reissue is mapper 2 in its header and 30 in the database, and loses its
-    background on 30;
+    background on 30. **Lot MAPPERS-N** makes two exceptions, the mislabellings nesdev documents
+    (`cartdb::documented_confusion`): a 199 header on a database 176 ("Some Chinese emulators
+    furthermore treat mapper 199 as a duplicate of INES Mapper 176", "INES Mapper 199") and a 74
+    header on a database 176, 191, 192, 194 or 195 ("SMYNES and older versions of VirtuaNES
+    EX/Plus use mapper 74 to denote *any* MMC3-based mixed CHR-ROM/CHR-RAM game", "INES Mapper
+    074"). Both only on the exact CRC match; the Hackset's *Dragon Ball Z Gaiden*, *Dragon Ball Z
+    II*, *Sangokushi II* (199 → 176) and two 74 dumps (→ 176 and → 195) now boot;
   * the submapper is the database's, or the one its chip implies (`MMC3A` → 4.4, `MMC6` → 4.1,
     `MMC1A` → 1.3);
   * PRG-RAM, battery, four-screen mirroring and region are taken from the entry; a CHR-RAM larger
