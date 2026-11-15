@@ -54,6 +54,8 @@ pub struct SyntheticScene {
     pub nes_picture_height: usize,
     /// The colour emphasis of `nes_picture`, empty without any (lot FIDPLUS-D2b).
     pub nes_picture_emphasis: Vec<u8>,
+    /// The subcarrier phase of its frame, for the composite decoder (lot FIDPLUS-D2b).
+    pub nes_video_phase: usize,
 }
 
 impl SyntheticScene {
@@ -491,6 +493,7 @@ impl Builder {
             nes_picture: Vec::new(),
             nes_picture_height: 0,
             nes_picture_emphasis: Vec::new(),
+            nes_video_phase: 0,
         })
     }
 }

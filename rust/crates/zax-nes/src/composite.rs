@@ -96,8 +96,8 @@ pub fn decode_uniform(pixel: u8, emphasis: u8, hue_degrees: f32) -> [f32; 3] {
     for phase in 0..PHASES {
         let level = (signal(pixel, emphasis, phase) - BLACK) / span;
         #[allow(clippy::cast_precision_loss)] // phase < 12
-        let angle =
-            std::f32::consts::PI * ((phase as f32 - 0.5) / 6.0 + 0.5) + hue_degrees.to_radians();
+        let angle = std::f32::consts::PI * ((phase as f32 - 0.5) / 6.0 + 0.5)
+            + (HUE_OFFSET + hue_degrees).to_radians();
         y += level;
         i += level * angle.cos();
         q += level * angle.sin();
@@ -122,11 +122,49 @@ const LUMA_WINDOW: usize = PHASES;
 /// Samples its chroma filter averages: two cycles, the narrower chroma band of a set.
 const CHROMA_WINDOW: usize = 2 * PHASES;
 
+/// The decoder's hue reference against the subcarrier phase, in degrees: fitted (1-degree steps)
+/// so that the 64 colours decoded from a flat field come closest to `TriCNES`'s palette, the error
+/// over the 52 coloured entries going from 627 to 165 (lot FIDPLUS-D2b; at 0 the sky of Super Mario
+/// Bros. `$22` decoded magenta). A television's tint knob turns the same angle.
+const HUE_OFFSET: f32 = 45.0;
+
 /// The demodulation angle of subcarrier phase `phase`, the one [`decode_uniform`] uses.
 fn phase_angle(phase: usize) -> f32 {
     #[allow(clippy::cast_precision_loss)] // phase < 12
     let phase = phase as f32;
-    std::f32::consts::PI * ((phase - 0.5) / 6.0 + 0.5)
+    std::f32::consts::PI * ((phase - 0.5) / 6.0 + 0.5) + HUE_OFFSET.to_radians()
+}
+
+/// What [`RowDecoder::decode_row`] reads per sample, computed once: the signal's level (0 black,
+/// 1 white) of every colour, emphasis and subcarrier phase, and the demodulation's cosine and
+/// sine of every phase.
+struct DecodeTables {
+    levels: Vec<f32>,
+    cos: [f32; PHASES],
+    sin: [f32; PHASES],
+}
+
+fn decode_tables() -> &'static DecodeTables {
+    static TABLES: std::sync::OnceLock<DecodeTables> = std::sync::OnceLock::new();
+    TABLES.get_or_init(|| {
+        let span = WHITE - BLACK;
+        let mut levels = Vec::with_capacity(64 * 8 * PHASES);
+        for pixel in 0..64u8 {
+            for emphasis in 0..8u8 {
+                for phase in 0..PHASES {
+                    levels.push((signal(pixel, emphasis, phase) - BLACK) / span);
+                }
+            }
+        }
+        let mut cos = [0.0; PHASES];
+        let mut sin = [0.0; PHASES];
+        for phase in 0..PHASES {
+            let angle = phase_angle(phase);
+            cos[phase] = angle.cos();
+            sin[phase] = angle.sin();
+        }
+        DecodeTables { levels, cos, sin }
+    })
 }
 
 /// Working buffers of [`decode_row`], kept by the caller from row to row.
@@ -151,28 +189,36 @@ impl RowDecoder {
     /// fringes move with it (the dot crawl).
     pub fn decode_row(&mut self, pixels: &[u8], emphasis: &[u8], phase: usize, out: &mut [u8]) {
         let samples = pixels.len() * SAMPLES_PER_PIXEL;
-        let span = WHITE - BLACK;
         // Running sums: entry k is the sum of the first k samples.
         for sums in [&mut self.luma, &mut self.in_phase, &mut self.quadrature] {
             sums.clear();
             sums.reserve(samples + 1);
             sums.push(0.0);
         }
-        let mut block = [0.0_f32; SAMPLES_PER_PIXEL];
+        let tables = decode_tables();
+        self.luma.resize(samples + 1, 0.0);
+        self.in_phase.resize(samples + 1, 0.0);
+        self.quadrature.resize(samples + 1, 0.0);
         let (mut y, mut i, mut q) = (0.0_f32, 0.0_f32, 0.0_f32);
+        let mut at = phase % PHASES;
+        let mut index = 1;
         for (x, &pixel) in pixels.iter().enumerate() {
-            let bits = emphasis.get(x).copied().unwrap_or(0);
-            let start = phase + x * SAMPLES_PER_PIXEL;
-            pixel_samples(pixel & 0x3F, bits, start, &mut block);
-            for (offset, &volts) in block.iter().enumerate() {
-                let level = (volts - BLACK) / span;
-                let angle = phase_angle((start + offset) % PHASES);
+            let bits = emphasis.get(x).copied().unwrap_or(0) & 7;
+            let levels = &tables.levels
+                [(usize::from(pixel & 0x3F) << 3 | usize::from(bits)) * PHASES..][..PHASES];
+            for _ in 0..SAMPLES_PER_PIXEL {
+                let level = levels[at];
                 y += level;
-                i += level * angle.cos();
-                q += level * angle.sin();
-                self.luma.push(y);
-                self.in_phase.push(i);
-                self.quadrature.push(q);
+                i += level * tables.cos[at];
+                q += level * tables.sin[at];
+                self.luma[index] = y;
+                self.in_phase[index] = i;
+                self.quadrature[index] = q;
+                index += 1;
+                at += 1;
+                if at == PHASES {
+                    at = 0;
+                }
             }
         }
         let window = |sums: &[f32], centre: usize, width: usize| -> f32 {
@@ -292,6 +338,43 @@ mod tests {
         assert!(g > r && g > b, "green {r} {g} {b}");
         let [r, g, b] = decode_uniform(0x12, 0, 0.0);
         assert!(b > r && b > g, "blue {r} {g} {b}");
+    }
+
+    #[test]
+    #[ignore = "timing, run with --release --ignored --nocapture"]
+    fn fidplus_d2b_cost_of_one_frame() {
+        let mut decoder = RowDecoder::default();
+        let row: Vec<u8> = (0..=255u8).map(|x| (x / 3) & 0x3F).collect();
+        let mut out = vec![0u8; 256 * 3];
+        let frames: u32 = 200;
+        let start = std::time::Instant::now();
+        for frame in 0..frames as usize {
+            for line in 0..240 {
+                decoder.decode_row(&row, &[], (frame * 4 + line * 4) % PHASES, &mut out);
+            }
+        }
+        let per_frame = start.elapsed().as_secs_f64() * 1000.0 / f64::from(frames);
+        println!("composite decode: {per_frame:.3} ms a frame");
+    }
+
+    #[test]
+    fn fidplus_d2b_key_colours_decode_near_tricnes() {
+        // TriCNES's plain colours (MIT): Super Mario Bros.'s sky $22, an orange $27, the cream
+        // $37 of Super Mario Bros. 3, a green $2A. Each channel within 40 of 255.
+        for (pixel, expected) in [
+            (0x22_u8, [147.0_f32, 144.0, 255.0]),
+            (0x27, [230.0, 158.0, 37.0]),
+            (0x37, [245.0, 215.0, 165.0]),
+            (0x2A, [94.0, 225.0, 50.0]),
+        ] {
+            let got = decode_uniform(pixel, 0, 0.0).map(|c| c * 255.0);
+            for (g, e) in got.iter().zip(expected) {
+                assert!(
+                    (g - e).abs() < 40.0,
+                    "{pixel:#x}: {got:?} against {expected:?}"
+                );
+            }
+        }
     }
 
     #[test]

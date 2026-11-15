@@ -70,5 +70,6 @@ pub fn from_json(
         nes_picture: Vec::new(),
         nes_picture_height: 0,
         nes_picture_emphasis: Vec::new(),
+        nes_video_phase: 0,
     })
 }

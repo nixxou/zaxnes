@@ -54,6 +54,13 @@ a plane for frames with emphasis, the palette scaled by the composite decoder's 
 and wgpu uploads and the harness's flat PNG. Next, D2b step 2: the picture through the generator
 and a line decoder (colour artefacts, dot crawl), Fidélité+ only.
 
+D2b step 2 (2026-11-15): `video.composite_signal` (Fidelite+, off) decodes the 2D picture from the
+generated signal (`composite::RowDecoder`: luma over one subcarrier cycle, I/Q over two). The hue
+reference was fitted to TriCNES's plain palette (+45 degrees, error 627 -> 165 over the coloured
+entries; at 0 the sky of Super Mario Bros. decoded magenta) and pinned by a test. Cost of the decode,
+measured in release: 7.1 ms a frame first, 1.2 ms with tables for the levels and the demodulation;
+the standard path pays nothing (the option is a branch per displayed frame). Harness:
+`ZAXNES_COMPOSITE=1` writes `<scene>-composite.png` next to the flat picture.
 D1a's cost on the standard path (callgrind, clean builds against 6c9cb163, PR-1 set): first
 +0.89 % on `mmc5` (the profile test in the setter the MMC5 calls on every level change), then
 +0.417 % with that branch out of line, and **-0.057 %** at 7edd528e, where the setter is back to

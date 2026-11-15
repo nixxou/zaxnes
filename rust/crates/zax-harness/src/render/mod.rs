@@ -840,6 +840,17 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
                 &scene.nes_picture_emphasis,
                 scene.nes_picture_height,
             )?;
+            // `ZAXNES_COMPOSITE=1`: the picture decoded from the composite signal too, as the
+            // app's `video.composite_signal` shows it (lot FIDPLUS-D2b).
+            if std::env::var_os("ZAXNES_COMPOSITE").is_some_and(|value| value == "1") {
+                write_composite_picture(
+                    &options.output.join(format!("{}-composite.png", scene.name)),
+                    &scene.nes_picture,
+                    &scene.nes_picture_emphasis,
+                    scene.nes_picture_height,
+                    scene.nes_video_phase,
+                )?;
+            }
         }
 
         if options.explain {
@@ -1071,6 +1082,48 @@ fn write_nes_picture(
             };
             [color.r, color.g, color.b, 255]
         })
+        .collect();
+    let (Ok(width), Ok(rows)) = (u32::try_from(width), u32::try_from(rows)) else {
+        return Ok(());
+    };
+    fs::write(file, png_image::encode_rgba(width, rows, &pixels)?)?;
+    Ok(())
+}
+
+/// The flat picture decoded from the 2C02's composite signal, row by row, the screen's row `r`
+/// starting its subcarrier 4 half-clocks after row `r - 1` (lot FIDPLUS-D2b).
+fn write_composite_picture(
+    file: &Path,
+    indices: &[u8],
+    emphasis: &[u8],
+    rows: usize,
+    video_phase: usize,
+) -> Result<(), HarnessError> {
+    use zax_nes::composite::{RowDecoder, PHASES};
+    let rows = if rows == 0 { 240 } else { rows };
+    let width = indices.len() / rows;
+    let margin = width.saturating_sub(256) / 2;
+    let margin_y = rows.saturating_sub(240) / 2;
+    let mut decoder = RowDecoder::default();
+    let mut rgb = vec![0u8; width * rows * 3];
+    for row in 0..rows {
+        let line = (row + PHASES * 60 - margin_y % PHASES) % PHASES;
+        let phase = (video_phase + 4 * line + PHASES * 1000 - (margin * 8) % PHASES) % PHASES;
+        let pixels: Vec<u8> = indices[row * width..(row + 1) * width]
+            .iter()
+            .map(|&pixel| pixel & 0x3F)
+            .collect();
+        let bits = emphasis.get(row * width..(row + 1) * width).unwrap_or(&[]);
+        decoder.decode_row(
+            &pixels,
+            bits,
+            phase,
+            &mut rgb[row * width * 3..(row + 1) * width * 3],
+        );
+    }
+    let pixels: Vec<u8> = rgb
+        .chunks_exact(3)
+        .flat_map(|c| [c[0], c[1], c[2], 255])
         .collect();
     let (Ok(width), Ok(rows)) = (u32::try_from(width), u32::try_from(rows)) else {
         return Ok(());
