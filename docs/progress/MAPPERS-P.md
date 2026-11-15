@@ -132,7 +132,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 517 | `mapper_517.c` | 107 | 1 | 1 | done (batch 1, `MultiP`) |
 | 524 | `mapper_524.c` | 81 | 0 | 0 | done (batch 16, `VrcP`) |
 | 525 | `mapper_525.c` | 91 | 1 | 0 | done (batch 10, `MultiP`) |
-| 526 | `mapper_526.c` | 123 | 1 | 0 | todo |
+| 526 | `mapper_526.c` | 123 | 1 | 0 | done (batch 34, `IrqP`) |
 | 527 | `mapper_527.c` | 61 | 0 | 0 | done (batch 27, `VrcP`) |
 | 528 | `mapper_528.c` | 118 | 0 | 0 | todo |
 | 532 | `mapper_532.c` | 411 | 0 | 0 | todo |
@@ -266,3 +266,6 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 * Batch 33: `IrqP` 471 (the written address is the bank; an IRQ on every A12 rise through the
   MMC3's `A12Watcher` filter, acknowledged by any write). In both PPU-bus lists and the mf_3b
   sweep, not in `clocks_on_cpu_cycle`; the watcher's state is saved for that kind only.
+* Batch 34: `IrqP` 526 (four PRG and eight CHR registers, a free-running 16-bit CPU-cycle
+  counter asserting while bit 12 is set; in `clocks_on_cpu_cycle` and in the mf_5a sweep, since
+  it counts from power-on).

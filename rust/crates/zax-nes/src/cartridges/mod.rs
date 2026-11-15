@@ -612,6 +612,8 @@ const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
             | 529
             // MAPPERS-N: mapper 266's VRC4 IRQ (nesdev "NES 2.0 Mapper 266").
             | 266
+            // MAPPERS-P: mapper 526, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
+            | 526
             // MAPPERS-P: mapper 555's competition timer, `Mmc3P` (puNES `EXTCL_CPU_EVERY_CYCLE`).
             | 555
             // MAPPERS-P: mapper 559, `VrcP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
@@ -2348,6 +2350,10 @@ mod tests {
         // MAPPERS-P: mapper 417's counter runs whether or not its IRQ is enabled.
         if Cartridge::is_supported(417) {
             expected.extend_from_slice(&[417, 417]);
+        }
+        // MAPPERS-P: mapper 526's counter runs from power-on (`extcl_cpu_every_cycle_526`).
+        if Cartridge::is_supported(526) {
+            expected.extend_from_slice(&[526, 526]);
         }
         // MAPPERS-N: mapper 682's jitter counter runs on every CPU cycle (`Rainbow.cpp`).
         if Cartridge::is_supported(682) {

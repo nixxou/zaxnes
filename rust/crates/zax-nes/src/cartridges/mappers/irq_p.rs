@@ -32,6 +32,10 @@ pub enum IrqPKind {
     /// 471, `mapper_471.c` (*Impact Soft* IM1): the written address is a 32 KiB PRG and an 8 KiB
     /// CHR bank, and every PPU A12 rise asserts the IRQ, which any write acknowledges.
     M471,
+    /// 526, `mapper_526.c` (BJ-56, a *Gradius II* bootleg): four 8 KiB PRG and eight 1 KiB CHR
+    /// registers at `$8000-$800B`, a free-running CPU-cycle counter whose bit 12 asserts the
+    /// IRQ, `$800D` restarting it and `$800F` acknowledging.
+    M526,
 }
 
 impl IrqPKind {
@@ -45,6 +49,7 @@ impl IrqPKind {
             416 => Self::M416,
             417 => Self::M417,
             471 => Self::M471,
+            526 => Self::M526,
             _ => return None,
         })
     }
@@ -57,6 +62,7 @@ impl IrqPKind {
             Self::M416 => 416,
             Self::M417 => 417,
             Self::M471 => 471,
+            Self::M526 => 526,
         }
     }
 }
@@ -91,6 +97,11 @@ impl IrqP {
             irq_pending: false,
             a12: A12Watcher::new(A12Watcher::MMC3_FILTER_DOTS),
         };
+        // `map_init_526`: PRG `$FC-$FF`, CHR 0-7.
+        if kind == IrqPKind::M526 {
+            board.regs = [0xFC, 0xFD, 0xFE, 0xFF];
+            board.chr = [0, 1, 2, 3, 4, 5, 6, 7];
+        }
         board.map();
         board
     }
@@ -152,6 +163,15 @@ impl IrqP {
                 }
                 b.map_chr_8k((r[1] & 0x06) >> 1);
             }
+            // `prg_fix_526`/`chr_fix_526`.
+            IrqPKind::M526 => {
+                for (slot, bank) in r.iter().enumerate() {
+                    b.map_prg_8k(slot, *bank);
+                }
+                for (slot, bank) in self.chr.iter().enumerate() {
+                    b.map_chr_1k(slot, i32::from(*bank));
+                }
+            }
             // `prg_fix_471`/`chr_fix_471`: the address's low byte.
             IrqPKind::M471 => {
                 b.map_prg_32k(r[0]);
@@ -173,7 +193,8 @@ impl IrqP {
     /// `mirroring_fix_416`: `$8000` D2).
     fn mirroring(&self) -> Option<NametableMirroring> {
         match self.kind {
-            IrqPKind::M357 => Some(NametableMirroring::Vertical),
+            // `mirroring_fix_526`: vertical.
+            IrqPKind::M357 | IrqPKind::M526 => Some(NametableMirroring::Vertical),
             IrqPKind::M416 => Some(if self.regs[1] & 0x04 != 0 {
                 NametableMirroring::Horizontal
             } else {
@@ -271,6 +292,14 @@ impl IrqP {
                     self.irq_pending = false;
                 }
                 a @ 0x8050..=0x8053 => self.nametables[usize::from(a & 0x03)] = value,
+                _ => {}
+            },
+            // `extcl_cpu_wr_mem_526`: by `address & $E00F`.
+            IrqPKind::M526 => match address & 0xE00F {
+                a @ 0x8000..=0x8007 => self.chr[usize::from(a & 0x07)] = value,
+                a @ 0x8008..=0x800B => r[usize::from(a & 0x03)] = value,
+                0x800D => self.irq_counter = 0,
+                0x800F => self.irq_pending = false,
                 _ => {}
             },
             // `extcl_cpu_wr_mem_471`: the address, and the IRQ acknowledged.
@@ -374,6 +403,13 @@ impl Mapper for IrqP {
                 self.irq_counter = (self.irq_counter + 1) & 0xFFFF;
                 if self.irq_counter & 0x400 != 0 && self.irq_enabled {
                     self.irq_counter = 0;
+                    self.irq_pending = true;
+                }
+            }
+            // `extcl_cpu_every_cycle_526`: a 16-bit counter, asserting while bit 12 is set.
+            IrqPKind::M526 => {
+                self.irq_counter = (self.irq_counter + 1) & 0xFFFF;
+                if self.irq_counter & 0x1000 != 0 {
                     self.irq_pending = true;
                 }
             }

@@ -1147,3 +1147,24 @@ fn mappers_p_471_asserts_on_a12_and_acknowledges_on_write() {
     core.mapper_write(0x8005, 0);
     assert!(!core.cartridge().unwrap().irq_asserted());
 }
+
+/// `mapper_526.c`: `$8008-$800B` the four PRG banks, `$8000-$8007` the CHR banks; the counter
+/// asserts at bit 12 (4096 cycles) and `$800F` acknowledges.
+#[cfg(feature = "board-526")]
+#[test]
+fn mappers_p_526_banks_and_counts_cpu_cycles() {
+    let mut core = MapperRom::new(526).prg(32).chr(64).load();
+    assert_eq!([28, 29, 30, 31], core.prg_windows());
+    core.mapper_write(0x8009, 7);
+    core.mapper_write(0x8003, 33);
+    assert_eq!([28, 7, 30, 31], core.prg_windows());
+    assert_eq!(33, core.chr_windows()[3]);
+    core.mapper_write(0x800D, 0);
+    for _ in 0..4100 {
+        core.bus_mut().tick();
+    }
+    assert!(core.cartridge().unwrap().irq_asserted());
+    core.mapper_write(0x800D, 0);
+    core.mapper_write(0x800F, 0);
+    assert!(!core.cartridge().unwrap().irq_asserted());
+}
