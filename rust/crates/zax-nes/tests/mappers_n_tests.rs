@@ -1,0 +1,138 @@
+//! Lot MAPPERS-N: one test per board, its expectations worked out from the Mesen2 file each
+//! board cites (`cartridges/mappers/mmc3_clones.rs`). The four sweeps of `mapper_tests` over
+//! `SUPPORTED_MAPPERS` (load, reset, save-state round trip, PPU bus) cover the rest.
+#![allow(clippy::unwrap_used)]
+
+mod common;
+
+#[allow(unused_imports)]
+use common::mapper_fixture::{MapperMachine, MapperRom};
+
+/// `MMC3_250.h:9`: the port is A13-A15 and A10, the value the low address byte.
+#[cfg(feature = "board-250")]
+#[test]
+fn mappers_n_250_decodes_port_and_value_from_the_address() {
+    let mut core = MapperRom::new(250).prg(16).load();
+    core.mapper_write(0x8006, 0x00); // $8000 <- 6
+    core.mapper_write(0x8403, 0x00); // $8001 <- 3
+    assert_eq!([3, 1, 14, 15], core.prg_windows());
+}
+
+/// `MMC3_45.h:57-75`: four registers written in turn; PRG mask and offset.
+#[cfg(feature = "board-45")]
+#[test]
+fn mappers_n_45_masks_and_offsets_prg_from_the_four_registers() {
+    let mut core = MapperRom::new(45).prg(64).chr(256).load();
+    for value in [0x00, 0x10, 0x0F, 0x30] {
+        core.mapper_write(0x6000, value);
+    }
+    core.mmc3_bank(6, 3);
+    assert_eq!([0x13, 0x11, 0x1E, 0x1F], core.prg_windows());
+}
+
+/// `MMC3_52.h:40-62`: one register, locked by its bit 7.
+#[cfg(feature = "board-52")]
+#[test]
+fn mappers_n_52_offsets_prg_and_locks() {
+    let mut core = MapperRom::new(52).prg(32).chr(256).load();
+    core.mapper_write(0xA001, 0x80);
+    core.mapper_write(0x6000, 0x89);
+    core.mmc3_bank(6, 3);
+    assert_eq!([0x13, 0x11, 0x1E, 0x1F], core.prg_windows());
+    core.mapper_write(0x6000, 0x0B); // locked: RAM, not the register
+    assert_eq!([0x13, 0x11, 0x1E, 0x1F], core.prg_windows());
+}
+
+/// `MMC3_44.h:28-42`: `$A001` selects the block.
+#[cfg(feature = "board-44")]
+#[test]
+fn mappers_n_44_selects_the_block_at_a001() {
+    let mut core = MapperRom::new(44).prg(64).chr(256).load();
+    core.mapper_write(0xA001, 0x02);
+    core.mmc3_bank(6, 3);
+    assert_eq!([0x23, 0x21, 0x2E, 0x2F], core.prg_windows());
+}
+
+/// `MMC3_49.h:36-55`: block in MMC3 mode, a 32 KiB bank otherwise.
+#[cfg(feature = "board-49")]
+#[test]
+fn mappers_n_49_has_a_block_mode_and_a_32_kib_mode() {
+    let mut core = MapperRom::new(49).prg(64).chr(256).load();
+    core.mapper_write(0xA001, 0x80);
+    core.mapper_write(0x6000, 0x41);
+    core.mmc3_bank(6, 3);
+    assert_eq!([0x13, 0x11, 0x1E, 0x1F], core.prg_windows());
+    core.mapper_write(0x6000, 0x20);
+    assert_eq!([8, 9, 10, 11], core.prg_windows());
+}
+
+/// `MMC3_205.h:33-44`.
+#[cfg(feature = "board-205")]
+#[test]
+fn mappers_n_205_selects_the_block_below_8000() {
+    let mut core = MapperRom::new(205).prg(64).chr(512).load();
+    core.mapper_write(0x6000, 0x02);
+    core.mmc3_bank(6, 3);
+    assert_eq!([0x23, 0x21, 0x2E, 0x2F], core.prg_windows());
+}
+
+/// `MMC3_134.h:17-42`: `$6001` bit 1 is PRG A18.
+#[cfg(feature = "board-134")]
+#[test]
+fn mappers_n_134_takes_prg_a18_from_6001() {
+    let mut core = MapperRom::new(134).prg(64).chr(512).load();
+    core.mapper_write(0x6001, 0x02);
+    core.mmc3_bank(6, 3);
+    assert_eq!([0x23, 0x21, 0x3E, 0x3F], core.prg_windows());
+}
+
+/// `MMC3_196.h:20-34`: a write to `$6000-$6FFF` switches to one 32 KiB bank.
+#[cfg(feature = "board-196")]
+#[test]
+fn mappers_n_196_switches_to_a_32_kib_bank() {
+    let mut core = MapperRom::new(196).prg(16).chr(256).load();
+    core.mapper_write(0x6000, 0x21);
+    assert_eq!([12, 13, 14, 15], core.prg_windows());
+}
+
+/// `MMC3_197.h:9-21`: R0 drives 4 KiB, R2 and R3 2 KiB each.
+#[cfg(feature = "board-197")]
+#[test]
+fn mappers_n_197_drives_4_and_2_kib_chr() {
+    let mut core = MapperRom::new(197).prg(16).chr(64).load();
+    core.mmc3_bank(0, 2);
+    core.mmc3_bank(2, 4);
+    core.mmc3_bank(3, 6);
+    assert_eq!([4, 5, 6, 7, 8, 9, 12, 13], core.chr_windows());
+}
+
+/// `MMC3_245.h:30-46`: `R0` bit 1 is PRG A19, the fixed banks included.
+#[cfg(feature = "board-245")]
+#[test]
+fn mappers_n_245_takes_prg_a19_from_r0() {
+    let mut core = MapperRom::new(245).prg(128).chr_ram(8192).load();
+    core.mmc3_bank(0, 2);
+    core.mmc3_bank(6, 3);
+    assert_eq!([0x43, 0x41, 0x7E, 0x7F], core.prg_windows());
+}
+
+/// `MMC3_249.h:21-46`: `$5000` bit 1 scrambles the bank lines.
+#[cfg(feature = "board-249")]
+#[test]
+fn mappers_n_249_scrambles_the_bank_lines() {
+    let mut core = MapperRom::new(249).prg(128).chr(256).load();
+    core.mmc3_bank(6, 3);
+    core.mapper_write(0x5000, 0x02);
+    assert_eq!([0x09, 0x01, 0x7E, 0x7F], core.prg_windows());
+}
+
+/// `MMC3_238.h:9-24`: the latch at `$4020-$7FFF`.
+#[cfg(feature = "board-238")]
+#[test]
+fn mappers_n_238_reads_back_its_protection_latch() {
+    let mut core = MapperRom::new(238).prg(16).chr(256).load();
+    core.mapper_write(0x6000, 0x01);
+    assert_eq!(0x02, core.read_memory(0x6000));
+    core.mapper_write(0x4100, 0x03);
+    assert_eq!(0x03, core.read_memory(0x5000));
+}

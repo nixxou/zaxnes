@@ -91,7 +91,47 @@ default = [
     "board-143-open-bus",
     "mmc1-snrom-e-bit",
     "board-jy-asic-tile-latch",
+    "board-44",
+    "board-45",
+    "board-49",
+    "board-52",
+    "board-134",
+    "board-196",
+    "board-197",
+    "board-205",
+    "board-238",
+    "board-245",
+    "board-249",
+    "board-250",
 ]
+
+# MAPPERS-N umbrella (docs/progress/MAPPERS-N.md).
+board-mmc3-clones = []
+
+board-44 = ["board-mmc3-clones"]
+
+board-45 = ["board-mmc3-clones"]
+
+board-49 = ["board-mmc3-clones"]
+
+board-52 = ["board-mmc3-clones"]
+
+board-134 = ["board-mmc3-clones"]
+
+board-196 = ["board-mmc3-clones"]
+
+board-197 = ["board-mmc3-clones"]
+
+board-205 = ["board-mmc3-clones"]
+
+board-238 = ["board-mmc3-clones"]
+
+board-245 = ["board-mmc3-clones"]
+
+board-249 = ["board-mmc3-clones"]
+
+board-250 = ["board-mmc3-clones"]
+# MAPPERS-N end
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
 # parameters, 45 titles (MF-6a step 1, which measured `smb3/core` +45 707 and `m4` +66 921).
@@ -1237,3 +1277,4 @@ serde_json = { workspace = true, optional = true }
 sha2 = "0.10"
 zax-core-api = { path = "../zax-core-api" }
 zax-goldens = { path = "../zax-goldens" }
+

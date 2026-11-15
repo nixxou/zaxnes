@@ -708,7 +708,7 @@ impl<
     /// Behind `board-268`, its only caller. [`Mmc3Outer`](super::Mmc3Outer) recomputes all twelve
     /// windows itself rather than laying an overlay over the chip's, because mapper 268's outer
     /// register replaces *address lines* of both bank numbers — see that type's `refresh`.
-    #[cfg(feature = "board-268")]
+    #[cfg(any(feature = "board-268", feature = "board-mmc3-clones"))]
     pub(crate) const fn select(&self) -> u8 {
         self.select
     }
@@ -718,7 +718,11 @@ impl<
     ///
     /// **The second caller is mapper 208's submapper 1** (MF-UNL-11 step 2), whose page makes its
     /// one 32 KiB PRG page "the bank register value SHR 2" of the chip's own `R6`.
-    #[cfg(any(feature = "board-268", feature = "board-208"))]
+    #[cfg(any(
+        feature = "board-268",
+        feature = "board-208",
+        feature = "board-mmc3-clones"
+    ))]
     pub(crate) const fn bank_register(&self, index: usize) -> u8 {
         self.bank[index & 0x07]
     }

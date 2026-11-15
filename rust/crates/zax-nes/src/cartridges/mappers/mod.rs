@@ -75,6 +75,8 @@ mod mmc3;
 mod mmc3_a9461;
 #[cfg(feature = "board-mmc3-chrram")]
 mod mmc3_chrram;
+#[cfg(feature = "board-mmc3-clones")]
+mod mmc3_clones;
 #[cfg(feature = "board-292")]
 mod mmc3_dragonfighter;
 #[cfg(feature = "board-208")]
@@ -216,6 +218,8 @@ pub use mmc3::{Mmc3ChrRam, Mmc3ChrRam192, Mmc3ChrRam194, Mmc3ChrRam74, WaixingFs
 pub use mmc3_a9461::Mmc3A9461;
 #[cfg(feature = "board-mmc3-chrram")]
 pub use mmc3_chrram::Mmc3ChrRamBoard;
+#[cfg(feature = "board-mmc3-clones")]
+pub use mmc3_clones::{Mmc3Clone, Mmc3CloneKind};
 #[cfg(feature = "board-292")]
 pub use mmc3_dragonfighter::Mmc3Dragonfighter;
 #[cfg(feature = "board-208")]

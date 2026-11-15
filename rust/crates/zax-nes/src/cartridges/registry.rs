@@ -105,6 +105,8 @@ use super::mappers::{JalecoJf13, JalecoJf17};
     feature = "board-190"
 ))]
 use super::mappers::{LatchBoard, SingleLatch};
+#[cfg(feature = "board-mmc3-clones")]
+use super::mappers::{Mmc3Clone, Mmc3CloneKind};
 #[cfg(feature = "board-taito-x1")]
 use super::mappers::{TaitoX1005, TaitoX1017};
 #[cfg(feature = "board-111")]
@@ -167,9 +169,17 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     #[cfg(feature = "board-38")]
     38,
     41,
+    #[cfg(feature = "board-44")]
+    44,
+    #[cfg(feature = "board-45")]
+    45,
     #[cfg(feature = "board-mmc3-multicart")]
     47,
     48,
+    #[cfg(feature = "board-49")]
+    49,
+    #[cfg(feature = "board-52")]
+    52,
     64,
     65,
     66,
@@ -254,6 +264,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     132,
     #[cfg(feature = "board-133")]
     133,
+    #[cfg(feature = "board-134")]
+    134,
     #[cfg(feature = "board-jv001")]
     136,
     // The four wirings of the Sachen 8259, which are **not** in letter order: 137 is the 8259D,
@@ -335,6 +347,12 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     194,
     #[cfg(feature = "board-mmc3-chrram")]
     195,
+    #[cfg(feature = "board-196")]
+    196,
+    #[cfg(feature = "board-197")]
+    197,
+    #[cfg(feature = "board-205")]
+    205,
     #[cfg(feature = "board-namcot108")]
     206,
     #[cfg(feature = "board-taito-x1")]
@@ -361,12 +379,20 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     228,
     #[cfg(feature = "board-small-boards")]
     232,
+    #[cfg(feature = "board-238")]
+    238,
     #[cfg(feature = "board-sachen-8reg")]
     243,
+    #[cfg(feature = "board-245")]
+    245,
     // The G0151-1 of 封神榜: eight bank registers, battery PRG-RAM at $6800-$6FFF and a forced
     // PRG A17 on four read ranges (MF-UNL-12 step 3).
     #[cfg(feature = "board-246")]
     246,
+    #[cfg(feature = "board-249")]
+    249,
+    #[cfg(feature = "board-250")]
+    250,
     // The Sachen UNL-SHERO, an MMC3 clone with 8 KiB of CHR-RAM, four CHR A18 lines at $4100 and
     // four-screen mirroring (MF-UNL-12 step 1).
     #[cfg(feature = "board-262")]
@@ -1640,6 +1666,66 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         #[cfg(feature = "board-jy-asic")]
         35 | 90 | 209 | 211 => Board::IrqBoard(IrqBoard::JyCompany(Box::new(JyCompany::new(
             memory, mapper,
+        )))),
+        #[cfg(feature = "board-44")]
+        44 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-45")]
+        45 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-49")]
+        49 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-52")]
+        52 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-134")]
+        134 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-196")]
+        196 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-197")]
+        197 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-205")]
+        205 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-238")]
+        238 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-245")]
+        245 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-249")]
+        249 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-250")]
+        250 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
         )))),
         _ => return None,
     })

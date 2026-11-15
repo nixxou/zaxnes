@@ -10,6 +10,8 @@ use super::Mapper091;
 use super::Mmc3A9461;
 #[cfg(feature = "board-mmc3-chrram")]
 use super::Mmc3ChrRamBoard;
+#[cfg(feature = "board-mmc3-clones")]
+use super::Mmc3Clone;
 #[cfg(feature = "board-292")]
 use super::Mmc3Dragonfighter;
 #[cfg(feature = "board-208")]
@@ -329,6 +331,11 @@ pub enum IrqBoard {
     /// no new high-water mark.
     #[cfg(feature = "board-91")]
     Mapper091(Mapper091),
+    // Appended by MAPPERS-N: the MMC3 clones that only mask, offset or re-decode the chip.
+    /// Mappers 44, 45, 49, 52, 134, 196, 197, 205, 238, 245, 249 and 250 (lot MAPPERS-N), boxed
+    /// for [`IrqBoard::Mmc3Outer`]'s reason: it holds a whole [`super::Mmc3`].
+    #[cfg(feature = "board-mmc3-clones")]
+    Mmc3Clone(Box<Mmc3Clone>),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as `Board`'s own `dispatch!` does.
@@ -379,6 +386,8 @@ macro_rules! inner {
             IrqBoard::Cony($b) => $body,
             #[cfg(feature = "board-91")]
             IrqBoard::Mapper091($b) => $body,
+            #[cfg(feature = "board-mmc3-clones")]
+            IrqBoard::Mmc3Clone($b) => $body,
         }
     };
 }
@@ -449,6 +458,7 @@ impl Mapper for IrqBoard {
         feature = "board-116",
         feature = "board-119",
         feature = "board-268",
+        feature = "board-mmc3-clones",
         feature = "board-68",
         feature = "board-91",
         feature = "board-cony",
@@ -495,7 +505,8 @@ impl Mapper for IrqBoard {
         feature = "board-116",
         feature = "board-119",
         feature = "board-268",
-        feature = "board-huang1"
+        feature = "board-huang1",
+        feature = "board-mmc3-clones"
     ))]
     fn prg_ram_writable(&self) -> bool {
         inner!(self, b => b.prg_ram_writable())
@@ -507,7 +518,11 @@ impl Mapper for IrqBoard {
     /// is the WRAM's as well (MF-UNL-6 step 1). No other board of this enum overrides it, so the
     /// arm this adds to `Board::intercept_cpu_write` answers `false` for all of them exactly as
     /// the un-forwarded dispatch did.
-    #[cfg(any(feature = "board-mmc3-multicart", feature = "board-268"))]
+    #[cfg(any(
+        feature = "board-mmc3-multicart",
+        feature = "board-268",
+        feature = "board-mmc3-clones"
+    ))]
     fn intercept_cpu_write(
         &mut self,
         memory: &mut CartridgeMemory,
@@ -594,7 +609,8 @@ impl Mapper for IrqBoard {
         feature = "board-268",
         feature = "board-cony",
         feature = "board-huang1",
-        feature = "board-jy-asic"
+        feature = "board-jy-asic",
+        feature = "board-mmc3-clones"
     ))]
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
         inner!(self, b => b.try_read_prg(memory, address))

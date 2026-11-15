@@ -256,7 +256,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let sachen8259 = cfg!(feature = "board-sachen8259");
     let huang1 = cfg!(feature = "board-huang1");
     let cony = cfg!(feature = "board-cony");
-    let additions: [(i32, bool); 113] = [
+    let additions: [(i32, bool); 125] = [
         (12, huang1),
         (14, huang1),
         (19, true),
@@ -268,8 +268,12 @@ fn req_core_100_every_required_mapper_is_registered() {
         (36, jv001),
         (37, multicart),
         (38, cfg!(feature = "board-38")),
+        (44, cfg!(feature = "board-44")),
+        (45, cfg!(feature = "board-45")),
         (47, multicart),
         (48, true),
+        (49, cfg!(feature = "board-49")),
+        (52, cfg!(feature = "board-52")),
         (65, true),
         (67, true),
         (68, cfg!(feature = "board-68")),
@@ -314,6 +318,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (123, scramble),
         (132, jv001),
         (133, cfg!(feature = "board-133")),
+        (134, cfg!(feature = "board-134")),
         (136, jv001),
         (137, sachen8259),
         (138, sachen8259),
@@ -353,6 +358,9 @@ fn req_core_100_every_required_mapper_is_registered() {
         (193, cfg!(feature = "board-193")),
         (194, chrram),
         (195, chrram),
+        (196, cfg!(feature = "board-196")),
+        (197, cfg!(feature = "board-197")),
+        (205, cfg!(feature = "board-205")),
         (206, namcot),
         (207, taito_x1),
         (208, cfg!(feature = "board-208")),
@@ -363,8 +371,12 @@ fn req_core_100_every_required_mapper_is_registered() {
         (218, cfg!(feature = "board-218")),
         (219, cfg!(feature = "board-219")),
         (232, small),
+        (238, cfg!(feature = "board-238")),
         (243, sachen),
+        (245, cfg!(feature = "board-245")),
         (246, cfg!(feature = "board-246")),
+        (249, cfg!(feature = "board-249")),
+        (250, cfg!(feature = "board-250")),
         (262, cfg!(feature = "board-262")),
         (263, cfg!(feature = "board-263")),
         (264, cony),

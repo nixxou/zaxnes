@@ -618,6 +618,18 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             // MF-UNL-12 step 2: the BMW8544 holds an `Mmc3` whose "scanline IRQ work[s] as on a
             // normal MMC3".
             | 292
+            | 44
+            | 45
+            | 49
+            | 52
+            | 134
+            | 196
+            | 197
+            | 205
+            | 238
+            | 245
+            | 249
+            | 250
     )
 }
 
@@ -676,6 +688,18 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 268
             // MF-UNL-12 step 2: the BMW8544's MMC3 counter; see the list above.
             | 292
+            | 44
+            | 45
+            | 49
+            | 52
+            | 134
+            | 196
+            | 197
+            | 205
+            | 238
+            | 245
+            | 249
+            | 250
     )
 }
 
@@ -1908,6 +1932,14 @@ mod tests {
         // the page gives the number no submapper and the board refuses neither half of the pair.
         #[cfg(feature = "board-292")]
         expected.extend_from_slice(&[292, 292]);
+        // MAPPERS-N: the MMC3 clones hold an `Mmc3`, so each moves for 114's reason, twice. They
+        // are appended here and the list is sorted below, since the sweep runs in number order.
+        for number in [44, 45, 49, 52, 134, 196, 197, 205, 238, 245, 249, 250] {
+            if Cartridge::is_supported(number) {
+                expected.extend_from_slice(&[number, number]);
+            }
+        }
+        expected.sort_unstable();
         assert_eq!(
             moved, expected,
             "expected exactly the MMC3, the MC-ACC, the MMC5, the two MMC3 multicarts, the \
