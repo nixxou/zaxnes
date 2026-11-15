@@ -173,3 +173,13 @@ polled as fast as possible (RawInput sees nothing of an Xbox 360 pad):
 * gilrs is the slowest of the fast backends (it appears to poll every ~8 ms). Choice for B5 left to
   the owner: an XInput thread at 1 kHz (Windows, `unsafe` FFI behind `emu.realtime_input`), or SDL
   pumped much more often on the main thread.
+## B5 step 3: the pad's own report rate (2026-11-15)
+
+`padbench rate` timestamps every new XInput `dwPacketNumber` while the stick moves (or just drifts):
+the owner's Xbox 360 pad, wired, reports every **8.00 ms (125 Hz)**, 5th-95th percentile 7.93-8.03
+ms, its default USB `bInterval` of 8. Its own latency is therefore 4 ms on average; Zaxnes adds 9.3 ms
+today (one read a frame) and about 0.3 ms with a 1 kHz read. Public figures (Gamepadla's hardware
+tester, community USB descriptors): 100-250 Hz for most pads over Bluetooth, dongles and many USB
+pads, about 200 Hz for an Xbox 360 wireless dongle, 250 Hz for the DualShock 4 / DualSense over USB;
+Bluetooth LE allows at most ~133 reports/s at its 7.5 ms minimum interval. Reading at 1 kHz asks
+nothing of the pad: it only stops adding delay on top of the pad's own.
