@@ -2652,7 +2652,22 @@ impl Ppu2C02 {
     #[inline(never)]
     fn read_buffer_from_fetch<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) -> bool {
         // X - D: 6 in alignments 2 and 3, 5 in 0 and 1.
-        let latch_dots: i32 = if self.alignment >= 2 { 6 } else { 5 };
+        // On the PAL 2C07 (16 dots for 5 CPU cycles) the read lands at a different point of its
+        // dot from one cycle to the next: X - D is 6 on the two cycles whose dot accumulator is
+        // 3 or 4, 5 on the three others (Visual 2C07 netlist, lot FIDPLUS-C C3c, `r2007`: 5 in
+        // 60 % of the reads and 6 in 40 %, whatever the dot; every other split of the five
+        // phases leaves 49 000 to 102 000 differing dots a frame, this one 8 400).
+        let latch_dots: i32 = if self.timing.region == NesRegion::Pal {
+            if self.dot_accumulator >= 3 {
+                6
+            } else {
+                5
+            }
+        } else if self.alignment >= 2 {
+            6
+        } else {
+            5
+        };
         if self.prepaid_dots != 0 {
             return false;
         }
@@ -2675,7 +2690,7 @@ impl Ppu2C02 {
             // Checked on Zelda II's title split, replayed on the netlist (A5).
             if matches!(latch_dot, 8..=256 | 328 | 336)
                 && latch_dot % 8 == 0
-                && self.netlist_measured_region()
+                && (self.netlist_measured_region() || self.timing.region == NesRegion::Pal)
             {
                 if latch_dot != 256 {
                     self.increment_y();
@@ -2691,7 +2706,7 @@ impl Ppu2C02 {
         let residue = self.fetch_bus_value(cart.as_deref());
         self.read_buffer = residue;
         self.run_dots(1, cart);
-        if latch_dot == 257 && self.netlist_measured_region() {
+        if latch_dot == 257 && (self.netlist_measured_region() || self.timing.region == NesRegion::Pal) {
             // Lot FIDPLUS-2 (A5, netlist): on dot 257 the horizontal copy overrides the read's
             // coarse X increment; only its Y increment is left.
             self.increment_y();

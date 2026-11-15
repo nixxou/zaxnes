@@ -1370,6 +1370,32 @@ fn fidplus_c3c_pal_rendering_switch_takes_four_dots() {
     assert!(!increments(false), "NTSC: the switch is in force by dot 16");
 }
 
+/// Lot FIDPLUS-C C3c (Visual 2C07 netlist, `r2007`): on the PAL 2C07 a `$2007` read during
+/// rendering latches 6 dots after its access dot on the cycles whose dot accumulator is 3 or 4,
+/// 5 on the others. Read on dot 98: with 6 the latch is dot 104, which increments coarse X anyway,
+/// so the two merge (one X step by the end of dot 104); with 5 it is dot 103 (two steps).
+#[test]
+fn fidplus_c3c_pal_2007_read_latch_follows_the_cycle_phase() {
+    fn coarse_x_steps(phase: i32) -> u16 {
+        let mut fixture = TileFixture::new();
+        fixture.core.set_region(zax_nes::NesRegion::Pal);
+        fixture.core.set_bus_conflicts(true);
+        fixture.set_mask(0x0A);
+        fixture.core.run_frame(0);
+        park_on_dot(&mut fixture, 98);
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        ppu.set_dot_accumulator_phase(phase);
+        let before = ppu.vram_v() & 0x1F;
+        ppu.read(7, None);
+        assert_eq!(104, ppu.dot(), "the read runs to its latch");
+        (ppu.vram_v() & 0x1F).wrapping_sub(before) & 0x1F
+    }
+    for phase in 0..5 {
+        let expected = if phase >= 3 { 1 } else { 2 };
+        assert_eq!(expected, coarse_x_steps(phase), "accumulator {phase}");
+    }
+}
+
 /// Lot FIDPLUS-C C3c (Visual 2C07 netlist, `g2000`, `g2001px`): the PAL 2C07 copies `t`'s
 /// vertical bits into `v` from dot 278 of the pre-render line, the 2C02 from dot 280. By dot 279
 /// the copy is in `v` on PAL and not yet on NTSC.

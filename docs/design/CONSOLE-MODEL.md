@@ -84,7 +84,18 @@ Revision A fails `5-MMC3` (both suites) and `6.MMC3_rev_B`: no single model pass
   the 2C02 from 280 (`v` holds the copy at the end of dot 278 in every frame, `vcopy.py`). Window
   278-302 on PAL (`Ppu2C02::vertical_copy_dots`; its end shifted too, unmeasured): `g2001px` 0
   differing dots on every whole frame, `g2000` 1 a frame (line 239 dot 256). Test
-  `fidplus_c3c_pal_vertical_copy_starts_on_dot_278`. Still open from the earlier steps:
+  `fidplus_c3c_pal_vertical_copy_starts_on_dot_278`.
+  Step 6, `r2007` (`$2007` reads during rendering; the judge needs `--bus-conflicts`, the
+  application's default): the read's X and Y increment comes **5 dots after the access on the 2C07
+  in 60 % of the reads and 6 in 40 %** (`r2007lat.py`; the 2C02: always 6), whatever the dot: the
+  read lands at another point of its dot from one cycle of the 16-dots-for-5-cycles pattern to the
+  next. Of the ten two-of-five splits of the dot accumulator, only "6 on 3 and 4" fits (8 400
+  differing dots a frame, almost all the 1-2-dot recording instants; 49 000 to 102 000 for the
+  others); the A5 merges with the pipeline's own increments (dots multiple of 8, dot 257) hold on
+  PAL too. Rendered lines: one long run left over five frames. Test
+  `fidplus_c3c_pal_2007_read_latch_follows_the_cycle_phase`. Left: on lines 240-310 the
+  increment of a read with rendering off shows 4-5 dots later than in Zaxnes (for `rmw`).
+  Still open from the earlier steps:
   the first frame's `$2007` increments seen 4-5 dots later on the netlist (line 241).
   Corpus at reset phase e3 so far (alignment 3 against 0, differing dots, whole frames): `g2005`
   31 543 / 25 103 and `g2005px` 7 508 / 2 034 (the alignment-3 `$2005` open-bus effects look
