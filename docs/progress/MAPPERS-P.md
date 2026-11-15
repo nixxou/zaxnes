@@ -70,7 +70,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 362 | `mapper_362.c` | 99 | 2 | 0 | todo |
 | 368 | `mapper_368.c` | 106 | 2 | 0 | done (batch 18, `IrqP`) |
 | 369 | `mapper_369.c` | 221 | 1 | 0 | todo |
-| 370 | `mapper_370.c` | 117 | 1 | 0 | todo |
+| 370 | `mapper_370.c` | 117 | 1 | 0 | done (batch 23, `Mmc3P`) |
 | 372 | `mapper_372.c` | 96 | 1 | 0 | done (batch 12, `Mmc3P`) |
 | 374 | `mapper_374.c` | 56 | 4 | 0 | done (batch 11, `Mmc1Outer`) |
 | 375 | `mapper_375.c` | 77 | 1 | 0 | done (batch 3, `MultiP`) |
@@ -236,3 +236,4 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 * Batch 21: 422 and 534 in `Mmc3P`, puNES's own `mapper_126.c` model (Zaxnes's 126 follows
   Mesen2's `MMC3_126.h` and is left as it is). 534 inverts `$C000`/`$C001` data.
 * Batch 22: `Mmc1Outer` 543 (outer register shifted in through `$5000` D3, WRAM bank from it and the MMC1's `$A000` D3, power-on `$E000` = `$0E` via `Mmc1::force_prg_register`).
+* Batch 23: `Mmc3P` 370 (CIRAM page per table from R0-R5 D7 in mode 1). **Fix**: `IrqBoard::nametable_page` was not forwarded for `board-irq-p`, so 417's per-table pages (batch 18) were never asked; it now is, for `board-mmc3-p` too (a cold, out-of-line dispatch run after register writes only). Both have a page test now.

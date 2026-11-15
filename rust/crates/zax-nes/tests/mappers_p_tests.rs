@@ -939,3 +939,37 @@ fn mappers_p_543_shifts_its_outer_bank_in() {
     core.mapper_write(0x5000, 0x00);
     assert_eq!([60, 61, 62, 63], core.prg_windows());
 }
+
+/// `mapper_370.c`: mode 1 (`$5001`) takes a CIRAM page per table from R0/R1 D7, inverted; the
+/// outer bank is `$50xx` D3-D5.
+#[cfg(feature = "board-370")]
+#[test]
+fn mappers_p_370_pages_ciram_from_chr_registers() {
+    let mut core = MapperRom::new(370).prg(64).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    core.mapper_write(0x5009, 0);
+    assert_eq!([17, 18, 30, 31], core.prg_windows());
+    core.mmc3_bank(0, 0x80);
+    core.mmc3_bank(1, 0x00);
+    core.mapper_write(0x5001, 0);
+    let cartridge = core.cartridge_mut().unwrap();
+    assert_eq!(
+        [0, 0, 1, 1],
+        [0, 1, 2, 3].map(|table| cartridge.nametable_page(table))
+    );
+}
+
+/// `mapper_417.c`: `$8050-$8053` D0 the CIRAM page of each table.
+#[cfg(feature = "board-417")]
+#[test]
+fn mappers_p_417_pages_ciram_per_table() {
+    let mut core = MapperRom::new(417).prg(16).chr(64).load();
+    for (index, value) in [1u8, 0, 0, 1].into_iter().enumerate() {
+        core.mapper_write(0x8050 + u16::try_from(index).unwrap(), value);
+    }
+    let cartridge = core.cartridge_mut().unwrap();
+    assert_eq!(
+        [1, 0, 0, 1],
+        [0, 1, 2, 3].map(|table| cartridge.nametable_page(table))
+    );
+}

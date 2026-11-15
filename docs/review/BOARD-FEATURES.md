@@ -820,6 +820,7 @@ dispatch is the generic path of the exotic ones only.
 | `board-536` | 536 | alias of 195 (`registry::board_number`): puNES `map_init_195` (puNES; MAPPERS-P). Requires `board-mmc3-chrram` | — | — (unit test) | **on** |
 | `board-422` | 422 | `Mmc3P` kind M422 (IrqBoard): BS-300/BS-400 multicarts, puNES's TEC9719 reading (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
 | `board-534` | 534 | `Mmc3P` kind M534 (IrqBoard): ING003C, 422 with inverted IRQ latch data (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-370` | 370 | `Mmc3P` kind M370 (IrqBoard): F600, CIRAM page per table in mode 1 (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
 | `board-53` | 53 | `MiscN` M53: Supervision 16-in-1, outer register at `$6000`, ROM at `$6000-$7FFF`, optional EPROM by CRC (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-487` | 487 | `MiscN` M487: NINA-03 and outer registers at `$4100`/`$4180`, Color Dreams register in the second half (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-518` | 518 | `MiscN` M518: Dance 2000, `$5000`/`$5200`, open bus over `$8000-$FFFF`, CHR page 0 from the nametable address (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |

@@ -83,6 +83,9 @@ pub enum Mmc3PKind {
     M422,
     /// 534, `mapper_126.c` (ING003C): 422's board whose `$C000`/`$C001` data is inverted.
     M534,
+    /// 370, `mapper_370.c` (F600): the address at `$5000-$5FFF` the outer bank; mode 1 takes a
+    /// CIRAM page per table from the CHR registers' D7, as the `TxSROM` does.
+    M370,
 }
 
 impl Mmc3PKind {
@@ -115,6 +118,7 @@ impl Mmc3PKind {
             412 => Self::M412,
             422 => Self::M422,
             534 => Self::M534,
+            370 => Self::M370,
             _ => return None,
         })
     }
@@ -146,6 +150,7 @@ impl Mmc3PKind {
             Self::M412 => 412,
             Self::M422 => 422,
             Self::M534 => 534,
+            Self::M370 => 370,
         }
     }
 }
@@ -374,6 +379,7 @@ impl Mmc3P {
                 }
             }
             Mmc3PKind::M422 | Mmc3PKind::M534 => self.prg_page_126(slot, page),
+            Mmc3PKind::M370 => ((o[0] & 0x38) << 1) | (page & (0x1F >> ((o[0] & 0x20) >> 5))),
             _ => page,
         }
     }
@@ -403,6 +409,23 @@ impl Mmc3P {
             }
         };
         (base & !mask) | (value & mask)
+    }
+
+    /// `chr_swap_mmc3_370`.
+    fn chr_page_370(&self, page: i32) -> i32 {
+        let r = i32::from(self.outer[0]);
+        ((r & 0x07) << 7) | (page & (0xFF >> ((!r & 0x04) >> 2)))
+    }
+
+    /// `mirroring_fix_mmc3_370` in mode 1: the CIRAM page of `table`, D7 of the CHR register
+    /// that serves it inverted.
+    fn page_370(&self, table: usize) -> i32 {
+        let register = if self.mmc3.select() & 0x80 != 0 {
+            2 + table
+        } else {
+            table >> 1
+        };
+        i32::from((self.mmc3.bank_register(register) >> 7) ^ 0x01)
     }
 
     /// `chr_swap_mmc3_126` for 422 and 534 (`reg0 ^ $20`, the non-"old dump" reading); `slot` is
@@ -548,6 +571,8 @@ impl Mmc3P {
             // `chr_swap_mmc3_412` in the NROM mode: an 8 KiB bank from `reg[0]` D2 up.
             let base = (i32::from(self.outer[0]) >> 2) << 3;
             std::array::from_fn(|slot| base | i32::try_from(slot).unwrap_or(0))
+        } else if self.kind == Mmc3PKind::M370 {
+            std::array::from_fn(|slot| self.chr_page_370(raw_chr[slot]))
         } else if matches!(self.kind, Mmc3PKind::M422 | Mmc3PKind::M534) {
             std::array::from_fn(|slot| self.chr_page_126(slot, raw_chr[slot]))
         } else if self.kind == Mmc3PKind::M399 {
@@ -674,6 +699,8 @@ impl Mmc3P {
                     r[usize::from(address & 0x03)] = data;
                 }
             }
+            // `extcl_cpu_wr_mem_370`: `$5000-$5FFF`, the low address byte.
+            Mmc3PKind::M370 if (0x5000..=0x5FFF).contains(&address) => r[0] = address & 0xFF,
             // `extcl_cpu_wr_mem_411`: `$5000-$5FFF`, A0 the register, no RAM there.
             Mmc3PKind::M411 if (0x5000..=0x5FFF).contains(&address) => {
                 r[usize::from(address & 0x0001)] = data;
@@ -802,6 +829,11 @@ impl Mapper for Mmc3P {
     /// RAM is readable; the DIP is 0 and the high address byte stands in for the bus, as
     /// [`super::Mmc3Clone`] does for its DIP reads (FIDELITY-LEADS J33).
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
+        // `extcl_cpu_rd_mem_370`: `$5000-$5FFF` reads `DIP & $80 | open bus & $7F`; the DIP is 0
+        // and the high address byte stands in for the bus (J33).
+        if self.kind == Mmc3PKind::M370 && (0x5000..=0x5FFF).contains(&address) {
+            return Some(address.to_be_bytes()[0] & 0x7F);
+        }
         if self.kind == Mmc3PKind::M334
             && (0x6000..=0x7FFF).contains(&address)
             && address & 0x0002 != 0
@@ -830,6 +862,13 @@ impl Mapper for Mmc3P {
 
     fn on_ppu_address_bus(&mut self, memory: &mut CartridgeMemory, address: u16, clock: i64) {
         self.mmc3.on_ppu_address_bus(memory, address, clock);
+    }
+
+    fn nametable_page(&self, table: i32) -> i32 {
+        if self.kind == Mmc3PKind::M370 && self.outer[0] & 0x07 == 0x01 {
+            return self.page_370(usize::try_from(table & 0x03).unwrap_or(0));
+        }
+        self.mmc3.nametable_page(table)
     }
 
     fn ppu_irq_horizon(&self) -> Option<i64> {
