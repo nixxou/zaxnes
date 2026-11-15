@@ -427,6 +427,29 @@ impl EngineHandle {
         cycles
     }
 
+    /// Lot FIDPLUS-B (B3): one slice of a frame, from where the last one stopped (or a new frame)
+    /// up to the first CPU instruction boundary at or after cycle `until`, with `word` the pad's
+    /// state now; the frame's cycles when it ended in this slice, `None` while it goes on
+    /// (`NesCore::run_frame_slice`). An engine without slices runs the whole frame.
+    pub fn run_frame_slice(&mut self, word: InputWord, until: i64) -> Option<i64> {
+        let cycles = match self.zaxnes_mut() {
+            Some(core) => core.run_frame_slice(word, until),
+            None => Some(self.engine.run_frame(word)),
+        };
+        if let Some(cycles) = cycles {
+            self.cycles = self.cycles.saturating_add(cycles);
+        }
+        self.pump_audio();
+        cycles
+    }
+
+    /// Whether a frame run in slices is in progress (lot FIDPLUS-B); never on an engine without
+    /// slices.
+    #[must_use]
+    pub fn frame_in_progress(&self) -> bool {
+        self.zaxnes().is_some_and(NesCore::frame_in_progress)
+    }
+
     /// One frame with `ahead` frames of run-ahead (AMD-041 REQ-LOOP-065), which is exact on
     /// Zaxnes. An engine without run-ahead runs the plain frame: lot FCEUX-5 is what would make
     /// it save, run N, take the frame and load, and until then the interface shows the control
