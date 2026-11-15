@@ -187,6 +187,10 @@ default = [
     "board-300",
     "board-336",
     "board-349",
+    "board-289",
+    "board-301",
+    "board-314",
+    "board-319",
 ]
 
 # MAPPERS-N umbrella (docs/progress/MAPPERS-N.md).
@@ -312,6 +316,10 @@ board-299 = ["board-latch-multi"]
 board-300 = ["board-latch-multi"]
 board-336 = ["board-latch-multi"]
 board-349 = ["board-latch-multi"]
+board-289 = ["board-latch-multi"]
+board-301 = ["board-latch-multi"]
+board-314 = ["board-latch-multi"]
+board-319 = ["board-latch-multi"]
 # MAPPERS-N end
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four

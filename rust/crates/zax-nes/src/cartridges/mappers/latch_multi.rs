@@ -157,6 +157,14 @@ pub enum LatchKind {
     M336,
     /// 349, `Unlicensed/BmcG146.h`.
     M349,
+    /// 289, `Unlicensed/Bmc60311C.h` (BMC-60311C).
+    M289,
+    /// 301, `Unlicensed/Bmc8157.h` (BMC-8157).
+    M301,
+    /// 314, `Unlicensed/Bmc64in1NoRepeat.h`.
+    M314,
+    /// 319, `Unlicensed/Hp898f.h` (HP-898F).
+    M319,
 }
 
 impl LatchKind {
@@ -223,6 +231,10 @@ impl LatchKind {
             300 => Self::M300,
             336 => Self::M336,
             349 => Self::M349,
+            289 => Self::M289,
+            301 => Self::M301,
+            314 => Self::M314,
+            319 => Self::M319,
             _ => return None,
         })
     }
@@ -288,6 +300,10 @@ impl LatchKind {
             Self::M300 => 300,
             Self::M336 => 336,
             Self::M349 => 349,
+            Self::M289 => 289,
+            Self::M301 => 301,
+            Self::M314 => 314,
+            Self::M319 => 319,
         }
     }
 
@@ -313,6 +329,10 @@ impl LatchKind {
                 | Self::M274
                 | Self::M51
                 | Self::M312
+                | Self::M289
+                | Self::M301
+                | Self::M314
+                | Self::M319
                 | Self::M285
                 | Self::M290
                 | Self::M299
@@ -967,6 +987,64 @@ impl LatchMulti {
                 self.banks.map_chr_8k(0);
                 Some(pick(a & 0x80 != 0, H, V))
             }
+            // `Bmc60311C.h:20-44`: `regs` = inner (`$8000+`), mode (`$6000`), outer (`$6001`).
+            LatchKind::M289 => {
+                let (inner, mode, outer) = (r0, i32::from(regs[1]), i32::from(regs[2]));
+                let page = outer | if mode & 0x04 != 0 { 0 } else { inner };
+                match mode & 0x03 {
+                    0 => self.prg_16k(page, page),
+                    1 => self.prg_16k(page & 0xFE, (page & 0xFE) + 1),
+                    2 => self.prg_16k(page, outer | 7),
+                    _ => {}
+                }
+                self.banks.map_chr_8k(0);
+                Some(pick(mode & 0x08 != 0, H, V))
+            }
+            // `Bmc8157.h:22-44`, DIP switch 0 (so never its open-bus case).
+            LatchKind::M301 => {
+                let inner0 = (a >> 2) & 0x07;
+                let inner1 = ((a >> 7) & 0x01) | ((a >> 8) & 0x02);
+                let outer = (((a >> 8) & 0x01) << 6) | (((a >> 5) & 0x03) << 3);
+                let base = match inner1 {
+                    0 => 0,
+                    1 => inner0,
+                    _ => 7,
+                };
+                self.prg_16k(outer | inner0, outer | base);
+                self.banks.map_chr_8k(0);
+                Some(pick(a & 0x02 != 0, H, V))
+            }
+            // `Bmc64in1NoRepeat.h:20-35`; `regs[4]` keeps the `$8000` page the UNROM-like mode
+            // leaves in place.
+            LatchKind::M314 => {
+                let r1 = i32::from(regs[1]);
+                let bank = ((r1 & 0x1F) << 1) | ((r1 >> 6) & 0x01);
+                if r0 & 0x80 != 0 {
+                    if r1 & 0x80 != 0 {
+                        let page = (r1 & 0x1F) << 1;
+                        self.prg_16k(page, page + 1);
+                        self.regs[4] = page.to_le_bytes()[0];
+                    } else {
+                        self.prg_16k(bank, bank);
+                        self.regs[4] = bank.to_le_bytes()[0];
+                    }
+                } else {
+                    self.prg_16k(i32::from(self.regs[4]), bank);
+                }
+                self.banks
+                    .map_chr_8k((i32::from(regs[2]) << 2) | ((r0 >> 1) & 0x03));
+                Some(pick(r0 & 0x20 != 0, H, V))
+            }
+            // `Hp898f.h:18-27`.
+            LatchKind::M319 => {
+                let r1 = i32::from(regs[1]);
+                let prg = (r1 >> 3) & 7;
+                let mask = (r1 >> 4) & 4;
+                self.banks
+                    .map_chr_8k(((r0 >> 4) & 0x07) & !(((r0 & 0x01) << 2) | (r0 & 0x02)));
+                self.prg_16k(prg & !mask, prg | mask);
+                Some(pick(r1 & 0x80 != 0, V, H))
+            }
             // `Bmc255.h:14-21`.
             LatchKind::M255 => {
                 let bit = i32::from(a & 0x1000 == 0);
@@ -1140,6 +1218,32 @@ impl LatchMulti {
                 }
                 self.regs[3] = value & 0x07;
             }
+            // `Bmc60311C.h:46-60`.
+            LatchKind::M289 => {
+                if address >= 0x8000 {
+                    self.regs[0] = value & 0x07;
+                } else {
+                    match address & 0xE001 {
+                        0x6000 => self.regs[1] = value & 0x0F,
+                        0x6001 => self.regs[2] = value,
+                        _ => {}
+                    }
+                }
+            }
+            // `Bmc64in1NoRepeat.h:37-44`.
+            LatchKind::M314 => {
+                if address < 0x8000 {
+                    self.regs[usize::from(address & 0x03)] = value;
+                } else {
+                    self.regs[3] = value;
+                }
+            }
+            // `Hp898f.h:29-34`: `(addr & $6000) == $6000`, A2 the register.
+            LatchKind::M319 => {
+                if address & 0x6000 == 0x6000 {
+                    self.regs[usize::from((address & 0x04) >> 2)] = value;
+                }
+            }
             LatchKind::M113
             | LatchKind::M177
             | LatchKind::M283
@@ -1175,6 +1279,11 @@ impl LatchMulti {
             LatchKind::M108 => self.regs[0] = 0xFF,
             // `Kaiser7016.h`: "_prgReg = 8".
             LatchKind::M306 => self.regs[0] = 8,
+            // `Bmc64in1NoRepeat.h:16-19`.
+            LatchKind::M314 => {
+                self.regs[0] = 0x80;
+                self.regs[1] = 0x43;
+            }
             // `Bs5.h:16-19`: every slot -1.
             LatchKind::M286 => self.regs = [0xFF; 8],
             _ => {}
@@ -1271,7 +1380,12 @@ impl Mapper for LatchMulti {
             // `Bmc51.h:10` (registers from `$6000`), `Nina03_06.h:12,20` (`$4100-$5FFF` under
             // `$E100`) and `Henggedianzi179.h:13` (`$5000-$5FFF`) go through `latch`.
             // and `Kaiser7013B.h:8` (registers from `$6000`).
-            LatchKind::M51 | LatchKind::M312 => (0x6000..=0x7FFF).contains(&address),
+            LatchKind::M51 | LatchKind::M289 | LatchKind::M312 | LatchKind::M319 => {
+                (0x6000..=0x7FFF).contains(&address)
+            }
+            // `Bmc60311C.h:10`, `Hp898f.h:10` (registers from `$6000`) and
+            // `Bmc64in1NoRepeat.h:13` (`$5000-$5003`).
+            LatchKind::M314 => (0x5000..=0x5003).contains(&address),
             LatchKind::M113 => (0x4100..=0x5FFF).contains(&address) && address & 0xE100 == 0x4100,
             LatchKind::M179 => (0x5000..=0x5FFF).contains(&address),
             // `Mapper120.h:9` (`$41FF`) and `Lh32.h:12` (`$6000`): the register is the bank of
@@ -1340,6 +1454,8 @@ impl Mapper for LatchMulti {
                 | LatchKind::M312
                 | LatchKind::M306
                 | LatchKind::M283
+                | LatchKind::M289
+                | LatchKind::M319
                 | LatchKind::M51
                 | LatchKind::M108
                 | LatchKind::M120
