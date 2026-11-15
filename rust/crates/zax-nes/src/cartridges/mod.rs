@@ -967,6 +967,7 @@ const fn mmc3_p_board(mapper: i32) -> bool {
             | 370
             | 344
             | 432
+            | 356
     )
 }
 
@@ -2239,7 +2240,7 @@ mod tests {
             315, 322, 327, 334, 339, 345, 361, 372, 377, 395, 399, 401, 410, 411, 420, 455, 456,
             457, 516, 393, 412,
             // MAPPERS-P: 248 and 536 run the boards of 115 and 195 (`registry::board_number`).
-            248, 536, 422, 534, 370, 344, 432,
+            248, 536, 422, 534, 370, 344, 432, 356,
         ] {
             if Cartridge::is_supported(number) {
                 expected.extend_from_slice(&[number, number]);

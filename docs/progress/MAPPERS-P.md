@@ -61,7 +61,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 353 | `mapper_353.c` | 149 | 1 | 0 | todo |
 | 354 | `mapper_354.c` | 111 | 0 | 0 | done (batch 4, `MultiP`) |
 | 355 | `mapper_355.c` | 258 | 4 | 1 | todo |
-| 356 | `mapper_356.c` | 106 | 1 | 0 | todo |
+| 356 | `mapper_356.c` | 106 | 1 | 0 | done (batch 25, `Mmc3P`) |
 | 357 | `mapper_357.c` | 118 | 1 | 0 | done (batch 18, `IrqP`) |
 | 358 | `mapper_358.c` | 76 | 4 | 0 | done (batch 3, `JyCompany` + `JyMulticart`) |
 | 359 | `mapper_359.c` | 293 | 3 | 0 | todo |
@@ -240,3 +240,4 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 * Batch 24: `Mmc3P` 344 and 432, whose DIP / solder-pad read replaces `$8000-$FFFF`:
   `Mmc3P::rom_windows` answers `NO_ROM_WINDOW` while it is on, so the read reaches
   `try_read_prg`. `write_low`'s tail moved to `after_low_write`.
+* Batch 25: `Mmc3P` 356 (410's registers, CHR-RAM while `reg[2]` D5 is clear, four-screen from D6; `Mmc3P::a000` keeps the chip's last `$A000` to return to, in the save state).

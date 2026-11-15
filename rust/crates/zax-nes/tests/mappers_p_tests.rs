@@ -1003,3 +1003,17 @@ fn mappers_p_432_has_nrom_128_and_a_pad_read() {
     core.mapper_write(0x6000, 0x01);
     assert_eq!(0, core.read_memory(0x8001));
 }
+
+/// `mapper_356.c`: four registers in turn; `reg[2]` D6 is four-screen.
+#[cfg(feature = "board-356")]
+#[test]
+fn mappers_p_356_has_a_four_screen_mode() {
+    let mut core = MapperRom::new(356).prg(64).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    for value in [0x00, 0x10, 0x6F, 0x30] {
+        core.mapper_write(0x6000, value);
+    }
+    assert_eq!([17, 18, 30, 31], core.prg_windows());
+    let cartridge = core.cartridge_mut().unwrap();
+    assert_eq!(zax_nes::NametableMirroring::FourScreen, cartridge.mirroring());
+}

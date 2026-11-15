@@ -92,6 +92,9 @@ pub enum Mmc3PKind {
     /// 432, `mapper_432.c` (Realtec 8090): `$6000`/`$6001` (even/odd) the solder pad and the outer
     /// bank, NROM modes, a solder-pad read over `$8000-$FFFF`; nesdev "NES 2.0 Mapper 432".
     M432,
+    /// 356, `mapper_356.c` (JY-215 / 7-in-1 *Rockman*): mapper 410's four registers, CHR-RAM
+    /// while `reg[2]` D5 is clear, four-screen mirroring from `reg[2]` D6.
+    M356,
 }
 
 impl Mmc3PKind {
@@ -127,6 +130,7 @@ impl Mmc3PKind {
             370 => Self::M370,
             344 => Self::M344,
             432 => Self::M432,
+            356 => Self::M356,
             _ => return None,
         })
     }
@@ -161,6 +165,7 @@ impl Mmc3PKind {
             Self::M370 => 370,
             Self::M344 => 344,
             Self::M432 => 432,
+            Self::M356 => 356,
         }
     }
 }
@@ -180,6 +185,9 @@ pub struct Mmc3P {
     submapper: u8,
     /// The PRG-ROM size in bytes, which 432's solder-pad decode reads (`less1024`).
     prg_size: usize,
+    /// The last value written to the chip's `$A000`, which 356 returns to when it leaves its
+    /// four-screen mode (the chip keeps no copy).
+    a000: u8,
 }
 
 impl Mmc3P {
@@ -191,6 +199,7 @@ impl Mmc3P {
             index: 0,
             chr_ram: memory.rom().chr_rom().is_empty(),
             prg_size: memory.rom().prg_rom().len(),
+            a000: 0,
             submapper: {
                 let header = memory.rom().header();
                 if header.is_nes20 {
@@ -207,7 +216,11 @@ impl Mmc3P {
         self.index = 0;
         match self.kind {
             // `map_init_372`/`_401`/`_410`/`_420`: "reg[2] = 0x0F", the CHR mask fully open.
-            Mmc3PKind::M372 | Mmc3PKind::M401 | Mmc3PKind::M410 | Mmc3PKind::M420 => {
+            Mmc3PKind::M356
+            | Mmc3PKind::M372
+            | Mmc3PKind::M401
+            | Mmc3PKind::M410
+            | Mmc3PKind::M420 => {
                 self.outer[2] = 0x0F;
             }
             // `map_init_399`: banks 0, 1 for PRG and CHR.
@@ -320,6 +333,11 @@ impl Mmc3P {
                 base | (page & (!o[3] & 0x1F))
             }
             Mmc3PKind::M410 => (o[1] | ((o[2] & 0xC0) << 2)) | (page & (!o[3] & 0x3F)),
+            // `prg_swap_mmc3_356`: 410's offset, but masked (`base & ~mask`).
+            Mmc3PKind::M356 => {
+                let mask = !o[3] & 0x3F;
+                ((o[1] | ((o[2] & 0xC0) << 2)) & !mask) | (page & mask)
+            }
             // `prg_swap_mmc3_411`: `$5000` D6 the NROM mode, D1 NROM-256.
             Mmc3PKind::M411 => {
                 if o[0] & 0x40 != 0 {
@@ -568,6 +586,10 @@ impl Mmc3P {
             Mmc3PKind::M401 | Mmc3PKind::M410 => {
                 (o[0] | ((o[2] & 0xF0) << 4)) | (page & (0xFF >> (!o[2] & 0x0F)))
             }
+            Mmc3PKind::M356 => {
+                let mask = 0xFF >> (!o[2] & 0x0F);
+                ((((o[2] & 0xF0) << 4) | o[0]) & !mask) | (page & mask)
+            }
             Mmc3PKind::M411 => {
                 let base = ((o[0] & 0x10) << 4) | ((o[1] & 0x04) << 5);
                 base | (page & (0x7F | ((o[1] & 0x02) << 6)))
@@ -634,6 +656,8 @@ impl Mmc3P {
                 Mmc3PKind::M327 => self.outer[0] & 0x10 != 0,
                 Mmc3PKind::M372 => self.outer[2] & 0x20 != 0,
                 Mmc3PKind::M410 => self.outer[2] & 0x40 != 0,
+                // `chr_swap_mmc3_356`: the RAM while D5 is **clear**.
+                Mmc3PKind::M356 => self.outer[2] & 0x20 == 0,
                 Mmc3PKind::M393 => self.outer[0] & 0x08 != 0,
                 _ => false,
             }
@@ -686,6 +710,17 @@ impl Mmc3P {
 
     /// The mirroring a kind imposes over the chip's (`mirroring_fix_mmc3_345`: D5 single-screen).
     fn settle_mirroring(&self, memory: &mut CartridgeMemory) {
+        // `mirroring_fix_mmc3_356`: D6 of `reg[2]` is four-screen (the PPU's 4 KiB).
+        if self.kind == Mmc3PKind::M356 {
+            memory.set_mirroring(if self.outer[2] & 0x40 != 0 {
+                NametableMirroring::FourScreen
+            } else if self.a000 & 0x01 != 0 {
+                NametableMirroring::Horizontal
+            } else {
+                NametableMirroring::Vertical
+            });
+            return;
+        }
         if self.kind == Mmc3PKind::M345 && self.outer[0] & 0x20 != 0 {
             memory.set_mirroring(if self.outer[0] & 0x10 != 0 {
                 NametableMirroring::SingleScreenB
@@ -826,7 +861,9 @@ impl Mmc3P {
                 r[usize::from(address & 0x0001)] = data;
             }
             // `extcl_cpu_wr_mem_401`/`_410`: four registers in turn until `reg[3]` D6 locks them.
-            Mmc3PKind::M401 | Mmc3PKind::M410 if (0x6000..=0x7FFF).contains(&address) => {
+            Mmc3PKind::M356 | Mmc3PKind::M401 | Mmc3PKind::M410
+                if (0x6000..=0x7FFF).contains(&address) =>
+            {
                 if r[3] & 0x40 == 0 && writable {
                     r[usize::from(self.index)] = data;
                     self.index = (self.index + 1) & 0x03;
@@ -869,6 +906,7 @@ impl Mapper for Mmc3P {
             writer.write_u16(value);
         }
         writer.write_u8(self.index);
+        writer.write_u8(self.a000);
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -877,6 +915,7 @@ impl Mapper for Mmc3P {
             *value = reader.read_u16()?;
         }
         self.index = reader.read_u8()? & 0x03;
+        self.a000 = reader.read_u8()?;
         self.refresh();
         Ok(())
     }
@@ -916,6 +955,9 @@ impl Mapper for Mmc3P {
         // `extcl_cpu_wr_mem_393`: every chip write is also the UNROM latch.
         if self.kind == Mmc3PKind::M393 {
             self.outer[1] = u16::from(value);
+        }
+        if address & 0xE001 == 0xA000 {
+            self.a000 = value;
         }
         // `extcl_cpu_wr_mem_516`: a write with A4 set also latches A0-A3.
         if self.kind == Mmc3PKind::M516 && address & 0x0010 != 0 {
