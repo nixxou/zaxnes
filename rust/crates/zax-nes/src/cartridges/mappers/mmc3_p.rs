@@ -120,6 +120,14 @@ pub enum Mmc3PKind {
     /// the 8 KiB CHR-RAM beside the CHR-ROM (bank D0-D1 of the register), and the value 1 makes
     /// the nametables four-screen in the CHR-RAM's second 4 KiB.
     M512,
+    /// 406, `mapper_406.c` (*Haradius Zero*, *Sidewinder*): an MMC3 whose PRG-ROM is a flash chip
+    /// (Macronix MX29F040 on submapper 0, AMD AM29F040 on 1), no WRAM, the chip's address lines
+    /// crossed (submapper 0 swaps A0 and A1, submapper 1 flips A13-A14 of `$8000-$9000` and
+    /// `$E000-$FFFF`).
+    M406,
+    /// 451, `mapper_451.c` (*Haratyler HP/MP*): an AMIC A29040B flash PRG-ROM; the MMC3 is only
+    /// mirroring and IRQ, fed from the address lines, and `$E000` A0-A1 the banks.
+    M451,
 }
 
 impl Mmc3PKind {
@@ -162,6 +170,8 @@ impl Mmc3PKind {
             555 => Self::M555,
             369 => Self::M369,
             512 => Self::M512,
+            406 => Self::M406,
+            451 => Self::M451,
             _ => return None,
         })
     }
@@ -203,6 +213,8 @@ impl Mmc3PKind {
             Self::M555 => 555,
             Self::M369 => 369,
             Self::M512 => 512,
+            Self::M406 => 406,
+            Self::M451 => 451,
         }
     }
 }
@@ -240,9 +252,16 @@ pub struct Mmc3P {
     /// derived by [`Mmc3P::refresh`], so not saved.
     ram_windows: u8,
     ram_banks: [u8; 8],
+    /// 406's and 451's flash command sequence and busy countdown (`sst39sf040.sequence`,
+    /// `.time_out`), saved for those kinds only.
+    flash_sequence: u8,
+    flash_busy: u32,
 }
 
 impl Mmc3P {
+    /// The 64 KiB sectors of 406's and 451's chips (`sst39sf040_init(…, 65536)`).
+    const FLASH_SECTOR: u32 = 0x1_0000;
+
     pub(crate) fn new(memory: &CartridgeMemory, kind: Mmc3PKind) -> Self {
         Self {
             mmc3: Mmc3::new(memory, kind.number()),
@@ -257,6 +276,8 @@ impl Mmc3P {
             expired_555: false,
             ram_windows: 0,
             ram_banks: [0; 8],
+            flash_sequence: 0,
+            flash_busy: 0,
             chr_269: if kind == Mmc3PKind::M269 {
                 Self::chr_269(memory)
             } else {
@@ -270,6 +291,101 @@ impl Mmc3P {
                     0
                 }
             },
+        }
+    }
+
+    /// Whether the flash chip answers reads itself (software ID or an erase running), which takes
+    /// the ROM windows off the cached path.
+    const fn flash_answers(&self) -> bool {
+        matches!(self.kind, Mmc3PKind::M406 | Mmc3PKind::M451)
+            && (self.flash_sequence == 0x90 || self.flash_busy != 0)
+    }
+
+    /// The chip's manufacturer and model IDs (`map_init_406`/`_451`).
+    const fn flash_ids(&self) -> (u8, u8) {
+        match self.kind {
+            Mmc3PKind::M451 => (0x37, 0x86),
+            _ if self.submapper == 0 => (0xC2, 0xA4),
+            _ => (0x01, 0xA4),
+        }
+    }
+
+    /// `sst39sf040_write`: the JEDEC command sequence, the unlock addresses taken from the chip
+    /// address (its PRG-ROM offset) `& $7FFF`. A program `AND`s the byte, as flash does (puNES
+    /// stores it; J37); erases are 64 KiB sectors, the countdown one CPU cycle per byte.
+    fn write_flash(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        let Some(chip) = self
+            .mmc3
+            .banks()
+            .and_then(|banks| banks.prg_rom_offset(address))
+        else {
+            return;
+        };
+        let (first, second) = if self.kind == Mmc3PKind::M451 {
+            (0x0555, 0x02AA)
+        } else {
+            (0x5555, 0x2AAA)
+        };
+        let command = chip & 0x7FFF;
+        match self.flash_sequence {
+            0x01 | 0x81 => {
+                if command == second && value == 0x55 {
+                    self.flash_sequence += 1;
+                }
+            }
+            0x02 => {
+                if command == first {
+                    self.flash_sequence = value;
+                }
+            }
+            0x82 => {
+                let size = self.prg_size;
+                if value == 0x30 {
+                    if chip < size {
+                        memory.flash_erase_sector(chip);
+                        self.flash_busy = Self::FLASH_SECTOR;
+                    }
+                } else if command == first && value == 0x10 {
+                    for sector in (0..size).step_by(Self::FLASH_SECTOR as usize) {
+                        memory.flash_erase_sector(sector);
+                    }
+                    self.flash_busy = u32::try_from(size).unwrap_or(u32::MAX);
+                }
+            }
+            0x90 => {
+                if value == 0xF0 {
+                    self.flash_sequence = 0;
+                }
+            }
+            0xA0 => {
+                memory.flash_program(chip, value);
+                self.flash_sequence = 0;
+            }
+            // `default`, `0x00` and `0x80`: the first unlock byte.
+            _ => {
+                if command == first && value == 0xAA {
+                    self.flash_sequence = self.flash_sequence.wrapping_add(1);
+                }
+            }
+        }
+    }
+
+    /// `extcl_cpu_wr_mem_451`: the MMC3 fed from the address lines.
+    fn write_451(&mut self, memory: &mut CartridgeMemory, address: u16) {
+        match address & 0xE000 {
+            0xA000 => self
+                .mmc3
+                .write_register(memory, 0xA000, u8::from(address & 0x01 != 0)),
+            0xC000 => {
+                let low = address.to_le_bytes()[0];
+                self.mmc3
+                    .write_register(memory, 0xC000, low.wrapping_sub(1));
+                self.mmc3.write_register(memory, 0xC001, 0);
+                let ack = if low == 0xFF { 0xE000 } else { 0xE001 };
+                self.mmc3.write_register(memory, ack, 0);
+            }
+            0xE000 => self.outer[0] = address & 0x03,
+            _ => {}
         }
     }
 
@@ -356,6 +472,8 @@ impl Mmc3P {
         self.raw_100 = Self::RAW_100_POWER_ON;
         self.timer_555 = 0;
         self.expired_555 = false;
+        self.flash_sequence = 0;
+        self.flash_busy = 0;
         match self.kind {
             // `map_init_372`/`_401`/`_410`/`_420`: "reg[2] = 0x0F", the CHR mask fully open.
             Mmc3PKind::M356
@@ -562,6 +680,8 @@ impl Mmc3P {
             Mmc3PKind::M369 => 0x20 | (page & 0x1F),
             // `prg_swap_mmc3_555`: base `reg[0]` D2 (256 KiB), mask from D0-D1.
             Mmc3PKind::M555 => ((o[0] & 0x04) << 3) | (page & (((o[0] & 0x03) << 3) | 0x07)),
+            // `prg_swap_mmc3_406`.
+            Mmc3PKind::M406 => page & 0x3F,
             Mmc3PKind::M353 => self.prg_page_353(slot, page),
             Mmc3PKind::M344 | Mmc3PKind::M432 => self.prg_page_dip(slot, page),
             _ => page,
@@ -847,12 +967,21 @@ impl Mmc3P {
         };
         let prg = if self.kind == Mmc3PKind::M369 {
             self.prg_369(prg)
+        } else if self.kind == Mmc3PKind::M451 {
+            // `prg_fix_451`: the chip's own banks are never written.
+            let reg = i32::from(self.outer[0]);
+            let inner = (reg & 0x01) | ((reg & 0x02) << 2);
+            [0, 0x10 + inner, 0x20 + inner, 0x30]
         } else {
             prg
         };
         let raw_chr = self.mmc3_chr();
         let chr: [i32; BankWindows::CHR_WINDOWS] = if self.kind == Mmc3PKind::M369 {
             self.chr_369(&raw_chr)
+        } else if self.kind == Mmc3PKind::M451 {
+            // `chr_fix_451`: an 8 KiB bank, `$E000` A0.
+            let base = (i32::from(self.outer[0]) & 0x01) << 3;
+            std::array::from_fn(|slot| base | i32::try_from(slot).unwrap_or(0))
         } else if self.kind == Mmc3PKind::M100 {
             std::array::from_fn(|slot| i32::from(self.raw_100[5 + slot]))
         } else if self.chr_ram_mode() {
@@ -1215,6 +1344,10 @@ impl Mapper for Mmc3P {
             writer.write_u32(self.timer_555);
             writer.write_bool(self.expired_555);
         }
+        if matches!(self.kind, Mmc3PKind::M406 | Mmc3PKind::M451) {
+            writer.write_u8(self.flash_sequence);
+            writer.write_u32(self.flash_busy);
+        }
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -1231,6 +1364,10 @@ impl Mapper for Mmc3P {
             self.timer_555 = reader.read_u32()?;
             self.expired_555 = reader.read_bool()?;
         }
+        if matches!(self.kind, Mmc3PKind::M406 | Mmc3PKind::M451) {
+            self.flash_sequence = reader.read_u8()?;
+            self.flash_busy = reader.read_u32()?;
+        }
         self.refresh();
         Ok(())
     }
@@ -1244,12 +1381,13 @@ impl Mapper for Mmc3P {
         self.mmc3.irq_asserted() || (self.kind == Mmc3PKind::M369 && self.outer[2] & 0x02 != 0)
     }
 
+    /// `wram_fix_mmc3_406`: 406 has no WRAM.
     fn prg_ram_enabled(&self) -> bool {
-        self.mmc3.prg_ram_enabled() && !self.smb2j_369()
+        self.mmc3.prg_ram_enabled() && !self.smb2j_369() && self.kind != Mmc3PKind::M406
     }
 
     fn prg_ram_writable(&self) -> bool {
-        self.mmc3.prg_ram_writable() && !self.smb2j_369()
+        self.mmc3.prg_ram_writable() && !self.smb2j_369() && self.kind != Mmc3PKind::M406
     }
 
     fn intercept_cpu_write(
@@ -1265,6 +1403,28 @@ impl Mapper for Mmc3P {
         if address < 0x8000 {
             return;
         }
+        // `extcl_cpu_wr_mem_406`/`_451`: every write is the flash chip's first, at the address
+        // the CPU drove; then the chip's address lines as the board crosses them.
+        let address = match self.kind {
+            Mmc3PKind::M406 => {
+                self.write_flash(memory, address, value);
+                if self.submapper == 0 {
+                    (address & 0xFFFC) | ((address & 0x0001) << 1) | ((address & 0x0002) >> 1)
+                } else if address <= 0x9000 || address >= 0xE000 {
+                    address ^ 0x6000
+                } else {
+                    address
+                }
+            }
+            Mmc3PKind::M451 => {
+                self.write_flash(memory, address, value);
+                self.write_451(memory, address);
+                self.refresh();
+                self.settle_mirroring(memory);
+                return;
+            }
+            _ => address,
+        };
         // `extcl_cpu_wr_mem_399`: `$8000-$9FFF` also writes its own bank registers, A0 clear
         // the CHR pair and D7 the half.
         // `extcl_cpu_wr_mem_393`: every chip write is also the UNROM latch.
@@ -1317,7 +1477,7 @@ impl Mapper for Mmc3P {
     /// The DIP / solder-pad read of 344 and 432 replaces the whole of `$8000-$FFFF`, so their
     /// windows leave the cached path while it is on.
     fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {
-        if self.reads_dip() {
+        if self.reads_dip() || self.flash_answers() {
             return [super::NO_ROM_WINDOW; 4];
         }
         self.mmc3
@@ -1331,6 +1491,16 @@ impl Mapper for Mmc3P {
         // The switches and the pad are 0 (J37).
         if address >= 0x8000 && self.reads_dip() {
             return Some(0);
+        }
+        // `sst39sf040_read`: the IDs in the software-ID mode (A0 the model), the toggle bit D6
+        // and `& $77` while an erase runs.
+        if address >= 0x8000 && self.flash_answers() {
+            if self.flash_sequence == 0x90 {
+                let (maker, model) = self.flash_ids();
+                return Some(if address & 0x0001 != 0 { model } else { maker });
+            }
+            let byte = self.mmc3.try_read_prg(memory, address)?;
+            return Some((byte ^ (u8::from(self.flash_busy & 0x01 != 0) << 6)) & 0x77);
         }
         // `extcl_cpu_rd_mem_370`: `$5000-$5FFF` reads `DIP & $80 | open bus & $7F`; the DIP is 0
         // and the high address byte stands in for the bus (J33).
@@ -1411,6 +1581,14 @@ impl Mapper for Mmc3P {
     /// `extcl_cpu_every_cycle_555`: with `reg[0]` D3 clear the timer is held at 0; set, it counts
     /// CPU cycles to `(DIP | $10) << 25`, the DIP being 0 here (J37), about five minutes.
     fn on_cpu_cycle(&mut self, _memory: &mut CartridgeMemory) {
+        // `sst39sf040_tick`: the end of an erase ends the command.
+        if self.flash_busy != 0 {
+            self.flash_busy -= 1;
+            if self.flash_busy == 0 {
+                self.flash_sequence = 0;
+            }
+            return;
+        }
         // `extcl_cpu_every_cycle_369`: a 12-bit counter asserting on its wrap to 0.
         if self.smb2j_369() {
             if self.outer[2] & 0x01 != 0 {

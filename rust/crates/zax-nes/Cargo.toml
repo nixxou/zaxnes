@@ -196,6 +196,8 @@ default = [
     "board-266",
     "board-284",
     "board-682",
+    "board-451",
+    "board-406",
     "board-413",
     "board-560",
     "board-512",
@@ -365,6 +367,8 @@ default = [
 board-mmc3-clones = []
 # MAPPERS-P umbrella: the MMC3 multicarts of `mmc3_p.rs`.
 board-mmc3-p = []
+board-451 = ["board-mmc3-p"]
+board-406 = ["board-mmc3-p"]
 board-512 = ["board-mmc3-p"]
 # MAPPERS-P umbrella: the chip-switching boards of `chip_switch.rs`.
 board-chip-switch = []

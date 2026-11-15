@@ -852,6 +852,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     403,
     #[cfg(feature = "board-404")]
     404,
+    #[cfg(feature = "board-406")]
+    406,
     #[cfg(feature = "board-409")]
     409,
     #[cfg(feature = "board-410")]
@@ -896,6 +898,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     442,
     #[cfg(feature = "board-447")]
     447,
+    #[cfg(feature = "board-451")]
+    451,
     #[cfg(feature = "board-452")]
     452,
     #[cfg(feature = "board-455")]
@@ -1076,6 +1080,20 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         #[cfg(feature = "board-512")]
         512 if header.chr_rom_size != 0 => BoardMemorySizes {
             chr_ram: Some(0x2000),
+            ..BoardMemorySizes::default()
+        },
+        // MAPPERS-P: the PRG-ROM of 406 and 451 is a flash chip with 64 KiB sectors, their save
+        // medium (puNES `sst39sf040_init(…, 65536)`, `force_battery_io`); 406 has no WRAM
+        // (`wram_fix_mmc3_406`).
+        #[cfg(feature = "board-406")]
+        406 => BoardMemorySizes {
+            prg_ram: Some(0),
+            flash_sector: Some(0x1_0000),
+            ..BoardMemorySizes::default()
+        },
+        #[cfg(feature = "board-451")]
+        451 => BoardMemorySizes {
+            flash_sector: Some(0x1_0000),
             ..BoardMemorySizes::default()
         },
         #[cfg(feature = "board-555")]
@@ -3602,6 +3620,16 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         413 => Board::IrqBoard(IrqBoard::IrqP(Box::new(IrqP::new(
             memory,
             IrqPKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-406")]
+        406 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
+            memory,
+            Mmc3PKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-451")]
+        451 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
+            memory,
+            Mmc3PKind::of(mapper)?,
         )))),
         #[cfg(feature = "board-299")]
         299 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(

@@ -1031,6 +1031,14 @@ places where puNES itself is incomplete are copied, not invented around:
   $10000) | base`, the closing parenthesis putting `| base` outside the read; the evident
   intent, the byte at `(A3 as A16) | base`, is what this board reads. The nametables are the
   board's own copy of the console's 2 KiB, mirrored as the header says.
+* 406, 451 (`SST39SF040.c`): puNES's program command stores the byte (`data[address] = value`);
+  a flash cell can only go from 1 to 0, so this board `AND`s it, as `FlashRom` does for 111 and
+  682. The erase busy time is puNES's, one CPU cycle per erased byte (65 536 for a sector, the
+  chip size for a chip erase), not the datasheets' milliseconds; the toggle bit and `& $77` read
+  are puNES's too. Any command byte other than those listed falls back to the first unlock step
+  (puNES's `default:` arm), and the chip address is the PRG-ROM offset through the MMC3 banks,
+  so a game that unlocks through a window not mapped as puNES maps it would differ only if the
+  two cores' bank maps differed.
 
 ### J36. Mapper 682 (Rainbow): the ESP is modelled from the protocol document
 The ESP (`rainbow_esp.rs`) follows Broke Studio's `rainbow-net.md` and `mapper-doc.md`; no

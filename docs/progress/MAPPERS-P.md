@@ -95,7 +95,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 401 | `mapper_401.c` | 97 | 1 | 0 | done (batch 13, `Mmc3P`) |
 | 403 | `mapper_403.c` | 96 | 4 | 0 | done (batch 6, `MultiP`) |
 | 404 | `mapper_404.c` | 71 | 1 | 0 | done (batch 11, `Mmc1Outer`) |
-| 406 | `mapper_406.c` | 120 | 2 | 0 | todo |
+| 406 | `mapper_406.c` | 120 | 2 | 0 | done (batch 50, `Mmc3P`) |
 | 409 | `mapper_409.c` | 56 | 1 | 0 | done (batch 6, `MultiP`) |
 | 410 | `mapper_410.c` | 96 | 1 | 0 | done (batch 13, `Mmc3P`) |
 | 411 | `mapper_411.c` | 103 | 7 | 0 | done (batch 13, `Mmc3P`) |
@@ -120,7 +120,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 442 | `mapper_442.c` | 127 | 1 | 0 | done (batch 39, `IrqP`) |
 | 446 | `mapper_446.c` | 746 | 4 | 0 | todo |
 | 447 | `mapper_447.c` | 98 | 1 | 0 | done (batch 16, `VrcP`) |
-| 451 | `mapper_451.c` | 147 | 2 | 0 | todo |
+| 451 | `mapper_451.c` | 147 | 2 | 0 | done (batch 50, `Mmc3P`) |
 | 452 | `mapper_452.c` | 119 | 1 | 0 | done (batch 40, `MultiP`) |
 | 455 | `mapper_455.c` | 97 | 1 | 0 | done (batch 14, `Mmc3P`) |
 | 456 | `mapper_456.c` | 83 | 1 | 0 | done (batch 14, `Mmc3P`) |
@@ -351,3 +351,11 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   image past its CHR-ROM, `RomImage::raw`) at `$4800-$4FFF`/`$C000-$CFFF` through
   `cpu_read_override` (advancing) and `cpu_peek_override`, both now forwarded by `IrqBoard`
   behind `board-413`, as is `rom_windows` (`$C000` window off the cache).
+* Batch 50: `Mmc3P` 406 and 451, MMC3 boards whose PRG-ROM is a flash chip: puNES's
+  `SST39SF040.c` command machine in the board (unlock addresses, IDs, software-ID mode, program,
+  sector and chip erase with the busy toggle), programs and erases going through
+  `CartridgeMemory::flash_program`/`flash_erase_sector` (their `cfg` and `FlashRom`'s widened to
+  `board-406`/`board-451`) so the changed sectors are the save file (`flash_sector: 64 KiB` in
+  `board_memory_sizes`); the windows leave the cache while the chip answers. 406 crosses A0/A1
+  (submapper 0) or A13-A14 (submapper 1) on the way to the MMC3 and has no WRAM; 451 feeds the
+  MMC3 from the address lines and banks from `$E000` A0-A1. Both in `clocks_on_cpu_cycle`.

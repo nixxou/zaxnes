@@ -304,7 +304,12 @@ impl CartridgeMemory {
     ///
     /// A board with no flash row in [`registry::board_memory_sizes`] still gets the write, so the
     /// behaviour of a board that had one before this module existed is unchanged.
-    #[cfg(any(feature = "board-111", feature = "board-682"))]
+    #[cfg(any(
+        feature = "board-111",
+        feature = "board-682",
+        feature = "board-406",
+        feature = "board-451"
+    ))]
     pub(crate) fn flash_program(&mut self, offset: usize, value: u8) {
         let rom = self.rom.prg_rom_mut();
         if let Some(flash) = &mut self.flash {
@@ -316,7 +321,12 @@ impl CartridgeMemory {
 
     /// Erases the flash sector `offset` falls in to `$FF`, the `$80`/`$30` command, and marks it
     /// changed.
-    #[cfg(any(feature = "board-111", feature = "board-682"))]
+    #[cfg(any(
+        feature = "board-111",
+        feature = "board-682",
+        feature = "board-406",
+        feature = "board-451"
+    ))]
     pub(crate) fn flash_erase_sector(&mut self, offset: usize) {
         let rom = self.rom.prg_rom_mut();
         if let Some(flash) = &mut self.flash {
@@ -634,6 +644,9 @@ const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
             | 526
             // MAPPERS-P: mapper 555's competition timer, `Mmc3P` (puNES `EXTCL_CPU_EVERY_CYCLE`).
             | 555
+            // MAPPERS-P: 406 and 451 count down their flash chip's erases (`sst39sf040_tick`).
+            | 406
+            | 451
             // MAPPERS-P: mapper 369's SMB2J mode counts CPU cycles (`extcl_cpu_every_cycle_369`).
             | 369
             // MAPPERS-P: mapper 559, `VrcP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
@@ -1042,6 +1055,8 @@ const fn mmc3_p_board(mapper: i32) -> bool {
             | 555
             | 369
             | 512
+            | 406
+            | 451
     )
 }
 
@@ -2329,8 +2344,8 @@ mod tests {
             471, 442, 359, 540, 362, 398,
             // MAPPERS-P: 556 and 351 hold an `Mmc3` in use at power-on (`ChipSwitch`); 560 has its
             // A13 latch and 413 an A12 counter (`IrqP`); 369 and 512 are `Mmc3P` boards.
-            556, 351, 560, 413, 369,
-            512,
+            556, 351, 560, 413, 369, 512, 406,
+            451,
             // MAPPERS-P: 272 is latched too but absent here: its counter only moves once a game
             // enables it, and the sweep enables nothing.
         ] {

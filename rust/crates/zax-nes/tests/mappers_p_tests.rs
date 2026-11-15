@@ -1565,3 +1565,71 @@ fn mappers_p_413_reads_its_misc_rom_serially_and_counts_a12() {
     }
     assert!(cartridge.irq_asserted());
 }
+
+/// `mapper_406.c` with `SST39SF040.c`: submapper 0 swaps A0 and A1 on the way to the MMC3, the
+/// PRG-ROM is an MX29F040 (IDs `$C2`/`$A4`, unlock at chip `$5555`/`$2AAA`) that programs by
+/// `AND`ing, and a sector erase reads `& $77` with D6 toggling until it ends.
+#[cfg(feature = "board-406")]
+#[test]
+fn mappers_p_406_crosses_a0_a1_and_flashes_its_prg() {
+    let mut core = MapperRom::new(406).prg(64).chr(32).submapper(0).load();
+    let read =
+        |core: &mut zax_nes::NesCore, address| core.cartridge_mut().unwrap().try_cpu_read(address);
+    // `$8002` is the chip's `$8001`: R6 = 2, R7 = 1.
+    for (register, bank) in [(6, 2), (7, 1)] {
+        core.mapper_write(0x8000, register);
+        core.mapper_write(0x8002, bank);
+    }
+    assert_eq!([2, 1, 62, 63], core.prg_windows());
+    // Chip `$5555` is bank 2 at `$9555`, chip `$2AAA` bank 1 at `$AAAA`.
+    let unlock = |core: &mut zax_nes::NesCore, command| {
+        core.mapper_write(0x9555, 0xAA);
+        core.mapper_write(0xAAAA, 0x55);
+        core.mapper_write(0x9555, command);
+    };
+    unlock(&mut core, 0x90);
+    assert_eq!(Some(0xC2), read(&mut core, 0x8000));
+    assert_eq!(Some(0xA4), read(&mut core, 0x8001));
+    core.mapper_write(0xA002, 0xF0);
+    assert_eq!(Some(62), read(&mut core, 0xC000));
+    unlock(&mut core, 0xA0);
+    core.mapper_write(0xC000, 0x0F);
+    assert_eq!(Some(0x3E & 0x0F), read(&mut core, 0xC000));
+    assert_ne!(core.export_flash_save(), Vec::<u8>::new());
+    unlock(&mut core, 0x80);
+    core.mapper_write(0x9555, 0xAA);
+    core.mapper_write(0xAAAA, 0x55);
+    core.mapper_write(0xC000, 0x30);
+    let cartridge = core.cartridge_mut().unwrap();
+    assert_eq!(Some(0x77), cartridge.try_cpu_read(0xE000));
+    cartridge.step_cpu_cycle();
+    assert_eq!(Some(0x37), cartridge.try_cpu_read(0xE000));
+    for _ in 1..0x1_0000 {
+        cartridge.step_cpu_cycle();
+    }
+    assert_eq!(Some(0xFF), cartridge.try_cpu_read(0xC000));
+    assert_eq!(Some(2), core.cartridge_mut().unwrap().try_cpu_read(0x8000));
+}
+
+/// `mapper_451.c`: `$E000` A0-A1 place the PRG and the 8 KiB CHR bank, `$A000` A0 the mirroring;
+/// the flash is an AMIC A29040B (IDs `$37`/`$86`, unlock at chip `$0555`/`$02AA`).
+#[cfg(feature = "board-451")]
+#[test]
+fn mappers_p_451_banks_from_the_address_and_answers_its_ids() {
+    let mut core = MapperRom::new(451).prg(64).chr(16).load();
+    assert_eq!([0, 0x10, 0x20, 0x30], core.prg_windows());
+    core.mapper_write(0xE003, 0);
+    assert_eq!([0, 0x19, 0x29, 0x30], core.prg_windows());
+    assert_eq!([8, 9, 10, 11, 12, 13, 14, 15], core.chr_windows());
+    core.mapper_write(0x8555, 0xAA);
+    core.mapper_write(0x82AA, 0x55);
+    core.mapper_write(0x8555, 0x90);
+    let cartridge = core.cartridge_mut().unwrap();
+    assert_eq!(Some(0x37), cartridge.try_cpu_read(0x8000));
+    assert_eq!(Some(0x86), cartridge.try_cpu_read(0x8001));
+    core.mapper_write(0x8000, 0xF0);
+    assert_eq!(
+        Some(0x19),
+        core.cartridge_mut().unwrap().try_cpu_read(0xA000)
+    );
+}
