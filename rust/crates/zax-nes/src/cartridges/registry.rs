@@ -545,20 +545,34 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     263,
     #[cfg(feature = "board-cony")]
     264,
+    #[cfg(feature = "board-265")]
+    265,
     #[cfg(feature = "board-268")]
     268,
     #[cfg(feature = "board-274")]
     274,
+    #[cfg(feature = "board-283")]
+    283,
+    #[cfg(feature = "board-285")]
+    285,
     #[cfg(feature = "board-286")]
     286,
     #[cfg(feature = "board-287")]
     287,
+    #[cfg(feature = "board-288")]
+    288,
+    #[cfg(feature = "board-290")]
+    290,
     // The BMW8544 / UNL-DRAGONFIGHTER, an MMC3 clone whose CHR banking is XORed with two
     // registers a read of $6000-$7FFF fills (MF-UNL-12 step 2).
     #[cfg(feature = "board-292")]
     292,
     #[cfg(feature = "board-298")]
     298,
+    #[cfg(feature = "board-299")]
+    299,
+    #[cfg(feature = "board-300")]
+    300,
     #[cfg(feature = "board-302")]
     302,
     #[cfg(feature = "board-305")]
@@ -571,6 +585,10 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     313,
     #[cfg(feature = "board-325")]
     325,
+    #[cfg(feature = "board-336")]
+    336,
+    #[cfg(feature = "board-349")]
+    349,
     #[cfg(feature = "board-taito-x1")]
     552,
 ];
@@ -2299,6 +2317,51 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
             memory,
             Mmc3CloneKind::of(mapper)?,
         )))),
+        #[cfg(feature = "board-265")]
+        265 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-283")]
+        283 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-285")]
+        285 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-288")]
+        288 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-290")]
+        290 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-299")]
+        299 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-300")]
+        300 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-336")]
+        336 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-349")]
+        349 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
         _ => return None,
     })
 }

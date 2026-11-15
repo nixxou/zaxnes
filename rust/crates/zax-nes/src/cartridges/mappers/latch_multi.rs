@@ -139,6 +139,24 @@ pub enum LatchKind {
     M312,
     /// 306, `Kaiser/Kaiser7016.h` (KS7016).
     M306,
+    /// 265, `Unlicensed/T262.h` (BMC-T-262).
+    M265,
+    /// 283, `Unlicensed/Gs2004.h` (GS-2004 / GS-2013).
+    M283,
+    /// 285, `Unlicensed/A65AS.h`.
+    M285,
+    /// 288, `Unlicensed/Gkcx1.h` (GKCX1).
+    M288,
+    /// 290, `Ntdec/BmcNtd03.h` (NTD-03).
+    M290,
+    /// 299, `Txc/Bmc11160.h` (BMC-11160).
+    M299,
+    /// 300, `Unlicensed/Bmc190in1.h`.
+    M300,
+    /// 336, `Unlicensed/BmcK3046.h`.
+    M336,
+    /// 349, `Unlicensed/BmcG146.h`.
+    M349,
 }
 
 impl LatchKind {
@@ -196,6 +214,15 @@ impl LatchKind {
             171 => Self::M171,
             312 => Self::M312,
             306 => Self::M306,
+            265 => Self::M265,
+            283 => Self::M283,
+            285 => Self::M285,
+            288 => Self::M288,
+            290 => Self::M290,
+            299 => Self::M299,
+            300 => Self::M300,
+            336 => Self::M336,
+            349 => Self::M349,
             _ => return None,
         })
     }
@@ -252,6 +279,15 @@ impl LatchKind {
             Self::M171 => 171,
             Self::M312 => 312,
             Self::M306 => 306,
+            Self::M265 => 265,
+            Self::M283 => 283,
+            Self::M285 => 285,
+            Self::M288 => 288,
+            Self::M290 => 290,
+            Self::M299 => 299,
+            Self::M300 => 300,
+            Self::M336 => 336,
+            Self::M349 => 349,
         }
     }
 
@@ -277,6 +313,11 @@ impl LatchKind {
                 | Self::M274
                 | Self::M51
                 | Self::M312
+                | Self::M285
+                | Self::M290
+                | Self::M299
+                | Self::M300
+                | Self::M349
         )
     }
 }
@@ -841,6 +882,91 @@ impl LatchMulti {
                 self.banks.map_chr_8k(0);
                 None
             }
+            // `T262.h:16-28`: `regs` = base, mode, lock, inner bank.
+            LatchKind::M265 => {
+                let base = i32::from(regs[0]);
+                let bank = i32::from(regs[3]);
+                self.prg_16k(base | bank, base | if regs[1] != 0 { bank } else { 7 });
+                self.banks.map_chr_8k(0);
+                self.flag.then(|| pick(a & 0x02 != 0, H, V))
+            }
+            // `Gs2004.h:14-20`: `$6000` is 8 KiB page $20, `$8000` a 32 KiB bank (power-on 7).
+            LatchKind::M283 => {
+                self.banks
+                    .map_prg_32k(if self.flag { r0 & 0x07 } else { 0x07 });
+                self.rom_6000 = Some(0x20);
+                self.banks.map_chr_8k(0);
+                None
+            }
+            // `A65AS.h:15-27`.
+            LatchKind::M285 => {
+                if r0 & 0x40 != 0 {
+                    self.prg_16k(r0 & 0x1E, (r0 & 0x1E) + 1);
+                } else {
+                    let outer = (r0 & 0x30) >> 1;
+                    self.prg_16k(outer | (r0 & 0x07), outer | 0x07);
+                }
+                self.banks.map_chr_8k(0);
+                Some(if r0 & 0x80 != 0 {
+                    if r0 & 0x20 != 0 {
+                        NametableMirroring::SingleScreenB
+                    } else {
+                        NametableMirroring::SingleScreenA
+                    }
+                } else {
+                    pick(r0 & 0x08 != 0, H, V)
+                })
+            }
+            // `Gkcx1.h:15-19`, 32 KiB pages.
+            LatchKind::M288 => {
+                self.banks.map_prg_32k((a >> 3) & 0x03);
+                self.banks.map_chr_8k(a & 0x07);
+                None
+            }
+            // `BmcNtd03.h:18-31`.
+            LatchKind::M290 => {
+                let prg = (a >> 10) & 0x1E;
+                if a & 0x80 != 0 {
+                    let page = prg | ((a >> 6) & 0x01);
+                    self.prg_16k(page, page);
+                } else {
+                    self.prg_16k(prg & 0xFE, (prg & 0xFE) + 1);
+                }
+                self.banks.map_chr_8k(((a & 0x0300) >> 5) | (a & 0x07));
+                Some(pick(a & 0x400 != 0, H, V))
+            }
+            // `Bmc11160.h:18-24`, 32 KiB pages.
+            LatchKind::M299 => {
+                let bank = (r0 >> 4) & 0x07;
+                self.banks.map_prg_32k(bank);
+                self.banks.map_chr_8k((bank << 2) | (r0 & 0x03));
+                Some(pick(r0 & 0x80 != 0, V, H))
+            }
+            // `Bmc190in1.h:14-20`.
+            LatchKind::M300 => {
+                let page = (r0 >> 2) & 0x07;
+                self.prg_16k(page, page);
+                self.banks.map_chr_8k(page);
+                Some(pick(r0 & 0x01 != 0, H, V))
+            }
+            // `BmcK3046.h:14-22`.
+            LatchKind::M336 => {
+                self.prg_16k((r0 & 0x38) | (r0 & 0x07), (r0 & 0x38) | 0x07);
+                self.banks.map_chr_8k(0);
+                None
+            }
+            // `BmcG146.h:18-34`.
+            LatchKind::M349 => {
+                if a & 0x800 != 0 {
+                    self.prg_16k((a & 0x1F) | (a & ((a & 0x40) >> 6)), (a & 0x18) | 0x07);
+                } else if a & 0x40 != 0 {
+                    self.prg_16k(a & 0x1F, a & 0x1F);
+                } else {
+                    self.prg_16k(a & 0x1E, (a & 0x1E) + 1);
+                }
+                self.banks.map_chr_8k(0);
+                Some(pick(a & 0x80 != 0, H, V))
+            }
             // `Bmc255.h:14-21`.
             LatchKind::M255 => {
                 let bit = i32::from(a & 0x1000 == 0);
@@ -939,10 +1065,6 @@ impl LatchMulti {
                     self.regs[1] = value & 0x01;
                 }
             }
-            LatchKind::M113 | LatchKind::M177 => {
-                self.regs[0] = value;
-                self.flag = true;
-            }
             // `Henggedianzi179.h:17-24`.
             LatchKind::M179 => {
                 if address >= 0x8000 {
@@ -1006,6 +1128,27 @@ impl LatchMulti {
                 } else {
                     self.regs[1] = value;
                 }
+            }
+            // `T262.h:28-36`: the address fields until A13 locks them; the data's low bits always.
+            LatchKind::M265 => {
+                if self.regs[2] == 0 {
+                    self.regs[0] = low_byte(((address & 0x60) >> 2) | ((address & 0x100) >> 3));
+                    self.regs[1] = u8::from(address & 0x80 != 0);
+                    self.regs[2] = u8::from(address & 0x2000 != 0);
+                    self.addr = address;
+                    self.flag = true;
+                }
+                self.regs[3] = value & 0x07;
+            }
+            LatchKind::M113
+            | LatchKind::M177
+            | LatchKind::M283
+            | LatchKind::M285
+            | LatchKind::M299
+            | LatchKind::M300
+            | LatchKind::M336 => {
+                self.regs[0] = value;
+                self.flag = true;
             }
             LatchKind::M39
             | LatchKind::M148
@@ -1196,6 +1339,7 @@ impl Mapper for LatchMulti {
                 | LatchKind::M212
                 | LatchKind::M312
                 | LatchKind::M306
+                | LatchKind::M283
                 | LatchKind::M51
                 | LatchKind::M108
                 | LatchKind::M120
