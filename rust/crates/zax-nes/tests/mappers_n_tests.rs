@@ -1075,3 +1075,22 @@ fn mappers_n_682_banks_fills_and_counts() {
     }
     assert!(core.cartridge().unwrap().irq_asserted());
 }
+
+/// Mesen2 `Rainbow.cpp`: with `$415A` bit 2, a read of `$4011` acknowledges the CPU IRQ and
+/// answers the audio DAC doubled instead of the open bus.
+#[cfg(feature = "board-682")]
+#[test]
+fn mappers_n_682_acknowledges_on_a_4011_read() {
+    use zax_nes::cpu::CpuBus;
+    let mut core = MapperRom::new(682).prg(32).chr(0).chr_ram(0x8000).load();
+    core.mapper_write(0x4159, 0x10);
+    core.mapper_write(0x415A, 0x05);
+    for _ in 0..0x20 {
+        core.bus_mut().tick();
+    }
+    assert!(core.cartridge().unwrap().irq_asserted());
+    core.bus_mut().write(0x2003, 0x04);
+    core.bus_mut().write(0x2004, 0x30);
+    assert_eq!(0, core.bus_mut().read(0x4011));
+    assert!(!core.cartridge().unwrap().irq_asserted());
+}

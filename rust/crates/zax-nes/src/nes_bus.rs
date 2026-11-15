@@ -149,6 +149,12 @@ pub struct NesBus {
     /// test for everybody else.
     #[cfg(any(feature = "board-143-open-bus", feature = "board-292"))]
     samples_console: bool,
+    /// Mapper 682 (lot MAPPERS-N): the Rainbow copies OAM's Y bytes from `$2003`/`$2004` writes
+    /// and answers a `$4011` read (Mesen2 `Rainbow.cpp`, `RegisterWriteHandler(0x2003, 0x2004)`
+    /// and `RegisterReadHandler(0x4011)`). Settled at attach like `samples_console`; every other
+    /// game pays this flag's test on a PPU register write.
+    #[cfg(feature = "board-682")]
+    snoops_cpu_bus: bool,
     /// `deferred_ppu && !expansion_audio`: whether the APU may lag at all, kept as one flag so
     /// that the per-cycle catch-up tests it **instead of** `deferred_ppu` rather than on top of
     /// it. Everything the MMC5's audio needs sits on the other side of that single test, out of
@@ -210,6 +216,8 @@ impl NesBus {
             vs_port: false,
             #[cfg(any(feature = "board-143-open-bus", feature = "board-292"))]
             samples_console: false,
+            #[cfg(feature = "board-682")]
+            snoops_cpu_bus: false,
             apu_batching: false,
             apu_quiet: 0,
             zone_instruction: false,
@@ -407,6 +415,10 @@ impl NesBus {
             self.samples_console = cartridge
                 .as_ref()
                 .is_some_and(|cartridge| matches!(cartridge.mapper_number(), 143 | 292));
+        }
+        #[cfg(feature = "board-682")]
+        {
+            self.snoops_cpu_bus = cartridge.as_ref().is_some_and(Cartridge::snoops_cpu_bus);
         }
         self.cartridge = cartridge;
     }
@@ -1251,6 +1263,15 @@ impl NesBus {
             0x4016 => self.read_input_port_as::<K>(0, self.data_bus),
             0x4017 => self.read_input_port_as::<K>(1, self.data_bus),
 
+            #[cfg(feature = "board-682")]
+            0x4011 if self.snoops_cpu_bus => match self
+                .cartridge
+                .as_mut()
+                .and_then(|cartridge| cartridge.snoop_cpu_bus_read(address))
+            {
+                Some(value) => value,
+                None => self.external_bus(),
+            },
             // $4000-$4014 are write-only and $4018-$401F are disabled: open bus.
             _ => self.external_bus(),
         }
@@ -1342,6 +1363,12 @@ impl NesBus {
             if let Some(register) = self.zone_data_address(address) {
                 self.ppu.wide_mut().write(register, value);
                 return;
+            }
+            #[cfg(feature = "board-682")]
+            if self.snoops_cpu_bus {
+                if let Some(cartridge) = self.cartridge.as_mut() {
+                    cartridge.snoop_cpu_bus_write(0x2000 | (address & 0x07), value);
+                }
             }
             self.ppu
                 .write_as::<K>(address & 0x07, value, self.cartridge.as_mut());

@@ -947,11 +947,14 @@ and its port, the CHR banks and sources, the four nametable sources with fill, a
 background extended modes, the window, both IRQs, the vectors, the three generated OAM routines and
 the VRC6-style audio (this core's own `Vrc6Audio`, its `$9000-$B002` ports at `$41A0-$41A8`'s
 offsets, scaled by `$41AA` / 15 and silenced when neither of `$41A9`'s two pins is set — the
-mixing level relative to the APU is the VRC6's, not measured on the board). Not yet: the sprite
-extended mode's OAM Y copy (Mesen2 watches `$2003`/`$2004` writes; here the copy stays zero, so
-sprite extended tiles always come from sprite 0's data), the `$4011` read acknowledge of the CPU
-IRQ, the 3D tile capture of the extended modes, the ESP (no Wi-Fi: `$4191`/`$4192` read 0), and
-the flash self-programming (PRG-ROM writes are dropped). Two readings: `$4151` returns the scanline
+mixing level relative to the APU is the VRC6's, not measured on the board). Phase 2 added the
+bus snoop (`NesBus`, one flag set at attach): `$2003`/`$2004` writes feed the OAM Y copy the
+sprite extended mode evaluates, as Mesen2 does, so an OAM **DMA** does not reach it either; a
+`$4011` read with `$415A` bit 2 acknowledges the CPU IRQ and answers the 6-bit DAC sum doubled
+(Mesen2 `GetLastOutput() << 1`; here the VRC6 generators' sum, Mesen2's own audio differs in its
+mixing). The 3D capture replays both nametable fetches of each column (previous line's fetches 41
+and 42 for tiles 0 and 1) and puts the per-fetch state back afterwards. Not yet: the ESP (no
+Wi-Fi: `$4191`/`$4192` read 0), and the flash self-programming (PRG-ROM writes are dropped). Two readings: `$4151` returns the scanline
 IRQ flag as it was **before** the read acknowledges it (Mesen2 clears first, so its bit 0 always
 reads 0, which contradicts the doc's "IRQ pending" bit); the PPU-idle reset after three CPU cycles
 without a fetch sets the scanline to -1 as Mesen2 does. `cpu_peek_override` clones the board to

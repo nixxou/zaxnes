@@ -637,6 +637,8 @@ impl Mapper for Board {
             Board::Mmc5Ext(board) => board.substitutes_background_tiles(),
             #[cfg(feature = "board-284")]
             Board::IrqBoard(IrqBoard::Drip(board)) => board.substitutes_background_tiles(),
+            #[cfg(feature = "board-682")]
+            Board::IrqBoard(IrqBoard::Rainbow(board)) => board.substitutes_background_tiles(),
             _ => false,
         }
     }
@@ -647,6 +649,8 @@ impl Mapper for Board {
             Board::Mmc5Ext(board) => board.background_capture_state(),
             #[cfg(feature = "board-284")]
             Board::IrqBoard(IrqBoard::Drip(board)) => board.background_capture_state(),
+            #[cfg(feature = "board-682")]
+            Board::IrqBoard(IrqBoard::Rainbow(board)) => board.background_capture_state(),
             _ => 0,
         }
     }
@@ -657,6 +661,8 @@ impl Mapper for Board {
             Board::Mmc5Ext(board) => board.set_background_capture_state(state),
             #[cfg(feature = "board-284")]
             Board::IrqBoard(IrqBoard::Drip(board)) => board.set_background_capture_state(state),
+            #[cfg(feature = "board-682")]
+            Board::IrqBoard(IrqBoard::Rainbow(board)) => board.set_background_capture_state(state),
             _ => {}
         }
     }
@@ -669,12 +675,32 @@ impl Mapper for Board {
             Board::IrqBoard(IrqBoard::Drip(board)) => {
                 board.position_captured_background_tile(address, column, line);
             }
+            #[cfg(feature = "board-682")]
+            Board::IrqBoard(IrqBoard::Rainbow(board)) => {
+                board.position_captured_background_tile(address, column, line);
+            }
             _ => {}
         }
     }
 
     fn write_nametable(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         dispatch!(self, b => b.write_nametable(memory, address, value));
+    }
+
+    /// One arm, the Rainbow's: no other board snoops the console's bus.
+    #[cfg(feature = "board-682")]
+    fn snoop_cpu_bus_write(&mut self, address: u16, value: u8) {
+        if let Board::IrqBoard(IrqBoard::Rainbow(board)) = self {
+            board.snoop_cpu_bus_write(address, value);
+        }
+    }
+
+    #[cfg(feature = "board-682")]
+    fn snoop_cpu_bus_read(&mut self, address: u16) -> Option<u8> {
+        match self {
+            Board::IrqBoard(IrqBoard::Rainbow(board)) => board.snoop_cpu_bus_read(address),
+            _ => None,
+        }
     }
 
     fn on_cpu_cycle(&mut self, memory: &mut CartridgeMemory) {

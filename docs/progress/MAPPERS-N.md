@@ -199,5 +199,8 @@ ext, capture path, bus hooks; 3 Wi-Fi option; 4 flash. Each phase committed on i
   nametable sources, fill, attribute/background extended modes, window, both IRQs, vectors, OAM
   routines, audio on `Vrc6Audio`. Test `mappers_n_682_banks_fills_and_counts`; zax-nes suite and
   clippy green. Leads in J35.
-* Next: phase 2 (`$2003`/`$2004` and `$4011` bus hooks in `nes_bus.rs`, 3D capture arms), then
-  phase 3 (Wi-Fi option), phase 4 (flash).
+* Phase 2 done: `NesBus::snoops_cpu_bus` (attach-time flag) feeds `$2003`/`$2004` writes and the
+  `$4011` read to the board; separate attribute answer; 3D capture arms in `board.rs`. Tests
+  `mappers_n_682_*` (2), zax-nes suite and clippy green; workspace builds (`zax-app` link needs the
+  SDL2 cmake build that a target purge removed, not rebuilt for disk space).
+* Next: phase 3 (Wi-Fi ESP behind an emulation option, off by default), phase 4 (flash).

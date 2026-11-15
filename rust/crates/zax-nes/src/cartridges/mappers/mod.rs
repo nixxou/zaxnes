@@ -45,8 +45,6 @@ mod decode_boards;
 mod discrete;
 #[cfg(feature = "board-284")]
 mod drip;
-#[cfg(feature = "board-682")]
-mod rainbow;
 #[cfg(feature = "board-eeprom")]
 mod eeprom24c0x;
 #[cfg(feature = "board-164")]
@@ -137,6 +135,8 @@ mod oeka_kids;
 mod pec9588;
 #[cfg(feature = "board-168")]
 mod racermate;
+#[cfg(feature = "board-682")]
+mod rainbow;
 mod rambo1;
 #[cfg(feature = "board-133")]
 mod sachen_72008;
@@ -218,8 +218,6 @@ pub use discrete::{
 };
 #[cfg(feature = "board-284")]
 pub use drip::Drip;
-#[cfg(feature = "board-682")]
-pub use rainbow::Rainbow;
 #[cfg(feature = "board-eeprom")]
 pub use eeprom24c0x::{Eeprom24C0X, EepromKind, EepromPort};
 #[cfg(feature = "board-164")]
@@ -322,6 +320,8 @@ pub use oeka_kids::OekaKids;
 pub use pec9588::Pec9588;
 #[cfg(feature = "board-168")]
 pub use racermate::Racermate;
+#[cfg(feature = "board-682")]
+pub use rainbow::Rainbow;
 #[cfg(feature = "board-158")]
 pub use rambo1::Tengen800037;
 pub use rambo1::{Rambo1, Rambo1Board};
@@ -659,6 +659,19 @@ pub trait Mapper {
 
     /// A write to PPUCTRL.
     fn on_ppu_control(&mut self, _control: u8) {}
+
+    /// A CPU write of `$2000-$3FFF` (mirrors folded to `$2000-$2007`) that the board snoops, for
+    /// mapper 682 alone: the bus asks only when [`Cartridge::snoops_cpu_bus`] said so at attach.
+    ///
+    /// [`Cartridge::snoops_cpu_bus`]: crate::cartridges::Cartridge::snoops_cpu_bus
+    #[cfg(feature = "board-682")]
+    fn snoop_cpu_bus_write(&mut self, _address: u16, _value: u8) {}
+
+    /// A CPU read of the 2A03's `$4011` the board answers, `None` for the open bus (mapper 682).
+    #[cfg(feature = "board-682")]
+    fn snoop_cpu_bus_read(&mut self, _address: u16) -> Option<u8> {
+        None
+    }
 
     /// The start of a scanline.
     fn on_ppu_scanline(&mut self, _memory: &mut CartridgeMemory, _scanline: i32, _rendering: bool) {

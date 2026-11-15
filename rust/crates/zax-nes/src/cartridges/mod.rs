@@ -1673,6 +1673,26 @@ impl Cartridge {
         self.write_nametable_as::<AnyBoard>(address, value);
     }
 
+    /// Whether the board snoops the console's own bus (`$2003`/`$2004` writes, the `$4011` read):
+    /// mapper 682 alone, asked once by `NesBus::attach`.
+    #[cfg(feature = "board-682")]
+    #[must_use]
+    pub fn snoops_cpu_bus(&self) -> bool {
+        self.mapper_number() == 682
+    }
+
+    /// See [`Mapper::snoop_cpu_bus_write`].
+    #[cfg(feature = "board-682")]
+    pub fn snoop_cpu_bus_write(&mut self, address: u16, value: u8) {
+        self.board.snoop_cpu_bus_write(address, value);
+    }
+
+    /// See [`Mapper::snoop_cpu_bus_read`].
+    #[cfg(feature = "board-682")]
+    pub fn snoop_cpu_bus_read(&mut self, address: u16) -> Option<u8> {
+        self.board.snoop_cpu_bus_read(address)
+    }
+
     pub fn write_nametable_as<K: BoardKind>(&mut self, address: u16, value: u8) {
         K::board_mut(&mut self.board).write_nametable(&mut self.memory, address, value);
     }

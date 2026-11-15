@@ -127,6 +127,8 @@ pub struct Rainbow {
     window_scanline: u8,
     sprite_ext_data: [u8; 64],
     oam_pos_y: [u8; 64],
+    /// The OAM address the board's copy of `$2003` follows.
+    oam_addr: u8,
     oam_mappings: [u8; 8],
     sprite_ext_bank: u8,
     large_sprites: bool,
@@ -143,6 +145,10 @@ pub struct Rainbow {
     audio_pins: u8,
     audio_volume: u8,
     nt_answer: NtAnswer,
+    /// The answer of the attribute fetch, kept apart so that the 3D capture can decide both.
+    at_answer: NtAnswer,
+    /// What the 3D capture displaced, put back by `set_background_capture_state`.
+    capture_stash: Option<(NtAnswer, NtAnswer)>,
 }
 
 impl Rainbow {
@@ -207,6 +213,7 @@ impl Rainbow {
             window_scanline: 0,
             sprite_ext_data: [0; 64],
             oam_pos_y: [0; 64],
+            oam_addr: 0,
             oam_mappings: [0; 8],
             sprite_ext_bank: 0,
             large_sprites: false,
@@ -223,6 +230,8 @@ impl Rainbow {
             audio_pins: 0,
             audio_volume: 0,
             nt_answer: NtAnswer::Plain,
+            at_answer: NtAnswer::Plain,
+            capture_stash: None,
         }
     }
 
@@ -710,7 +719,7 @@ impl Rainbow {
             }
         }
         if attribute {
-            self.nt_answer = if control.attr_ext() {
+            self.at_answer = if control.attr_ext() {
                 NtAnswer::Value(((self.ext_data & 0xC0) >> 6) * 0x55)
             } else if control.fill() {
                 NtAnswer::Value(self.fill_attr * 0x55)
@@ -832,6 +841,7 @@ impl Mapper for Rainbow {
             self.send_src,
             self.audio_pins,
             self.audio_volume,
+            self.oam_addr,
         ] {
             writer.write_u8(byte);
         }
@@ -865,7 +875,7 @@ impl Mapper for Rainbow {
         {
             *word = reader.read_u16()?;
         }
-        let mut bytes = [0u8; 51];
+        let mut bytes = [0u8; 52];
         reader.read_into(&mut bytes)?;
         let flag = |index: usize| bytes[index] != 0;
         self.fpga_bank = bytes[0];
@@ -919,6 +929,7 @@ impl Mapper for Rainbow {
         self.send_src = bytes[48];
         self.audio_pins = bytes[49];
         self.audio_volume = bytes[50];
+        self.oam_addr = bytes[51];
         reader.read_into(&mut self.nt_banks)?;
         let mut controls = [0u8; 4];
         reader.read_into(&mut controls)?;
@@ -937,6 +948,8 @@ impl Mapper for Rainbow {
         reader.read_into(&mut self.fpga_ram)?;
         self.audio.load_state(reader)?;
         self.nt_answer = NtAnswer::Plain;
+        self.at_answer = NtAnswer::Plain;
+        self.capture_stash = None;
         Ok(())
     }
 
@@ -1030,6 +1043,31 @@ impl Mapper for Rainbow {
         self.large_sprites = control & 0x20 != 0;
     }
 
+    /// `WriteRam`'s `$2003`/`$2004` arms: the Y byte of every sprite written through `$2004`, for
+    /// `ProcessSpriteEval` (an OAM DMA does not pass here, as in Mesen2).
+    fn snoop_cpu_bus_write(&mut self, address: u16, value: u8) {
+        match address {
+            0x2003 => self.oam_addr = value,
+            0x2004 => {
+                if matches!(self.oam_addr & 0x03, 0) {
+                    self.oam_pos_y[usize::from(self.oam_addr >> 2)] = value;
+                }
+                self.oam_addr = self.oam_addr.wrapping_add(1);
+            }
+            _ => {}
+        }
+    }
+
+    /// `ReadRam`'s `$4011` arm: with `$415A` bit 2 the read acknowledges the CPU IRQ and answers
+    /// the audio DAC doubled (`GetLastOutput() << 1`); otherwise the open bus.
+    fn snoop_cpu_bus_read(&mut self, address: u16) -> Option<u8> {
+        if address != 0x4011 || !self.cpu_irq_ack_on_4011 {
+            return None;
+        }
+        self.ack_cpu_irq();
+        Some(u8::try_from(self.audio.dac() << 1).unwrap_or(0xFF))
+    }
+
     /// `MapperReadVram`'s bookkeeping, for every address the PPU reads while rendering.
     fn on_ppu_address_bus(&mut self, _memory: &mut CartridgeMemory, address: u16, _clock: i64) {
         let address = address & 0x3FFF;
@@ -1047,6 +1085,7 @@ impl Mapper for Rainbow {
         self.last_ppu_read = address;
         if !self.in_frame {
             self.nt_answer = NtAnswer::Plain;
+            self.at_answer = NtAnswer::Plain;
             return;
         }
         if (0x2000..=0x2FFF).contains(&address) {
@@ -1060,7 +1099,12 @@ impl Mapper for Rainbow {
 
     fn read_nametable_from_vram(&self, memory: &CartridgeMemory, address: u16, vram: &[u8]) -> u8 {
         if self.in_frame {
-            match self.nt_answer {
+            let answer = if address & 0x03FF >= 0x03C0 {
+                self.at_answer
+            } else {
+                self.nt_answer
+            };
+            match answer {
                 NtAnswer::Value(value) => return value,
                 NtAnswer::Window(offset, shift) => {
                     let byte = self.fpga_ram
@@ -1100,6 +1144,63 @@ impl Mapper for Rainbow {
             2 => self.fpga_ram[((bank & 0x03) << 10) | offset] = value,
             _ => {}
         }
+    }
+
+    /// Every extended mode and the window change what a background tile shows.
+    fn substitutes_background_tiles(&self) -> bool {
+        self.window_enabled
+            || self.nt_control.iter().any(|control| {
+                control.attr_ext() || control.bg_ext() || control.fill() || control.source() != 0
+            })
+    }
+
+    /// The per-fetch state the capture moves: in-frame, scanline, fetch count, window and tile
+    /// flags, the extended byte and the window line.
+    fn background_capture_state(&self) -> u64 {
+        u64::from(self.in_frame)
+            | (u64::from(u16::from_le_bytes(self.scanline.to_le_bytes())) << 1)
+            | (u64::from(self.nt_fetch_count) << 17)
+            | (u64::from(self.in_window) << 25)
+            | (u64::from(self.override_tile) << 26)
+            | (u64::from(self.ext_data) << 27)
+            | (u64::from(self.window_scanline) << 35)
+    }
+
+    fn set_background_capture_state(&mut self, state: u64) {
+        self.in_frame = state & 0x01 != 0;
+        self.scanline = i16::from_le_bytes(
+            u16::try_from((state >> 1) & 0xFFFF)
+                .unwrap_or(0)
+                .to_le_bytes(),
+        );
+        self.nt_fetch_count = u8::try_from((state >> 17) & 0xFF).unwrap_or(0);
+        self.in_window = state & (1 << 25) != 0;
+        self.override_tile = state & (1 << 26) != 0;
+        self.ext_data = u8::try_from((state >> 27) & 0xFF).unwrap_or(0);
+        self.window_scanline = u8::try_from((state >> 35) & 0xFF).unwrap_or(0);
+        if let Some((nt, at)) = self.capture_stash.take() {
+            self.nt_answer = nt;
+            self.at_answer = at;
+        }
+    }
+
+    /// Replays the two nametable fetches of column `column` of line `line` as the rendering makes
+    /// them: tiles 0 and 1 are the previous line's fetches 41 and 42, tile `c` the line's fetch
+    /// `c - 1` (`UpdateInWindowFlag`'s `(_ntFetchCounter + 1) % 42`).
+    fn position_captured_background_tile(&mut self, address: u16, column: i32, line: i32) {
+        if self.capture_stash.is_none() {
+            self.capture_stash = Some((self.nt_answer, self.at_answer));
+        }
+        let column = u8::try_from(column.rem_euclid(42)).unwrap_or(0);
+        let line = i16::try_from(line).unwrap_or(0);
+        self.in_frame = true;
+        self.scanline = if column < 2 { line - 1 } else { line };
+        self.nt_fetch_count = (column + 40) % 42;
+        self.decide_nametable(address);
+        let coarse_y = (address >> 5) & 0x1F;
+        let tile_column = address & 0x1F;
+        let attribute = (address & 0x2C00) | 0x03C0 | ((coarse_y & 0x1C) << 1) | (tile_column >> 2);
+        self.decide_nametable(attribute);
     }
 
     fn chr_view<'m>(&self, _memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
