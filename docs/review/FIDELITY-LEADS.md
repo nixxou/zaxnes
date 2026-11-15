@@ -937,6 +937,19 @@ CHR-RAM) and puNES (`mapper_198.c`, banks from `$50` folding onto `$40-$4F`). Th
 password screen cleanly; the later `[T+ChSFIX2]` and `[T+ChTFIX2]` patches show stray glyphs on
 the password screen, not investigated (translation hacks; their CHR use may differ).
 
+### J26. Mappers 53, 487, 518 and 519 (`MiscN`): Mesen2's readings, sources compared
+* 53 (`Supervision.h`): the 32 KiB EPROM is recognised by Mesen2's CRC of the first 32 KiB; an
+  image without it powers on at 16 KiB banks `$80`/`$81` wrapped by the ROM, as Mesen2 does.
+* 487 (`Mapper487.h`): Mesen2's comments are the only description at hand (no nesdev page
+  read for it); the NINA-03 register is ignored in the second half, as there.
+* 518 (`Dance2000.h`): Mesen2 switches CHR page 0 on every VRAM address change; here on the
+  addresses the board hears (`on_ppu_address_bus`: fetches and `$2006`), which a scroll write
+  alone does not drive. `$5200` without bit 2 changes the mode but rebuilds nothing until the
+  next `$5000` write, as in Mesen2.
+* 519 (`Eh8813A.h`): the DIP switches are all off, so the DIP mode reads the address with its low
+  nibble cleared.
+None of the four has a dump at hand.
+
 ### J25. Mapper 303 (KS7017): the `$4030` status read
 Mesen2 (`Kaiser7017.h` `ReadRegister`) answers `$4030` with 1 while the IRQ is pending, 0 else,
 and acknowledges it; puNES (`mapper_303.c`) acknowledges and computes the same value but returns

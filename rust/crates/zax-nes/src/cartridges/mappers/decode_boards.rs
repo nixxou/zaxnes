@@ -28,6 +28,7 @@
     feature = "board-fine-rom",
     feature = "board-234",
     feature = "board-188",
+    feature = "board-misc-n",
     feature = "board-latch-multi",
     feature = "board-nina03",
     feature = "board-sachen-8reg",
@@ -58,6 +59,8 @@ use super::MagicFloor;
 use super::Mapper;
 #[cfg(feature = "board-234")]
 use super::Maxi15;
+#[cfg(feature = "board-misc-n")]
+use super::MiscN;
 #[cfg(feature = "board-111")]
 use super::Mmc1Parallel;
 #[cfg(feature = "board-nina03")]
@@ -167,6 +170,9 @@ pub enum DecodeBoard {
     /// Mapper 188, Bandai's Karaoke Studio ([`BandaiKaraoke`]).
     #[cfg(feature = "board-188")]
     BandaiKaraoke(BandaiKaraoke),
+    /// Mappers 53, 487, 518 and 519 ([`MiscN`]).
+    #[cfg(feature = "board-misc-n")]
+    MiscN(MiscN),
     // Appended by MF-VS step 4, the lot's one board: the register is a `$4016` write and not a
     // cartridge write, which is the only thing that makes it unusual here.
     /// Mapper 99, the Nintendo VS. System board.
@@ -271,6 +277,8 @@ macro_rules! inner {
             DecodeBoard::Maxi15($b) => $body,
             #[cfg(feature = "board-188")]
             DecodeBoard::BandaiKaraoke($b) => $body,
+            #[cfg(feature = "board-misc-n")]
+            DecodeBoard::MiscN($b) => $body,
             #[cfg(feature = "board-vs-system")]
             DecodeBoard::VsBoard($b) => $body,
             #[cfg(feature = "board-jv001")]
@@ -464,6 +472,7 @@ impl Mapper for DecodeBoard {
     #[cfg(any(
         feature = "board-234",
         feature = "board-188",
+        feature = "board-misc-n",
         feature = "board-246",
         feature = "board-latch-multi"
     ))]
@@ -566,7 +575,8 @@ impl Mapper for DecodeBoard {
         feature = "board-96",
         feature = "board-162",
         feature = "board-163",
-        feature = "board-164"
+        feature = "board-164",
+        feature = "board-518"
     ))]
     fn on_ppu_address_bus(&mut self, memory: &mut CartridgeMemory, address: u16, clock: i64) {
         inner!(self, b => b.on_ppu_address_bus(memory, address, clock));

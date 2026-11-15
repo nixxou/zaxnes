@@ -82,6 +82,8 @@ mod magic_floor;
 mod mapper091;
 #[cfg(feature = "board-234")]
 mod maxi15;
+#[cfg(feature = "board-misc-n")]
+mod misc_n;
 mod mmc1;
 #[cfg(feature = "board-111")]
 mod mmc1_parallel;
@@ -241,6 +243,8 @@ pub use magic_floor::MagicFloor;
 pub use mapper091::Mapper091;
 #[cfg(feature = "board-234")]
 pub use maxi15::Maxi15;
+#[cfg(feature = "board-misc-n")]
+pub use misc_n::{MiscKind, MiscN};
 pub use mmc1::Mmc1;
 #[cfg(feature = "board-111")]
 pub use mmc1_parallel::Mmc1Parallel;

@@ -127,6 +127,8 @@ use super::mappers::{JalecoJf13, JalecoJf17};
 use super::mappers::{LatchBoard, SingleLatch};
 #[cfg(feature = "board-latch-multi")]
 use super::mappers::{LatchKind, LatchMulti};
+#[cfg(feature = "board-misc-n")]
+use super::mappers::{MiscKind, MiscN};
 #[cfg(feature = "board-mmc3-clones")]
 use super::mappers::{Mmc3Clone, Mmc3CloneKind};
 #[cfg(feature = "board-taito-x1")]
@@ -224,6 +226,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     51,
     #[cfg(feature = "board-52")]
     52,
+    #[cfg(feature = "board-53")]
+    53,
     #[cfg(feature = "board-54")]
     54,
     #[cfg(feature = "board-56")]
@@ -661,6 +665,12 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     349,
     #[cfg(feature = "board-366")]
     366,
+    #[cfg(feature = "board-487")]
+    487,
+    #[cfg(feature = "board-518")]
+    518,
+    #[cfg(feature = "board-519")]
+    519,
     #[cfg(feature = "board-521")]
     521,
     #[cfg(feature = "board-522")]
@@ -729,12 +739,12 @@ fn datach_has_external_eeprom(header: &InesHeader) -> bool {
 /// The MAPPERS-N boards whose iNES 1.0 CHR-RAM is Mesen2's 8 KiB default (see
 /// [`board_memory_sizes`]).
 const MAPPERS_N_CHR_RAM_8K: &[i32] = &[
-    39, 40, 42, 43, 44, 45, 46, 49, 50, 51, 52, 54, 56, 57, 58, 59, 60, 61, 62, 63, 103, 104, 106,
-    108, 113, 117, 120, 125, 126, 134, 142, 148, 166, 167, 170, 171, 174, 177, 179, 183, 196, 197,
-    200, 201, 202, 203, 204, 205, 212, 213, 214, 216, 217, 221, 222, 224, 226, 227, 229, 230, 231,
-    233, 235, 236, 238, 240, 241, 242, 244, 245, 249, 250, 254, 255, 258, 259, 261, 265, 274, 283,
-    285, 286, 287, 288, 289, 290, 299, 300, 301, 302, 303, 304, 305, 306, 307, 309, 312, 313, 314,
-    319, 320, 324, 325, 329, 331, 332, 333, 336, 346, 348, 349, 366, 521, 522,
+    39, 40, 42, 43, 44, 45, 46, 49, 50, 51, 52, 54, 56, 57, 58, 59, 60, 61, 53, 62, 63, 103, 104,
+    106, 108, 113, 117, 120, 125, 126, 134, 142, 148, 166, 167, 170, 171, 174, 177, 179, 183, 196,
+    197, 200, 201, 202, 203, 204, 205, 212, 213, 214, 216, 217, 221, 222, 224, 226, 227, 229, 230,
+    231, 233, 235, 236, 238, 240, 241, 242, 244, 245, 249, 250, 254, 255, 258, 259, 261, 265, 274,
+    283, 285, 286, 287, 288, 289, 290, 299, 300, 301, 302, 303, 304, 305, 306, 307, 309, 312, 313,
+    314, 319, 320, 324, 325, 329, 331, 332, 333, 336, 346, 348, 349, 366, 518, 521, 522,
 ];
 
 /// The volatile-memory sizes of `mapper`'s board for `header`.
@@ -1023,6 +1033,12 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         31 => BoardMemorySizes {
             prg_ram: Some(0),
             chr_ram: (header.chr_rom_size == 0).then_some(0x2000),
+            ..BoardMemorySizes::default()
+        },
+        // MAPPERS-N: `$6000-$7FFF` is 53's outer register and ROM (`Supervision.h`).
+        #[cfg(feature = "board-53")]
+        53 => BoardMemorySizes {
+            prg_ram: Some(0),
             ..BoardMemorySizes::default()
         },
         #[cfg(feature = "board-175")]
@@ -2240,6 +2256,26 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         ))),
         #[cfg(feature = "board-234")]
         234 => Board::DecodeBoard(DecodeBoard::Maxi15(Maxi15::new(memory))),
+        #[cfg(feature = "board-53")]
+        53 => Board::DecodeBoard(DecodeBoard::MiscN(MiscN::new(
+            memory,
+            MiscKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-487")]
+        487 => Board::DecodeBoard(DecodeBoard::MiscN(MiscN::new(
+            memory,
+            MiscKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-518")]
+        518 => Board::DecodeBoard(DecodeBoard::MiscN(MiscN::new(
+            memory,
+            MiscKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-519")]
+        519 => Board::DecodeBoard(DecodeBoard::MiscN(MiscN::new(
+            memory,
+            MiscKind::of(mapper)?,
+        ))),
         #[cfg(feature = "board-188")]
         188 => Board::DecodeBoard(DecodeBoard::BandaiKaraoke(BandaiKaraoke::new(memory))),
         #[cfg(feature = "board-233")]

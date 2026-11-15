@@ -128,3 +128,5 @@ Owner's request (2026-11-15): implement the mappers missing compared with the ot
   Remaining: 53 260 266 284 303 323 328 487 513 518 519 529 530 682.
 * 303 (KS7017) in `IrqBoard`, no dump. Remaining: 53 260 266 284 323 328 487 513 518 519 529
   530 682.
+* 53, 487, 518, 519 in a new `MiscN` (DecodeBoard), no dumps. Remaining: 260 266 284 323 328 513
+  529 530 682.

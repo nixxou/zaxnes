@@ -848,3 +848,61 @@ fn mappers_n_303_banks_by_address_and_counts_down() {
     assert_eq!(Some(1), core.cartridge_mut().unwrap().try_cpu_read(0x4030));
     assert!(!core.cartridge().unwrap().irq_asserted());
 }
+
+/// Mesen2 `Supervision.h`: power-on at the last 32 KiB pair ($80/$81 of 16 KiB, wrapped); `$6000`
+/// writes the outer register, `$8000` the inner; `$6000-$7FFF` reads ROM.
+#[cfg(feature = "board-53")]
+#[test]
+fn mappers_n_53_banks_from_6000_and_8000() {
+    let mut core = MapperRom::new(53).prg(64).chr(0).load();
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    core.mapper_write(0x6000, 0x11); // game mode, outer 1
+    core.mapper_write(0x8000, 0x02);
+    assert_eq!([20, 21, 30, 31], core.prg_windows());
+    assert_eq!(31, core.read_memory(0x6010)); // ((8 << 1) | $0F) = $1F
+}
+
+/// Mesen2 `Mapper487.h`: outer `$4180`, NINA `$4100`, Color Dreams `$8000` in the second half.
+#[cfg(feature = "board-487")]
+#[test]
+fn mappers_n_487_switches_nina_and_color_dreams_halves() {
+    let mut core = MapperRom::new(487).prg(128).chr(1024).load();
+    core.mapper_write(0x4180, 0x04);
+    core.mapper_write(0x4100, 0x03);
+    assert_eq!([16, 17, 18, 19], core.prg_windows());
+    assert_eq!(19 * 8, usize::from(core.chr_windows()[0])); // CHR (4 << 2) | 3, in 1 KiB
+    core.mapper_write(0x4180, 0x24); // second half
+    core.mapper_write(0x8000, 0x11); // Color Dreams: inner register (1 << 3) | 1
+    assert_eq!((4 + 0x10) * 4, core.prg_windows()[0]); // 32 KiB 4, 512 KiB further on
+}
+
+/// Mesen2 `Dance2000.h`: `$5000` PRG (16 KiB, `$C000` bank 0), `$5200` mode; bit 6 of `$5000`
+/// opens the bus over `$8000-$FFFF`; mode bit 1 makes the nametable address pick CHR page 0.
+#[cfg(feature = "board-518")]
+#[test]
+fn mappers_n_518_opens_the_bus_and_follows_the_nametable() {
+    let mut core = MapperRom::new(518).prg(16).chr(0).load();
+    core.mapper_write(0x5000, 0x03);
+    assert_eq!([6, 7, 0, 1], core.prg_windows());
+    core.mapper_write(0x5200, 0x06); // 32 KiB mode and the nametable switch
+    assert_eq!([12, 13, 14, 15], core.prg_windows());
+    let cartridge = core.cartridge_mut().unwrap();
+    cartridge.ppu_write(0x1000, 0x5A); // page 1
+    cartridge.on_ppu_address_bus(0x2C00, 0);
+    assert_eq!(0x5A, core.chr_bank(0x0000));
+    core.mapper_write(0x5000, 0x43);
+    assert_eq!(None, core.cartridge_mut().unwrap().try_cpu_read(0x8000));
+}
+
+/// Mesen2 `Eh8813A.h`: the bank in the address of a write with A8 clear, CHR from the value; A6
+/// replaces the low nibble of every read address with the DIP switches (none set).
+#[cfg(feature = "board-519")]
+#[test]
+fn mappers_n_519_banks_by_address_and_reads_the_dip_switches() {
+    let mut core = MapperRom::new(519).prg(16).chr(64).load();
+    core.mapper_write(0x8083, 0x05);
+    assert_eq!([6, 7, 6, 7], core.prg_windows());
+    assert_eq!(40, core.chr_windows()[0]);
+    core.mapper_write(0x8104, 0x00); // A8 set: ignored
+    assert_eq!([6, 7, 6, 7], core.prg_windows());
+}

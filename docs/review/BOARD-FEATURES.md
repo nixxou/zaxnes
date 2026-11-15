@@ -721,6 +721,10 @@ dispatch is the generic path of the exotic ones only.
 | `board-175` | 175 | `FineRom` M175: 16 KiB PRG and 8 KiB CHR from `$A000`, applied on a read of `$FFFC` (Mesen2, FCEUX; J24) | ~20 | — (no dump) | **on** |
 | `board-307` | 307 | `FineRom` M307: 4 KiB ROM/RAM layout, `$8000`/`$8001` registers, a CIRAM page per table (Mesen2, puNES; J24) | ~30 | — (no dump) | **on** |
 | `board-303` | 303 | `Kaiser7017` (IrqBoard): 16 KiB bank from the address of a `$4A00` write, applied at `$5100`, `$C000` bank 2, 16-bit CPU-cycle IRQ at `$4020`/`$4021`, status at `$4030` (Mesen2, puNES; J25) | ~130 | — (no dump) | **on** |
+| `board-53` | 53 | `MiscN` M53: Supervision 16-in-1, outer register at `$6000`, ROM at `$6000-$7FFF`, optional EPROM by CRC (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
+| `board-487` | 487 | `MiscN` M487: NINA-03 and outer registers at `$4100`/`$4180`, Color Dreams register in the second half (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
+| `board-518` | 518 | `MiscN` M518: Dance 2000, `$5000`/`$5200`, open bus over `$8000-$FFFF`, CHR page 0 from the nametable address (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
+| `board-519` | 519 | `MiscN` M519: EH8813A, bank in the write address, DIP read mode (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-252` | 252 | `Waixing252` (in `IrqBoard`): Waixing VRC4 clone, CHR-RAM by mask/compare | ~200 | CPU-clocked (VRC IRQ) | **on** |
 | `board-234` | 234 | `Maxi15` (in `DecodeBoard`): AVE Maxi 15, registers latched on reads | ~130 | no cached window; only this board reads through the forwarded `cpu_read_override` | **on** |
 | `board-200` | 200 | `LatchMulti` | 5 | — | **on** since the owner accepted `AMD-MAPPERS-N-200.md` (2026-11-15) |
