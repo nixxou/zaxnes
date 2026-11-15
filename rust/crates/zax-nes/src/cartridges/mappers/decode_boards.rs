@@ -442,13 +442,21 @@ impl Mapper for DecodeBoard {
     /// 188, whose microphone answers `$6000-$7FFF`. Reached only for a read the cached ROM
     /// windows do not serve (`NesBus::read_internal_body_as`), so the other boards of this enum,
     /// which leave their windows cacheable, are not on it for ROM.
-    #[cfg(any(feature = "board-234", feature = "board-188"))]
+    #[cfg(any(
+        feature = "board-234",
+        feature = "board-188",
+        feature = "board-fine-rom"
+    ))]
     #[inline(never)]
     fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
         inner!(self, b => b.cpu_read_override(memory, address))
     }
 
-    #[cfg(any(feature = "board-234", feature = "board-188"))]
+    #[cfg(any(
+        feature = "board-234",
+        feature = "board-188",
+        feature = "board-fine-rom"
+    ))]
     fn cpu_peek_override(&self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
         inner!(self, b => b.cpu_peek_override(memory, address))
     }
@@ -479,7 +487,11 @@ impl Mapper for DecodeBoard {
     ///
     /// **Behaviour-neutral for every other board here**: none of them overrides it, so each
     /// answers `false` through `Mapper`'s own default exactly as the un-forwarded dispatch did.
-    #[cfg(any(feature = "board-246", feature = "board-latch-multi"))]
+    #[cfg(any(
+        feature = "board-246",
+        feature = "board-latch-multi",
+        feature = "board-fine-rom"
+    ))]
     fn intercept_cpu_write(
         &mut self,
         memory: &mut CartridgeMemory,
@@ -579,7 +591,8 @@ impl Mapper for DecodeBoard {
         feature = "board-111",
         feature = "board-218",
         feature = "board-sachen-8reg",
-        feature = "board-sachen8259"
+        feature = "board-sachen8259",
+        feature = "board-307"
     ))]
     #[inline(never)]
     fn nametable_page(&self, table: i32) -> i32 {

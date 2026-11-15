@@ -716,6 +716,10 @@ dispatch is the generic path of the exotic ones only.
 | `board-199` | 199 | `Mmc3Clone` kind M199: unbanked 8 KiB CHR-RAM, 32 KiB PRG-RAM with `$5000` | ~30 | — | **on** (not verified on a game) |
 | `board-168` | 168 | `Racermate`: 16 KiB PRG bank plus fixed last bank, 4 KiB CHR-RAM bank `^ 8` out of 64 KiB, M2 IRQ counter (bit 10), U2 protection (nesdev, puNES; FIDELITY-LEADS J22) | ~150 | 1 of 3 (v3.12; v3.11 and v5.01 stuck in the core, J22) | **on** |
 | `board-188` | 188 | `BandaiKaraoke`: 16 KiB bank from the internal ROM or the expansion, `$C000` fixed, bus conflicts, the microphone at `$6000-$7FFF` from controller 1's A and B (nesdev, Mesen2, puNES; FIDELITY-LEADS J23) | ~120 | 3 of 3 (Karaoke Studio, Senyou Cassette Vol. 1 and 2) | **on** |
+| `board-31` | 31 | `FineRom` M31: eight 4 KiB PRG pages written at `$5000-$5FFF`, `$5FFF` = `$FF` at power-on (nesdev, Mesen2, puNES; J24) | ~20 | — (no dump) | **on** |
+| `board-103` | 103 | `FineRom` M103: last 32 KiB fixed, 16 KiB RAM at `$6000` and over `$B800-$D7FF`, ROM at `$6000` on `$F000` bit 4 (Mesen2, puNES; J24) | ~30 | 1 (Doki Doki Panic FDS conversion, world 1-1) | **on** |
+| `board-175` | 175 | `FineRom` M175: 16 KiB PRG and 8 KiB CHR from `$A000`, applied on a read of `$FFFC` (Mesen2, FCEUX; J24) | ~20 | — (no dump) | **on** |
+| `board-307` | 307 | `FineRom` M307: 4 KiB ROM/RAM layout, `$8000`/`$8001` registers, a CIRAM page per table (Mesen2, puNES; J24) | ~30 | — (no dump) | **on** |
 | `board-252` | 252 | `Waixing252` (in `IrqBoard`): Waixing VRC4 clone, CHR-RAM by mask/compare | ~200 | CPU-clocked (VRC IRQ) | **on** |
 | `board-234` | 234 | `Maxi15` (in `DecodeBoard`): AVE Maxi 15, registers latched on reads | ~130 | no cached window; only this board reads through the forwarded `cpu_read_override` | **on** |
 | `board-200` | 200 | `LatchMulti` | 5 | — | **on** since the owner accepted `AMD-MAPPERS-N-200.md` (2026-11-15) |

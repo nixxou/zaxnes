@@ -937,6 +937,21 @@ CHR-RAM) and puNES (`mapper_198.c`, banks from `$50` folding onto `$40-$4F`). Th
 password screen cleanly; the later `[T+ChSFIX2]` and `[T+ChTFIX2]` patches show stray glyphs on
 the password screen, not investigated (translation hacks; their CHR use may differ).
 
+### J24. Mappers 31, 103, 175 and 307 (`FineRom`): where the sources part
+* 31: nesdev ("INES Mapper 031") sets only `$5FFF` to `$FF` at power-on and says it does not
+  change on reset; Mesen2 (`NsfCart31.h`) leaves the seven others at 0, puNES (`mapper_031.c`)
+  powers them on at `$F8-$FE` (the last 32 KiB). This board takes Mesen2's zeros and keeps all
+  eight across a reset. No dump at hand.
+* 103: Mesen2 (`Mapper103.h`) and puNES (`mapper_103.c`) agree (RAM at `$6000` and over
+  `$B800-$D7FF`, always writable); Mesen2 keeps `$8000`'s low four bits, puNES the byte, which
+  only matters past 128 KiB. *Doki Doki Panic* (FDS conversion, Hackset) plays world 1-1.
+* 175: nesdev has no register description. Mesen2 (`Kaiser7022.h`) and FCEUX (`175.cpp`) apply
+  `$A000`'s bank on a read of `$FFFC`, puNES (`mapper_175.c`) on any read of `$F000-$FFFF`; this
+  board follows the two. FCEUX also moves CHR and `$E000` at once; Mesen2 waits for the read,
+  as here. Registers at exactly `$8000`/`$A000` (Mesen2, FCEUX) where puNES masks `$F000`.
+* 307: Mesen2 (`Kaiser7037.h`) and puNES (`mapper_307.c`) agree on the 4 KiB layout and the
+  CIRAM page per table. A write to `$7000-$7FFF` (ROM) or `$A000-$AFFF` is dropped. No dump.
+
 ### J23. Mapper 188: the microphone is controller 1's A and B, its level 0
 nesdev ("INES Mapper 188"): `$6000-$7FFF` reads bit 0 "0: A button is pressed", bit 1 "0: B
 button is pressed", bit 2 "1-bit ADC microphone input", bits 7-3 open bus. Mesen2

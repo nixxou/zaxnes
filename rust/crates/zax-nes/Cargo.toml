@@ -178,6 +178,10 @@ default = [
     "board-312",
     "board-56",
     "board-142",
+    "board-31",
+    "board-103",
+    "board-175",
+    "board-307",
     "board-302",
     "board-305",
     "board-306",
@@ -334,6 +338,11 @@ board-234 = ["board-decode-boards"]
 # MAPPERS-N: Bandai's Karaoke Studio and its microphone (`BandaiKaraoke`).
 board-188 = ["board-decode-boards"]
 board-302 = ["board-fine-rom"]
+# MAPPERS-N: more boards with PRG finer than 8 KiB or ROM and RAM in one window (`FineRom`).
+board-31 = ["board-fine-rom"]
+board-103 = ["board-fine-rom"]
+board-175 = ["board-fine-rom"]
+board-307 = ["board-fine-rom"]
 board-305 = ["board-fine-rom"]
 board-306 = ["board-latch-multi"]
 board-217 = ["board-mmc3-clones"]

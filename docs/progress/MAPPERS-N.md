@@ -122,3 +122,7 @@ Owner's request (2026-11-15): implement the mappers missing compared with the ot
 * To report to the owner: `cargo check -p zax-nes --no-default-features` fails at the base
   e2b7fced already (`ppu/mod.rs` `read_nametable_as::<K>` outside a generic, and registry's
   `Mmc3ChrRamBoard` used without its feature) -- not this lot's, not touched (ppu is off limits).
+* 31, 103, 175, 307 in `FineRom` (now any board decoding `$6000-$FFFF` itself, RAM included).
+  103 verified on Doki Doki Panic (world 1-1); the three others have no dump. The
+  `nametable_pages_vary` list left `Cartridge::create` for a const fn, as the clock list did.
+  Remaining: 53 260 266 284 303 323 328 487 513 518 519 529 530 682.

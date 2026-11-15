@@ -182,6 +182,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     #[cfg(feature = "board-29")]
     29,
     30,
+    #[cfg(feature = "board-31")]
+    31,
     32,
     #[cfg(feature = "board-small-boards")]
     33,
@@ -297,6 +299,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     #[cfg(feature = "board-vs-system")]
     99,
     101,
+    #[cfg(feature = "board-103")]
+    103,
     #[cfg(feature = "board-104")]
     104,
     #[cfg(feature = "board-105")]
@@ -416,6 +420,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     173,
     #[cfg(feature = "board-174")]
     174,
+    #[cfg(feature = "board-175")]
+    175,
     #[cfg(feature = "board-176")]
     176,
     #[cfg(feature = "board-177")]
@@ -615,6 +621,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     305,
     #[cfg(feature = "board-306")]
     306,
+    #[cfg(feature = "board-307")]
+    307,
     #[cfg(feature = "board-309")]
     309,
     #[cfg(feature = "board-312")]
@@ -992,6 +1000,30 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         168 => BoardMemorySizes {
             prg_ram: Some(0),
             chr_ram: Some(Racermate::CHR_RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
+        // MAPPERS-N: the `FineRom` boards decode `$6000-$7FFF` themselves; 103 and 307 have
+        // work RAM behind it (`Mapper103.h`, `Kaiser7037.h`), 31 none (nesdev "PRG RAM capacity:
+        // None"), 175 none, and 31's CHR is "recommended" 8 KiB of RAM.
+        #[cfg(feature = "board-103")]
+        103 => BoardMemorySizes {
+            prg_ram: Some(FineRom::RAM_103),
+            ..BoardMemorySizes::default()
+        },
+        #[cfg(feature = "board-307")]
+        307 => BoardMemorySizes {
+            prg_ram: Some(FineRom::RAM_307),
+            ..BoardMemorySizes::default()
+        },
+        #[cfg(feature = "board-31")]
+        31 => BoardMemorySizes {
+            prg_ram: Some(0),
+            chr_ram: (header.chr_rom_size == 0).then_some(0x2000),
+            ..BoardMemorySizes::default()
+        },
+        #[cfg(feature = "board-175")]
+        175 => BoardMemorySizes {
+            prg_ram: Some(0),
             ..BoardMemorySizes::default()
         },
         // MAPPERS-N: no PRG-RAM, `$6000-$7FFF` is the microphone (nesdev "INES Mapper 188").
@@ -2460,6 +2492,26 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
             memory,
             IrqLatchKind::of(mapper)?,
         )))),
+        #[cfg(feature = "board-31")]
+        31 => Board::DecodeBoard(DecodeBoard::FineRom(FineRom::new(
+            memory,
+            FineRomKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-103")]
+        103 => Board::DecodeBoard(DecodeBoard::FineRom(FineRom::new(
+            memory,
+            FineRomKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-175")]
+        175 => Board::DecodeBoard(DecodeBoard::FineRom(FineRom::new(
+            memory,
+            FineRomKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-307")]
+        307 => Board::DecodeBoard(DecodeBoard::FineRom(FineRom::new(
+            memory,
+            FineRomKind::of(mapper)?,
+        ))),
         #[cfg(feature = "board-302")]
         302 => Board::DecodeBoard(DecodeBoard::FineRom(FineRom::new(
             memory,

@@ -503,6 +503,40 @@ pub struct Cartridge {
     clocks_on_cpu_cycle: bool,
 }
 
+/// Whether `mapper`'s board may answer a CIRAM page per nametable; the numbers and the lot that
+/// added each are in the comment on the field in `Cartridge::create`.
+///
+/// **Extracted from `Cartridge::create` by MAPPERS-N** (mapper 307), as [`clocks_on_cpu_cycle`]
+/// was, to keep that function under `clippy::too_many_lines`.
+const fn nametable_pages_vary(mapper: i32) -> bool {
+    matches!(
+        mapper,
+        5 | 19
+            | 24
+            | 26
+            | 35
+            | 68
+            | 90
+            | 95
+            | 111
+            | 118
+            | 137
+            | 138
+            | 139
+            | 141
+            | 150
+            | 158
+            | 207
+            | 209
+            | 211
+            | 218
+            | 243
+            // MAPPERS-N: 307, the KS7037, a CIRAM page per table from four registers
+            // (`Kaiser7037.h`, `SetNametables`).
+            | 307
+    )
+}
+
 /// Whether `mapper`'s board moves on every CPU cycle; the numbers and the lot that added each are
 /// in the comment on the field in `Cartridge::create`.
 ///
@@ -913,29 +947,7 @@ impl Cartridge {
             // nametable RAM and the board maps the same 2 KiB into the pattern tables, so one
             // memory has to answer both windows (nesdev, "INES Mapper 218"). The number is in the
             // latch whatever `board-218` says, for mapper 68's reason above.
-            nametable_pages_vary: matches!(
-                mapper,
-                5 | 19
-                    | 24
-                    | 26
-                    | 35
-                    | 68
-                    | 90
-                    | 95
-                    | 111
-                    | 118
-                    | 137
-                    | 138
-                    | 139
-                    | 141
-                    | 150
-                    | 158
-                    | 207
-                    | 209
-                    | 211
-                    | 218
-                    | 243
-            ),
+            nametable_pages_vary: nametable_pages_vary(mapper),
             bus_conflicts,
             // The two lists are `watches_ppu_reads` and `watches_ppu_bus_without_read` below,
             // which carry the numbers and the lot that added each.

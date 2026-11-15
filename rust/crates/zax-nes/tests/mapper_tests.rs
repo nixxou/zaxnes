@@ -256,7 +256,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let sachen8259 = cfg!(feature = "board-sachen8259");
     let huang1 = cfg!(feature = "board-huang1");
     let cony = cfg!(feature = "board-cony");
-    let additions: [(i32, bool); 237] = [
+    let additions: [(i32, bool); 241] = [
         (6, cfg!(feature = "board-6")),
         (8, cfg!(feature = "board-8")),
         (12, huang1),
@@ -266,6 +266,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (24, true),
         (26, true),
         (29, cfg!(feature = "board-29")),
+        (31, cfg!(feature = "board-31")),
         (33, small),
         (35, jy),
         (36, jv001),
@@ -324,6 +325,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         // MF-VS step 4: mapper 99 is the VS. System board itself and 151 the VRC1 on a VS board,
         // two numbers that exist only on that machine.
         (99, cfg!(feature = "board-vs-system")),
+        (103, cfg!(feature = "board-103")),
         (104, cfg!(feature = "board-104")),
         (105, cfg!(feature = "board-105")),
         (106, cfg!(feature = "board-106")),
@@ -382,6 +384,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (172, jv001),
         (173, jv001),
         (174, cfg!(feature = "board-174")),
+        (175, cfg!(feature = "board-175")),
         (176, cfg!(feature = "board-176")),
         (177, cfg!(feature = "board-177")),
         (178, cfg!(feature = "board-178")),
@@ -476,6 +479,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (304, cfg!(feature = "board-304")),
         (305, cfg!(feature = "board-305")),
         (306, cfg!(feature = "board-306")),
+        (307, cfg!(feature = "board-307")),
         (309, cfg!(feature = "board-309")),
         (312, cfg!(feature = "board-312")),
         (313, cfg!(feature = "board-313")),

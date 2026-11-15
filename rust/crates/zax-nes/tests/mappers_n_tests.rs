@@ -753,3 +753,76 @@ fn mappers_n_188_banks_both_roms_and_reads_the_microphone() {
     core.run_frame(0x01); // controller 1's A
     assert_eq!(0x02, core.read_memory(0x6000) & 0x07);
 }
+
+/// nesdev "INES Mapper 031": eight 4 KiB pages written at `$5000-$5FFF` (A0-A2), `$5FFF` set to
+/// `$FF` at power-on. The fixture fills each 8 KiB bank with its number.
+#[cfg(feature = "board-31")]
+#[test]
+fn mappers_n_31_banks_4_kib_pages_from_5000() {
+    let mut core = MapperRom::new(31).prg(16).chr(0).load();
+    assert_eq!(15, core.read_memory(0xF010));
+    core.mapper_write(0x5FF8, 3);
+    assert_eq!(1, core.read_memory(0x8010));
+    core.mapper_write(0x5001, 10);
+    assert_eq!(5, core.read_memory(0x9010));
+}
+
+/// Mesen2 `Mapper103.h` and puNES `mapper_103.c`: the last 32 KiB at `$8000`, RAM at `$6000`
+/// and over `$B800-$D7FF` until `$F000` bit 4 maps ROM there, the RAM written either way.
+#[cfg(feature = "board-103")]
+#[test]
+fn mappers_n_103_overlays_work_ram_and_writes_it_always() {
+    let mut core = MapperRom::new(103).prg(16).chr(0).load();
+    assert_eq!(12, core.read_memory(0x8010));
+    core.mapper_write(0xB800, 0x77);
+    assert_eq!(0x77, core.read_memory(0xB800));
+    core.mapper_write(0x8000, 5);
+    core.mapper_write(0xF000, 0x10);
+    assert_eq!(13, core.read_memory(0xB800));
+    assert_eq!(5, core.read_memory(0x6010));
+    core.mapper_write(0x6001, 0x99);
+    core.mapper_write(0xF000, 0x00);
+    assert_eq!(0x99, core.read_memory(0x6001));
+    assert_eq!(0x77, core.read_memory(0xB800));
+}
+
+/// Mesen2 `Kaiser7022.h` and FCEUX `175.cpp`: `$A000` holds a bank that takes effect, PRG and
+/// CHR together, when the CPU reads `$FFFC`.
+#[cfg(feature = "board-175")]
+#[test]
+fn mappers_n_175_applies_its_bank_on_a_read_of_fffc() {
+    let mut core = MapperRom::new(175).prg(16).chr(64).load();
+    core.mapper_write(0xA000, 3);
+    assert_eq!(0, core.read_memory(0x8010));
+    core.cartridge_mut().unwrap().try_cpu_read(0xFFFC);
+    assert_eq!(6, core.read_memory(0x8010));
+    assert_eq!(6, core.read_memory(0xC010));
+    assert_eq!(24, core.chr_bank(0x0000));
+}
+
+/// Mesen2 `Kaiser7037.h` and puNES `mapper_307.c`: 4 KiB layout RAM, ROM 15, R6, ROM -4, RAM,
+/// R7, last 8 KiB; registers through `$8000`/`$8001`; a CIRAM page per table.
+#[cfg(feature = "board-307")]
+#[test]
+fn mappers_n_307_mixes_rom_and_ram_and_pages_each_table() {
+    let mut core = MapperRom::new(307).prg(16).chr(0).load();
+    for (index, value) in [(6, 3), (7, 9), (2, 1), (5, 1)] {
+        core.mapper_write(0x8000, index);
+        core.mapper_write(0x8001, value);
+    }
+    assert_eq!(3, core.read_memory(0x8010));
+    assert_eq!(14, core.read_memory(0xA010));
+    assert_eq!(9, core.read_memory(0xC010));
+    assert_eq!(7, core.read_memory(0x7010));
+    core.mapper_write(0xB010, 0x55);
+    core.mapper_write(0x6010, 0x66);
+    assert_eq!(
+        (0x55, 0x66),
+        (core.read_memory(0xB010), core.read_memory(0x6010))
+    );
+    let board = core.cartridge().unwrap();
+    assert_eq!(
+        [1, 0, 0, 1],
+        [0, 1, 2, 3].map(|table| board.nametable_page(table))
+    );
+}
