@@ -250,6 +250,31 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
 
     // AMD-009 (Q-022): without a profile the scene shows the core's pixel frame.
     scene.two_dimensional_mode = engine.two_dimensional_mode;
+    // `ZAXNES_EMPHASIS_3D=1`: the app's `video.emphasis_3d`, the scene tinted with the frame's
+    // most common colour emphasis (lot FIDPLUS-D2b).
+    // `ZAXNES_EMPHASIS_3D=force:<0-7>` forces a value instead, to show the tint on a game that
+    // never asks for one.
+    let mut scene_emphasis = 0u8;
+    let setting = std::env::var("ZAXNES_EMPHASIS_3D").unwrap_or_default();
+    if let Some(forced) = setting.strip_prefix("force:") {
+        scene_emphasis = forced.parse::<u8>().unwrap_or(0) & 7;
+        println!("render: scene emphasis forced to {scene_emphasis}");
+    } else if setting == "1" {
+        let mut counts = [0usize; 8];
+        for &bits in &emphasis {
+            counts[usize::from(bits & 7)] += 1;
+        }
+        if !emphasis.is_empty() {
+            scene_emphasis = (0..8u8)
+                .rev()
+                .max_by_key(|&bits| counts[usize::from(bits)])
+                .unwrap_or(0);
+        }
+        println!("render: scene emphasis {scene_emphasis}");
+    }
+    zax_engine3d::palette::set_scene_emphasis(scene_emphasis);
+    // The backdrop read again: it is a palette colour too.
+    scene.nes_background_color = engine.frame_color(0);
     let draw_list = engine.build_draw_list().clone();
 
     Ok(SyntheticScene {
