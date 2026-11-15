@@ -1348,6 +1348,28 @@ fn fidelity_switch_on_fetch_reads_the_stale_low_byte_in_alignments_2_and_3() {
     }
 }
 
+/// Lot FIDPLUS-C C3c (Visual 2C07 netlist, `g2001px`): the PAL 2C07 switches the rendering four
+/// dots after a `$2001` write, the 2C02 two. Switched off on dot 12, the coarse-X increment of
+/// dot 16 still happens on PAL and not on NTSC.
+#[test]
+fn fidplus_c3c_pal_rendering_switch_takes_four_dots() {
+    fn increments(pal: bool) -> bool {
+        let mut fixture = TileFixture::new();
+        if pal {
+            fixture.core.set_region(zax_nes::NesRegion::Pal);
+        }
+        fixture.set_mask(0x0A);
+        fixture.core.run_frame(0);
+        park_on_dot(&mut fixture, 12);
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        let before = ppu.vram_v();
+        ppu.write(1, 0x00, None);
+        ppu.vram_v() == increment_x(before)
+    }
+    assert!(increments(true), "PAL: dot 16 still renders");
+    assert!(!increments(false), "NTSC: the switch is in force by dot 16");
+}
+
 /// Lot FIDPLUS-2 (A5, transistor netlist): a `$2001` write landing on dot 254 switches the
 /// fetches and increments from dot 257 on, but the horizontal copy of dot 257 still follows the
 /// old state in alignments 2 and 3: switched off, the copy is made; switched on, it is not.

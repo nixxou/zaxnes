@@ -928,8 +928,15 @@ impl Ppu2C02 {
             self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline();
         // Two dots in every alignment: the netlist with the CPU's hold time (step 33) stops and
         // starts the fetches and `v`'s increments on the third dot after the write in all four;
-        // TriCNES's third dot in alignment 2 does not appear there.
-        let delay = 2;
+        // TriCNES's third dot in alignment 2 does not appear there. The PAL 2C07 takes four
+        // (Visual 2C07 netlist, lot FIDPLUS-C C3c, `g2001px`: a switch on written on dot 12 leaves
+        // dot 16's increment undone and fetches again from dot 17; 8 170 differing dots a frame
+        // with four, 54 000 to 97 000 with two, three or five).
+        let delay = if self.timing.region == NesRegion::Pal {
+            4
+        } else {
+            2
+        };
         let corrupts = (value & 0x18) == 0 && self.switch_off_corrupts_palettes();
         if renders && self.prepaid_dots == 0 {
             if corrupts {
@@ -950,8 +957,11 @@ impl Ppu2C02 {
         // old state — the netlist copies after a switch off and does not after a switch on, in
         // alignments 2 and 3 (A5; alignments 0 and 1 hit the switch-on race of step 33). Both are
         // settled here, on the write, so that nothing is tested per dot.
-        let late_switch =
-            ran_ahead && self.dot == 256 && self.alignment >= 2 && self.netlist_measured_region();
+        // The 2C07 does the same with its four dots (a write on dot 252 switches on dot 257).
+        let late_switch = ran_ahead
+            && self.dot == 256
+            && self.alignment >= 2
+            && (self.netlist_measured_region() || self.timing.region == NesRegion::Pal);
         let was_rendering = self.rendering_enabled();
         self.mask = value;
         if late_switch {

@@ -73,6 +73,17 @@ Revision A fails `5-MMC3` (both suites) and `6.MMC3_rev_B`: no single model pass
   power-on frame, as on NTSC, and 3 dots a frame: line 239 dot 256 and the pre-render's vertical
   copy, line 311 dots 278-279, to look at next). Zaxnes: no glitch on PAL (`write_control`), test
   `fidelity_2000_write_on_dot_257_takes_nametable_x_from_open_bus`.
+  Step 4 (2026-11-15), `g2001px` (rendering switched on and off along the lines): **the 2C07
+  switches the rendering four dots after a `$2001` write, the 2C02 two** (a switch on written on
+  dot 12: no increment on dot 16, fetches again from dot 17). Delay 4 on PAL: 8 170 differing dots
+  a frame left, against 54 000 to 97 000 with 2, 3 or 5; then the dot-257 copy follows the state
+  before a switch landing on it, as on the 2C02 (`late_switch`, the write on dot 252 with four
+  dots): 0 differing dots on whole frames but the pre-render's 2 (line 311, dots 278-279). Test
+  `fidplus_c3c_pal_rendering_switch_takes_four_dots`. Open: the pre-render's vertical copy, and
+  the first frame's `$2007` increments seen 4-5 dots later on the netlist (line 241).
+  Corpus at reset phase e3 so far (alignment 3 against 0, differing dots, whole frames): `g2005`
+  31 543 / 25 103 and `g2005px` 7 508 / 2 034 (the alignment-3 `$2005` open-bus effects look
+  absent on the 2C07 too), `g2006px` 7 104 both.
 * C3 (the goal's list, for the record): RP2A03 letter revisions (the DMC/OAM DMA and `$4015` read
   differences), the PAL 2C07 measured as the 2C02 was, random CPU/PPU alignment and RAM at power-on
   as a model choice; each with the test ROM or netlist that judges it.
