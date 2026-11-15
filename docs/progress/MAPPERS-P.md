@@ -416,3 +416,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   acknowledge); `IrqBoard` forwards that override for `board-342`. 342 is in `irq_p_a12_board`,
   `nametable_pages_vary` and the mf_3b sweep. The MAPPERS-P list is done: 133 of the 135
   numbers, 186 refused, 355, 532 and 562 blocked.
+* Perf after batch 56 (1cac40fd) against e4596884: mm2 core +0.003 %, total +0.002 %; zelda2
+  core +0.002 %, total +0.003 %; smb3 core +0.002 %, total +0.014 %. smb3's `convert` (+0.150 %)
+  and `lua_hooks` (+0.238 %) both grew by the same 2 020 920 instructions, outside any board
+  code: a shared function's layout, to recheck if it persists.
