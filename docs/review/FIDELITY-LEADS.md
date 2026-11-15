@@ -997,6 +997,11 @@ places where puNES itself is incomplete are copied, not invented around:
 * 559 (`mapper_559.c`): puNES maps its four nametable registers with `memmap_nmt_1k`, whose
   values (`$E0`/`$E1` at power-on) are read here as a CIRAM page from D0; what the upper bits
   select on the board is not documented anywhere this lot can read.
+* 555 (`mapper_555.c`): the timer's length is `(DIP | $10) << 25` CPU cycles and the DIP is 0,
+  so a round lasts about five minutes (puNES's default); puNES's on-screen countdown is a host
+  overlay and is not reproduced. `$5000-$57FF` is the work RAM's 4 KiB bank 2, so an image whose
+  header gives 8 KiB or less has it alias `$6000-$6FFF`; nesdev's page gives no RAM size and the
+  header's is used as it is. The 8 KiB CHR-RAM beside the CHR-ROM is assumed, as for the TQROM.
 
 ### J36. Mapper 682 (Rainbow): the ESP is modelled from the protocol document
 The ESP (`rainbow_esp.rs`) follows Broke Studio's `rainbow-net.md` and `mapper-doc.md`; no

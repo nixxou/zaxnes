@@ -928,6 +928,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     552,
     #[cfg(feature = "board-554")]
     554,
+    #[cfg(feature = "board-555")]
+    555,
     #[cfg(feature = "board-557")]
     557,
     #[cfg(feature = "board-559")]
@@ -1018,6 +1020,14 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
     match mapper {
         // MAPPERS-P: puNES `map_init_269` copies the PRG-ROM into CHR when the image has no
         // CHR-ROM, so the CHR memory is the PRG-ROM's size (`Mmc3P::fill_chr_269`).
+        // MAPPERS-P: puNES `chr_swap_mmc3_555` maps 1 KiB CHR-RAM windows beside the CHR-ROM
+        // (`memmap_vram_1k`); the cartridge carries 8 KiB of it, which an iNES 1.0 header cannot
+        // state (the TQROM's case, mapper 119 above).
+        #[cfg(feature = "board-555")]
+        555 => BoardMemorySizes {
+            chr_ram: Some(0x2000),
+            ..BoardMemorySizes::default()
+        },
         #[cfg(feature = "board-269")]
         269 if header.chr_rom_size == 0 => BoardMemorySizes {
             chr_ram: Some(header.prg_rom_size),
@@ -3431,7 +3441,15 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
             VrcPKind::of(mapper)?,
         )))),
         #[cfg(feature = "board-557")]
-        557 => Board::DecodeBoard(DecodeBoard::MultiP(MultiP::new(memory, MultiPKind::of(mapper)?))),
+        557 => Board::DecodeBoard(DecodeBoard::MultiP(MultiP::new(
+            memory,
+            MultiPKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-555")]
+        555 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
+            memory,
+            Mmc3PKind::of(mapper)?,
+        )))),
         #[cfg(feature = "board-299")]
         299 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
             memory,

@@ -147,7 +147,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 550 | `mapper_550.c` | 86 | 1 | 0 | done (batch 11, `Mmc1Outer`) |
 | 551 | `mapper_178.c` | 109 | 4 | 0 | done (batch 19, `WaixingFs305`) |
 | 554 | `mapper_554.c` | 94 | 1 | 0 | done (batch 10, `MultiP`) |
-| 555 | `mapper_555.c` | 142 | 3 | 0 | todo |
+| 555 | `mapper_555.c` | 142 | 3 | 0 | done (batch 32, `Mmc3P`) |
 | 556 | `mapper_556.c` | 178 | 1 | 0 | todo |
 | 557 | `mapper_557.c` | 58 | 1 | 0 | done (batch 31, `MultiP`) |
 | 558 | `mapper_558.c` | 135 | 14 | 0 | todo |
@@ -258,3 +258,8 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 * Batch 31: `MultiP` 557 (an FDS conversion on a Namcot 118 clone: the 118's eight registers kept
   in `MultiP::chr`, already in the save state; PRG `& $0F` with the fixed pair at `$0E`/`$0F`,
   CHR fixed, R5 D5 the mirroring). Kept off `Namcot108`, whose layout is a measured hot path.
+* Batch 32: `Mmc3P` 555 (*Nintendo Campus Challenge 1991*): outer registers at `$5800`/`$5C00`,
+  RAM at `$5000-$57FF` (the work RAM's 4 KiB bank 2), the competition timer on `on_cpu_cycle`
+  (in `clocks_on_cpu_cycle`; `timer_555`/`expired_555` saved for that kind only) and the mode
+  whose CHR registers with D6 select 1 KiB windows of an 8 KiB CHR-RAM beside the CHR-ROM
+  (`ram_windows`, derived; `ppu_peek`/`ppu_write` serve them, `chr_peek_view` is `None`).

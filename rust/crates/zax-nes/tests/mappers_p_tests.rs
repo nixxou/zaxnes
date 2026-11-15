@@ -1110,3 +1110,23 @@ fn mappers_p_557_is_a_namcot_118_with_fixed_chr() {
     assert_eq!([3, 5, 14, 15], core.prg_windows());
     assert_eq!([0, 1, 2, 3, 4, 5, 6, 7], core.chr_windows());
 }
+
+/// `mapper_555.c`: `$5800` the outer PRG bank and mask, `$5800-$5FFF` reads the timer status,
+/// `$5000-$57FF` is RAM, and mode 2 puts a CHR register with D6 on the CHR-RAM.
+#[cfg(feature = "board-555")]
+#[test]
+fn mappers_p_555_has_an_outer_bank_ram_at_5000_and_mixed_chr() {
+    let mut core = MapperRom::new(555).prg(64).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    assert_eq!([1, 2, 6, 7], core.prg_windows());
+    core.mapper_write(0x5800, 0x05);
+    assert_eq!([33, 34, 46, 47], core.prg_windows());
+    assert_eq!(0x5C, core.read_memory(0x5800));
+    core.mapper_write(0x5010, 0x77);
+    assert_eq!(0x77, core.read_memory(0x5010));
+    core.mapper_write(0x5800, 0x02);
+    core.mmc3_bank(2, 0x41);
+    core.mmc3_bank(3, 0x05);
+    let windows = core.chr_windows();
+    assert_eq!((0, 5), (windows[4], windows[5]));
+}

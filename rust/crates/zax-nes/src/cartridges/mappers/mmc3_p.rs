@@ -107,6 +107,11 @@ pub enum Mmc3PKind {
     /// the bank select is a whole byte whose values `$00-$07`, `$46`/`$47` and `$80-$85` load
     /// eight 1 KiB CHR and four 8 KiB PRG registers directly, with no PRG/CHR mode.
     M100,
+    /// 555, `mapper_555.c` (*Nintendo Campus Challenge 1991*): two registers at `$5800`/`$5C00`
+    /// (an outer PRG/CHR bank and masks), work RAM at `$5000-$57FF`, a competition timer whose
+    /// expiry `$5800-$5FFF` reads in D7, and a mode in which CHR register D6 picks the 8 KiB
+    /// CHR-RAM beside the CHR-ROM.
+    M555,
 }
 
 impl Mmc3PKind {
@@ -146,6 +151,7 @@ impl Mmc3PKind {
             269 => Self::M269,
             353 => Self::M353,
             100 => Self::M100,
+            555 => Self::M555,
             _ => return None,
         })
     }
@@ -184,6 +190,7 @@ impl Mmc3PKind {
             Self::M269 => 269,
             Self::M353 => 353,
             Self::M100 => 100,
+            Self::M555 => 555,
         }
     }
 }
@@ -213,6 +220,14 @@ pub struct Mmc3P {
     /// Mapper 100's bank select, four PRG and eight CHR registers (`m100.reg`, `.prg`,
     /// `.chr`), saved for that kind only.
     raw_100: [u8; 13],
+    /// Mapper 555's timer (`m555.counter.timer`) and its expiry (`.disabled`), saved for that
+    /// kind only.
+    timer_555: u32,
+    expired_555: bool,
+    /// Mapper 555's windows on the CHR-RAM chip (bit per 1 KiB window) and the RAM bank of each;
+    /// derived by [`Mmc3P::refresh`], so not saved.
+    ram_windows: u8,
+    ram_banks: [u8; 8],
 }
 
 impl Mmc3P {
@@ -226,6 +241,10 @@ impl Mmc3P {
             prg_size: memory.rom().prg_rom().len(),
             a000: 0,
             raw_100: Self::RAW_100_POWER_ON,
+            timer_555: 0,
+            expired_555: false,
+            ram_windows: 0,
+            ram_banks: [0; 8],
             chr_269: if kind == Mmc3PKind::M269 {
                 Self::chr_269(memory)
             } else {
@@ -240,6 +259,28 @@ impl Mmc3P {
                 }
             },
         }
+    }
+
+    /// `chr_swap_mmc3_555`: in the mode `reg[0] & 6 == 2`, a CHR register with D6 set puts its
+    /// window on the CHR-RAM, bank D0-D2 (`memmap_vram_1k`, which wraps on the chip's size).
+    fn settle_ram_555(&mut self, raw_chr: &[i32; BankWindows::CHR_WINDOWS]) {
+        self.ram_windows = 0;
+        if self.outer[0] & 0x06 != 0x02 {
+            return;
+        }
+        for (slot, value) in raw_chr.iter().enumerate() {
+            if value & 0x40 != 0 {
+                self.ram_windows |= 1 << slot;
+                self.ram_banks[slot] = u8::try_from(value & 0x07).unwrap_or(0);
+            }
+        }
+    }
+
+    /// Where a CHR address on one of 555's CHR-RAM windows falls in the chip, or `None`.
+    fn ram_offset_555(&self, address: u16) -> Option<usize> {
+        let window = usize::from(address >> 10) & 0x07;
+        (address < 0x2000 && self.ram_windows & (1 << window) != 0)
+            .then(|| usize::from(self.ram_banks[window]) * 0x400 + usize::from(address & 0x03FF))
     }
 
     /// `map_init_100`: PRG 0, 1, `$FE`, `$FF`, CHR 0-7.
@@ -271,6 +312,8 @@ impl Mmc3P {
         self.outer = [0; 4];
         self.index = 0;
         self.raw_100 = Self::RAW_100_POWER_ON;
+        self.timer_555 = 0;
+        self.expired_555 = false;
         match self.kind {
             // `map_init_372`/`_401`/`_410`/`_420`: "reg[2] = 0x0F", the CHR mask fully open.
             Mmc3PKind::M356
@@ -472,6 +515,8 @@ impl Mmc3P {
             Mmc3PKind::M422 | Mmc3PKind::M534 => self.prg_page_126(slot, page),
             Mmc3PKind::M370 => ((o[0] & 0x38) << 1) | (page & (0x1F >> ((o[0] & 0x20) >> 5))),
             Mmc3PKind::M269 => o[1] | (page & (o[3] & 0x3F)),
+            // `prg_swap_mmc3_555`: base `reg[0]` D2 (256 KiB), mask from D0-D1.
+            Mmc3PKind::M555 => ((o[0] & 0x04) << 3) | (page & (((o[0] & 0x03) << 3) | 0x07)),
             Mmc3PKind::M353 => self.prg_page_353(slot, page),
             Mmc3PKind::M344 | Mmc3PKind::M432 => self.prg_page_dip(slot, page),
             _ => page,
@@ -766,6 +811,16 @@ impl Mmc3P {
             std::array::from_fn(|slot| base | i32::try_from(slot).unwrap_or(0))
         } else if matches!(self.kind, Mmc3PKind::M344 | Mmc3PKind::M432) {
             std::array::from_fn(|slot| self.chr_page_dip(raw_chr[slot]))
+        } else if self.kind == Mmc3PKind::M555 {
+            let base = (i32::from(self.outer[0]) & 0x04) << 5;
+            let mixed = self.outer[0] & 0x06 == 0x02;
+            std::array::from_fn(|slot| {
+                if mixed {
+                    base | raw_chr[slot]
+                } else {
+                    base | (raw_chr[slot] & 0x7F)
+                }
+            })
         } else if self.kind == Mmc3PKind::M269 {
             let (offset, mask) = (i32::from(self.outer[0]), i32::from(self.outer[2]));
             std::array::from_fn(|slot| offset | (raw_chr[slot] & mask))
@@ -792,6 +847,9 @@ impl Mmc3P {
         } else {
             std::array::from_fn(|slot| self.chr_page(raw_chr[slot]))
         };
+        if self.kind == Mmc3PKind::M555 {
+            self.settle_ram_555(&raw_chr);
+        }
         let Some(banks) = self.mmc3.banks_mut() else {
             return;
         };
@@ -926,6 +984,18 @@ impl Mmc3P {
                 if (r[3] >> 8) & 0x80 == 0 {
                     Self::write_269(r, self.index, value);
                     self.index = (self.index + 1) & 0x03;
+                }
+            }
+            // `extcl_cpu_wr_mem_555`: `$5800`/`$5C00` (A11, A10 the register); `wram_wr` for the
+            // whole of `$5000-$5FFF`, which `wram_fix_mmc3_555` maps to the RAM's 4 KiB bank 2.
+            Mmc3PKind::M555 if (0x5000..=0x5FFF).contains(&address) => {
+                if address & 0x0800 != 0 {
+                    r[usize::from((address & 0x0400) >> 10)] = data;
+                }
+                let ram = memory.prg_ram_mut();
+                if !ram.is_empty() {
+                    let len = ram.len();
+                    ram[(0x2000 + usize::from(address & 0x0FFF)) % len] = value;
                 }
             }
             // `extcl_cpu_wr_mem_370`: `$5000-$5FFF`, the low address byte.
@@ -1069,6 +1139,10 @@ impl Mapper for Mmc3P {
         if self.kind == Mmc3PKind::M100 {
             writer.write_raw(&self.raw_100);
         }
+        if self.kind == Mmc3PKind::M555 {
+            writer.write_u32(self.timer_555);
+            writer.write_bool(self.expired_555);
+        }
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -1080,6 +1154,10 @@ impl Mapper for Mmc3P {
         self.a000 = reader.read_u8()?;
         if self.kind == Mmc3PKind::M100 {
             reader.read_into(&mut self.raw_100)?;
+        }
+        if self.kind == Mmc3PKind::M555 {
+            self.timer_555 = reader.read_u32()?;
+            self.expired_555 = reader.read_bool()?;
         }
         self.refresh();
         Ok(())
@@ -1173,6 +1251,16 @@ impl Mapper for Mmc3P {
         }
         // `extcl_cpu_rd_mem_370`: `$5000-$5FFF` reads `DIP & $80 | open bus & $7F`; the DIP is 0
         // and the high address byte stands in for the bus (J33).
+        // `extcl_cpu_rd_mem_555`: `$5800-$5FFF` the timer's expiry in D7 over `$5C`, `$5000-$57FF`
+        // the RAM's 4 KiB bank 2.
+        if self.kind == Mmc3PKind::M555 && (0x5000..=0x5FFF).contains(&address) {
+            if address & 0x0800 != 0 {
+                return Some(if self.expired_555 { 0xDC } else { 0x5C });
+            }
+            let ram = memory.prg_ram();
+            return (!ram.is_empty())
+                .then(|| ram[(0x2000 + usize::from(address & 0x0FFF)) % ram.len()]);
+        }
         if self.kind == Mmc3PKind::M370 && (0x5000..=0x5FFF).contains(&address) {
             return Some(address.to_be_bytes()[0] & 0x7F);
         }
@@ -1191,13 +1279,21 @@ impl Mapper for Mmc3P {
     }
 
     fn chr_peek_view<'m>(&self, memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
-        if !self.chr_269.is_empty() {
+        if !self.chr_269.is_empty() || self.kind == Mmc3PKind::M555 {
             return None;
         }
         self.mmc3.chr_peek_view(memory)
     }
 
     fn ppu_peek(&self, memory: &CartridgeMemory, address: u16, fetch: ChrFetch) -> u8 {
+        if let Some(offset) = self.ram_offset_555(address) {
+            let ram = memory.chr_ram();
+            return if ram.is_empty() {
+                0
+            } else {
+                ram[offset % ram.len()]
+            };
+        }
         if !self.chr_269.is_empty() && address < 0x2000 {
             return self
                 .mmc3
@@ -1212,7 +1308,32 @@ impl Mapper for Mmc3P {
         if !self.chr_269.is_empty() {
             return;
         }
+        if let Some(offset) = self.ram_offset_555(address) {
+            let ram = memory.chr_ram_mut();
+            if !ram.is_empty() {
+                let len = ram.len();
+                ram[offset % len] = value;
+            }
+            return;
+        }
         self.mmc3.ppu_write(memory, address, value);
+    }
+
+    /// `extcl_cpu_every_cycle_555`: with `reg[0]` D3 clear the timer is held at 0; set, it counts
+    /// CPU cycles to `(DIP | $10) << 25`, the DIP being 0 here (J37), about five minutes.
+    fn on_cpu_cycle(&mut self, _memory: &mut CartridgeMemory) {
+        if self.kind != Mmc3PKind::M555 {
+            return;
+        }
+        if self.outer[0] & 0x08 == 0 {
+            self.timer_555 = 0;
+            self.expired_555 = false;
+        } else {
+            self.timer_555 = self.timer_555.wrapping_add(1);
+            if self.timer_555 == 0x10 << 25 {
+                self.expired_555 = true;
+            }
+        }
     }
 
     fn on_ppu_address_bus(&mut self, memory: &mut CartridgeMemory, address: u16, clock: i64) {

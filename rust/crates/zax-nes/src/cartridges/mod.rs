@@ -612,6 +612,8 @@ const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
             | 529
             // MAPPERS-N: mapper 266's VRC4 IRQ (nesdev "NES 2.0 Mapper 266").
             | 266
+            // MAPPERS-P: mapper 555's competition timer, `Mmc3P` (puNES `EXTCL_CPU_EVERY_CYCLE`).
+            | 555
             // MAPPERS-P: mapper 559, `VrcP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
             | 559
             // MAPPERS-P: mapper 527, `VrcP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
@@ -981,6 +983,7 @@ const fn mmc3_p_board(mapper: i32) -> bool {
             | 269
             | 353
             | 100
+            | 555
     )
 }
 
@@ -2253,7 +2256,7 @@ mod tests {
             315, 322, 327, 334, 339, 345, 361, 372, 377, 395, 399, 401, 410, 411, 420, 455, 456,
             457, 516, 393, 412,
             // MAPPERS-P: 248 and 536 run the boards of 115 and 195 (`registry::board_number`).
-            248, 536, 422, 534, 370, 344, 432, 356, 269, 353, 100,
+            248, 536, 422, 534, 370, 344, 432, 356, 269, 353, 100, 555,
         ] {
             if Cartridge::is_supported(number) {
                 expected.extend_from_slice(&[number, number]);
