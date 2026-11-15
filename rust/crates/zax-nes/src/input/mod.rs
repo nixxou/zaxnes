@@ -170,6 +170,26 @@ impl InputPorts {
         }
     }
 
+    /// Replaces the input word inside a frame (lot FIDPLUS-B step 2): the shift registers take it
+    /// when the game next strobes `$4016`, or at once while the strobe is held. The VS. System's
+    /// cabinet keeps its once-a-frame word.
+    pub fn set_live_word(&mut self, input_word: u16) {
+        #[cfg(feature = "board-vs-system")]
+        if self.vs.is_some() {
+            return;
+        }
+        if self.input_word == input_word {
+            // The same word: nothing to take (a slice that only goes on with the frame).
+            return;
+        }
+        self.input_word = input_word;
+        if self.strobe {
+            // The strobe held high reloads the registers continuously: they show the new word
+            // now. A reload already scheduled for the strobe's fall stays as it was.
+            self.reload();
+        }
+    }
+
     /// Stores where the Zapper of `port` is aimed this frame (REQ-CORE-060).
     ///
     /// # Errors

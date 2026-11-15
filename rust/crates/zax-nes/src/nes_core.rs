@@ -107,6 +107,10 @@ pub struct NesCore {
     /// Fidélité+ (`docs/design/HALF-CYCLE.md`): every frame through its own loop
     /// ([`NesCore::run_fidelity_plus_steps`]). Off by default; not in the state (step 4).
     fidelity_plus: bool,
+    /// The frame a sliced run (`NesCore::run_frame_slice`, lot FIDPLUS-B) has started and not
+    /// finished: its first cycle, margin decoder and idle loop. Not part of the state: a state is
+    /// taken between frames.
+    slice: Option<SliceFrame>,
     /// The margin decoder of the ROM loaded, found by [`NesCore::find_margin_decoder`] when the
     /// ROM, the pack or `emu.builtin_patches` changes, and read by `end_frame` every frame.
     decoder: Option<&'static dyn crate::wide_decode::MarginDecoder>,
@@ -123,6 +127,24 @@ pub struct NesCore {
     real_frame: CoreState,
     /// Whether `real_frame` holds a state [`NesCore::restore_real_frame`] still owes a restore.
     real_frame_held: bool,
+}
+
+/// How a slice's instructions stopped.
+enum SliceOutcome {
+    /// The frame ended (vblank began).
+    FrameDone,
+    /// The slice's cycle budget is spent, the frame goes on.
+    Budget,
+    /// The board changed variant: go on through `with_board_kind!` again.
+    KindChanged,
+}
+
+/// A frame a sliced run has started (lot FIDPLUS-B, `docs/design/REALTIME-PACING.md`).
+#[derive(Clone, Copy)]
+struct SliceFrame {
+    start_cycle: i64,
+    decoder: Option<&'static dyn crate::wide_decode::MarginDecoder>,
+    idle_loop: Option<(u16, u16)>,
 }
 
 impl Default for NesCore {
@@ -169,6 +191,7 @@ impl NesCore {
             idle_loop: None,
             generic_path: false,
             fidelity_plus: false,
+            slice: None,
             decoder: None,
             steady_sprites: Vec::new(),
             steady_places: Vec::new(),
@@ -1059,6 +1082,111 @@ impl NesCore {
         self.finish_frame(decoder, start_cycle)
     }
 
+    /// Runs the frame in slices (lot FIDPLUS-B step 2, `docs/design/REALTIME-PACING.md`): from
+    /// where the last slice stopped, or from a new frame, up to the first CPU instruction boundary
+    /// at or after cycle `until` (the bus's cycle count), or to the frame's end. `input_word` is
+    /// the pad's state now: a new frame starts with it, a frame in progress takes it at the next
+    /// `$4016` strobe. Returns the frame's cycles when it ended in this slice (the video callback
+    /// has fired, as after [`Self::run_frame`]), `None` when it goes on. A machine run only by
+    /// whole frames and one run by slices of any size are the same machine.
+    pub fn run_frame_slice(&mut self, input_word: u16, until: i64) -> Option<i64> {
+        if self.bus.cartridge().is_none() {
+            return Some(0);
+        }
+        let frame = if let Some(frame) = self.slice {
+            self.bus.input_mut().set_live_word(input_word);
+            frame
+        } else {
+            self.bus.input_mut().begin_frame(input_word);
+            if let Some(source) = self.zapper_position_source.as_mut() {
+                self.bus.input_mut().aim_zappers(source);
+            }
+            let start_cycle = self.bus.cycle_count();
+            let decoder = self.margin_decoder();
+            self.bus.ppu_mut().wide_mut().set_decoded(decoder.is_some());
+            let idle_loop = self.idle_loop.filter(|_| self.bus.ppu().wide().unlocked());
+            self.bus.ppu_mut().clear_frame_boundary();
+            let frame = SliceFrame {
+                start_cycle,
+                decoder,
+                idle_loop,
+            };
+            self.slice = Some(frame);
+            frame
+        };
+
+        let fidelity = self.fidelity_plus || self.bus.ppu().edges_pending();
+        if fidelity {
+            self.bus.ppu_mut().set_fidelity_plus(self.fidelity_plus);
+        }
+        self.bus.defer_ppu();
+        let done = loop {
+            let outcome = match self.bus.cartridge().filter(|_| !self.generic_path) {
+                Some(cartridge) => with_board_kind!(cartridge.board(), K => {
+                    self.run_slice_steps::<K>(frame.idle_loop, until, fidelity)
+                }),
+                None => self.run_slice_steps::<AnyBoard>(frame.idle_loop, until, fidelity),
+            };
+            match outcome {
+                SliceOutcome::FrameDone => break true,
+                SliceOutcome::Budget => break false,
+                SliceOutcome::KindChanged => {}
+            }
+        };
+        self.bus.end_deferred_ppu();
+        if !done {
+            return None;
+        }
+        self.slice = None;
+        if let Some(decoder) = frame.decoder {
+            self.decode_margins(decoder);
+        }
+        Some(self.finish_frame(frame.decoder, frame.start_cycle))
+    }
+
+    /// Whether a sliced run has a frame in progress ([`Self::run_frame_slice`]).
+    #[must_use]
+    pub const fn frame_in_progress(&self) -> bool {
+        self.slice.is_some()
+    }
+
+    /// The instructions of a slice on the board kind `K`: as [`Self::run_frame_steps`] (or the
+    /// Fidélité+ loop's), and a stop at the first instruction boundary at or after cycle `until`.
+    /// A loop of its own, so that the whole-frame loops carry no budget test.
+    fn run_slice_steps<K: BoardKind>(
+        &mut self,
+        idle_loop: Option<(u16, u16)>,
+        until: i64,
+        fidelity: bool,
+    ) -> SliceOutcome {
+        loop {
+            if fidelity {
+                self.cpu.step(&mut FidelityBus::<K>::new(&mut self.bus));
+            } else {
+                self.cpu.step(&mut KindBus::<K>::new(&mut self.bus));
+            }
+            if let Some((first, last)) = idle_loop {
+                if (first..=last).contains(&self.cpu.pc) && self.bus.ppu().wide().stalling() {
+                    self.bus.ppu_mut().wide_mut().end_stall();
+                }
+            }
+            if self.bus.ppu().vblank_just_started() {
+                return SliceOutcome::FrameDone;
+            }
+            if K::SWITCHES
+                && !self
+                    .bus
+                    .cartridge()
+                    .is_some_and(|cartridge| K::matches(cartridge.board()))
+            {
+                return SliceOutcome::KindChanged;
+            }
+            if self.bus.cycle_count() >= until {
+                return SliceOutcome::Budget;
+            }
+        }
+    }
+
     /// The standard frame: the PPU and the APU batched, the board's path (lot CORE-2).
     fn run_standard_frame(&mut self, idle_loop: Option<(u16, u16)>) {
         self.bus.defer_ppu();
@@ -1286,6 +1414,8 @@ impl NesCore {
     /// next real frame then starts a sequence of its own (REQ-LOOP-066).
     fn forget_real_frame(&mut self) {
         self.real_frame_held = false;
+        // A sliced frame in progress belongs to the machine that was replaced (lot FIDPLUS-B).
+        self.slice = None;
     }
 
     /// Whether a frame has any smooth scrolling to do: the game's own aid, the host's option for
