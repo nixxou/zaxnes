@@ -937,6 +937,18 @@ CHR-RAM) and puNES (`mapper_198.c`, banks from `$50` folding onto `$40-$4F`). Th
 password screen cleanly; the later `[T+ChSFIX2]` and `[T+ChTFIX2]` patches show stray glyphs on
 the password screen, not investigated (translation hacks; their CHR use may differ).
 
+### J23. Mapper 188: the microphone is controller 1's A and B, its level 0
+nesdev ("INES Mapper 188"): `$6000-$7FFF` reads bit 0 "0: A button is pressed", bit 1 "0: B
+button is pressed", bit 2 "1-bit ADC microphone input", bits 7-3 open bus. Mesen2
+(`BandaiMicrophone.h:37-46`) reads the two buttons and the level from key bindings of their own;
+puNES (`mapper_188.c:49-53`) returns a constant 3. Here the buttons are controller 1's A and B,
+handed to the board once per frame (`Mapper::set_input_word`), the level stays 0 (there is no
+microphone input), and bits 7-3 are the high byte of the address, which an absolute read leaves
+on the bus but an indexed read across a page or a DMA would not. The external ROM selected in a
+128 KiB image (no expansion cartridge) reads open bus, as nesdev recommends and Mesen2 does,
+where puNES and "several emulators" map a bank. Karaoke Studio and its two expansion cartridges
+(Hackset `[!]` dumps) reach their song lists.
+
 ### J22. Mapper 168: nesdev/puNES board, two of three versions stuck in the core
 The board follows nesdev ("INES Mapper 168") and puNES (`mapper_168.c`): CHR banks
 `(reg & $0F) ^ 8` (the page allows either convention), the control bit taken from A7 or D2,

@@ -23,6 +23,8 @@ macro_rules! banked {
 #[cfg(feature = "board-small-boards")]
 mod bandai74161;
 mod bandai_fcg;
+#[cfg(feature = "board-188")]
+mod bandai_karaoke;
 #[cfg(feature = "board-small-boards")]
 mod bf9096;
 #[cfg(feature = "board-111")]
@@ -176,6 +178,8 @@ mod waixing_fs305;
 #[cfg(feature = "board-small-boards")]
 pub use bandai74161::Bandai74161;
 pub use bandai_fcg::BandaiFcg;
+#[cfg(feature = "board-188")]
+pub use bandai_karaoke::BandaiKaraoke;
 #[cfg(feature = "board-small-boards")]
 pub use bf9096::Bf9096;
 #[cfg(feature = "board-111")]
@@ -708,6 +712,10 @@ pub trait Mapper {
 
     /// One CPU cycle elapsed (`memory.cpu_cycle()` already incremented).
     fn on_cpu_cycle(&mut self, _memory: &mut CartridgeMemory) {}
+
+    /// The frame's input word (`NesCore::run_frame`), once at the start of each frame, for a
+    /// board with an input device of its own: mapper 188's microphone buttons (lot MAPPERS-N).
+    fn set_input_word(&mut self, _word: u16) {}
 
     /// `M` of REQ-CORE-073: the board's expansion audio in the mixer's integer units
     /// (REQ-CORE-075, AMD-054), or `None` for a board without any — which is every board but

@@ -1046,6 +1046,13 @@ impl Cartridge {
     /// `#[inline(always)]` for the reason `<NesBus as CpuBus>::irq_asserted` carries: this is the
     /// middle link of the per-CPU-cycle /IRQ sample, and pinning only the outer one moved the
     /// boundary here instead (6.6 M instructions on `m1`, 12.9 M on `mmc5`, MF-5b step 1).
+    /// Hands the board the frame's input word, once at the start of the frame (lot MAPPERS-N:
+    /// mapper 188's microphone buttons are controller 1's A and B; see `BandaiKaraoke`).
+    #[cfg(feature = "board-188")]
+    pub fn set_input_word(&mut self, word: u16) {
+        self.board.set_input_word(word);
+    }
+
     #[must_use]
     #[allow(clippy::inline_always)] // Measured: MF-5b step 1.
     #[inline(always)]

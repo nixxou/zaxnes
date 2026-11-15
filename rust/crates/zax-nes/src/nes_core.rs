@@ -978,6 +978,11 @@ impl NesCore {
         }
 
         self.bus.input_mut().begin_frame(input_word);
+        // Mapper 188's microphone has two buttons of its own (lot MAPPERS-N, `BandaiKaraoke`).
+        #[cfg(feature = "board-188")]
+        if let Some(cartridge) = self.bus.cartridge_mut() {
+            cartridge.set_input_word(input_word);
+        }
 
         // The aimed position is sampled once, at the start of the frame, and stays fixed
         // for its whole duration (REQ-CORE-060).

@@ -732,3 +732,24 @@ fn mappers_n_168_banks_protects_u2_and_counts() {
     core.mapper_write(0xF080, 0xFF);
     assert!(!core.cartridge().unwrap().irq_asserted());
 }
+
+/// nesdev "INES Mapper 188" and Mesen2 `BandaiKaraoke.h`: bit 4 picks the internal ROM (`& 7`) or
+/// the expansion (`| 8`), `$C000` is the internal ROM's last bank, bit 5 the mirroring, and
+/// `$6000-$7FFF` reads the microphone's two buttons active low.
+#[cfg(feature = "board-188")]
+#[test]
+fn mappers_n_188_banks_both_roms_and_reads_the_microphone() {
+    // Bus conflicts: the writes go to the fixed bank, filled with $FF.
+    let mut core = MapperRom::new(188)
+        .prg(32)
+        .chr(0)
+        .prg_bank_all_ones(14)
+        .load();
+    core.mapper_write(0xC000, 0x13);
+    assert_eq!([6, 7, 0xFF, 15], core.prg_windows());
+    core.mapper_write(0xC000, 0x02);
+    assert_eq!([20, 21, 0xFF, 15], core.prg_windows());
+    assert_eq!(0x03, core.read_memory(0x6000) & 0x07);
+    core.run_frame(0x01); // controller 1's A
+    assert_eq!(0x02, core.read_memory(0x6000) & 0x07);
+}

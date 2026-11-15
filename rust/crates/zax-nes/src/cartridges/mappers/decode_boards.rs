@@ -27,6 +27,7 @@
     feature = "board-jv001",
     feature = "board-fine-rom",
     feature = "board-234",
+    feature = "board-188",
     feature = "board-latch-multi",
     feature = "board-nina03",
     feature = "board-sachen-8reg",
@@ -38,6 +39,8 @@ compile_error!(
      meant to be selected on its own"
 );
 
+#[cfg(feature = "board-188")]
+use super::BandaiKaraoke;
 #[cfg(feature = "board-111")]
 use super::Cheapocabra;
 #[cfg(any(feature = "board-162", feature = "board-163"))]
@@ -161,6 +164,9 @@ pub enum DecodeBoard {
     /// Mapper 234, the Maxi 15 ([`Maxi15`]).
     #[cfg(feature = "board-234")]
     Maxi15(Maxi15),
+    /// Mapper 188, Bandai's Karaoke Studio ([`BandaiKaraoke`]).
+    #[cfg(feature = "board-188")]
+    BandaiKaraoke(BandaiKaraoke),
     // Appended by MF-VS step 4, the lot's one board: the register is a `$4016` write and not a
     // cartridge write, which is the only thing that makes it unusual here.
     /// Mapper 99, the Nintendo VS. System board.
@@ -263,6 +269,8 @@ macro_rules! inner {
             DecodeBoard::Mmc1Parallel($b) => $body,
             #[cfg(feature = "board-234")]
             DecodeBoard::Maxi15($b) => $body,
+            #[cfg(feature = "board-188")]
+            DecodeBoard::BandaiKaraoke($b) => $body,
             #[cfg(feature = "board-vs-system")]
             DecodeBoard::VsBoard($b) => $body,
             #[cfg(feature = "board-jv001")]
@@ -430,27 +438,34 @@ impl Mapper for DecodeBoard {
         inner!(self, b => b.prg_ram_enabled())
     }
 
-    /// Forwarded for mapper 234 (MAPPERS-N), whose registers latch on a CPU read. Reached only
-    /// for a read the cached ROM windows do not serve (`NesBus::read_internal_body_as`), so the
-    /// other boards of this enum, which leave their windows cacheable, are not on it for ROM.
-    #[cfg(feature = "board-234")]
+    /// Forwarded for mapper 234 (MAPPERS-N), whose registers latch on a CPU read, and mapper
+    /// 188, whose microphone answers `$6000-$7FFF`. Reached only for a read the cached ROM
+    /// windows do not serve (`NesBus::read_internal_body_as`), so the other boards of this enum,
+    /// which leave their windows cacheable, are not on it for ROM.
+    #[cfg(any(feature = "board-234", feature = "board-188"))]
     #[inline(never)]
     fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
         inner!(self, b => b.cpu_read_override(memory, address))
     }
 
-    #[cfg(feature = "board-234")]
+    #[cfg(any(feature = "board-234", feature = "board-188"))]
     fn cpu_peek_override(&self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
         inner!(self, b => b.cpu_peek_override(memory, address))
     }
 
     #[cfg(any(
         feature = "board-234",
+        feature = "board-188",
         feature = "board-246",
         feature = "board-latch-multi"
     ))]
     fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {
         inner!(self, b => b.rom_windows(memory))
+    }
+
+    #[cfg(feature = "board-188")]
+    fn set_input_word(&mut self, word: u16) {
+        inner!(self, b => b.set_input_word(word));
     }
 
     /// Forwarded for mapper 246 alone (MF-UNL-12 step 3), the one board here with registers

@@ -656,6 +656,10 @@ impl Mapper for Board {
     fn on_cpu_cycle(&mut self, memory: &mut CartridgeMemory) {
         dispatch!(self, b => b.on_cpu_cycle(memory));
     }
+
+    fn set_input_word(&mut self, word: u16) {
+        dispatch!(self, b => b.set_input_word(word));
+    }
 }
 
 /// How the hot path of a frame reaches the cartridge's board (lot CORE-2,

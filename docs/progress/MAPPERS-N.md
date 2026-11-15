@@ -116,3 +116,9 @@ Owner's request (2026-11-15): implement the mappers missing compared with the ot
   (199 -> 176, 74 -> 176/191/192/194/195), on an exact CRC match only (docs/review/CARTDB.md).
   The three Hackset "199" games and the two 74 dumps boot. Golden/campaign may move for a test
   ROM with such a header: check at final validation.
+* 188 Bandai Karaoke Studio (nesdev + Mesen2 + puNES): the three Hackset [!] dumps reach their
+  song lists; the microphone buttons are controller 1's A and B (`Mapper::set_input_word`, one
+  board dispatch per frame behind `board-188`), level 0 (FIDELITY-LEADS J23).
+* To report to the owner: `cargo check -p zax-nes --no-default-features` fails at the base
+  e2b7fced already (`ppu/mod.rs` `read_nametable_as::<K>` outside a generic, and registry's
+  `Mmc3ChrRamBoard` used without its feature) -- not this lot's, not touched (ppu is off limits).

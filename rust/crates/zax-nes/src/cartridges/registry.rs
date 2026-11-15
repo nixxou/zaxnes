@@ -6,6 +6,8 @@
 //! share a board when they are the same silicon differently wired (9 and 10, 21/22/23/25/27,
 //! 87 and 101). 156 is outside that table: it runs Metal Force (Korea), a widescreen target.
 
+#[cfg(feature = "board-188")]
+use super::mappers::BandaiKaraoke;
 #[cfg(feature = "board-111")]
 use super::mappers::Cheapocabra;
 #[cfg(feature = "board-cony")]
@@ -433,6 +435,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     185,
     #[cfg(feature = "board-mmc3-scramble")]
     187,
+    #[cfg(feature = "board-188")]
+    188,
     #[cfg(feature = "board-189")]
     189,
     #[cfg(feature = "board-190")]
@@ -988,6 +992,12 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         168 => BoardMemorySizes {
             prg_ram: Some(0),
             chr_ram: Some(Racermate::CHR_RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
+        // MAPPERS-N: no PRG-RAM, `$6000-$7FFF` is the microphone (nesdev "INES Mapper 188").
+        #[cfg(feature = "board-188")]
+        188 => BoardMemorySizes {
+            prg_ram: Some(0),
             ..BoardMemorySizes::default()
         },
         #[cfg(feature = "board-252")]
@@ -1556,6 +1566,9 @@ pub(crate) fn has_bus_conflicts(mapper: i32, header: &InesHeader) -> bool {
         // MAPPERS-N: Mesen2 gives the Maxi 15 conflicts (`Mapper234.h`, `HasBusConflicts`).
         #[cfg(feature = "board-234")]
         234 => true,
+        // MAPPERS-N: nesdev "INES Mapper 188", "Subject to bus conflicts: Yes".
+        #[cfg(feature = "board-188")]
+        188 => true,
         #[cfg(feature = "board-149")]
         149 => true, // Q-147 for the two numbers of this lot that are absent by a choice
         11 | 13 | 66 | 70 | 78 | 89 | 93 | 152 | 180 | 185 => true,
@@ -2189,6 +2202,8 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         ))),
         #[cfg(feature = "board-234")]
         234 => Board::DecodeBoard(DecodeBoard::Maxi15(Maxi15::new(memory))),
+        #[cfg(feature = "board-188")]
+        188 => Board::DecodeBoard(DecodeBoard::BandaiKaraoke(BandaiKaraoke::new(memory))),
         #[cfg(feature = "board-233")]
         233 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
             memory,
