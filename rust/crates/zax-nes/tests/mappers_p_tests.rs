@@ -1431,3 +1431,28 @@ fn mappers_p_528_writes_fme7_commands_with_a_vrc7_irq() {
     core.mapper_write(0xA00E, 0);
     assert!(!core.cartridge().unwrap().irq_asserted());
 }
+
+/// `mapper_369.c`: `$4100` the mode: `$01` NROM-256 bank 1, `$13` the *SMB2J* layout with ROM
+/// bank `$0E` at `$6000` and a 12-bit CPU-cycle IRQ, `$37` the MMC3 at `$10`.
+#[cfg(feature = "board-369")]
+#[test]
+fn mappers_p_369_switches_between_its_games() {
+    let mut core = MapperRom::new(369).prg(64).chr(512).load();
+    core.mapper_write(0x4100, 0x01);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    assert_eq!(8, core.chr_windows()[0]);
+    core.mapper_write(0x4100, 0x13);
+    core.mapper_write(0xE000, 0x02);
+    assert_eq!([12, 13, 10, 15], core.prg_windows());
+    assert_eq!(14, core.read_memory(0x6000));
+    core.mapper_write(0xA000, 0x02);
+    for _ in 0..4096 {
+        core.bus_mut().tick();
+    }
+    assert!(core.cartridge().unwrap().irq_asserted());
+    core.mapper_write(0x8000, 0);
+    assert!(!core.cartridge().unwrap().irq_asserted());
+    core.mapper_write(0x4100, 0x37);
+    mmc3_start(&mut core, 1, 2);
+    assert_eq!([17, 18, 30, 31], core.prg_windows());
+}

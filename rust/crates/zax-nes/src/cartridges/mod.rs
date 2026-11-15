@@ -626,6 +626,8 @@ const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
             | 526
             // MAPPERS-P: mapper 555's competition timer, `Mmc3P` (puNES `EXTCL_CPU_EVERY_CYCLE`).
             | 555
+            // MAPPERS-P: mapper 369's SMB2J mode counts CPU cycles (`extcl_cpu_every_cycle_369`).
+            | 369
             // MAPPERS-P: mapper 559, `VrcP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
             | 559
             // MAPPERS-P: mapper 527, `VrcP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
@@ -1016,6 +1018,7 @@ const fn mmc3_p_board(mapper: i32) -> bool {
             | 353
             | 100
             | 555
+            | 369
     )
 }
 
@@ -2300,10 +2303,10 @@ mod tests {
             // MAPPERS-P: 471 (an IRQ on every A12 rise), 442 (the 1 bpp latch of PPU A0/A9 on
             // A13's rise), 359 and 540 (A12 IRQ) in `IrqP`; 362 and 398 (the fetched CHR window)
             // in `VrcP`.
-            471, 442, 359, 540, 362,
-            398,
+            471, 442, 359, 540, 362, 398,
             // MAPPERS-P: 272 is latched too but absent here: its counter only moves once a game
             // enables it, and the sweep enables nothing.
+            369,
         ] {
             if Cartridge::is_supported(number) {
                 expected.extend_from_slice(&[number, number]);

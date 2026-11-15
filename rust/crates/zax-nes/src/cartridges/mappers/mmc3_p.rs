@@ -112,6 +112,10 @@ pub enum Mmc3PKind {
     /// expiry `$5800-$5FFF` reads in D7, and a mode in which CHR register D6 picks the 8 KiB
     /// CHR-RAM beside the CHR-ROM.
     M555,
+    /// 369, `mapper_369.c` (N-49, *Super Mario Bros. Party*): `$4100` picks the game: NROM
+    /// banks (`$00`/`$01`), the *SMB2J* conversion with a 12-bit CPU-cycle IRQ (`$13`), or the
+    /// MMC3 at two outer banks (`$37`, `$FF`).
+    M369,
 }
 
 impl Mmc3PKind {
@@ -152,6 +156,7 @@ impl Mmc3PKind {
             353 => Self::M353,
             100 => Self::M100,
             555 => Self::M555,
+            369 => Self::M369,
             _ => return None,
         })
     }
@@ -191,6 +196,7 @@ impl Mmc3PKind {
             Self::M353 => 353,
             Self::M100 => 100,
             Self::M555 => 555,
+            Self::M369 => 369,
         }
     }
 }
@@ -259,6 +265,36 @@ impl Mmc3P {
                 }
             },
         }
+    }
+
+    /// `prg_fix_mmc3_369`: the NROM games and the *SMB2J* layout replace the chip's windows.
+    fn prg_369(&self, chip: [i32; BankWindows::PRG_WINDOWS]) -> [i32; BankWindows::PRG_WINDOWS] {
+        match self.outer[0] {
+            game @ (0x00 | 0x01) => {
+                let base = i32::from(game) << 2;
+                [base, base + 1, base + 2, base + 3]
+            }
+            0x13 => [0x0C, 0x0D, 0x08 | (i32::from(self.outer[1]) & 0x03), 0x0F],
+            _ => chip,
+        }
+    }
+
+    /// `chr_fix_mmc3_369`/`chr_swap_mmc3_369`: an 8 KiB bank from the mode's low bits in the
+    /// NROM and *SMB2J* modes, the chip's banks at `$80` (`$37`) or `$100` otherwise.
+    fn chr_369(&self, raw: &[i32; BankWindows::CHR_WINDOWS]) -> [i32; BankWindows::CHR_WINDOWS] {
+        match self.outer[0] {
+            game @ (0x00 | 0x01 | 0x13) => {
+                let base = (i32::from(game) & 0x03) << 3;
+                std::array::from_fn(|slot| base | i32::try_from(slot).unwrap_or(0))
+            }
+            0x37 => std::array::from_fn(|slot| 0x80 | (raw[slot] & 0x7F)),
+            _ => std::array::from_fn(|slot| 0x100 | (raw[slot] & 0x7F)),
+        }
+    }
+
+    /// 369's *SMB2J* mode, in which `$6000` is PRG-ROM and the IRQ counts CPU cycles.
+    const fn smb2j_369(&self) -> bool {
+        matches!(self.kind, Mmc3PKind::M369) && self.outer[0] == 0x13
     }
 
     /// `chr_swap_mmc3_555`: in the mode `reg[0] & 6 == 2`, a CHR register with D6 set puts its
@@ -515,6 +551,9 @@ impl Mmc3P {
             Mmc3PKind::M422 | Mmc3PKind::M534 => self.prg_page_126(slot, page),
             Mmc3PKind::M370 => ((o[0] & 0x38) << 1) | (page & (0x1F >> ((o[0] & 0x20) >> 5))),
             Mmc3PKind::M269 => o[1] | (page & (o[3] & 0x3F)),
+            // `prg_swap_mmc3_369`: `$37` the 128 KiB at `$10`, other modes 256 KiB at `$20`.
+            Mmc3PKind::M369 if o[0] == 0x37 => 0x10 | (page & 0x0F),
+            Mmc3PKind::M369 => 0x20 | (page & 0x1F),
             // `prg_swap_mmc3_555`: base `reg[0]` D2 (256 KiB), mask from D0-D1.
             Mmc3PKind::M555 => ((o[0] & 0x04) << 3) | (page & (((o[0] & 0x03) << 3) | 0x07)),
             Mmc3PKind::M353 => self.prg_page_353(slot, page),
@@ -800,8 +839,15 @@ impl Mmc3P {
         } else {
             std::array::from_fn(|slot| self.prg_page(slot, raw_prg[slot]))
         };
+        let prg = if self.kind == Mmc3PKind::M369 {
+            self.prg_369(prg)
+        } else {
+            prg
+        };
         let raw_chr = self.mmc3_chr();
-        let chr: [i32; BankWindows::CHR_WINDOWS] = if self.kind == Mmc3PKind::M100 {
+        let chr: [i32; BankWindows::CHR_WINDOWS] = if self.kind == Mmc3PKind::M369 {
+            self.chr_369(&raw_chr)
+        } else if self.kind == Mmc3PKind::M100 {
             std::array::from_fn(|slot| i32::from(self.raw_100[5 + slot]))
         } else if self.chr_ram_mode() {
             std::array::from_fn(|slot| i32::try_from(slot).unwrap_or(0))
@@ -998,6 +1044,8 @@ impl Mmc3P {
                     ram[(0x2000 + usize::from(address & 0x0FFF)) % len] = value;
                 }
             }
+            // `extcl_cpu_wr_mem_369`: `$4100` (A8 in `$4000-$4FFF`) the mode.
+            Mmc3PKind::M369 if address & 0xF100 == 0x4100 => r[0] = data,
             // `extcl_cpu_wr_mem_370`: `$5000-$5FFF`, the low address byte.
             Mmc3PKind::M370 if (0x5000..=0x5FFF).contains(&address) => r[0] = address & 0xFF,
             // `extcl_cpu_wr_mem_411`: `$5000-$5FFF`, A0 the register, no RAM there.
@@ -1169,15 +1217,15 @@ impl Mapper for Mmc3P {
     }
 
     fn irq_asserted(&self) -> bool {
-        self.mmc3.irq_asserted()
+        self.mmc3.irq_asserted() || (self.kind == Mmc3PKind::M369 && self.outer[2] & 0x02 != 0)
     }
 
     fn prg_ram_enabled(&self) -> bool {
-        self.mmc3.prg_ram_enabled()
+        self.mmc3.prg_ram_enabled() && !self.smb2j_369()
     }
 
     fn prg_ram_writable(&self) -> bool {
-        self.mmc3.prg_ram_writable()
+        self.mmc3.prg_ram_writable() && !self.smb2j_369()
     }
 
     fn intercept_cpu_write(
@@ -1206,6 +1254,17 @@ impl Mapper for Mmc3P {
             self.write_100(address, value);
         }
         // `extcl_cpu_wr_mem_353`: `$x080` selects the game from A13-A14.
+        // `extcl_cpu_wr_mem_369` in the *SMB2J* mode: `$8000-$9FFF` disables and acknowledges the
+        // IRQ (`outer[2]` D0 enable, D1 pending), `$A000-$BFFF` D1 enables it, `$E000-$FFFF`
+        // the bank at `$C000`.
+        if self.smb2j_369() {
+            match address & 0xE000 {
+                0x8000 => self.outer[2] = 0,
+                0xA000 => self.outer[2] = (self.outer[2] & 0x02) | u16::from((value >> 1) & 0x01),
+                0xE000 => self.outer[1] = u16::from(value),
+                _ => {}
+            }
+        }
         if self.kind == Mmc3PKind::M353 && address & 0x0FFF == 0x0080 {
             self.outer[0] = (address >> 13) & 0x03;
         }
@@ -1260,6 +1319,12 @@ impl Mapper for Mmc3P {
             let ram = memory.prg_ram();
             return (!ram.is_empty())
                 .then(|| ram[(0x2000 + usize::from(address & 0x0FFF)) % ram.len()]);
+        }
+        // `wram_fix_mmc3_369`: PRG-ROM bank `$0E` at `$6000` in the *SMB2J* mode.
+        if self.smb2j_369() && (0x6000..=0x7FFF).contains(&address) {
+            let rom = memory.rom().prg_rom();
+            return (!rom.is_empty())
+                .then(|| rom[(0xE * 0x2000 + usize::from(address & 0x1FFF)) % rom.len()]);
         }
         if self.kind == Mmc3PKind::M370 && (0x5000..=0x5FFF).contains(&address) {
             return Some(address.to_be_bytes()[0] & 0x7F);
@@ -1322,6 +1387,16 @@ impl Mapper for Mmc3P {
     /// `extcl_cpu_every_cycle_555`: with `reg[0]` D3 clear the timer is held at 0; set, it counts
     /// CPU cycles to `(DIP | $10) << 25`, the DIP being 0 here (J37), about five minutes.
     fn on_cpu_cycle(&mut self, _memory: &mut CartridgeMemory) {
+        // `extcl_cpu_every_cycle_369`: a 12-bit counter asserting on its wrap to 0.
+        if self.smb2j_369() {
+            if self.outer[2] & 0x01 != 0 {
+                self.outer[3] = (self.outer[3] + 1) & 0x0FFF;
+                if self.outer[3] == 0 {
+                    self.outer[2] |= 0x02;
+                }
+            }
+            return;
+        }
         if self.kind != Mmc3PKind::M555 {
             return;
         }
@@ -1337,6 +1412,10 @@ impl Mapper for Mmc3P {
     }
 
     fn on_ppu_address_bus(&mut self, memory: &mut CartridgeMemory, address: u16, clock: i64) {
+        // 369's *SMB2J* mode leaves the chip's A12 counter alone (`extcl_ppu_*_369`).
+        if self.smb2j_369() {
+            return;
+        }
         self.mmc3.on_ppu_address_bus(memory, address, clock);
     }
 

@@ -69,7 +69,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 361 | `mapper_361.c` | 85 | 5 | 0 | done (batch 12, `Mmc3P`) |
 | 362 | `mapper_362.c` | 99 | 2 | 0 | done (batch 41, `VrcP`) |
 | 368 | `mapper_368.c` | 106 | 2 | 0 | done (batch 18, `IrqP`) |
-| 369 | `mapper_369.c` | 221 | 1 | 0 | todo |
+| 369 | `mapper_369.c` | 221 | 1 | 0 | done (batch 44, `Mmc3P`) |
 | 370 | `mapper_370.c` | 117 | 1 | 0 | done (batch 23, `Mmc3P`) |
 | 372 | `mapper_372.c` | 96 | 1 | 0 | done (batch 12, `Mmc3P`) |
 | 374 | `mapper_374.c` | 56 | 4 | 0 | done (batch 11, `Mmc1Outer`) |
@@ -320,3 +320,6 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 * Batch 43: `IrqP` 528 (1201, *Gimmick!* bootleg): FME-7 commands and data written together at
   `$A000`/`$C000`, A14 the outer bank `$10`, command 8 = 1 the work RAM at `$6000`; commands
   `$D`-`$F` drive Zaxnes's own `VrcIrq` (control, acknowledge, latch), stepped in `on_cpu_cycle`.
+* Batch 44: `Mmc3P` 369 (N-49): `$4100` picks NROM banks, the *SMB2J* layout (ROM `$0E` at
+  `$6000`, a 12-bit CPU-cycle IRQ in `outer[2]`/`outer[3]`, the chip's A12 counter idle) or the
+  MMC3 at `$10`/`$20`; in `clocks_on_cpu_cycle` and still in both PPU-bus lists.
