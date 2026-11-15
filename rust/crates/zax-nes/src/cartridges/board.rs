@@ -600,14 +600,10 @@ impl Mapper for Board {
     fn read_nametable_from_vram(&self, memory: &CartridgeMemory, address: u16, vram: &[u8]) -> u8 {
         match self {
             Board::Mmc5Ext(board) => board.read_nametable_from_vram(memory, address, vram),
-            #[cfg(feature = "board-284")]
-            Board::IrqBoard(IrqBoard::Drip(board)) => {
-                board.read_nametable_from_vram(memory, address, vram)
-            }
-            #[cfg(feature = "board-682")]
-            Board::IrqBoard(IrqBoard::Rainbow(board)) => {
-                board.read_nametable_from_vram(memory, address, vram)
-            }
+            // MAPPERS-N: one arm, out of line, for every `IrqBoard` that serves its own tables
+            // (284, 682), so that this dispatch keeps a single extra body whatever their number.
+            #[cfg(any(feature = "board-284", feature = "board-682"))]
+            Board::IrqBoard(board) => board.served_nametable(memory, address, vram),
             _ => self.read_nametable(memory, address),
         }
     }

@@ -470,6 +470,28 @@ macro_rules! inner {
     };
 }
 
+impl IrqBoard {
+    /// The nametable byte for [`Board::read_nametable_from_vram`]: the board's own answer for the
+    /// two boards that serve their tables (284, 682), `read_nametable`'s for the others. **Out of
+    /// line** so that the PPU's fetch path holds one call for them all (lot MAPPERS-N, callgrind).
+    #[cfg(any(feature = "board-284", feature = "board-682"))]
+    #[inline(never)]
+    pub(crate) fn served_nametable(
+        &self,
+        memory: &CartridgeMemory,
+        address: u16,
+        vram: &[u8],
+    ) -> u8 {
+        match self {
+            #[cfg(feature = "board-284")]
+            Self::Drip(board) => board.read_nametable_from_vram(memory, address, vram),
+            #[cfg(feature = "board-682")]
+            Self::Rainbow(board) => board.read_nametable_from_vram(memory, address, vram),
+            _ => self.read_nametable(memory, address),
+        }
+    }
+}
+
 impl Mapper for IrqBoard {
     fn mapper_number(&self) -> i32 {
         inner!(self, b => b.mapper_number())
