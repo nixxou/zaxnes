@@ -160,6 +160,21 @@ use super::FlashRom;
 use super::{BankWindows, Board, CartridgeMemory};
 use crate::rom::InesHeader;
 
+/// The number whose board a number runs (lot MAPPERS-P): puNES's `mappers.c` dispatches **248** to
+/// `map_init_115` (nesdev, "INES Mapper 248": a duplicate of 115) and **536** to `map_init_195`
+/// (the Waixing FS303 board). `Cartridge::create` builds the board, its memory and its latch
+/// lists from this number and keeps the header's for itself.
+#[must_use]
+pub(crate) const fn board_number(mapper: i32) -> i32 {
+    match mapper {
+        #[cfg(feature = "board-248")]
+        248 => 115,
+        #[cfg(feature = "board-536")]
+        536 => 195,
+        _ => mapper,
+    }
+}
+
 /// Mapper numbers this build can run, in ascending order (REQ-CORE-102).
 ///
 /// **The table depends on the board features** (`docs/review/BOARD-FEATURES.md`): a number whose
@@ -591,6 +606,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     // PRG A17 on four read ranges (MF-UNL-12 step 3).
     #[cfg(feature = "board-246")]
     246,
+    #[cfg(feature = "board-248")]
+    248,
     #[cfg(feature = "board-249")]
     249,
     #[cfg(feature = "board-250")]
@@ -875,6 +892,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     529,
     #[cfg(feature = "board-530")]
     530,
+    #[cfg(feature = "board-536")]
+    536,
     #[cfg(feature = "board-538")]
     538,
     #[cfg(feature = "board-541")]

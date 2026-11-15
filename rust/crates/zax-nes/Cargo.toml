@@ -196,6 +196,8 @@ default = [
     "board-266",
     "board-284",
     "board-682",
+    "board-536",
+    "board-248",
     "board-551",
     "board-417",
     "board-416",
@@ -406,6 +408,8 @@ board-374 = ["board-mmc1-outer"]
 board-297 = ["board-mmc1-outer"]
 # MAPPERS-P umbrella: the discrete boards of `multicart_p.rs`.
 board-multi-p = ["board-decode-boards"]
+board-536 = ["board-mmc3-chrram"]
+board-248 = ["board-mmc3-scramble"]
 board-551 = ["board-178"]
 board-340 = ["board-multi-p"]
 board-554 = ["board-multi-p"]

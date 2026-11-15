@@ -27,7 +27,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 122 | `mapper_184.c` | 64 | 0 | 0 | done (batch 1, `MultiP`) |
 | 186 | `mapper_186.c` | 82 | 1 | 0 | todo |
 | 237 | `mapper_237.c` | 98 | 1 | 0 | done (batch 1, `MultiP`) |
-| 248 | `mapper_115.c` | 115 | 0 | 0 | todo |
+| 248 | `mapper_115.c` | 115 | 0 | 0 | done (batch 20, alias, `registry::board_number`) |
 | 256 | `mapper_256.c` | 123 | 241 | 0 | todo |
 | 267 | `mapper_267.c` | 87 | 1 | 0 | done (batch 12, `Mmc3P`) |
 | 269 | `mapper_269.c` | 130 | 3 | 0 | todo |
@@ -137,7 +137,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 528 | `mapper_528.c` | 118 | 0 | 0 | todo |
 | 532 | `mapper_532.c` | 411 | 0 | 0 | todo |
 | 534 | `mapper_126.c` | 153 | 10 | 0 | todo |
-| 536 | `mapper_195.c` | 148 | 0 | 0 | todo |
+| 536 | `mapper_195.c` | 148 | 0 | 0 | done (batch 20, alias, `registry::board_number`) |
 | 538 | `mapper_538.c` | 64 | 2 | 0 | done (batch 9, `MultiP`) |
 | 539 | `mapper_539.c` | 113 | 1 | 0 | todo |
 | 540 | `mapper_359.c` | 293 | 1 | 0 | todo |
@@ -230,3 +230,6 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 * Batch 19: 551 on `WaixingFs305` (mapper 178's board), whose PRG decode is puNES's `prg_fix_178`
   exactly; a load-time `chr_banked` flag moves `$4803` to the CHR bank and the ports to the
   `$FF00` decode puNES gives 551. Mapper 178's own path is unchanged apart from the flag's test.
+* Batch 20: `registry::board_number` — puNES dispatches 248 to `map_init_115` and 536 to
+  `map_init_195`; `Cartridge::create` builds the board, its memory sizes, bus conflicts and latch
+  lists from that number and keeps the header's as `mapper_number`. The mf_3b sweep lists both.

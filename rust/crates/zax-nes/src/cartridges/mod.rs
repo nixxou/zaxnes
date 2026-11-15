@@ -999,6 +999,10 @@ impl Cartridge {
             ));
         }
 
+        // Lot MAPPERS-P: the numbers that are another number's board run as that board, with
+        // its memory sizes and its latch lists; the cartridge keeps the header's number.
+        let header_mapper = mapper;
+        let mapper = registry::board_number(mapper);
         let sizes = registry::board_memory_sizes(mapper, rom.header());
         let bus_conflicts = registry::has_bus_conflicts(mapper, rom.header());
         let memory = CartridgeMemory::new(rom, sizes);
@@ -1078,7 +1082,7 @@ impl Cartridge {
             // which carry the numbers and the lot that added each.
             watches_ppu_reads: watches_ppu_reads(mapper),
             watches_ppu_bus_without_read: watches_ppu_bus_without_read(mapper),
-            mapper_number: mapper,
+            mapper_number: header_mapper,
             // The MMC5 (5), the Bandai FCG (16), the Jaleco SS88006 (18), the Namco 163
             // (19), Konami's VRC2/VRC4 (21, 22, 23, 25, 27), VRC6 (24, 26) and VRC7 (85),
             // the RAMBO-1 (64) and the Sunsoft FME-7 (69). See the field.
@@ -2227,6 +2231,8 @@ mod tests {
             196, 197, 205, 222, 224, 238, 245, 249, 250, 259, 287, 313, 325, 513, 260, 267, 291,
             315, 322, 327, 334, 339, 345, 361, 372, 377, 395, 399, 401, 410, 411, 420, 455, 456,
             457, 516, 393, 412,
+            // MAPPERS-P: 248 and 536 run the boards of 115 and 195 (`registry::board_number`).
+            248, 536,
         ] {
             if Cartridge::is_supported(number) {
                 expected.extend_from_slice(&[number, number]);
