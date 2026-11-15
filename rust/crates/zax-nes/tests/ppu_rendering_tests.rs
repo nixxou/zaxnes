@@ -1373,7 +1373,8 @@ fn fidplus2_dot_257_copy_follows_the_state_before_a_switch_on_dot_256() {
             fixture.set_scroll(0, 0);
             fixture.set_mask(0x0A);
             fixture.core.run_frame(0);
-            let line = run_to(&mut fixture, 64..=66, 100);
+            // The CPU reaches one dot in three: 98, 251 and 296 share a phase on one line.
+            let line = run_to(&mut fixture, 64..=66, 98);
             if switch_on {
                 // Off well before, on with the write landing on dot 254.
                 fixture.core.bus_mut().write(0x2001, 0x00);
@@ -1383,10 +1384,15 @@ fn fidplus2_dot_257_copy_follows_the_state_before_a_switch_on_dot_256() {
                 // Off with the write landing on dot 254, on again before the next line's fetches.
                 run_to(&mut fixture, line..=line, 251);
                 fixture.core.bus_mut().write(0x2001, 0x00);
-                run_to(&mut fixture, line..=line, 297);
+                run_to(&mut fixture, line..=line, 296);
                 fixture.core.bus_mut().write(0x2001, 0x0A);
             }
-            run_to(&mut fixture, (line + 4)..=(line + 4), 10);
+            // Past line + 3, whatever the dot.
+            let bus = fixture.core.bus_mut();
+            while bus.ppu().scanline() <= line + 3 {
+                bus.tick();
+                bus.sync_ppu();
+            }
             let y = usize::try_from(line).unwrap();
             let next = row(&fixture, y + 1);
             let reference = row(&fixture, y + 3);

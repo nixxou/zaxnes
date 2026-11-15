@@ -932,7 +932,8 @@ impl Ppu2C02 {
         // old state — the netlist copies after a switch off and does not after a switch on, in
         // alignments 2 and 3 (A5; alignments 0 and 1 hit the switch-on race of step 33). Both are
         // settled here, on the write, so that nothing is tested per dot.
-        let late_switch = ran_ahead && self.dot == 256 && self.alignment >= 2;
+        let late_switch =
+            ran_ahead && self.dot == 256 && self.alignment >= 2 && self.netlist_measured_region();
         let was_rendering = self.rendering_enabled();
         self.mask = value;
         if late_switch {
@@ -2594,7 +2595,13 @@ impl Ppu2C02 {
             // Lot FIDPLUS-2 (A5, netlist): the read's X and Y increments are the pipeline's own
             // signals, so on a dot that increments coarse X anyway (every eighth, 328, 336) they
             // merge with it: one X increment, plus Y; on dot 256, which makes both, nothing more.
-            if matches!(latch_dot, 8..=256 | 328 | 336) && latch_dot % 8 == 0 {
+            // Feature `ppu-2007-read-merge`, off by default: it moves Zelda II Europe's golden
+            // pictures, which waits for the owner's eye.
+            if cfg!(feature = "ppu-2007-read-merge")
+                && matches!(latch_dot, 8..=256 | 328 | 336)
+                && latch_dot % 8 == 0
+                && self.netlist_measured_region()
+            {
                 if latch_dot != 256 {
                     self.increment_y();
                     self.v_row_next = self.v;
@@ -2609,7 +2616,10 @@ impl Ppu2C02 {
         let residue = self.fetch_bus_value(cart.as_deref());
         self.read_buffer = residue;
         self.run_dots(1, cart);
-        if latch_dot == 257 {
+        if cfg!(feature = "ppu-2007-read-merge")
+            && latch_dot == 257
+            && self.netlist_measured_region()
+        {
             // Lot FIDPLUS-2 (A5, netlist): on dot 257 the horizontal copy overrides the read's
             // coarse X increment; only its Y increment is left.
             self.increment_y();
@@ -3135,6 +3145,13 @@ impl Ppu2C02 {
             // $2002 is read-only; the write only loaded the bus latch.
             _ => {}
         }
+    }
+
+    /// Whether the rules measured on the NTSC 2C02 netlist apply (lot FIDPLUS-2, A5): the PAL
+    /// 2C07 (3.2 dots a cycle) and the clones keep the previous model, which their golden pictures
+    /// follow (Zelda II Europe moved with them), until a measurement of their own.
+    const fn netlist_measured_region(&self) -> bool {
+        matches!(self.timing.region, NesRegion::Ntsc | NesRegion::Multi)
     }
 
     /// Two `$2007` writes on consecutive CPU cycles (the dummy write and the write of a
