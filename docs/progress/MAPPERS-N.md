@@ -59,3 +59,16 @@ Owner's request (2026-11-15): implement the mappers missing compared with the ot
 * Tools: `scratchpad/register.py` (features, SUPPORTED_MAPPERS, create_board, A12 lists) and
   `addtest.py` (req_core_100 table) — not committed; redo by hand if lost.
 * Baseline on e2b7fced: campaign 215/4/1/111, golden 98 ROMs in scratchpad `base/golden-base.jsonl`.
+* ffc5e4ca — `LatchMulti` + 46 51 60 61 62 104 108 113 120 125 170 174 177 179 216 261 274 286 (ROM at
+  $6000, RAM at $C000 for 125, reset-switched 60). DecodeBoard forwards `prg_ram_enabled`.
+* 0b9aea7c — `Mmc3Clone` + 126 224 259 287 313 325; 191 in `Mmc3ChrRamBoard`.
+  Checkpoint ck1 on this commit: golden-core identical to e2b7fced (98 ROMs), campaign 215/4/1/111.
+* c2d6e19f — `IrqLatch` (IrqBoard): 40 42 43 50 106 183 (CPU clock), 117 222 (A12).
+* f07f0fc0 — 6 8 17 (Front Fareast) on `IrqLatch`. Refusal tests now use 20 / 84 / 186 / 200.
+* Perf: WSL `~/pr1`, labels `mn-base` (e2b7fced) and `mn-ck2` (c2d6e19f), driver script in
+  scratchpad `perf/run.sh`; results `~/pr1/cg-mn-*`.
+* Disk: `rust/target` reached 14 GB; build with `CARGO_INCREMENTAL=0` and delete stale
+  `target/debug/deps/*.exe`.
+* Next: 176 (FK23C), then 199/198, Kaiser FDS conversions (56/142, 171, 175, 302-307, 312), Subor
+  166/167, 252, 265, 266, 283, 288-290, 300-301, 314, 319-320, 323-324, 328-333, 336, 346, 348-349,
+  366, 513, 518-522, 529-530.
