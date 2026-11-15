@@ -388,6 +388,10 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     163,
     #[cfg(feature = "board-164")]
     164,
+    #[cfg(feature = "board-166")]
+    166,
+    #[cfg(feature = "board-167")]
+    167,
     #[cfg(feature = "board-170")]
     170,
     #[cfg(feature = "board-171")]
@@ -597,6 +601,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     319,
     #[cfg(feature = "board-320")]
     320,
+    #[cfg(feature = "board-324")]
+    324,
     #[cfg(feature = "board-325")]
     325,
     #[cfg(feature = "board-329")]
@@ -619,6 +625,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     366,
     #[cfg(feature = "board-521")]
     521,
+    #[cfg(feature = "board-522")]
+    522,
     #[cfg(feature = "board-taito-x1")]
     552,
 ];
@@ -905,6 +913,12 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         #[cfg(feature = "board-329")]
         329 => BoardMemorySizes {
             prg_ram: Some(0x8000),
+            ..BoardMemorySizes::default()
+        },
+        // MAPPERS-N: the LH10's 8 KiB of work RAM at `$C000-$DFFF` (Mesen2 `Lh10.h:25`).
+        #[cfg(feature = "board-522")]
+        522 => BoardMemorySizes {
+            prg_ram: Some(0x2000),
             ..BoardMemorySizes::default()
         },
         #[cfg(feature = "board-125")]
@@ -1451,6 +1465,9 @@ pub(crate) fn has_bus_conflicts(mapper: i32, header: &InesHeader) -> bool {
         // `HasBusConflicts` true), its register sitting over the PRG-ROM.
         #[cfg(feature = "board-148")]
         148 => true,
+        // MAPPERS-N: `FaridUnrom.h:9`, `HasBusConflicts` true.
+        #[cfg(feature = "board-324")]
+        324 => true,
         #[cfg(feature = "board-149")]
         149 => true, // Q-147 for the two numbers of this lot that are absent by a choice
         11 | 13 | 66 | 70 | 78 | 89 | 93 | 152 | 180 | 185 => true,
@@ -2470,6 +2487,26 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         ))),
         #[cfg(feature = "board-521")]
         521 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-166")]
+        166 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-167")]
+        167 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-324")]
+        324 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-522")]
+        522 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
             memory,
             LatchKind::of(mapper)?,
         ))),

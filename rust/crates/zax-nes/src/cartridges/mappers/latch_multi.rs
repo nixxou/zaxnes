@@ -179,6 +179,14 @@ pub enum LatchKind {
     M346,
     /// 521, `Unlicensed/DreamTech01.h`.
     M521,
+    /// 166, `Unlicensed/Subor166.h` (Subor).
+    M166,
+    /// 167, `Unlicensed/Subor166.h`, the alternate wiring.
+    M167,
+    /// 324, `Homebrew/FaridUnrom.h` (FARID_UNROM_8-IN-1).
+    M324,
+    /// 522, `Whirlwind/Lh10.h` (LH10, FDS conversion).
+    M522,
 }
 
 impl LatchKind {
@@ -256,6 +264,10 @@ impl LatchKind {
             332 => Self::M332,
             346 => Self::M346,
             521 => Self::M521,
+            166 => Self::M166,
+            167 => Self::M167,
+            324 => Self::M324,
+            522 => Self::M522,
             _ => return None,
         })
     }
@@ -332,6 +344,10 @@ impl LatchKind {
             Self::M332 => 332,
             Self::M346 => 346,
             Self::M521 => 521,
+            Self::M166 => 166,
+            Self::M167 => 167,
+            Self::M324 => 324,
+            Self::M522 => 522,
         }
     }
 
@@ -1128,6 +1144,43 @@ impl LatchMulti {
                 self.banks.map_chr_8k(0);
                 None
             }
+            // `Subor166.h:20-41`: `regs` = the four masked registers.
+            LatchKind::M166 | LatchKind::M167 => {
+                let alt = self.kind == LatchKind::M167;
+                let outer = ((i32::from(regs[0]) ^ i32::from(regs[1])) & 0x10) << 1;
+                let inner = i32::from(regs[2]) ^ i32::from(regs[3]);
+                if regs[1] & 0x08 != 0 {
+                    let bank = (outer | inner) & 0xFE;
+                    if alt {
+                        self.prg_16k(bank + 1, bank);
+                    } else {
+                        self.prg_16k(bank, bank + 1);
+                    }
+                } else if regs[1] & 0x04 != 0 {
+                    self.prg_16k(0x1F, outer | inner);
+                } else {
+                    self.prg_16k(outer | inner, if alt { 0x20 } else { 0x07 });
+                }
+                self.banks.map_chr_8k(0);
+                None
+            }
+            // `FaridUnrom.h:28-38`: the latched outer bank and the inner one.
+            LatchKind::M324 => {
+                let outer = (r0 & 0x70) >> 1;
+                self.prg_16k((r0 & 0x07) | outer, 0x07 | outer);
+                self.banks.map_chr_8k(0);
+                None
+            }
+            // `Lh10.h:20-27`: R6, R7, work RAM at `$C000`, the last bank; `$6000` page -2.
+            LatchKind::M522 => {
+                self.banks.map_prg_8k(0, i32::from(regs[6]));
+                self.banks.map_prg_8k(1, i32::from(regs[7]));
+                self.banks.map_prg_ram_8k(2, 0);
+                self.banks.map_prg_8k(3, -1);
+                self.rom_6000 = Some(-2);
+                self.banks.map_chr_8k(0);
+                None
+            }
             // `Bmc255.h:14-21`.
             LatchKind::M255 => {
                 let bit = i32::from(a & 0x1000 == 0);
@@ -1368,6 +1421,28 @@ impl LatchMulti {
                 0xEE36 => self.regs[0] = 1,
                 _ => {}
             },
+            // `Subor166.h:20-26`.
+            LatchKind::M166 | LatchKind::M167 => match address & 0xE000 {
+                0x8000 => self.regs[0] = value & 0x10,
+                0xA000 => self.regs[1] = value & 0x1C,
+                0xC000 => self.regs[2] = value & 0x1F,
+                _ => self.regs[3] = value & 0x1F,
+            },
+            // `FaridUnrom.h:28-34`: bit 7 rising latches the outer bits, until bit 3 locks them.
+            LatchKind::M324 => {
+                let reg = self.regs[0];
+                let mut next = reg;
+                if reg & 0x08 == 0 && reg & 0x80 == 0 && value & 0x80 != 0 {
+                    next = (reg & 0x87) | (value & 0x78);
+                }
+                self.regs[0] = (next & 0x78) | (value & 0x87);
+            }
+            // `Lh10.h:29-34`: `$8000` the index, `$8001` the data; `$C000-$DFFF` is work RAM.
+            LatchKind::M522 => match address & 0xE001 {
+                0x8000 => self.addr = u16::from(value & 0x07),
+                0x8001 => self.regs[usize::from(self.addr & 0x07)] = value,
+                _ => {}
+            },
             LatchKind::M113
             | LatchKind::M177
             | LatchKind::M283
@@ -1482,6 +1557,12 @@ impl Mapper for LatchMulti {
                 self.regs[0] = (self.regs[0] + 1) % 4;
                 let _ = self.map();
             }
+            // `FaridUnrom.h:15-20`: RESET keeps only the inner bank and the latch-arm bit, which
+            // releases the lock — the board's documented way back to its menu.
+            LatchKind::M324 => {
+                self.regs[0] &= 0x87;
+                let _ = self.map();
+            }
             LatchKind::M233 => {
                 self.regs = [0; 8];
                 self.flag = !self.flag;
@@ -1564,7 +1645,9 @@ impl Mapper for LatchMulti {
             return;
         }
         // `Lh32.h:18`: `$C000-$DFFF` is work RAM, the board's only register being `$6000`.
-        if self.kind == LatchKind::M125 {
+        if matches!(self.kind, LatchKind::M125 | LatchKind::M522)
+            && (self.kind == LatchKind::M125 || (0xC000..=0xDFFF).contains(&address))
+        {
             let _ = self
                 .banks
                 .try_write_prg_window(address, value, memory.prg_ram_mut(), true);
@@ -1586,6 +1669,7 @@ impl Mapper for LatchMulti {
                 | LatchKind::M312
                 | LatchKind::M306
                 | LatchKind::M283
+                | LatchKind::M522
                 | LatchKind::M289
                 | LatchKind::M319
                 | LatchKind::M51
