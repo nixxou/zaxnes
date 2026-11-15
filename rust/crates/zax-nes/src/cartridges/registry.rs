@@ -533,6 +533,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     254,
     #[cfg(feature = "board-255")]
     255,
+    #[cfg(feature = "board-258")]
+    258,
     #[cfg(feature = "board-259")]
     259,
     #[cfg(feature = "board-261")]
@@ -593,10 +595,16 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     319,
     #[cfg(feature = "board-325")]
     325,
+    #[cfg(feature = "board-333")]
+    333,
     #[cfg(feature = "board-336")]
     336,
+    #[cfg(feature = "board-348")]
+    348,
     #[cfg(feature = "board-349")]
     349,
+    #[cfg(feature = "board-366")]
+    366,
     #[cfg(feature = "board-taito-x1")]
     552,
 ];
@@ -2390,6 +2398,26 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
             memory,
             LatchKind::of(mapper)?,
         ))),
+        #[cfg(feature = "board-258")]
+        258 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-333")]
+        333 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-348")]
+        348 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-366")]
+        366 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
         _ => return None,
     })
 }

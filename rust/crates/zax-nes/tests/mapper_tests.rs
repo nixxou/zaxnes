@@ -256,7 +256,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let sachen8259 = cfg!(feature = "board-sachen8259");
     let huang1 = cfg!(feature = "board-huang1");
     let cony = cfg!(feature = "board-cony");
-    let additions: [(i32, bool); 214] = [
+    let additions: [(i32, bool); 218] = [
         (6, cfg!(feature = "board-6")),
         (8, cfg!(feature = "board-8")),
         (12, huang1),
@@ -442,6 +442,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (253, cfg!(feature = "board-253")),
         (254, cfg!(feature = "board-254")),
         (255, cfg!(feature = "board-255")),
+        (258, cfg!(feature = "board-258")),
         (259, cfg!(feature = "board-259")),
         (261, cfg!(feature = "board-261")),
         (262, cfg!(feature = "board-262")),
@@ -470,8 +471,11 @@ fn req_core_100_every_required_mapper_is_registered() {
         (314, cfg!(feature = "board-314")),
         (319, cfg!(feature = "board-319")),
         (325, cfg!(feature = "board-325")),
+        (333, cfg!(feature = "board-333")),
         (336, cfg!(feature = "board-336")),
+        (348, cfg!(feature = "board-348")),
         (349, cfg!(feature = "board-349")),
+        (366, cfg!(feature = "board-366")),
         (552, taito_x1),
     ];
     let expected: Vec<i32> = additions

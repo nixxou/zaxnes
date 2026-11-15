@@ -68,6 +68,14 @@ pub enum Mmc3CloneKind {
     M217,
     /// Mapper 254, Mesen2 `MMC3_254.h` (*Pokémon* hacks: work RAM read through an XOR).
     M254,
+    /// Mapper 258, Mesen2 `Unl158B.h` (UNL-158B, protection reads at `$5000`).
+    M258,
+    /// Mapper 333, Mesen2 `Bmc8in1.h` (BMC-8IN1).
+    M333,
+    /// Mapper 348, Mesen2 `Bmc830118C.h` (BMC-830118C).
+    M348,
+    /// Mapper 366, Mesen2 `BmcGn45.h` (BMC-GN-45).
+    M366,
 }
 
 impl Mmc3CloneKind {
@@ -95,6 +103,10 @@ impl Mmc3CloneKind {
             325 => Self::M325,
             217 => Self::M217,
             254 => Self::M254,
+            258 => Self::M258,
+            333 => Self::M333,
+            348 => Self::M348,
+            366 => Self::M366,
             _ => return None,
         })
     }
@@ -121,6 +133,10 @@ impl Mmc3CloneKind {
             Self::M325 => 325,
             Self::M217 => 217,
             Self::M254 => 254,
+            Self::M258 => 258,
+            Self::M333 => 333,
+            Self::M348 => 348,
+            Self::M366 => 366,
         }
     }
 }
@@ -261,6 +277,14 @@ impl Mmc3Clone {
                 };
                 ((ex1 << 5) & 0x60) | page
             }
+            // `Unl158B.h:24-34`, MMC3 mode.
+            Mmc3CloneKind::M258 => page & 0x0F,
+            // `Bmc8in1.h:17-22` and `Bmc830118C.h:23-36`, the ordinary case.
+            Mmc3CloneKind::M333 | Mmc3CloneKind::M348 => {
+                ((i32::from(r[0]) & 0x0C) << 2) | (page & 0x0F)
+            }
+            // `BmcGn45.h:22-25`.
+            Mmc3CloneKind::M366 => (page & 0x0F) | i32::from(r[0]),
             _ => page,
         }
     }
@@ -328,6 +352,12 @@ impl Mmc3Clone {
                 };
                 ((ex1 << 8) & 0x0300) | page
             }
+            // `Bmc8in1.h:12-15`, `Bmc830118C.h:18-21`.
+            Mmc3CloneKind::M333 | Mmc3CloneKind::M348 => {
+                ((i32::from(r[0]) & 0x0C) << 5) | (page & 0x7F)
+            }
+            // `BmcGn45.h:17-20`.
+            Mmc3CloneKind::M366 => (page & 0x7F) | (i32::from(r[0]) << 3),
             _ => page,
         }
     }
@@ -360,6 +390,8 @@ impl Mmc3Clone {
     }
 
     /// Recomputes the twelve windows from the chip and the outer registers.
+    // One arm per kind that re-lays the windows out, each with its Mesen2 lines.
+    #[allow(clippy::too_many_lines)]
     fn refresh(&mut self) {
         let raw_prg = self.mmc3_prg();
         let mut prg: [i32; BankWindows::PRG_WINDOWS] =
@@ -431,6 +463,28 @@ impl Mmc3Clone {
                     self.prg_page(2, base),
                     self.prg_page(3, base + 1),
                 ];
+            }
+            // `Unl158B.h:24-34`: bit 7 of `$5000` selects 16 or 32 KiB NROM-style banking.
+            Mmc3CloneKind::M258 if self.outer[0] & 0x80 != 0 => {
+                let bank = i32::from(self.outer[0] & 0x07);
+                prg = if self.outer[0] & 0x20 != 0 {
+                    let base = (bank & 0x06) << 1;
+                    [base, base + 1, base + 2, base + 3]
+                } else {
+                    let base = bank << 1;
+                    [base, base + 1, base, base + 1]
+                };
+            }
+            // `Bmc8in1.h:17-22`: without bit 4, one 32 KiB bank.
+            Mmc3CloneKind::M333 if self.outer[0] & 0x10 == 0 => {
+                let base = i32::from(self.outer[0] & 0x0F) << 2;
+                prg = [base, base + 1, base + 2, base + 3];
+            }
+            // `Bmc830118C.h:23-32`: in block 3 the two switchable banks are mirrored at `$C000` and
+            // `$E000` from page $32.
+            Mmc3CloneKind::M348 if self.outer[0] & 0x0C == 0x0C => {
+                prg[2] = 0x32 | (raw_prg[0] & 0x0F);
+                prg[3] = 0x32 | (raw_prg[1] & 0x0F);
             }
             Mmc3CloneKind::M245 => {
                 let or = if self.mmc3.bank_register(0) & 0x02 != 0 {
@@ -589,6 +643,27 @@ impl Mmc3Clone {
                 0x5007 => self.outer[2] = value,
                 _ => return None,
             },
+            // `Unl158B.h:40-46`: `$5000-$5FFF` with A0-A2 clear.
+            Mmc3CloneKind::M258 if (0x5000..=0x5FFF).contains(&address) => {
+                if address.trailing_zeros() >= 3 {
+                    self.outer[0] = value;
+                }
+            }
+            // `Bmc830118C.h:12,38-42`.
+            Mmc3CloneKind::M348 if (0x6800..=0x68FF).contains(&address) => self.outer[0] = value,
+            // `BmcGn45.h:27-45`: until bit 7 of the address enables the work RAM, `$6000-$6FFF`
+            // latches the block from the address and `$7000-$7FFF` from the data.
+            Mmc3CloneKind::M366 if (0x6000..=0x7FFF).contains(&address) => {
+                if self.outer[1] != 0 {
+                    return Some(false);
+                }
+                if address < 0x7000 {
+                    self.outer[0] = (address & 0x30).to_le_bytes()[0];
+                    self.outer[1] = u8::from(address & 0x80 != 0);
+                } else {
+                    self.outer[0] = value & 0x30;
+                }
+            }
             _ => return None,
         }
         self.refresh();
@@ -723,6 +798,12 @@ impl Mapper for Mmc3Clone {
                 self.refresh();
                 return;
             }
+            // `Bmc8in1.h:25-31`: any write with A12 set is the outer register, not the chip's.
+            Mmc3CloneKind::M333 if address & 0x1000 != 0 => {
+                self.outer[0] = value;
+                self.refresh();
+                return;
+            }
             // `MMC3_254.h:24-28`.
             Mmc3CloneKind::M254 if address == 0x8000 => self.outer[0] = 0xFF,
             Mmc3CloneKind::M254 if address == 0xA001 => self.outer[1] = value,
@@ -736,6 +817,12 @@ impl Mapper for Mmc3Clone {
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
         if self.kind == Mmc3CloneKind::M238 && (0x4020..=0x7FFF).contains(&address) {
             return Some(self.outer[0]);
+        }
+        // `Unl158B.h:36-38`: the open bus ORed with a protection table; the high address byte
+        // stands in for the bus (FIDELITY-LEADS J2).
+        if self.kind == Mmc3CloneKind::M258 && (0x5000..=0x5FFF).contains(&address) {
+            const LUT: [u8; 8] = [0x00, 0x00, 0x00, 0x01, 0x02, 0x04, 0x0F, 0x00];
+            return Some(address.to_be_bytes()[0] | LUT[usize::from(address & 0x07)]);
         }
         // `MMC3_254.h:15-22`: the work RAM, XORed with `$A001`'s last value until `$8000` has
         // been written.
