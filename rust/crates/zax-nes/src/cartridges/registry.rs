@@ -96,6 +96,8 @@ use super::mappers::{
 };
 #[cfg(any(feature = "board-162", feature = "board-163"))]
 use super::mappers::{ChrWindowBoard, ChrWindowKind};
+#[cfg(feature = "board-fine-rom")]
+use super::mappers::{FineRom, FineRomKind};
 #[cfg(feature = "board-irq-latch")]
 use super::mappers::{IrqLatch, IrqLatchKind};
 #[cfg(feature = "board-jaleco-72-92-86")]
@@ -553,6 +555,10 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     292,
     #[cfg(feature = "board-298")]
     298,
+    #[cfg(feature = "board-302")]
+    302,
+    #[cfg(feature = "board-305")]
+    305,
     #[cfg(feature = "board-312")]
     312,
     #[cfg(feature = "board-313")]
@@ -2262,6 +2268,16 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
             memory,
             IrqLatchKind::of(mapper)?,
         )))),
+        #[cfg(feature = "board-302")]
+        302 => Board::DecodeBoard(DecodeBoard::FineRom(FineRom::new(
+            memory,
+            FineRomKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-305")]
+        305 => Board::DecodeBoard(DecodeBoard::FineRom(FineRom::new(
+            memory,
+            FineRomKind::of(mapper)?,
+        ))),
         _ => return None,
     })
 }

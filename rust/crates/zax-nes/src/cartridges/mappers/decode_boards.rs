@@ -25,6 +25,7 @@
     feature = "board-246",
     feature = "board-jaleco-72-92-86",
     feature = "board-jv001",
+    feature = "board-fine-rom",
     feature = "board-latch-multi",
     feature = "board-nina03",
     feature = "board-sachen-8reg",
@@ -40,6 +41,8 @@ compile_error!(
 use super::Cheapocabra;
 #[cfg(any(feature = "board-162", feature = "board-163"))]
 use super::ChrWindowBoard;
+#[cfg(feature = "board-fine-rom")]
+use super::FineRom;
 #[cfg(feature = "board-77")]
 use super::IremLrog017;
 #[cfg(feature = "board-jv001")]
@@ -223,6 +226,9 @@ pub enum DecodeBoard {
     /// Lot MAPPERS-N's discrete multicarts ([`LatchMulti`]).
     #[cfg(feature = "board-latch-multi")]
     LatchMulti(LatchMulti),
+    /// Lot MAPPERS-N's Kaiser boards with 2 KiB PRG pages ([`FineRom`]).
+    #[cfg(feature = "board-fine-rom")]
+    FineRom(FineRom),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as [`SmallBoard`]'s own `inner!` does.
@@ -276,6 +282,8 @@ macro_rules! inner {
             DecodeBoard::G0151($b) => $body,
             #[cfg(feature = "board-latch-multi")]
             DecodeBoard::LatchMulti($b) => $body,
+            #[cfg(feature = "board-fine-rom")]
+            DecodeBoard::FineRom($b) => $body,
         }
     };
 }
@@ -393,7 +401,7 @@ impl Mapper for DecodeBoard {
     /// Forwarded for lot MAPPERS-N's `LatchMulti` alone, whose kinds 46, 51, 108, 120, 125 and
     /// 170 put PRG-ROM or a register — never work RAM — at `$6000-$7FFF`. Asked once per CPU write,
     /// through `cpu_read_windows`, and not once per read, as `prg_ram_window` above.
-    #[cfg(feature = "board-latch-multi")]
+    #[cfg(any(feature = "board-latch-multi", feature = "board-fine-rom"))]
     fn prg_ram_enabled(&self) -> bool {
         inner!(self, b => b.prg_ram_enabled())
     }
@@ -460,7 +468,9 @@ impl Mapper for DecodeBoard {
         feature = "board-246",
         feature = "board-jv001",
         feature = "board-latch-multi",
-        feature = "board-sachen-8reg"
+        feature = "board-sachen-8reg",
+        feature = "board-fine-rom",
+        feature = "board-fine-rom",
     ))]
     #[inline(never)]
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {

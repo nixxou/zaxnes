@@ -474,3 +474,15 @@ fn mappers_n_142_switches_6000_to_rom_and_counts() {
     }
     assert!(core.cartridge().unwrap().irq_asserted());
 }
+
+/// `Kaiser7031.h`: `$8000-$FFFF` shows 2 KiB pages 15 down to 0, `$6000-$7FFF` four registers.
+#[cfg(feature = "board-305")]
+#[test]
+fn mappers_n_305_maps_2_kib_pages() {
+    let mut core = MapperRom::new(305).prg(8).load();
+    // 2 KiB page 15 lies in 8 KiB bank 3; page 0 in bank 0.
+    assert_eq!(3, core.read_memory(0x8100));
+    assert_eq!(0, core.read_memory(0xF900));
+    core.mapper_write(0x8800, 9); // register 1: $6800-$6FFF, page 9 in bank 2
+    assert_eq!(2, core.read_memory(0x6900));
+}
