@@ -3348,7 +3348,7 @@ impl Ppu2C02 {
         }
 
         if !is_palette_address(address) {
-            return self.read_nametable_inner(address, cart.as_deref());
+            return self.read_nametable_inner::<K>(address, cart.as_deref());
         }
 
         self.palette_raw[palette_index(address)]
@@ -3368,7 +3368,7 @@ impl Ppu2C02 {
         }
 
         if !is_palette_address(address) {
-            return self.read_nametable_inner(address, cartridge);
+            return self.read_nametable_inner::<K>(address, cartridge);
         }
 
         self.palette_raw[palette_index(address)]
@@ -3473,7 +3473,7 @@ impl Ppu2C02 {
     /// attached (Q-062).
     #[must_use]
     pub fn read_nametable_byte(&self, address: u16, cartridge: Option<&Cartridge>) -> u8 {
-        self.read_nametable_inner(address, cartridge)
+        self.read_nametable_inner::<AnyBoard>(address, cartridge)
     }
 
     /// Where nametable `address` lies: the console VRAM page the cartridge maps it to,
@@ -3496,9 +3496,25 @@ impl Ppu2C02 {
     /// cost that function sixteen instructions a call for a branch pattern fetches never take.
     /// `read_pattern_planes` is the function R0's callgrind of MF-1 singled out; see
     /// `docs/progress/MF-2.md`, step 7.
+    ///
+    /// **Generic over the board kind since lot MAPPERS-N** (owner's go-ahead, 2026-11-15; this
+    /// file was outside that lot's scope, so the backport should re-read this note). Before, there
+    /// was one copy for every path and it held the whole `Board::read_nametable_from_vram`
+    /// dispatch: each board that serves its own nametables added an arm there, and every game
+    /// paid for it on every nametable fetch. Callgrind of clean builds, `core` of Mega Man 2 and
+    /// Zelda II (MMC1, specialised path) over 300 frames: mapper 284's arm **+0.045 %**, mapper
+    /// 682's alone **+0.025 %**, all of it in this function (+3.1 M instructions), against the
+    /// +0.02 % a board may cost. Now a specialised kind gets a copy whose served-nametable branch
+    /// calls its own board ([`Cartridge::read_nametable_from_vram_as`]) and the arms stay on the
+    /// `AnyBoard` copy, the generic path of the boards without a specialised loop. Still
+    /// `#[inline(never)]`, one copy per kind, for the MF-2 reason above.
     #[inline(never)]
-    fn read_nametable_inner(&self, address: u16, cartridge: Option<&Cartridge>) -> u8 {
-        self.read_nametable_as(address, cartridge, self.layout_of(cartridge))
+    fn read_nametable_inner<K: BoardKind>(
+        &self,
+        address: u16,
+        cartridge: Option<&Cartridge>,
+    ) -> u8 {
+        self.read_nametable_as::<K>(address, cartridge, self.layout_of(cartridge))
     }
 
     /// A nametable byte as the PPU reads it under `layout`, the mirroring it had when a row was
@@ -3522,7 +3538,7 @@ impl Ppu2C02 {
     /// `lto = "fat"`, and this is a decision LTO takes afterwards; see step 3.
     #[allow(clippy::inline_always)] // Measured: a `callq` here costs 4.0 M instructions.
     #[inline(always)]
-    fn read_nametable_as(
+    fn read_nametable_as<K: BoardKind>(
         &self,
         address: u16,
         cartridge: Option<&Cartridge>,
@@ -3538,7 +3554,7 @@ impl Ppu2C02 {
                 // is the **whole** of the two features' footprint on the PPU's fetch path, and
                 // a board that does not take this branch cannot see it.
                 #[cfg(feature = "board-mmc5-exattr-split")]
-                return cartridge.read_nametable_from_vram(address, &self.vram);
+                return cartridge.read_nametable_from_vram_as::<K>(address, &self.vram);
                 #[cfg(not(feature = "board-mmc5-exattr-split"))]
                 return cartridge.read_nametable_as::<K>(address);
             }

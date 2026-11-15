@@ -1601,6 +1601,28 @@ impl Cartridge {
             .read_nametable_from_vram(&self.memory, address, vram)
     }
 
+    /// [`Cartridge::read_nametable_from_vram`] on the board kind `K` (lot MAPPERS-N): a
+    /// specialised kind reaches its own board's method and **never the `Board` dispatch**, whose
+    /// arms for the boards that serve their own tables (the MMC5's extended modes, 284, 682) are
+    /// then only on the generic path. `AnyBoard` is the dispatch, unchanged.
+    ///
+    /// A kind that [`BoardKind::SWITCHES`] (the light MMC5) goes through the dispatch too: between
+    /// the write that arms the MMC5's split or extended attributes and the check that hands the
+    /// frame back to `AnyBoard`, the board is already `Board::Mmc5Ext` and only the dispatch
+    /// answers its tables.
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    #[must_use]
+    #[allow(clippy::inline_always)] // Lot MAPPERS-N: on every served-nametable fetch.
+    #[inline(always)]
+    pub fn read_nametable_from_vram_as<K: BoardKind>(&self, address: u16, vram: &[u8]) -> u8 {
+        if K::SWITCHES {
+            self.board
+                .read_nametable_from_vram(&self.memory, address, vram)
+        } else {
+            K::board(&self.board).read_nametable_from_vram(&self.memory, address, vram)
+        }
+    }
+
     /// Where a write to a nametable the cartridge answers lands in console VRAM, or `None` when
     /// the board keeps or drops the byte (see [`Mapper::nametable_write_offset`]).
     #[cfg(feature = "board-mmc5-exattr-split")]
