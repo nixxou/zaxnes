@@ -112,6 +112,29 @@ Corpus without the netlist's first frame (power-on artefact), alignments 2 and 3
 | `r2007` | 168 152 | 78 806 (post-render lines, the bench's PPUCTRL, A7) |
 | `g2005` | 57 399 | 57 399 (same artefact) |
 
+## Order changed: step 4 before step 3 (2026-11-15)
+
+Step 4 makes the mode usable (alignments 0-1 checked, savestates, the option in the application);
+step 3 is the longest and part of what it settles is analogue (the floating AD bus of A5). So 4
+first.
+
+## Step 4 — alignments 0-1, savestates, option (2026-11-15)
+
+* Alignments 0 and 1 against the netlist (`PAIRS="0:2 1:0" fidjudge.sh`, the judge now requires a
+  zero offset in **every** paired frame): `g2006px` 0 dots (standard 740), `g2005px` 2 as the
+  standard. `g2001px`: both modes differ widely; the netlist starts no `v` increment after a
+  mid-line switch on in these two alignments, the switch-on race of step 33 (two signals in one
+  half step of a zero-delay simulation): not a reference, not followed.
+* Savestates: `Ppu2C02::save_edge_state` / `load_edge_state` (count, each edge's dots, kind and
+  byte, the data latch). Run-ahead's in-memory state always carries the block. A savestate file
+  takes version 12 (13 with the widescreen extension) **only when edges are pending** when it is
+  written; every other state keeps version 10/11, which earlier builds read. A Fidélité+ state
+  loads in the standard core too (its pending edges still run). Test
+  `fidplus_state_tests.rs`: a program writing `$2007` in a loop, states taken with edges pending,
+  file and in-memory restores equal to the live machine.
+* Option `emu.fidelity_plus` (Emulation tab, desktop and handheld, French and English texts; off,
+  takes effect at the next load).
+
 ## Next: step 3
 
 The PPU DATA read and write state machines as state, on PPU clock halves (AccuracyCoin's
