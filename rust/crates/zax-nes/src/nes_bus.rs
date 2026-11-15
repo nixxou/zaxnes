@@ -375,6 +375,21 @@ impl NesBus {
         self.reapply_vs_palette();
     }
 
+    /// Whether the image loaded is a VS. System: `NesCore` then runs it on the generic path
+    /// (`BoardKind::RUNS_VS`, lot MAPPERS-N).
+    #[cfg(feature = "board-vs-system")]
+    #[must_use]
+    pub const fn is_vs_image(&self) -> bool {
+        self.vs_port & VS_IMAGE != 0
+    }
+
+    /// Without the VS. System no image is one.
+    #[cfg(not(feature = "board-vs-system"))]
+    #[must_use]
+    pub const fn is_vs_image(&self) -> bool {
+        false
+    }
+
     /// Re-shows palette RAM through the VS PPU's remap after the PPU rewrote it (a palette
     /// write, the power-on fill, a state load); nothing for any other image.
     #[cfg(feature = "board-vs-system")]
@@ -1264,7 +1279,7 @@ impl NesBus {
                 .read_as::<K>(address & 0x07, self.cartridge.as_mut());
             // Lot MAPPERS-N: an RC2C05's `$2002` identifier, applied here and not in the PPU.
             #[cfg(feature = "board-vs-system")]
-            if self.vs_port & VS_RC2C05 != 0 && address & 0x07 == 2 {
+            if K::RUNS_VS && self.vs_port & VS_RC2C05 != 0 && address & 0x07 == 2 {
                 return self.vs_status(value);
             }
             return value;
@@ -1440,7 +1455,7 @@ impl NesBus {
             // Lot MAPPERS-N: "The RC2C05 swaps the meanings of $2000 and $2001" (nesdev,
             // "Vs. System"), done on the register number as the chip's pins do.
             #[cfg(feature = "board-vs-system")]
-            let register = if self.vs_port & VS_RC2C05 != 0 && register < 2 {
+            let register = if K::RUNS_VS && self.vs_port & VS_RC2C05 != 0 && register < 2 {
                 register ^ 1
             } else {
                 register
@@ -1448,7 +1463,7 @@ impl NesBus {
             self.ppu
                 .write_as::<K>(register, value, self.cartridge.as_mut());
             #[cfg(feature = "board-vs-system")]
-            if self.vs_port & VS_REMAP != 0 && register == 7 {
+            if K::RUNS_VS && self.vs_port & VS_REMAP != 0 && register == 7 {
                 self.reapply_vs_palette();
             }
             return;

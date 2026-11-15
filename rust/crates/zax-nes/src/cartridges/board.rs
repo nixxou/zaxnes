@@ -749,6 +749,14 @@ pub trait BoardKind {
     /// [`Cartridge::SERVED_BY_CARTRIDGE`]: super::Cartridge::SERVED_BY_CARTRIDGE
     const SERVES_NAMETABLES: bool = true;
 
+    /// Whether a VS. System image may run on this kind (lot MAPPERS-N): `true` for [`AnyBoard`]
+    /// alone, because `NesCore` sends every VS image to the generic path whatever its board
+    /// (`NesBus::is_vs_image`). The bus's VS quirks (`$2002` identifier, `$2000`/`$2001` swap,
+    /// palette remap) are then compiled out of every specialised path: callgrind of Zelda II
+    /// (MMC1) measured the one test left on `NesBus::read_cycle_as::<Mmc1Kind>` at +3.0 M
+    /// instructions over 300 frames (+0.045 % `core`).
+    const RUNS_VS: bool = false;
+
     /// Whether `board` is this kind's variant.
     fn matches(board: &Board) -> bool;
 
@@ -764,6 +772,8 @@ pub enum AnyBoard {}
 
 impl BoardKind for AnyBoard {
     type B = Board;
+
+    const RUNS_VS: bool = true;
 
     #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
     #[inline(always)]

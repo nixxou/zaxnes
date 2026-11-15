@@ -1113,7 +1113,10 @@ impl NesCore {
         // here, and the frame runs through the code compiled for it, or for every board when it
         // is not in the table. `run_frame` checked that a cartridge is loaded.
         loop {
-            let done = match self.bus.cartridge().filter(|_| !self.generic_path) {
+            // Lot MAPPERS-N: a VS. System image always takes the generic path, the one kind that
+            // carries the bus's VS quirks (`BoardKind::RUNS_VS`).
+            let generic = self.generic_path || self.bus.is_vs_image();
+            let done = match self.bus.cartridge().filter(|_| !generic) {
                 Some(cartridge) => {
                     with_board_kind!(cartridge.board(), K => self.run_frame_steps::<K>(idle_loop))
                 }
