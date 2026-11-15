@@ -723,9 +723,26 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   RP2A03 letter revisions (BeesNES flag `bRp2A02` in audio profiles), 2C07 PAL, 2C05 Vs.
 - Zaxnes: none selectable. A "console model" setting would group C6, D3, E1, E2.
 
-### G2. Regions PAL-M and PAL-N famiclones — open (free)
+### G2. Regions PAL-M and PAL-N famiclones — done (FIDPLUS-1)
 - BeesNES: per-region cycle tables (`Src/Ppu/LSNCreateCycleTablePalM.inl`, `...PalN.inl`) and
   master clocks (`LSNSystem.h:1182-1190`). Zaxnes: NTSC, PAL, Dendy, Multi (`region_timing.rs:45-47`).
+- **FIDPLUS-1 (2026-11-15)**: `NesRegion::PalM = 4` and `PalN = 5` (persisted numbers), one timing
+  row each in `region_timing.rs`, from BeesNES (MIT):
+  - PAL-M: master 3 067 875 000 / 143 Hz, CPU / 12 = **1 787 806 Hz**, PPU / 4 (3 dots per cycle),
+    NTSC geometry (262 lines, vblank 241, `LSNLSpiroNes.h:213-221`), **no** odd-frame dot skip
+    (`CPalMPpu`, `LSNPpu2C0X.h:2823`), 60 fps nominal;
+  - PAL-N: master 42 984 675 / 2 Hz, CPU / 12 = **1 791 028 Hz**, PPU / 4, PAL's 312 lines with the
+    Dendy's 51 post-render lines (vblank 291, `LSNLSpiroNes.h:224-232`), **with** the odd-frame dot
+    skip (`CPalNPpu`, `LSNPpu2C0X.h:2830`), 50 fps nominal;
+  - both: NTSC frame-counter steps (`LSNApu2A0X.h:152-176`) and NTSC noise/DMC periods
+    (`LSNApuUnit.cpp:27-28`); pulse duty sequences 1 (25 %) and 2 (50 %) **swapped**
+    (`_bSwapDuty`, `LSNSystem.h:1182,1190`; `GetDuty`, `LSNApu2A0X.h:1891`), applied on the
+    `$4000`/`$4004` write (`PulseChannel::set_swaps_duty`). The MMC5 squares keep the normal order.
+  - FCEUX and NesHawk have neither region: PAL-M runs their NTSC and PAL-N their Dendy (the
+    geometries), without the clock or duty differences; NesHawk blocks keep the host's choice.
+  - Single source: BeesNES. The odd-frame skip of PAL-N and the duty swap have no second
+    reference here. The handheld options row still offers Auto/NTSC/PAL only; the menu bar offers
+    all five.
 
 ---
 

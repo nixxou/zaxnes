@@ -24,7 +24,8 @@ Les **profils audio de console** (`rust/crates/zax-nes/src/apu/console_profile.r
 `Src/Audio/LSNAudioOptions.cpp`) : fréquences de coupure des filtres, gains par voie, inversion et
 CPU « letterless » de chaque console mesurée, ainsi que la formule de ses filtres passe-haut. Les
 choix d'émulation documentés d'après BeesNES (position de démarrage du PPU, effacement de l'OAM,
-défaut OAMADDR) en citent le fichier et la ligne. BeesNES est distribué sous licence MIT :
+défaut OAMADDR, horloges et géométrie des régions PAL-M et PAL-N, inversion des rapports
+cycliques des famiclones) en citent le fichier et la ligne. BeesNES est distribué sous licence MIT :
 
     MIT License
 

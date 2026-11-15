@@ -28,8 +28,8 @@ fn req_core_015_average_cpu_cycles_per_frame() {
         (NesRegion::Multi, 29780.5, 0.5),
         // PAL-M: NTSC geometry without the odd-frame skip, 262 x 341 / 3.
         (NesRegion::PalM, 29780.67, 0.5),
-        // PAL-N: Dendy geometry, 312 x 341 / 3.
-        (NesRegion::PalN, 35464.0, 1.0),
+        // PAL-N: Dendy geometry with the odd-frame skip, 312 x 341 / 3 - 1/6.
+        (NesRegion::PalN, 35463.83, 0.5),
     ] {
         let mut core = machine_with(&minimal(), "Minimal.nes");
         core.set_region(region);
@@ -57,7 +57,7 @@ fn req_core_015_timing_table() {
         (NesRegion::Dendy, 1_773_448, 312, 291, 50, false),
         (NesRegion::Multi, 1_789_773, 262, 241, 60, true),
         (NesRegion::PalM, 1_787_806, 262, 241, 60, false),
-        (NesRegion::PalN, 1_791_028, 312, 291, 50, false),
+        (NesRegion::PalN, 1_791_028, 312, 291, 50, true),
     ] {
         let timing = RegionTiming::for_region(region);
 

@@ -109,7 +109,7 @@ impl RegionTiming {
         true,
     );
     /// PAL-N, `BeesNES` (MIT): master 42 984 675 / 2 Hz, CPU / 12, PPU / 4, 312 lines with the
-    /// Dendy's 50 post-render lines (vblank on 291), NTSC frame counter and noise/DMC tables,
+    /// Dendy's 51 post-render lines (vblank on 291), the odd-frame dot skip (`CPalNPpu`), NTSC frame counter and noise/DMC tables,
     /// swapped duties.
     const PAL_N: Self = Self::make(
         NesRegion::PalN,
@@ -118,7 +118,7 @@ impl RegionTiming {
         1,
         312,
         291,
-        false,
+        true,
         50,
         false,
         true,
