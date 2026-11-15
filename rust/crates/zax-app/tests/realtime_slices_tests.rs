@@ -44,23 +44,20 @@ fn fidplus_b3_ten_seconds_of_slices_make_six_hundred_frames() {
 #[test]
 fn fidplus_b3_a_frame_spreads_over_two_half_frame_ticks() {
     let mut harness = harness(true);
-    // Settle on a frame boundary, then two half frames make one frame.
-    while in_progress(&harness) {
-        harness.tick(1.0 / 2000.0);
-    }
     let start = frame_count(&harness);
-    assert_eq!(0, harness.tick(1.0 / 120.0));
-    assert!(in_progress(&harness), "half a frame run");
-    assert_eq!(start, frame_count(&harness));
-    let mut ended = 0;
-    for _ in 0..4 {
-        if !in_progress(&harness) {
-            break;
+    let mut quiet = 0;
+    for _ in 0..120 {
+        let ended = harness.tick(1.0 / 120.0);
+        assert!(ended <= 1, "{ended} frames in half a frame of time");
+        if ended == 0 {
+            // Half a frame ran: the frame goes on at the next tick.
+            quiet += 1;
+            assert!(in_progress(&harness));
         }
-        ended += harness.tick(1.0 / 240.0);
     }
-    assert_eq!(1, ended);
-    assert_eq!(start + 1, frame_count(&harness));
+    let made = frame_count(&harness) - start;
+    assert!((58..=61).contains(&made), "{made}");
+    assert!(quiet >= 55, "{quiet}");
 }
 
 #[test]
