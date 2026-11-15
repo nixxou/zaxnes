@@ -1013,9 +1013,12 @@ impl NesCore {
 
         self.bus.ppu_mut().clear_frame_boundary();
         if self.fidelity_plus {
-            // Fidélité+: no batching, its own loop (one test a frame on the standard path). The
-            // PPU is told every frame: a load builds it afresh.
+            // Fidélité+: its own loop (one test a frame on the standard path). The PPU is told
+            // every frame: a load builds it afresh. The PPU and the APU are batched as in the
+            // standard frame: every register access still catches the PPU up first, and the
+            // edges count dots, not catch-ups.
             self.bus.ppu_mut().set_fidelity_plus(true);
+            self.bus.defer_ppu();
             loop {
                 let done = match self.bus.cartridge().filter(|_| !self.generic_path) {
                     Some(cartridge) => with_board_kind!(cartridge.board(), K => {
@@ -1027,6 +1030,7 @@ impl NesCore {
                     break;
                 }
             }
+            self.bus.end_deferred_ppu();
         } else {
             self.run_standard_frame(idle_loop);
         }

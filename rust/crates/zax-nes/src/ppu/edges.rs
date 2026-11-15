@@ -221,6 +221,20 @@ impl Ppu2C02 {
         cart: Cart<'_, '_, K>,
     ) {
         while count > 0 {
+            if self.edge_count == 0 && self.fetch_pending == 0 && !self.tracing() {
+                // Nothing pending: the standard core's stretches, up to the dot before 256 on a
+                // line that renders, whose Y increment may post the coarse-Y wrap's edge (A7).
+                let stretch = if self.rendering_now() && self.dot < 256 {
+                    count.min(i64::from(255 - self.dot))
+                } else {
+                    count
+                };
+                if stretch > 0 {
+                    self.run_dots_standard(stretch, cart);
+                    count -= stretch;
+                    continue;
+                }
+            }
             // Only the edges pending before this dot count it down: one its own work posts (the
             // coarse-Y wrap of dot 256) or an edge posts counts from the next.
             let mut pending = usize::from(self.edge_count);
@@ -250,6 +264,20 @@ impl Ppu2C02 {
                 self.record_traced_dot();
             }
             count -= 1;
+        }
+    }
+
+    /// Whether the per-dot trace is on (feature `ppu-dot-trace`): the dots are then all run one at
+    /// a time, as the trace records them.
+    #[allow(clippy::unused_self)]
+    const fn tracing(&self) -> bool {
+        #[cfg(feature = "ppu-dot-trace")]
+        {
+            self.dot_trace.is_some()
+        }
+        #[cfg(not(feature = "ppu-dot-trace"))]
+        {
+            false
         }
     }
 
