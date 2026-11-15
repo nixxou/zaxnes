@@ -754,6 +754,13 @@ impl<
         self.irq_revision_a = true;
     }
 
+    /// The console model's MMC3 (lot FIDPLUS-C): the revision of the scanline counter chosen by
+    /// the player or the test campaign over the one the header implies (`true` revision A, the
+    /// NEC / Sharp MMC3A and the MMC6's counter; `false` revision B, the MMC3B / MMC3C).
+    pub(crate) fn set_irq_revision_a(&mut self, revision_a: bool) {
+        self.irq_revision_a = revision_a;
+    }
+
     /// Makes `$A000` inert, for a board that holds this chip and whose own page takes the
     /// mirroring away from it (MF-UNL-8 step 2, **Q-165**).
     ///

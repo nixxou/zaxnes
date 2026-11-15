@@ -50,6 +50,8 @@ pub struct NesCore {
     power_on_ram: crate::PowerOnRam,
     /// What the PPU's palette RAM, OAM and nametable RAM hold at power-on (lot FIDELITY step 36).
     power_on_ppu_ram: crate::PowerOnPpuRam,
+    /// The console model's MMC3 revision (lot FIDPLUS-C), applied when a ROM is loaded.
+    mmc3_revision: crate::Mmc3Revision,
     advanced_patches_enabled: bool,
     /// The built-in patch applied to a ROM none is made for (Rust-only, owner request: forced).
     forced_patch: Option<&'static crate::builtin_patches::BuiltinPatch>,
@@ -171,6 +173,7 @@ impl NesCore {
             cartridge_db: true,
             power_on_ram: crate::PowerOnRam::Pattern,
             power_on_ppu_ram: crate::PowerOnPpuRam::Zero,
+            mmc3_revision: crate::Mmc3Revision::Cartridge,
             advanced_patches_enabled: false,
             forced_patch: None,
             rom_crc: None,
@@ -229,6 +232,11 @@ impl NesCore {
     /// at the next one.
     pub fn set_power_on_ppu_ram(&mut self, pattern: crate::PowerOnPpuRam) {
         self.power_on_ppu_ram = pattern;
+    }
+
+    /// The console model's MMC3 revision (lot FIDPLUS-C): read when the next ROM is loaded.
+    pub fn set_mmc3_revision(&mut self, revision: crate::Mmc3Revision) {
+        self.mmc3_revision = revision;
     }
 
     /// Whether the PPU corrupts a row of OAM when the rendering is switched off inside a line and
@@ -655,13 +663,22 @@ impl NesCore {
             note
         };
 
-        let cartridge = match Cartridge::create(rom) {
+        let mut cartridge = match Cartridge::create(rom) {
             Ok(cartridge) => cartridge,
             Err(error) => {
                 self.close_rom();
                 return RomLoadResult::fail(error.failure, error.message);
             }
         };
+        match self.mmc3_revision {
+            crate::Mmc3Revision::Cartridge => {}
+            crate::Mmc3Revision::A => {
+                cartridge.set_mmc3_irq_revision_a(true);
+            }
+            crate::Mmc3Revision::B => {
+                cartridge.set_mmc3_irq_revision_a(false);
+            }
+        }
 
         // The header's region, unless the dump is known to be of another one.
         let region =

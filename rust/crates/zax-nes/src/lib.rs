@@ -18,7 +18,7 @@ mod nes_core;
 mod power_on_ram;
 pub mod ppu;
 mod region_timing;
-pub use power_on_ram::{PowerOnPpuRam, PowerOnRam, BLARGG_POWER_UP_PALETTE};
+pub use power_on_ram::{Mmc3Revision, PowerOnPpuRam, PowerOnRam, BLARGG_POWER_UP_PALETTE};
 pub mod rom;
 pub mod state;
 mod video_info;

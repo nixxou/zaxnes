@@ -535,6 +535,27 @@ struct Finished {
     frame: Vec<u8>,
 }
 
+/// Lot FIDPLUS-C, the console model each test ROM was written for (`docs/design/CONSOLE-MODEL.md`):
+/// with `ZAXNES_CONSOLE_MODEL=rom` the campaign runs these under their own console. Their author's
+/// console or chip: blargg's palette at power-on (his readme: the values "are probably unique to my
+/// NES"), and the MMC3 revision A counter, which the MMC6 shares, for the rows of that revision
+/// (they and `5-MMC3` / `6.MMC3_rev_B` exclude each other).
+fn console_model_of(
+    name: &str,
+) -> (
+    Option<zax_nes::PowerOnPpuRam>,
+    Option<zax_nes::Mmc3Revision>,
+) {
+    let lower = name.to_ascii_lowercase();
+    let palette = lower
+        .contains("power_up_palette")
+        .then_some(zax_nes::PowerOnPpuRam::Blargg);
+    let revision_a = ["5.mmc3_rev_a", "6-mmc6", "6-mmc3_alt"]
+        .iter()
+        .any(|row| lower.contains(row));
+    (palette, revision_a.then_some(zax_nes::Mmc3Revision::A))
+}
+
 /// Loads `image`, runs it with the reader its suite documents and returns the row.
 fn run_one_zaxnes(
     name: &str,
@@ -601,6 +622,24 @@ fn run_one_zaxnes(
                 other.trim_start_matches("random:").parse().unwrap_or(1),
             ),
         });
+    }
+    // `ZAXNES_MMC3_REVISION=a|b`: the console model's MMC3 (lot FIDPLUS-C); the cartridge's
+    // otherwise.
+    if let Ok(value) = std::env::var("ZAXNES_MMC3_REVISION") {
+        core.set_mmc3_revision(match value.as_str() {
+            "a" | "A" => zax_nes::Mmc3Revision::A,
+            "b" | "B" => zax_nes::Mmc3Revision::B,
+            _ => zax_nes::Mmc3Revision::Cartridge,
+        });
+    }
+    if std::env::var("ZAXNES_CONSOLE_MODEL").is_ok_and(|value| value == "rom") {
+        let (palette, revision) = console_model_of(name);
+        if let Some(palette) = palette {
+            core.set_power_on_ppu_ram(palette);
+        }
+        if let Some(revision) = revision {
+            core.set_mmc3_revision(revision);
+        }
     }
     // Study `study/access-phase`: `ZAXNES_PHASE=0..2` moves the CPU/PPU alignment.
     core.set_phase_offset(
