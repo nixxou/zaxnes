@@ -65,6 +65,12 @@ D1b (2026-11-15): the profile filters' memory in the savestate (formats 14 / 15,
 E1 (5)); and the filters are no longer rebuilt at rest by every ratio recomputation (a click at each
 fine pacing adjustment of the host before). Standard path: untouched (no profile, format 10 / 11).
 
+D1c (2026-11-15): closed without a code change — BeesNES's HPF0 is at the output rate after its
+sinc, like ours after the band-limited synthesis, same formula; the order against the low-pass is
+immaterial for linear filters (test, < 1e-12). It found D1d's real content: BeesNES's CPU-rate
+low-pass is never off (disabled or above Nyquist: `output / 2 + 100` Hz) and one extra pole at that
+corner follows it on every profile; ours drops both, and the three zeros.
+
 D1a's cost on the standard path (callgrind, clean builds against 6c9cb163, PR-1 set): first
 +0.89 % on `mmc5` (the profile test in the setter the MMC5 calls on every level change), then
 +0.417 % with that branch out of line, and **-0.057 %** at 7edd528e, where the setter is back to

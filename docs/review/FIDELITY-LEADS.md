@@ -823,7 +823,13 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   before decimation (per-step cost); (2) the overall profile volume (0.34 to 4.5) is not applied,
   only its sign: our output is normalised to full scale, applying it would clip; (3) BeesNES's
   sample box applies HPF0 inside its windowed-sinc resampler, ours after our own resampler (same
-  one-pole formula, a few samples of phase apart); (4) the expansion audio (VRC6, MMC5, N163...)
+  one-pole formula, a few samples of phase apart) — **closed 2026-11-15 (FIDPLUS-D1c), not an
+  approximation**: the sample box runs HPF0 at the output rate right after its sinc
+  (`LSNSampleBox.h:636-645`, `ProcessHpf` `:285-291`), with the same `a (y1 + x - x1)` and
+  `tau = 1 / f` as ours, at the same rate; only its place against the low-pass differs, and both
+  are linear and time-invariant, so the order does not change the signal (test
+  `fidplus_d1c_hpf0_order_against_the_low_pass_is_immaterial`, 20 000 samples, < 1e-12). Both
+  resamplers are linear-phase: a fixed delay, no phase difference; (4) the expansion audio (VRC6, MMC5, N163...)
   is added after the gains and is not weighted per console, while BeesNES lets the mapper
   post-process between HPF1 and HPF2 (`PostHpf`, `LSNApu2A0X.h:1919-1931`) — **done 2026-11-15
   (owner, an exception to AMD-061 §6.2 inside the profile option, FIDPLUS-D1a)**: with a profile,
@@ -838,7 +844,13 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   Open: run-ahead's in-memory restore keeps the filters where the frames ahead left them (their
   audio is not heard; a few samples of filter memory apart); (6) the
   N20914398 profile was measured with a Sunsoft 5B cartridge and has no low-pass and no
-  inversion — kept as BeesNES lists it.
+  inversion — kept as BeesNES lists it. Found by D1c, for D1d: BeesNES never leaves the CPU-rate
+  low-pass out — a profile with it disabled (N20914398, Twin Famicom 475711 SCART) or above the
+  output's Nyquist (PAL PM608755, 64 kHz) gets one at `output / 2 + 100` Hz
+  (`LSNApu2A0X.h:725-726`), and every profile adds one more pole there (`m_pfOutputPole[1]`,
+  `:733-737`, `:541-546`); ours drops them (about -3 dB each at 24.1 kHz for 48 kHz output, the
+  top of the band). Zeros: only N13721267 (144.4 kHz), N34169630 (145.2 kHz) and PM313006
+  (188.8 kHz) have one; it lifts the band edge by under 0.1 dB.
 
 ### E2. Per-console clock — rejected (no effect while the pacing follows the display; step 38)
 - Each console's crystal differs (E1 table). Option "measured clock of console X" changes speed and

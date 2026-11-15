@@ -374,4 +374,44 @@ mod tests {
         let mut fresh = ProfileFilter::new(&CONSOLE_AUDIO_PROFILES[1], 48_000);
         assert!(fresh.process(0.5) < 0.0, "this console inverts its output");
     }
+
+    /// Lot FIDPLUS-D1c (FIDELITY-LEADS E1-3): `BeesNES` runs HPF0 in its sample box, at the output
+    /// rate right after the band-limiting sinc (`LSNSampleBox.h:641`), and its low-pass before
+    /// the box; ours runs the low-pass first at the output rate, then HPF0. Both are linear and
+    /// time-invariant, so the order does not change the signal: HPF0 then the low-pass gives the
+    /// same samples, to rounding.
+    #[test]
+    fn fidplus_d1c_hpf0_order_against_the_low_pass_is_immaterial() {
+        let profile = CONSOLE_AUDIO_PROFILES[0];
+        let mut ours = ProfileFilter::new(&profile, 48_000);
+        let (b0, a1) = ours.low_pass.expect("this profile has a low-pass");
+        let alpha = ours.high_pass[0].expect("HPF0 is on");
+        let (mut hp_in, mut hp_out, mut lp_in, mut lp_out) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+        let mut worst = 0.0f64;
+        let mut state = 0x1234_5678u32;
+        for step in 0..20_000u32 {
+            // A square wave with a slow level drift and a little noise.
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            let square = if (step / 37) % 2 == 0 { 0.4 } else { 0.1 };
+            let x = square + f64::from(step % 4000) * 1e-5 + f64::from(state % 100) * 1e-4;
+            // Our order: low-pass, HPF0 (HPF1 and HPF2 left out of both sides).
+            let lp = b0.mul_add(x + ours.low_pass_input, -(a1 * ours.low_pass_output));
+            ours.low_pass_input = x;
+            ours.low_pass_output = lp;
+            let a = alpha * (ours.high_pass_output[0] + lp - ours.high_pass_input[0]);
+            ours.high_pass_input[0] = lp;
+            ours.high_pass_output[0] = a;
+            // BeesNES's order: HPF0 after the low-pass's band-limiting, here simply first.
+            let hp = alpha * (hp_out + x - hp_in);
+            hp_in = x;
+            hp_out = hp;
+            let b = b0.mul_add(hp + lp_in, -(a1 * lp_out));
+            lp_in = hp;
+            lp_out = b;
+            worst = worst.max((a - b).abs());
+        }
+        assert!(worst < 1e-12, "largest difference {worst}");
+    }
 }
