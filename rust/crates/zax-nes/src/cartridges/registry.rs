@@ -16,6 +16,8 @@ use super::mappers::Cony;
 use super::mappers::DecodeBoard;
 #[cfg(feature = "board-eeprom")]
 use super::mappers::EepromPort;
+#[cfg(feature = "board-323")]
+use super::mappers::FaridSlrom;
 #[cfg(feature = "board-176")]
 use super::mappers::Fk23c;
 #[cfg(feature = "board-huang1")]
@@ -643,6 +645,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     319,
     #[cfg(feature = "board-320")]
     320,
+    #[cfg(feature = "board-323")]
+    323,
     #[cfg(feature = "board-324")]
     324,
     #[cfg(feature = "board-325")]
@@ -2276,6 +2280,8 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
             memory,
             MiscKind::of(mapper)?,
         ))),
+        #[cfg(feature = "board-323")]
+        323 => Board::DecodeBoard(DecodeBoard::FaridSlrom(Box::new(FaridSlrom::new(memory)))),
         #[cfg(feature = "board-188")]
         188 => Board::DecodeBoard(DecodeBoard::BandaiKaraoke(BandaiKaraoke::new(memory))),
         #[cfg(feature = "board-233")]

@@ -725,6 +725,7 @@ dispatch is the generic path of the exotic ones only.
 | `board-487` | 487 | `MiscN` M487: NINA-03 and outer registers at `$4100`/`$4180`, Color Dreams register in the second half (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-518` | 518 | `MiscN` M518: Dance 2000, `$5000`/`$5200`, open bus over `$8000-$FFFF`, CHR page 0 from the nametable address (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-519` | 519 | `MiscN` M519: EH8813A, bank in the write address, DIP read mode (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
+| `board-323` | 323 | `FaridSlrom`: a wrapper of `Mmc1` narrowing its banks to a 128 KiB game with an outer register at `$6000`, locked by bit 3 (Mesen2, puNES; J27). The MMC1's own path is untouched | ~120 | — (no dump) | **on** |
 | `board-252` | 252 | `Waixing252` (in `IrqBoard`): Waixing VRC4 clone, CHR-RAM by mask/compare | ~200 | CPU-clocked (VRC IRQ) | **on** |
 | `board-234` | 234 | `Maxi15` (in `DecodeBoard`): AVE Maxi 15, registers latched on reads | ~130 | no cached window; only this board reads through the forwarded `cpu_read_override` | **on** |
 | `board-200` | 200 | `LatchMulti` | 5 | — | **on** since the owner accepted `AMD-MAPPERS-N-200.md` (2026-11-15) |

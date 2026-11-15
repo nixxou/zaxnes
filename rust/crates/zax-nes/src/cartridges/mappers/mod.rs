@@ -43,6 +43,8 @@ mod discrete;
 mod eeprom24c0x;
 #[cfg(feature = "board-164")]
 mod eeprom93c66;
+#[cfg(feature = "board-323")]
+mod farid_slrom;
 #[cfg(feature = "board-fine-rom")]
 mod fine_rom;
 #[cfg(feature = "board-176")]
@@ -204,6 +206,8 @@ pub use discrete::{
 pub use eeprom24c0x::{Eeprom24C0X, EepromKind, EepromPort};
 #[cfg(feature = "board-164")]
 pub use eeprom93c66::Eeprom93C66;
+#[cfg(feature = "board-323")]
+pub use farid_slrom::FaridSlrom;
 #[cfg(feature = "board-fine-rom")]
 pub use fine_rom::{FineRom, FineRomKind};
 #[cfg(feature = "board-176")]

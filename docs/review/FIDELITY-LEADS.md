@@ -937,6 +937,13 @@ CHR-RAM) and puNES (`mapper_198.c`, banks from `$50` folding onto `$40-$4F`). Th
 password screen cleanly; the later `[T+ChSFIX2]` and `[T+ChTFIX2]` patches show stray glyphs on
 the password screen, not investigated (translation hacks; their CHR use may differ).
 
+### J27. Mapper 323: the outer bank's fourth bit, and the RAM under the register
+Mesen2 (`FaridSlrom.h`) takes the outer bank from bits 4-6 (`(value & 0x70) >> 1`) and makes
+`$6000-$7FFF` a register range, so the RAM does not take the byte; puNES (`mapper_323.c`) takes
+bits 4-7 (`(reg & 0xF0) >> 1`) and lets the RAM take every write. This board follows puNES on
+both: the extra bit only reaches past 1 MiB, where Mesen2 would wrap, and a register sharing the
+bus with an enabled RAM chip leaves the chip written. No dump at hand.
+
 ### J26. Mappers 53, 487, 518 and 519 (`MiscN`): Mesen2's readings, sources compared
 * 53 (`Supervision.h`): the 32 KiB EPROM is recognised by Mesen2's CRC of the first 32 KiB; an
   image without it powers on at 16 KiB banks `$80`/`$81` wrapped by the ROM, as Mesen2 does.

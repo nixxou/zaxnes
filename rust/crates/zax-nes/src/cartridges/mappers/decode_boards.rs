@@ -29,6 +29,7 @@
     feature = "board-234",
     feature = "board-188",
     feature = "board-misc-n",
+    feature = "board-323",
     feature = "board-latch-multi",
     feature = "board-nina03",
     feature = "board-sachen-8reg",
@@ -46,6 +47,8 @@ use super::BandaiKaraoke;
 use super::Cheapocabra;
 #[cfg(any(feature = "board-162", feature = "board-163"))]
 use super::ChrWindowBoard;
+#[cfg(feature = "board-323")]
+use super::FaridSlrom;
 #[cfg(feature = "board-fine-rom")]
 use super::FineRom;
 #[cfg(feature = "board-77")]
@@ -173,6 +176,9 @@ pub enum DecodeBoard {
     /// Mappers 53, 487, 518 and 519 ([`MiscN`]).
     #[cfg(feature = "board-misc-n")]
     MiscN(MiscN),
+    /// Mapper 323, Farid's SLROM multicart ([`FaridSlrom`]).
+    #[cfg(feature = "board-323")]
+    FaridSlrom(Box<FaridSlrom>),
     // Appended by MF-VS step 4, the lot's one board: the register is a `$4016` write and not a
     // cartridge write, which is the only thing that makes it unusual here.
     /// Mapper 99, the Nintendo VS. System board.
@@ -279,6 +285,8 @@ macro_rules! inner {
             DecodeBoard::BandaiKaraoke($b) => $body,
             #[cfg(feature = "board-misc-n")]
             DecodeBoard::MiscN($b) => $body,
+            #[cfg(feature = "board-323")]
+            DecodeBoard::FaridSlrom($b) => $body,
             #[cfg(feature = "board-vs-system")]
             DecodeBoard::VsBoard($b) => $body,
             #[cfg(feature = "board-jv001")]
@@ -414,7 +422,8 @@ impl Mapper for DecodeBoard {
     #[cfg(any(
         feature = "board-164",
         feature = "board-178",
-        feature = "board-latch-multi"
+        feature = "board-latch-multi",
+        feature = "board-323"
     ))]
     fn prg_ram_window(&self, memory: &CartridgeMemory) -> (usize, usize) {
         inner!(self, b => b.prg_ram_window(memory))
@@ -440,7 +449,8 @@ impl Mapper for DecodeBoard {
     #[cfg(any(
         feature = "board-111",
         feature = "board-latch-multi",
-        feature = "board-fine-rom"
+        feature = "board-fine-rom",
+        feature = "board-323"
     ))]
     fn prg_ram_enabled(&self) -> bool {
         inner!(self, b => b.prg_ram_enabled())
@@ -499,7 +509,8 @@ impl Mapper for DecodeBoard {
     #[cfg(any(
         feature = "board-246",
         feature = "board-latch-multi",
-        feature = "board-fine-rom"
+        feature = "board-fine-rom",
+        feature = "board-323"
     ))]
     fn intercept_cpu_write(
         &mut self,

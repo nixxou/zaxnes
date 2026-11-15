@@ -906,3 +906,22 @@ fn mappers_n_519_banks_by_address_and_reads_the_dip_switches() {
     core.mapper_write(0x8104, 0x00); // A8 set: ignored
     assert_eq!([6, 7, 6, 7], core.prg_windows());
 }
+
+/// Mesen2 `FaridSlrom.h` and puNES `mapper_323.c`: an MMC1 whose 16 KiB PRG pages become
+/// `(outer & $F0) >> 1 | (page & 7)` and 4 KiB CHR pages `(outer & $F0) << 1 | (page & $1F)`,
+/// the outer register written at `$6000` while the RAM is enabled, until bit 3 locks it.
+#[cfg(feature = "board-323")]
+#[test]
+fn mappers_n_323_confines_the_mmc1_to_a_game_and_locks() {
+    let mut core = MapperRom::new(323).prg(128).chr(256).load();
+    core.mapper_write(0x6000, 0x10);
+    assert_eq!([0x10, 0x11, 0x1E, 0x1F], core.prg_windows());
+    assert_eq!(0x80, core.chr_bank(0x0000));
+    core.mmc1_write(0xE000, 0x03);
+    assert_eq!([0x16, 0x17, 0x1E, 0x1F], core.prg_windows());
+    core.mapper_write(0x6000, 0x28); // game 2, locked
+    assert_eq!([0x26, 0x27, 0x2E, 0x2F], core.prg_windows());
+    core.mapper_write(0x6000, 0x30);
+    assert_eq!([0x26, 0x27, 0x2E, 0x2F], core.prg_windows());
+    assert_eq!(0x30, core.read_memory(0x6000)); // the RAM takes every write
+}
