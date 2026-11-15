@@ -312,6 +312,7 @@ const EMULATION: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::EmuPpuBusConflicts),
     LayoutEntry::Row(SettingId::EmuOamaddrBug),
     LayoutEntry::Row(SettingId::EmuOamDecay),
+    LayoutEntry::Row(SettingId::EmuRainbowNetwork),
     LayoutEntry::Row(SettingId::EmuPowerOnTop),
     LayoutEntry::Row(SettingId::EmuPpu2006Delay),
     LayoutEntry::Row(SettingId::EmuPpu2006Glitch),

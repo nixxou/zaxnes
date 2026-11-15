@@ -148,6 +148,7 @@ setting_ids! {
     EmuOamCorruption => "emu.oam_corruption",
     EmuOamaddrBug => "emu.oamaddr_bug",
     EmuOamDecay => "emu.oam_decay",
+    EmuRainbowNetwork => "emu.rainbow_network",
     EmuPowerOnTop => "emu.power_on_top",
     EmuPpu2006Delay => "emu.ppu_2006_delay",
     EmuPpu2006Glitch => "emu.ppu_2006_glitch",

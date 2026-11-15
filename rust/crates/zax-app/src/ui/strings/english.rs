@@ -511,6 +511,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.ppu_bus_conflicts", "PPU bus conflicts"),
     ("setting.emu.oamaddr_bug", "OAMADDR defect (2C02G)"),
     ("setting.emu.oam_decay", "OAM decay"),
+    ("setting.emu.rainbow_network", "Rainbow board network"),
     ("setting.emu.power_on_top", "Power on at the top of the picture"),
     ("setting.emu.ppu_2006_delay", "$2006 load delay"),
     ("setting.emu.ppu_2006_glitch", "$2006 scroll glitch"),
@@ -1203,6 +1204,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         "detail.emu.oamaddr_bug",
         "A defect of the NES and Famicom video chip (2C02G and later): if a game leaves the sprite memory address at 8 or more when the picture starts, eight bytes of sprite memory are copied over the first eight, so a couple of sprites can take the place of others for a frame. Games written for the console reset that address and never show it. A PAL console does not have this defect, so it never applies there. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.rainbow_network",
+        "Lets games on the Rainbow board (mapper 682, Broke Studio) use your network through the board's Wi-Fi chip: connecting to their game server and downloading files. Off, the chip still works (files, random numbers) but reports no Wi-Fi, and nothing leaves the emulator. Savestates, rewind and replays cannot restore a connection. Takes effect at the next load. Default: off.",
     ),
     (
         "detail.emu.oam_decay",

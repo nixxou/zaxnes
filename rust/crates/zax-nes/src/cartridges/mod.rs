@@ -1693,6 +1693,12 @@ impl Cartridge {
         self.board.snoop_cpu_bus_write(address, value);
     }
 
+    /// See [`Mapper::set_network_enabled`]: mapper 682's ESP network, off by default.
+    #[cfg(feature = "board-682")]
+    pub fn set_network_enabled(&mut self, enabled: bool) {
+        self.board.set_network_enabled(enabled);
+    }
+
     /// See [`Mapper::snoop_cpu_bus_read`].
     #[cfg(feature = "board-682")]
     pub fn snoop_cpu_bus_read(&mut self, address: u16) -> Option<u8> {

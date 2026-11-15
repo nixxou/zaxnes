@@ -57,6 +57,8 @@ pub struct NesCore {
     /// save and jump into it (FIDELITY-LEADS J14). The seed is fixed, so runs stay reproducible.
     power_on_battery_ram: crate::PowerOnRam,
     advanced_patches_enabled: bool,
+    /// `emu.rainbow_network`: mapper 682's ESP may use the host's network (off by default).
+    rainbow_network: bool,
     /// The built-in patch applied to a ROM none is made for (Rust-only, owner request: forced).
     forced_patch: Option<&'static crate::builtin_patches::BuiltinPatch>,
     /// CRC-32 of the data (iNES header excluded) of the ROM loaded as the host gave it, which
@@ -154,6 +156,7 @@ impl NesCore {
             power_on_ppu_ram: crate::PowerOnPpuRam::Zero,
             power_on_battery_ram: crate::PowerOnRam::Random(Self::BATTERY_RAM_SEED),
             advanced_patches_enabled: false,
+            rainbow_network: false,
             forced_patch: None,
             rom_crc: None,
             pack: None,
@@ -338,6 +341,32 @@ impl NesCore {
     pub fn set_bus_conflicts(&mut self, enabled: bool) {
         self.bus.ppu_mut().set_bus_conflicts(enabled);
     }
+
+    /// Whether the Rainbow board's ESP (mapper 682) reaches the host's network: off by default,
+    /// so that nothing leaves the emulator unless the player asks (lot MAPPERS-N). Applies to the
+    /// cartridge loaded now and to the next ones.
+    pub fn set_rainbow_network(&mut self, enabled: bool) {
+        self.rainbow_network = enabled;
+        self.apply_rainbow_network();
+    }
+
+    /// Attaches a freshly built cartridge with the settings that live on the core.
+    fn attach_cartridge(&mut self, cartridge: Cartridge) {
+        self.bus.attach(Some(cartridge));
+        self.apply_rainbow_network();
+    }
+
+    #[cfg(feature = "board-682")]
+    fn apply_rainbow_network(&mut self) {
+        let enabled = self.rainbow_network;
+        if let Some(cartridge) = self.bus.cartridge_mut() {
+            cartridge.set_network_enabled(enabled);
+        }
+    }
+
+    #[cfg(not(feature = "board-682"))]
+    #[allow(clippy::unused_self)]
+    const fn apply_rainbow_network(&mut self) {}
 
     /// Whether the built-in patches and the advanced ones are on for the next load, as
     /// [`NesCore::set_builtin_patches`] and [`NesCore::set_advanced_patches`] left them.
@@ -654,7 +683,7 @@ impl NesCore {
         self.set_hack_options(options);
         self.original_image = patched.map(|_| image.to_vec());
 
-        self.bus.attach(Some(cartridge));
+        self.attach_cartridge(cartridge);
         self.install_pack(Some(image));
         self.power_on();
         match note {
@@ -2309,7 +2338,7 @@ impl NesCore {
         self.battery_ram_imported = false;
         self.rom_crc = has_rom_image.then_some(rom_crc).or(self.rom_crc);
         (self.original_image, self.builtin_patch) = patch;
-        self.bus.attach(Some(cartridge));
+        self.attach_cartridge(cartridge);
         self.install_pack(pack_image.as_deref());
         self.region = region;
         self.apply_region();

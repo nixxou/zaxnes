@@ -205,4 +205,8 @@ ext, capture path, bus hooks; 3 Wi-Fi option; 4 flash. Each phase committed on i
   SDL2 cmake build that a target purge removed, not rebuilt for disk space).
 * Phase 4 done: S29 flash on PRG (save file and savestate through `FlashRom`) and CHR (in place);
   test `mappers_n_682_programs_and_erases_its_prg_flash`.
-* Next: phase 3 (Wi-Fi ESP behind an emulation option, off by default).
+* Phase 3 done: `rainbow_esp.rs`, the ESP protocol (status, debug, buffers, Wi-Fi, random, server
+  TCP/UDP/UDP pool, network registry, the 16 file commands, HTTP download); the host network
+  behind the setting `emu.rainbow_network` (Emulation page, off by default, NES and app strings
+  in English and French). Test `mappers_n_682_talks_to_its_esp`. Leads J36.
+* Rainbow is complete as planned; no dump tested (none local, downloading needs consent).

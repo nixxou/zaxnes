@@ -137,6 +137,8 @@ mod pec9588;
 mod racermate;
 #[cfg(feature = "board-682")]
 mod rainbow;
+#[cfg(feature = "board-682")]
+mod rainbow_esp;
 mod rambo1;
 #[cfg(feature = "board-133")]
 mod sachen_72008;
@@ -672,6 +674,10 @@ pub trait Mapper {
     fn snoop_cpu_bus_read(&mut self, _address: u16) -> Option<u8> {
         None
     }
+
+    /// The emulation option `emu.rainbow_network` (mapper 682's ESP), off by default.
+    #[cfg(feature = "board-682")]
+    fn set_network_enabled(&mut self, _enabled: bool) {}
 
     /// The start of a scanline.
     fn on_ppu_scanline(&mut self, _memory: &mut CartridgeMemory, _scanline: i32, _rendering: bool) {

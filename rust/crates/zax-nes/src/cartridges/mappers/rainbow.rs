@@ -32,6 +32,7 @@
 //! here (phase 2): sprite extended mode's OAM copy (`$2003`/`$2004` writes), the `$4011` read,
 //! and the 3D tile capture of the extended modes; phase 4 the flash self-programming
 //! (FIDELITY-LEADS J35).
+use super::rainbow_esp::Esp;
 use super::{Mapper, NO_ROM_WINDOW};
 use crate::apu::Vrc6Audio;
 use crate::cartridges::{BankWindows, Cartridge, CartridgeMemory, ChrFetch, ChrView};
@@ -303,6 +304,11 @@ pub struct Rainbow {
     wifi_irq_enabled: bool,
     recv_dst: u8,
     send_src: u8,
+    /// `$4191` bit 7: an ESP message is in FPGA RAM, not yet acknowledged.
+    data_received: bool,
+    /// Every this many CPU cycles the host network is polled (while it is in use).
+    net_poll: u16,
+    esp: Box<Esp>,
     fpga_ram: Vec<u8>,
     audio: Vrc6Audio,
     audio_pins: u8,
@@ -392,6 +398,9 @@ impl Rainbow {
             wifi_irq_enabled: false,
             recv_dst: 0,
             send_src: 0,
+            data_received: false,
+            net_poll: 0,
+            esp: Box::new(Esp::new()),
             fpga_ram: vec![0; Self::FPGA_RAM],
             audio: Vrc6Audio::new(),
             audio_pins: 0,
@@ -491,10 +500,16 @@ impl Rainbow {
                 value
             }
             0x4160 => 0x20,
-            0x4161 => (u8::from(self.cpu_irq_pending) << 6) | (u8::from(self.sl_irq_pending) << 7),
+            0x4161 => {
+                u8::from(self.wifi_irq_pending())
+                    | (u8::from(self.cpu_irq_pending) << 6)
+                    | (u8::from(self.sl_irq_pending) << 7)
+            }
             0x4190 => u8::from(self.esp_enabled) | (u8::from(self.wifi_irq_enabled) << 1),
-            // No ESP: nothing received, nothing ready, nothing sent.
-            0x4191 | 0x4192 => 0,
+            // "Data received" (bit 7) and "Data ready", a message waiting on the ESP's side.
+            0x4191 => (u8::from(self.data_received) << 7) | (u8::from(self.esp.has_answer()) << 6),
+            // "Data sent": a message leaves at once here.
+            0x4192 => 0x80,
             0x4280..=0x47FF => {
                 if side {
                     match address {
@@ -576,6 +591,11 @@ impl Rainbow {
                 self.esp_enabled = value & 0x01 != 0;
                 self.wifi_irq_enabled = value & 0x02 != 0;
             }
+            0x4191 => {
+                self.data_received = false;
+                self.deliver_esp();
+            }
+            0x4192 => self.send_esp(),
             0x4193 => self.recv_dst = value & 0x07,
             0x4194 => self.send_src = value & 0x07,
             // `RainbowAudio::WriteRegister`: the three generators at the VRC6's own offsets.
@@ -688,6 +708,41 @@ impl Rainbow {
             FlashOp::None => {}
             FlashOp::Program(offset, value) => rom[offset] &= value,
             FlashOp::Erase(range) => rom[range].fill(0xFF),
+        }
+    }
+
+    /// `$4161` bit 0: a message was received with `$4190` bit 1 set.
+    const fn wifi_irq_pending(&self) -> bool {
+        self.wifi_irq_enabled && self.data_received
+    }
+
+    /// `$4192` write: the message at the `$4194` page, `[length][command][parameters]`, goes to
+    /// the ESP (nothing with the ESP disabled).
+    fn send_esp(&mut self) {
+        if !self.esp_enabled {
+            return;
+        }
+        let base = 0x1800 + usize::from(self.send_src) * 0x100;
+        let length = usize::from(self.fpga_ram[base]);
+        if length == 0 {
+            return;
+        }
+        let end = (base + 1 + length).min(Self::FPGA_RAM);
+        let message = self.fpga_ram[base + 1..end].to_vec();
+        self.esp.command(&message);
+        self.deliver_esp();
+    }
+
+    /// Puts the next ESP answer in the `$4193` page when the previous one was acknowledged.
+    fn deliver_esp(&mut self) {
+        if !self.esp_enabled || self.data_received {
+            return;
+        }
+        if let Some(answer) = self.esp.pop_answer() {
+            let base = 0x1800 + usize::from(self.recv_dst) * 0x100;
+            let length = answer.len().min(Self::FPGA_RAM - base).min(0x100);
+            self.fpga_ram[base..base + length].copy_from_slice(&answer[..length]);
+            self.data_received = true;
         }
     }
 
@@ -1075,6 +1130,8 @@ impl Mapper for Rainbow {
         self.audio.save_state(writer);
         self.prg_flash.save(writer);
         self.chr_flash.save(writer);
+        writer.write_bool(self.data_received);
+        self.esp.save_state(writer);
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -1160,6 +1217,8 @@ impl Mapper for Rainbow {
         self.audio.load_state(reader)?;
         self.prg_flash.load(reader)?;
         self.chr_flash.load(reader)?;
+        self.data_received = reader.read_bool()?;
+        self.esp.load_state(reader)?;
         self.nt_answer = NtAnswer::Plain;
         self.at_answer = NtAnswer::Plain;
         self.capture_stash = None;
@@ -1179,11 +1238,17 @@ impl Mapper for Rainbow {
     fn irq_asserted(&self) -> bool {
         (self.cpu_irq_enabled && self.cpu_irq_pending)
             || (self.sl_irq_enabled && self.sl_irq_pending)
+            || self.wifi_irq_pending()
     }
 
     /// `ProcessCpuClock`.
     fn on_cpu_cycle(&mut self, _memory: &mut CartridgeMemory) {
         self.jitter = self.jitter.wrapping_add(1);
+        self.net_poll = self.net_poll.wrapping_add(1);
+        if matches!(self.net_poll & 0x0FFF, 0) && self.esp.polls() {
+            self.esp.poll();
+            self.deliver_esp();
+        }
         self.audio.step_cpu_cycle();
         if self.cpu_irq_counter != 0 {
             self.cpu_irq_counter -= 1;
@@ -1254,6 +1319,10 @@ impl Mapper for Rainbow {
 
     fn on_ppu_control(&mut self, control: u8) {
         self.large_sprites = control & 0x20 != 0;
+    }
+
+    fn set_network_enabled(&mut self, enabled: bool) {
+        self.esp.set_network_enabled(enabled);
     }
 
     /// `WriteRam`'s `$2003`/`$2004` arms: the Y byte of every sprite written through `$2004`, for

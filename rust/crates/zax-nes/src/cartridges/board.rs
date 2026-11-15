@@ -696,6 +696,13 @@ impl Mapper for Board {
     }
 
     #[cfg(feature = "board-682")]
+    fn set_network_enabled(&mut self, enabled: bool) {
+        if let Board::IrqBoard(IrqBoard::Rainbow(board)) = self {
+            board.set_network_enabled(enabled);
+        }
+    }
+
+    #[cfg(feature = "board-682")]
     fn snoop_cpu_bus_read(&mut self, address: u16) -> Option<u8> {
         match self {
             Board::IrqBoard(IrqBoard::Rainbow(board)) => board.snoop_cpu_bus_read(address),

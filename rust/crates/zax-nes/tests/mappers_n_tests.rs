@@ -1126,3 +1126,45 @@ fn mappers_n_682_programs_and_erases_its_prg_flash() {
     assert_eq!(Some(0xFF), read(&mut core, 0x8000));
     assert_ne!(core.export_flash_save(), Vec::<u8>::new());
 }
+
+/// Broke Studio's `mapper-doc.md` and `rainbow-net.md`: a message written at the `$4194` page of
+/// FPGA RAM goes to the ESP on a `$4192` write; the answer lands at the `$4193` page with `$4191`
+/// bit 7 set, and a `$4191` write acknowledges it. Files round-trip; Wi-Fi reports "not connected"
+/// with the network option off (the default).
+#[cfg(feature = "board-682")]
+#[test]
+fn mappers_n_682_talks_to_its_esp() {
+    let mut core = MapperRom::new(682).prg(32).chr(0).chr_ram(0x8000).load();
+    let send = |core: &mut zax_nes::NesCore, message: &[u8]| {
+        for (index, byte) in message.iter().enumerate() {
+            core.mapper_write(0x4800 + u16::try_from(index).unwrap(), *byte);
+        }
+        core.mapper_write(0x4192, 0);
+    };
+    let answer = |core: &mut zax_nes::NesCore, length: u16| -> Vec<u8> {
+        let cartridge = core.cartridge_mut().unwrap();
+        assert_eq!(Some(0x80), cartridge.try_cpu_read(0x4191).map(|v| v & 0x80));
+        (0..length)
+            .map(|offset| cartridge.try_cpu_read(0x4900 + offset).unwrap())
+            .collect()
+    };
+    core.mapper_write(0x4190, 0x01);
+    core.mapper_write(0x4193, 0x01);
+    core.mapper_write(0x4194, 0x00);
+    send(&mut core, &[1, 0]);
+    assert_eq!(vec![2, 0, 0], answer(&mut core, 3));
+    core.mapper_write(0x4191, 0);
+    send(&mut core, &[1, 9]);
+    assert_eq!(vec![4, 4, 0, 0, 0], answer(&mut core, 5));
+    core.mapper_write(0x4191, 0);
+    send(&mut core, &[4, 39, 0, 0, 5]);
+    send(&mut core, &[4, 46, b'a', b'b', b'c']);
+    send(&mut core, &[2, 44, 0]);
+    send(&mut core, &[2, 45, 3]);
+    assert_eq!(vec![5, 22, 3, b'a', b'b', b'c'], answer(&mut core, 6));
+    core.mapper_write(0x4191, 0);
+    assert_eq!(
+        Some(0x00),
+        core.cartridge_mut().unwrap().try_cpu_read(0x4191)
+    );
+}

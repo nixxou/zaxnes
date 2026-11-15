@@ -523,6 +523,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.ppu_bus_conflicts", "Conflits de bus PPU"),
     ("setting.emu.oamaddr_bug", "Défaut OAMADDR (2C02G)"),
     ("setting.emu.oam_decay", "Effacement de l'OAM"),
+    ("setting.emu.rainbow_network", "Réseau de la carte Rainbow"),
     ("setting.emu.power_on_top", "Allumage en haut de l'image"),
     ("setting.emu.ppu_2006_delay", "Délai de chargement $2006"),
     ("setting.emu.ppu_2006_glitch", "Glitch de défilement $2006"),
@@ -1177,6 +1178,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (
         "detail.emu.oamaddr_bug",
         "Un défaut de la puce vidéo de la NES et de la Famicom (2C02G et suivantes) : si un jeu laisse l'adresse de la mémoire des sprites à 8 ou plus quand l'image commence, huit octets de cette mémoire sont recopiés sur les huit premiers, et un ou deux sprites peuvent en remplacer d'autres pendant une image. Les jeux écrits pour la console remettent cette adresse à zéro et ne le montrent jamais. Une console PAL n'a pas ce défaut : il ne s'y applique jamais. Prend effet au prochain chargement. Par défaut : activé.",
+    ),
+    (
+        "detail.emu.rainbow_network",
+        "Permet aux jeux de la carte Rainbow (mapper 682, Broke Studio) d'utiliser votre réseau par la puce Wi-Fi de la carte : connexion à leur serveur de jeu et téléchargement de fichiers. Désactivé, la puce fonctionne toujours (fichiers, nombres aléatoires) mais n'annonce aucun Wi-Fi, et rien ne sort de l'émulateur. Les sauvegardes d'état, le retour en arrière et les replays ne peuvent pas rétablir une connexion. Prend effet au prochain chargement. Par défaut : désactivé.",
     ),
     (
         "detail.emu.oam_decay",

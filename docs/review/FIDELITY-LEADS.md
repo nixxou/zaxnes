@@ -940,6 +940,31 @@ CHR-RAM) and puNES (`mapper_198.c`, banks from `$50` folding onto `$40-$4F`). Th
 password screen cleanly; the later `[T+ChSFIX2]` and `[T+ChTFIX2]` patches show stray glyphs on
 the password screen, not investigated (translation hacks; their CHR use may differ).
 
+### J36. Mapper 682 (Rainbow): the ESP is modelled from the protocol document
+The ESP (`rainbow_esp.rs`) follows Broke Studio's `rainbow-net.md` and `mapper-doc.md`; no
+emulator's ESP was read (the Broke Studio Mesen fork that has one is not local, and fetching it
+needs the owner's consent). What is a reading or a choice here:
+* a message goes out at once (`$4192` bit 7 always reads 1) and its answer is ready on the same
+  write, where the real ESP takes milliseconds over its serial link; a game that waits for the
+  answer sees it sooner, a game that does not wait is unaffected;
+* `$4191` bit 6 ("data ready") is "an answer is queued"; the queue keeps the 64 newest answers;
+  the Wi-Fi IRQ (`$4161` bit 0) is "a message is in FPGA RAM, not acknowledged" with `$4190` bit 1;
+  messages are processed and delivered only with `$4190` bit 0 set;
+* `MESSAGE_FROM_SERVER` carries the server's payload after the identifier; TCP is framed
+  `[length][payload]` in both directions, UDP is one datagram per message;
+* the file system is in memory and in the savestate, **not on the host's disk** (the host does not
+  persist the flash save file either yet); auto paths are `drive/path/index`, manual names are
+  folded to upper case; `FILE_GET_FS_INFO` reports 4 MiB per drive;
+* random numbers are a seeded xorshift (repeatable), not the ESP's hardware generator;
+* the access point, IP (127.0.0.1 with the network on), MAC and scan result are fixed values; Wi-Fi
+  "connected" follows the option, `WIFI_CONNECT` does nothing;
+* not done: TCP_S (TLS) and HTTPS downloads (no TLS in the core: answered "unsupported"), ICMP
+  pings (answered "start failed"), the SD card (reported absent, drive 1 is a second in-memory
+  drive), the debug log output;
+* the network is behind `emu.rainbow_network`, **off by default** (owner, 2026-11-15); with it on
+  a connection is not part of a savestate (loading one disconnects), so rewind, run-ahead and
+  replays cannot restore it.
+
 ### J35. Mapper 682 (Rainbow): what phase 1 leaves out, and two readings
 Mesen2 mainline (`Homebrew/Rainbow.cpp`) and Broke Studio's `mapper-doc.md` are the sources.
 Phase 1 (`board-682`) has the CPU map, the five PRG modes and the two low-bank modes, the FPGA RAM
@@ -961,7 +986,7 @@ command byte that is not one of the known ones at the third unlock cycle resets 
 (Mesen2 leaves the state until the next write). PRG writes go through this core's `FlashRom`, so
 they reach the flash save file (8 KiB tracking sectors) and the savestate; **CHR flash writes change
 CHR-ROM in place and are neither in the save file nor in a savestate** (Mesen2 keeps both through
-its ROM patch). Not yet: the ESP (no Wi-Fi: `$4191`/`$4192` read 0). Two readings: `$4151` returns the scanline
+its ROM patch). Phase 3 added the ESP (J36). Two readings: `$4151` returns the scanline
 IRQ flag as it was **before** the read acknowledges it (Mesen2 clears first, so its bit 0 always
 reads 0, which contradicts the doc's "IRQ pending" bit); the PPU-idle reset after three CPU cycles
 without a fetch sets the scanline to -1 as Mesen2 does. `cpu_peek_override` clones the board to

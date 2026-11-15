@@ -823,6 +823,13 @@ impl EngineHandle {
         }
     }
 
+    /// `emu.rainbow_network`: mapper 682's ESP may use the host's network; Zaxnes only.
+    pub fn set_rainbow_network(&mut self, enabled: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_rainbow_network(enabled);
+        }
+    }
+
     /// Whether OAM decays with the rendering off (lot FIDELITY); likewise.
     pub fn set_oam_decay(&mut self, enabled: bool) {
         if let Some(core) = self.zaxnes_mut() {

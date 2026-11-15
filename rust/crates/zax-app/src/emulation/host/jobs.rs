@@ -620,6 +620,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let advanced = self.advanced_patches_wanted();
                 let forced = self.forced_patch();
                 let cartridge_db = self.settings.get(SettingId::EmuCartridgeDb).as_bool();
+                let rainbow_network = self.settings.get(SettingId::EmuRainbowNetwork).as_bool();
                 let fidelity = self.fidelity_switches();
                 let console_profile = self.console_audio_profile();
                 let alignment = self.cpu_ppu_alignment();
@@ -627,6 +628,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let result = match self.session.as_mut() {
                     Some(session) => {
                         session.core_mut().set_cartridge_db(cartridge_db);
+                        session.core_mut().set_rainbow_network(rainbow_network);
                         apply_fidelity_switches(session.core_mut(), fidelity);
                         session.core_mut().set_cpu_ppu_alignment(alignment);
                         session

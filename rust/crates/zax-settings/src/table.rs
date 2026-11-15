@@ -1054,6 +1054,7 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
     video_nes_palette(out);
     emulation_engine(out);
     emulation_cartridge(out);
+    emulation_rainbow(out);
     emulation_power_on_ppu(out);
     out.push(
         SettingDescriptor::new(
@@ -1160,6 +1161,23 @@ fn emulation_power_on_ppu(out: &mut Vec<SettingDescriptor>) {
             opt(2, "Random"),
         ]))
         .with_label("Power-on video memory"),
+    );
+}
+
+fn emulation_rainbow(out: &mut Vec<SettingDescriptor>) {
+    // Lot MAPPERS-N: the Rainbow board's (mapper 682) ESP reaches the host's network only when
+    // the player asks; off, Wi-Fi reports "not connected" (the owner's request).
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuRainbowNetwork,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Rainbow board network"),
     );
 }
 
