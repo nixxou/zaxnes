@@ -612,6 +612,8 @@ const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
             | 529
             // MAPPERS-N: mapper 266's VRC4 IRQ (nesdev "NES 2.0 Mapper 266").
             | 266
+            // MAPPERS-P: mapper 528, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
+            | 528
             // MAPPERS-P: mapper 540, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
             | 540
             // MAPPERS-P: mapper 359, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).

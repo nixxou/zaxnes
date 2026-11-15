@@ -1402,3 +1402,32 @@ fn mappers_p_540_has_2_kib_chr_banks() {
         [windows[0], windows[1], windows[4], windows[5]]
     );
 }
+
+/// `mapper_528.c`: an FME-7 command and its data in one write at `$A000`/`$C000`, `$C000` adding
+/// the outer bank `$10`; command 8 at 1 is the work RAM at `$6000`; commands `$D`-`$F` the
+/// VRC7 IRQ (control, acknowledge, latch).
+#[cfg(feature = "board-528")]
+#[test]
+fn mappers_p_528_writes_fme7_commands_with_a_vrc7_irq() {
+    let mut core = MapperRom::new(528).prg(64).chr(512).load();
+    assert_eq!([0, 1, 14, 15], core.prg_windows());
+    core.mapper_write(0xA009, 5);
+    assert_eq!([5, 1, 14, 15], core.prg_windows());
+    core.mapper_write(0xC00A, 3);
+    assert_eq!([21, 19, 46, 47], core.prg_windows());
+    assert_eq!(16, core.read_memory(0x6000));
+    core.mapper_write(0xC000, 2);
+    assert_eq!(2, core.chr_windows()[0]);
+    core.mapper_write(0xA008, 1);
+    core.mapper_write(0x6000, 0x5A);
+    assert_eq!(0x5A, core.read_memory(0x6000));
+
+    core.mapper_write(0xA00F, 0xFE);
+    core.mapper_write(0xA00D, 0x06);
+    for _ in 0..3 {
+        core.bus_mut().tick();
+    }
+    assert!(core.cartridge().unwrap().irq_asserted());
+    core.mapper_write(0xA00E, 0);
+    assert!(!core.cartridge().unwrap().irq_asserted());
+}

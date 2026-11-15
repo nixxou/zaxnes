@@ -6,6 +6,7 @@
 //! [`Mapper::on_cpu_cycle`] and the line on [`Mapper::irq_asserted`], which that enum forwards.
 //! The PRG-ROM these boards show at `$5000`/`$6000` is answered by [`Mapper::try_read_prg`], with
 //! the work RAM disabled ([`Mapper::prg_ram_enabled`]).
+use super::vrc_irq::VrcIrq;
 use super::{windows_for, Eeprom93C66, Mapper};
 use crate::cartridges::{A12Watcher, BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
@@ -56,6 +57,10 @@ pub enum IrqPKind {
     /// 540, `mapper_359.c` too (the *Master Fighter VI'* board): 359 with four 2 KiB CHR banks
     /// from registers 0, 1, 6 and 7.
     M540,
+    /// 528, `mapper_528.c` (1201, a *Gimmick!* bootleg): the FME-7's command/data registers
+    /// written in one go at `$A000`/`$C000` (A0-A3 the command, `$C000` adding an outer bank),
+    /// with a VRC7's IRQ on commands `$D`-`$F` and command `$B` ignored.
+    M528,
 }
 
 impl IrqPKind {
@@ -75,6 +80,7 @@ impl IrqPKind {
             442 => Self::M442,
             359 => Self::M359,
             540 => Self::M540,
+            528 => Self::M528,
             _ => return None,
         })
     }
@@ -93,6 +99,7 @@ impl IrqPKind {
             Self::M442 => 442,
             Self::M359 => 359,
             Self::M540 => 540,
+            Self::M528 => 528,
         }
     }
 }
@@ -118,6 +125,8 @@ pub struct IrqP {
     /// and the last A12 level; saved for those kinds only. `regs` hold `prg[0..4]`, `chr` the
     /// eight CHR registers, `irq_counter` the 16-bit counter.
     ext_359: [u8; 8],
+    /// 528's VRC7 IRQ (`init_VRC7(0x01, 0x00)`), saved for that kind only.
+    vrc_irq: VrcIrq,
     /// Whether the image has CHR-ROM, which 359's CHR banking needs (`chrrom_size()`).
     chr_rom: bool,
     /// 471's A12 edge detector (the MMC3's filter; puNES clocks once per rendered line).
@@ -138,6 +147,7 @@ impl IrqP {
             a12: A12Watcher::new(A12Watcher::MMC3_FILTER_DOTS),
             ext_359: [0, 0x3F, 0, 0xFF, 0, 0, 0, 0],
             chr_rom: !memory.rom().chr_rom().is_empty(),
+            vrc_irq: VrcIrq::new(),
             eeprom: (kind == IrqPKind::M558 && memory.prg_ram().len() == Self::EEPROM_RAM_SIZE)
                 .then(Eeprom93C66::new),
         };
@@ -145,6 +155,12 @@ impl IrqP {
         // CHR 0-7.
         if matches!(kind, IrqPKind::M359 | IrqPKind::M540) {
             board.regs = [0xFC, 0xFD, 0xFF, 0x00];
+            board.chr = [0, 1, 2, 3, 4, 5, 6, 7];
+        }
+        // `init_FME7`: `prg[0..4]` = 0, 0, 1, `$FE`; CHR 0-7. `nametables[0]` is the FME-7's
+        // mirroring command, `nametables[1]` the outer bank (`m528.reg`).
+        if kind == IrqPKind::M528 {
+            board.regs = [0, 0, 0x01, 0xFE];
             board.chr = [0, 1, 2, 3, 4, 5, 6, 7];
         }
         // `map_init_526`: PRG `$FC-$FF`, CHR 0-7.
@@ -214,6 +230,18 @@ impl IrqP {
                 b.map_chr_8k((r[1] & 0x06) >> 1);
             }
             IrqPKind::M359 | IrqPKind::M540 => self.map_359(),
+            // `prg_swap_fme7_528`/`chr_swap_fme7_528`: `outer + (value & (outer | $0F))`, the
+            // last window `~0`; CHR `outer << 4 | value`.
+            IrqPKind::M528 => {
+                let outer = i32::from(self.nametables[1]);
+                let mask = outer | 0x0F;
+                for (slot, value) in [r[1], r[2], r[3], 0xFF].into_iter().enumerate() {
+                    b.map_prg_8k(slot, outer + (value & mask));
+                }
+                for (slot, bank) in self.chr.iter().enumerate() {
+                    b.map_chr_1k(slot, (outer << 4) | i32::from(*bank));
+                }
+            }
             // `prg_fix_442`: `reg[0]` D6 above D0-D4.
             IrqPKind::M442 => {
                 b.map_prg_32k(((r[0] & 0x40) >> 1) | (r[0] & 0x1F));
@@ -394,6 +422,24 @@ impl IrqP {
         }
     }
 
+    /// `extcl_cpu_wr_mem_528`: `$A000`/`$C000` (A0-A3 the FME-7 command), the outer bank from
+    /// A14.
+    fn latch_528(&mut self, address: u16, value: u8) {
+        if !matches!(address & 0xF000, 0xA000 | 0xC000) {
+            return;
+        }
+        match address & 0x0F {
+            0x0B => {}
+            0x0D => self.vrc_irq.write_control(value),
+            0x0E => self.vrc_irq.acknowledge(),
+            0x0F => self.vrc_irq.write_latch(value),
+            command @ 0x00..=0x07 => self.chr[usize::from(command)] = value,
+            command @ 0x08..=0x0A => self.regs[usize::from(command - 0x08)] = value,
+            _ => self.nametables[0] = value,
+        }
+        self.nametables[1] = u8::try_from((address & 0x4000) >> 10).unwrap_or(0);
+    }
+
     /// `irq_clock_359`: in the A12 mode, past the filter, the low counter byte reloads from the
     /// high one at 0 or on a pending reload, else counts down; at 0 it asserts while enabled.
     fn clock_359(&mut self) {
@@ -419,6 +465,13 @@ impl IrqP {
         match self.kind {
             // `mirroring_fix_526`: vertical.
             IrqPKind::M357 | IrqPKind::M526 => Some(NametableMirroring::Vertical),
+            // The FME-7's mirroring command.
+            IrqPKind::M528 => Some(match self.nametables[0] & 0x03 {
+                0 => NametableMirroring::Vertical,
+                1 => NametableMirroring::Horizontal,
+                2 => NametableMirroring::SingleScreenA,
+                _ => NametableMirroring::SingleScreenB,
+            }),
             // `mirroring_fix_359`.
             IrqPKind::M359 | IrqPKind::M540 => Some(match self.ext_359[4] & 0x03 {
                 0 => NametableMirroring::Vertical,
@@ -452,6 +505,11 @@ impl IrqP {
             }
             (IrqPKind::M368, 0x6000..=0x7FFF) => Some((2, 0x2000)),
             (IrqPKind::M416, 0x6000..=0x7FFF) => Some((7, 0x2000)),
+            // `wram_swap_fme7_528`: `prg[0]` 1 is the work RAM, any other value a ROM bank.
+            (IrqPKind::M528, 0x6000..=0x7FFF) if self.regs[0] != 0x01 => {
+                let outer = usize::from(self.nametables[1]);
+                Some((outer + (usize::from(self.regs[0]) & (outer | 0x0F)), 0x2000))
+            }
             // `wram_fix_359`: `prg[3]` through the outer bank and mask.
             (IrqPKind::M359 | IrqPKind::M540, 0x6000..=0x7FFF) => {
                 Some((usize::from(self.prg_359(self.regs[3])), 0x2000))
@@ -553,6 +611,7 @@ impl IrqP {
             }
             IrqPKind::M272 => self.latch_272(address, value),
             IrqPKind::M359 | IrqPKind::M540 => self.latch_359(address, value),
+            IrqPKind::M528 => self.latch_528(address, value),
             // `extcl_cpu_wr_mem_442`: `$5000-$5FFF`, A8-A10 the register, of which only the
             // first is read.
             IrqPKind::M442 => {
@@ -586,6 +645,9 @@ impl Mapper for IrqP {
         if matches!(self.kind, IrqPKind::M359 | IrqPKind::M540) {
             writer.write_raw(&self.ext_359);
         }
+        if self.kind == IrqPKind::M528 {
+            self.vrc_irq.save_state(writer);
+        }
         if self.kind == IrqPKind::M471 {
             self.a12.save_state(writer);
         }
@@ -604,6 +666,9 @@ impl Mapper for IrqP {
         if matches!(self.kind, IrqPKind::M359 | IrqPKind::M540) {
             reader.read_into(&mut self.ext_359)?;
         }
+        if self.kind == IrqPKind::M528 {
+            self.vrc_irq.load_state(reader)?;
+        }
         if self.kind == IrqPKind::M471 {
             self.a12.load_state(reader)?;
         }
@@ -618,7 +683,7 @@ impl Mapper for IrqP {
     }
 
     fn irq_asserted(&self) -> bool {
-        self.irq_pending
+        self.irq_pending || self.vrc_irq.asserted()
     }
 
     /// `extcl_cpu_every_cycle_NNN`. 311: past 4096 cycles the line stays asserted. 357: at
@@ -689,6 +754,7 @@ impl Mapper for IrqP {
                     }
                 }
             }
+            IrqPKind::M528 => self.vrc_irq.step_cpu_cycle(),
             IrqPKind::M471 | IrqPKind::M558 | IrqPKind::M272 | IrqPKind::M442 => {}
         }
     }
@@ -736,6 +802,7 @@ impl Mapper for IrqP {
     /// `memmap_prgrom_*(0, MMCPU(0x5000/0x6000), …)`: ROM where the work RAM would be.
     fn prg_ram_enabled(&self) -> bool {
         matches!(self.kind, IrqPKind::M417 | IrqPKind::M558)
+            || (self.kind == IrqPKind::M528 && self.regs[0] == 0x01)
     }
 
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {

@@ -1014,6 +1014,11 @@ places where puNES itself is incomplete are copied, not invented around:
   a low-plane pattern fetch, of which a rendered line has the same 42 (34 background slots and 8
   sprite slots). The phase inside the line differs by a few dots; the pre-render line's fetches,
   which puNES's line test excludes, and `$2007` reads of the low planes also step it here.
+* 359/540 (`mapper_359.c`): the A12 mode counts raw rises of the address the PPU drives, behind
+  puNES's five-CPU-cycle filter; puNES derives the rise from the background and sprite pattern
+  addresses at fixed dots instead, which agrees on ordinary layouts.
+* 528 (`mapper_528.c`): the IRQ is Zaxnes's `VrcIrq` (the VRC4/VRC6/VRC7 counter); puNES's VRC7
+  asserts one CPU cycle after the overflow (`irq_delay = 1`), Zaxnes on the overflow itself.
 
 ### J36. Mapper 682 (Rainbow): the ESP is modelled from the protocol document
 The ESP (`rainbow_esp.rs`) follows Broke Studio's `rainbow-net.md` and `mapper-doc.md`; no

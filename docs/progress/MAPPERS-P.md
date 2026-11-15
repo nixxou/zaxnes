@@ -134,7 +134,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 525 | `mapper_525.c` | 91 | 1 | 0 | done (batch 10, `MultiP`) |
 | 526 | `mapper_526.c` | 123 | 1 | 0 | done (batch 34, `IrqP`) |
 | 527 | `mapper_527.c` | 61 | 0 | 0 | done (batch 27, `VrcP`) |
-| 528 | `mapper_528.c` | 118 | 0 | 0 | todo |
+| 528 | `mapper_528.c` | 118 | 0 | 0 | done (batch 43, `IrqP`) |
 | 532 | `mapper_532.c` | 411 | 0 | 0 | blocked (needs an external font image, see batch 36) |
 | 534 | `mapper_126.c` | 153 | 10 | 0 | done (batch 21, `Mmc3P`) |
 | 536 | `mapper_195.c` | 148 | 0 | 0 | done (batch 20, alias, `registry::board_number`) |
@@ -317,3 +317,6 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   `clocks_on_cpu_cycle`). puNES's `map_init_359` sets `prg[2]` twice and leaves `prg[3]` 0;
   kept. The mf_3b list's comments were regrouped (rustfmt had moved them onto the previous
   numbers).
+* Batch 43: `IrqP` 528 (1201, *Gimmick!* bootleg): FME-7 commands and data written together at
+  `$A000`/`$C000`, A14 the outer bank `$10`, command 8 = 1 the work RAM at `$6000`; commands
+  `$D`-`$F` drive Zaxnes's own `VrcIrq` (control, acknowledge, latch), stepped in `on_cpu_cycle`.
