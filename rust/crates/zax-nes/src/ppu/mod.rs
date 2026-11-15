@@ -3127,7 +3127,11 @@ impl Ppu2C02 {
         let now = self.ppu_clock;
         let (then, address) = self.last_data_write;
         // One CPU cycle is 3 dots (3.2 on PAL): "the previous cycle" is 4 dots at most.
-        if !rendering && then != i64::MIN && (1..=4).contains(&(now - then)) && !is_palette_address(address) {
+        if !rendering
+            && then != i64::MIN
+            && (1..=4).contains(&(now - then))
+            && !is_palette_address(address)
+        {
             self.write_vram_inner(address, value, PpuBusAccess::Inert, cart);
         }
         self.last_data_write = if rendering {
