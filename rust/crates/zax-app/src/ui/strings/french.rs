@@ -1211,7 +1211,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.realtime_input",
-        "Fait avancer la console par tranches de temps réel au lieu d'une image entière d'un coup, et donne au jeu la manette telle qu'elle est au moment où il la lit, comme sur la console. Un bouton pressé pendant la fabrication d'une image peut être vu dans cette même image. Pas utilisé avec le run-ahead ni pendant l'enregistrement ou la lecture d'un film : ceux-ci gardent des images entières. Prend effet tout de suite. Par défaut : désactivé.",
+        "Fait avancer la console par tranches de temps réel au lieu d'une image entière d'un coup, pour que le jeu lise la manette au moment où il la demande, comme sur la console : un réglage de fidélité, pour les jeux et programmes de test qui lisent la manette plusieurs fois par image. Il ne réduit pas la latence pour l'instant : la manette est toujours lue une fois par rafraîchissement de l'écran et l'image finie peut être montrée un rafraîchissement plus tard ; pour la latence la plus basse, laissez-le désactivé et utilisez le run-ahead. Pas utilisé avec le run-ahead ni pendant l'enregistrement ou la lecture d'un film : ceux-ci gardent des images entières. Prend effet tout de suite. Par défaut : désactivé.",
     ),
     (
         "detail.emu.fidelity_plus",

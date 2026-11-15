@@ -86,3 +86,20 @@ apart like the Fidélité+ kind (`Fid<K>`) so the standard loop is unchanged. Th
   two ticks at most on a 60 Hz display; finer input needs a faster input poll (B4 measures it).
 * A savestate made mid-frame keeps the machine at that instruction; the slice's frame bookkeeping
   is not in it, so the frame after a load ends at the next vblank as a whole frame would.
+
+## What B3 gives a player, and what is missing (2026-11-15)
+
+Owner question (an XInput pad): with the pads read once per host tick and the slices run as a
+burst in that tick, B3 brings no lower lag: the game reads a fresher pad mid-frame, but the frame's
+picture is shown up to a tick later, and run-ahead (the real lag reducer) must be off. B3 is a
+fidelity setting (when the pad is read in emulated time) and the groundwork. Its help text says so.
+
+For a real latency gain, two pieces, planned as B5:
+
+1. A pad poll much faster than the display: a thread reading XInput (and SDL pads) at ~1 kHz into
+   the live pad cell, each sample timestamped.
+2. The machine run along real time on the emulation thread (slices of ~1 ms, sleeping to the
+   clock), and the last finished frame shown at the display's vsync.
+
+Then a button pressed while the console builds a frame can be seen in that frame, as on the
+console; the gain (up to about half a frame on average) is to be measured in B4/B5.
