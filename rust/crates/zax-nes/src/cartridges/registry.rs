@@ -394,6 +394,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     163,
     #[cfg(feature = "board-164")]
     164,
+    #[cfg(feature = "board-165")]
+    165,
     #[cfg(feature = "board-166")]
     166,
     #[cfg(feature = "board-167")]
@@ -950,6 +952,12 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // A CHR-RAM-only image keeps the header's size: the 2 KiB is the chip beside the CHR-ROM.
         // MAPPERS-N: the 2 KiB beside the CHR-ROM (cartridge database `8B7EE49B`, puNES
         // `mapper_252.c` mapping it through `vram`).
+        // MAPPERS-N: "GetChrRamSize() { return 0x1000; }" (Mesen2 `MMC3_165.h:13`).
+        #[cfg(feature = "board-165")]
+        165 => BoardMemorySizes {
+            chr_ram: Some(0x1000),
+            ..BoardMemorySizes::default()
+        },
         #[cfg(feature = "board-252")]
         252 if header.chr_rom_size != 0 => BoardMemorySizes {
             chr_ram: Some(Waixing252::CHR_RAM_SIZE),
@@ -2422,6 +2430,11 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         )))),
         #[cfg(feature = "board-254")]
         254 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-165")]
+        165 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
             memory,
             Mmc3CloneKind::of(mapper)?,
         )))),

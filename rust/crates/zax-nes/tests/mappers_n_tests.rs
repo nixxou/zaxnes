@@ -643,3 +643,28 @@ fn mappers_n_252_selects_chr_ram_by_mask_and_compare() {
     core.mapper_write(0xB000, 0x04);
     assert_eq!(0xA5, core.chr_bank(0x0000), "4 now maps CHR-RAM page 0");
 }
+
+/// Mesen2 `MMC3_165.h`: the left half shows R0 or R1 by its MMC2-style latch, in 4 KiB pages,
+/// switched by a fetch of `$0FD8`/`$0FE8` and applied at the next PPU address; page 0 is the
+/// 4 KiB CHR-RAM.
+#[cfg(feature = "board-165")]
+#[test]
+fn mappers_n_165_latches_its_chr_halves_and_maps_page_0_to_ram() {
+    let mut core = MapperRom::new(165).prg(32).chr(256).load();
+    core.mmc3_bank(0, 4); // R0: 4 KiB page 1
+    core.mmc3_bank(1, 8); // R1: 4 KiB page 2
+    assert_eq!([4, 5, 6, 7], core.chr_windows()[..4]);
+    let cartridge = core.cartridge_mut().unwrap();
+    cartridge.on_ppu_address_bus(0x0FE8, 10);
+    cartridge.on_ppu_address_bus(0x0000, 20);
+    assert_eq!([8, 9, 10, 11], core.chr_windows()[..4]);
+    // R1 = 0: the left half is the CHR-RAM.
+    core.mmc3_bank(1, 0);
+    core.cartridge_mut().unwrap().ppu_write(0x0123, 0x5A);
+    assert_eq!(
+        0x5A,
+        core.cartridge()
+            .unwrap()
+            .ppu_peek(0x0123, zax_nes::cartridges::ChrFetch::Background)
+    );
+}

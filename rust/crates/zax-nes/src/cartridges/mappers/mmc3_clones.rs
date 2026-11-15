@@ -76,6 +76,9 @@ pub enum Mmc3CloneKind {
     M348,
     /// Mapper 366, Mesen2 `BmcGn45.h` (BMC-GN-45).
     M366,
+    /// Mapper 165, Mesen2 `MMC3_165.h`: MMC2-style CHR latches over two 4 KiB halves, page 0 being
+    /// 4 KiB of CHR-RAM (*Fire Emblem* Chinese translations).
+    M165,
 }
 
 impl Mmc3CloneKind {
@@ -107,6 +110,7 @@ impl Mmc3CloneKind {
             333 => Self::M333,
             348 => Self::M348,
             366 => Self::M366,
+            165 => Self::M165,
             _ => return None,
         })
     }
@@ -137,6 +141,7 @@ impl Mmc3CloneKind {
             Self::M333 => 333,
             Self::M348 => 348,
             Self::M366 => 366,
+            Self::M165 => 165,
         }
     }
 }
@@ -169,6 +174,29 @@ impl Mmc3Clone {
             index: 0,
             chr_ram: memory.rom().chr_rom().is_empty(),
         }
+    }
+
+    /// `MMC3_165.h:38-49` (`NotifyVramAddressChange`): a fetch of `$0FD8-$0FDF` or `$0FE8-$0FEF`
+    /// (or the same in the right table) sets that half's latch, and the mapping follows at the
+    /// **next** PPU address, as Mesen2's `_needUpdate` defers it. `outer[0]`/`outer[1]` are the
+    /// latches, `outer[2]` the pending update.
+    fn latch_165(&mut self, address: u16) {
+        if self.outer[2] != 0 {
+            self.outer[2] = 0;
+            self.refresh();
+        }
+        if matches!(address & 0x2FF8, 0x0FD0 | 0x0FE8) {
+            self.outer[usize::from((address >> 12) & 0x01)] = u8::from(address & 0x08 != 0);
+            self.outer[2] = 1;
+        }
+    }
+
+    /// The CHR-RAM offset of a mapper-165 window on page 0, `None` otherwise.
+    fn ram_165(&self, memory: &CartridgeMemory, address: u16) -> Option<usize> {
+        let window = 1u8 << ((address >> 10) & 0x07);
+        let len = memory.chr_ram().len();
+        (self.kind == Mmc3CloneKind::M165 && self.outer[3] & window != 0 && len != 0)
+            .then(|| usize::from(address & 0x0FFF) % len)
     }
 
     /// `MMC3_126.h:40-47`, `GetChrOuterBank`.
@@ -401,6 +429,28 @@ impl Mmc3Clone {
             std::array::from_fn(|slot| self.chr_page(raw_chr[slot]));
 
         match self.kind {
+            // `MMC3_165.h:24-36` (`UpdateChrMapping`): each 4 KiB half takes R0 or R1 (left) and R2
+            // or R4 (right) by its latch, in 4 KiB pages; page 0 is the CHR-RAM, which
+            // `outer[3]` marks window by window.
+            Mmc3CloneKind::M165 => {
+                let left = self
+                    .mmc3
+                    .bank_register(usize::from(self.outer[0] != 0));
+                let right = self
+                    .mmc3
+                    .bank_register(if self.outer[1] != 0 { 4 } else { 2 });
+                let mut ram = 0u8;
+                for (half, page) in [left, right].into_iter().enumerate() {
+                    if page == 0 {
+                        ram |= 0x0F << (half * 4);
+                    }
+                    let base = i32::from(page >> 2) * 4;
+                    for (j, slot) in chr[half * 4..half * 4 + 4].iter_mut().enumerate() {
+                        *slot = base + i32::try_from(j).unwrap_or(0);
+                    }
+                }
+                self.outer[3] = ram;
+            }
             // `MMC3_196.h:20-27`: once `$6000-$6FFF` is written, one 32 KiB bank, bypassing the
             // chip's PRG mapping (`SelectPrgPage4x(0, _exRegs[1] << 2)`).
             Mmc3CloneKind::M196 if self.outer[0] != 0 => {
@@ -846,19 +896,32 @@ impl Mapper for Mmc3Clone {
     }
 
     fn chr_peek_view<'m>(&self, memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
+        if self.kind == Mmc3CloneKind::M165 && self.outer[3] != 0 {
+            return None;
+        }
         self.mmc3.chr_peek_view(memory)
     }
 
     fn ppu_peek(&self, memory: &CartridgeMemory, address: u16, fetch: ChrFetch) -> u8 {
+        if let Some(offset) = self.ram_165(memory, address) {
+            return memory.chr_ram()[offset];
+        }
         self.mmc3.ppu_peek(memory, address, fetch)
     }
 
     fn ppu_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        if let Some(offset) = self.ram_165(memory, address) {
+            memory.chr_ram_mut()[offset] = value;
+            return;
+        }
         self.mmc3.ppu_write(memory, address, value);
     }
 
     fn on_ppu_address_bus(&mut self, memory: &mut CartridgeMemory, address: u16, clock: i64) {
         self.mmc3.on_ppu_address_bus(memory, address, clock);
+        if self.kind == Mmc3CloneKind::M165 {
+            self.latch_165(address);
+        }
     }
 
     fn ppu_irq_horizon(&self) -> Option<i64> {

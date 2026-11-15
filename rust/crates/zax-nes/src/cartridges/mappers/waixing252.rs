@@ -32,6 +32,8 @@ pub struct Waixing252 {
     irq: VrcIrq,
     /// Which 1 KiB windows read the CHR-RAM, one bit each; derived by [`Waixing252::refresh`].
     ram_windows: u8,
+    /// Whether the cartridge has CHR-RAM beside CHR-ROM, settled at load.
+    has_ram: bool,
 }
 
 impl Waixing252 {
@@ -47,15 +49,16 @@ impl Waixing252 {
             compare: 0x06,
             irq: VrcIrq::new(),
             ram_windows: 0,
+            has_ram: !memory.chr_ram().is_empty() && !memory.rom().chr_rom().is_empty(),
         }
     }
 
-    fn refresh(&mut self, memory: &CartridgeMemory) {
+    fn refresh(&mut self) {
         self.banks.map_prg_8k(0, i32::from(self.prg[0] & 0x1F));
         self.banks.map_prg_8k(1, i32::from(self.prg[1] & 0x1F));
         self.banks.map_prg_8k(2, -2);
         self.banks.map_prg_8k(3, -1);
-        let has_ram = !memory.chr_ram().is_empty() && !memory.rom().chr_rom().is_empty();
+        let has_ram = self.has_ram;
         self.ram_windows = 0;
         for (slot, value) in self.chr.iter().enumerate() {
             if has_ram && value & self.mask == self.compare {
@@ -96,16 +99,18 @@ impl Mapper for Waixing252 {
         reader.read_into(&mut self.chr)?;
         self.mask = reader.read_u8()?;
         self.compare = reader.read_u8()?;
-        self.irq.load_state(reader)
+        self.irq.load_state(reader)?;
+        self.refresh();
+        Ok(())
     }
 
-    fn reset(&mut self, memory: &mut CartridgeMemory) {
+    fn reset(&mut self, _memory: &mut CartridgeMemory) {
         self.prg = [0, 0];
         self.chr = [0; 8];
         self.mask = 0xFE;
         self.compare = 0x06;
         self.irq.reset();
-        self.refresh(memory);
+        self.refresh();
     }
 
     fn irq_asserted(&self) -> bool {
@@ -142,7 +147,7 @@ impl Mapper for Waixing252 {
                 _ => {}
             },
         }
-        self.refresh(memory);
+        self.refresh();
     }
 
     fn chr_view<'m>(&self, _memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
@@ -190,7 +195,7 @@ impl Mapper for Waixing252 {
         if (mask, compare) != (self.mask, self.compare) {
             self.mask = mask;
             self.compare = compare;
-            self.refresh(memory);
+            self.refresh();
         }
     }
 }

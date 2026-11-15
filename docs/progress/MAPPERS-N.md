@@ -106,3 +106,6 @@ Owner's request (2026-11-15): implement the mappers missing compared with the ot
 * Next: the 7 remaining mappers with Hackset dumps (165 168 188 198 199 234 252), then the
   nesdev/puNES/FCEUX cross-check of the 117 new boards, the 18 other remaining numbers, final
   validation (golden will move for battery games and the 53 `bNNN` database entries: explain).
+* Hackset-verifiable remainder: 234 (1654f521, Maxi 15 x3), 252 (7246ef17, Sangokushi Chinese;
+  its state reload refresh fixed in the next commit), 165 (Fire Emblem Gaiden Chinese x3). Left:
+  198, 199, 168, 188. AMD-MAPPERS-N-200 accepted and applied (6e10b0ef).
