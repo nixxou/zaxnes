@@ -574,3 +574,19 @@ fn mappers_n_34_nina_switch_refreshes_the_read_windows() {
     assert_eq!(Some(4), cartridge.read_rom_window(0x8100));
     assert_eq!(Some(7), cartridge.read_rom_window(0xE100));
 }
+
+/// nesdev ("INES Mapper 015"): the images "claiming mapper 15" that are not the K-1029
+/// multicarts are mapper hacks, for which emulators "must not enforce CHR-RAM
+/// write-protection". An image declaring battery RAM is one of them, so mode 0 writes CHR-RAM
+/// there (Bao Xiao San Guo); the K-1029 keeps MR-15-1's protection
+/// (`mr_15_1_mapper_15_write_protects_chr_ram_in_modes_0_and_3`).
+#[test]
+fn mappers_n_15_hack_images_do_not_write_protect_chr_ram() {
+    let mut core = MapperRom::new(15).prg(16).chr(0).battery().load();
+    for mode in [0u16, 3] {
+        core.mapper_write(0x8000 | mode, 0x00);
+        let value = 0x30 | u8::try_from(mode).unwrap();
+        core.cartridge_mut().unwrap().ppu_write(0x0000, value);
+        assert_eq!(value, core.chr_bank(0x0000), "mode {mode}");
+    }
+}

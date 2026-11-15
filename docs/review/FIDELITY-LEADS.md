@@ -875,3 +875,24 @@ bank number otherwise shows an empty page. Boards that override the size keep th
 Mesen2 `Fk23C.h:160` selects CHR-RAM for the `$5xx0` bit 5 only when the cartridge has CHR-RAM
 ("_selectChrRam && _chrRamSize > 0"). The first port missed that condition, so the NES 2.0 dump of
 Zhi Li Xiao Zhuang Yuan (CHR-ROM only, `$5FF0 = $60`) read zeros; it now matches Mesen2 and FCEUX.
+
+### J14. Battery PRG-RAM powers on as zeros (open, owner's call)
+Without a save file, a cartridge's PRG-RAM starts all zero here (`cartridges/mod.rs`,
+`prg_ram: vec![0; …]`), as in FCEUX. Mesen2 initialises it like every NES memory from
+`RamPowerOnState`, whose default is `Random` (`SettingTypes.h:659`, `NesConfig`). Real SRAM powers on
+undefined. *Famicom Jump II - Saikyou no 7 Nin* (`3F15D20D`, mapper 153) takes all-zero save RAM
+for valid saved data and jumps into it (`JMP $7E6A` from a bank-2 table): it crashes to a grey
+screen here and in FCEUX, and boots to its title with an all-`$FF` or random save RAM
+(`zax-harness render --sav`). The mapper itself is right. Changing the power-on state touches
+every battery game, the golden and determinism, so it is left to the owner: a seeded pattern
+for battery RAM without a save file is the likely fix.
+
+### J15. Mapper 15: CHR-RAM write protection only on the K-1029
+MR-15-1 (from nesdev: "CHR-RAM is write-protected in PRG banking modes 0 and 3") write-protected
+every mapper-15 image. The same nesdev page says the K-1029 multicarts are the only genuine
+cartridges, that other images "claiming mapper 15" are mapper hacks, and that emulators "must not
+enforce CHR-RAM write-protection" for them and must give them 8 KiB of PRG-RAM. Mesen2
+(`Mapper15.h:29`) protects every image; puNES (`mapper_015.c`) and FCEUX never protect. This
+build keeps MR-15-1 for the K-1029 and lifts it for an image declaring battery RAM or NES 2.0
+PRG-RAM (cartridge database included), which is not a K-1029. Bao Xiao San Guo (`CE102393`,
+8 KiB battery RAM in the database) writes its CHR in mode 0 and now shows its logo.
