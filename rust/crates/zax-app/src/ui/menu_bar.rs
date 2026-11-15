@@ -19,6 +19,7 @@ use crate::emulation::commands::{Command, CommandArgs, Shortcut};
 use crate::emulation::host::SlotPatchStatus;
 use crate::emulation::speed_setting;
 use crate::persistence::app_settings::{AppSettings, TvRegionSetting};
+use crate::persistence::console_model::ConsoleModel;
 use crate::persistence::save_slots::{
     numbered_slot_id, SaveSlotRecord, EXPOSED_SLOT_COUNT, QUICK_SLOT_ID,
 };
@@ -54,6 +55,8 @@ pub enum Submenu {
     Speed,
     /// The video regions.
     Region,
+    /// The console models (lot FIDPLUS-1, G1).
+    ConsoleModel,
     /// The two controller ports.
     Ports,
     /// The device of one port.
@@ -75,6 +78,8 @@ pub enum Selection {
     Speed(i32),
     /// The video region is this one and not detected automatically.
     Region(TvRegionSetting),
+    /// Every value this console model sets is in force.
+    ConsoleModel(ConsoleModel),
     /// This port holds this device.
     Port(usize, ControllerPortType),
     /// The camera is in this mode.
@@ -290,6 +295,7 @@ impl MenuBarModel {
             Submenu::DeleteState => delete_slot_items(host),
             Submenu::Speed => speed_items(),
             Submenu::Region => region_items(),
+            Submenu::ConsoleModel => console_model_items(),
             Submenu::Ports => port_items(),
             Submenu::Port(port) => port_device_items(port),
             Submenu::CameraMode => camera_items(),
@@ -319,6 +325,7 @@ fn is_selected(selection: Selection, host: &AppHost) -> bool {
     match selection {
         Selection::Speed(value) => settings.game_speed() == value,
         Selection::Region(region) => !settings.auto_tv_mode() && settings.tv_mode() == region,
+        Selection::ConsoleModel(console) => console.is_selected(settings),
         Selection::Port(port, device) => host.port_type(port) == device,
         Selection::Camera(mode) => host.scene().camera.mode() == mode,
         Selection::Skybox(value) => settings.skybox() == value,
@@ -388,6 +395,7 @@ fn build_menus() -> Vec<Menu> {
             MenuItem::rule(),
             MenuItem::sub(text::speed(), Submenu::Speed),
             MenuItem::sub(text::region(), Submenu::Region),
+            MenuItem::sub(text::console_model(), Submenu::ConsoleModel),
             MenuItem::sub(text::ports(), Submenu::Ports),
         ],
     };
@@ -627,6 +635,20 @@ fn region_items() -> Vec<MenuItem> {
         ));
     }
     items
+}
+
+fn console_model_items() -> Vec<MenuItem> {
+    ConsoleModel::ALL
+        .into_iter()
+        .map(|console| {
+            MenuItem::choice(
+                Command::SetConsoleModel,
+                console.label().to_owned(),
+                CommandArgs::of_number(console as i32),
+                Selection::ConsoleModel(console),
+            )
+        })
+        .collect()
 }
 
 fn port_items() -> Vec<MenuItem> {

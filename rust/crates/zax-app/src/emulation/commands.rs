@@ -134,6 +134,7 @@ commands! {
     SpeedDown => "emulation.speed_down", Shortcut::None, false;
     SetRegion => "emulation.set_region", Shortcut::None, false;
     ToggleAutoRegion => "emulation.auto_region", Shortcut::None, true;
+    SetConsoleModel => "emulation.set_console_model", Shortcut::None, false;
     SetPortType => "emulation.set_port_type", Shortcut::None, false;
     ToggleTwoDimensional => "video.toggle_2d", Shortcut::Fixed("F11"), true;
     ResetView => "video.reset_view", Shortcut::Key("shortcut.long_press_menu"), false;

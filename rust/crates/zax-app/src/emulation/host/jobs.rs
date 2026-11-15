@@ -8,7 +8,6 @@ use zax_core_api::{EngineKind, NesRegion};
 use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::state_codec;
 use zax_nes::NesCore;
-use zax_profiles::enums::TvRegionMode;
 use zax_settings::catalogue::SettingId;
 use zax_settings::values::SettingValue;
 
@@ -913,12 +912,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             self.settings.apply_detected_region(detected);
         } else if profile_reloaded {
             if let Some(settings) = game.profile.settings.as_ref() {
-                let mode = match settings.tv_mode {
-                    TvRegionMode::Pal => TvRegionSetting::Pal,
-                    TvRegionMode::Dendy => TvRegionSetting::Dendy,
-                    TvRegionMode::Multi => TvRegionSetting::Multi,
-                    _ => TvRegionSetting::Ntsc,
-                };
+                // The profile keeps the raw number (`TvRegionMode::Other`), so the famiclone
+                // regions (4, 5) come back too; unknown numbers read as NTSC.
+                let mode = TvRegionSetting::from_raw(settings.tv_mode.raw());
                 self.settings.set_tv_mode(mode);
             }
         }

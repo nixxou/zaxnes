@@ -986,6 +986,9 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
             opt(1, "PAL"),
             opt(2, "MULTI"),
             opt(3, "DENDY"),
+            // Lot FIDPLUS-1, G2: the famiclone regions (docs/review/FIDELITY-LEADS.md).
+            opt(4, "PAL-M"),
+            opt(5, "PAL-N"),
         ]))
         .with_lua("TVMode")
         .with_field("34")
