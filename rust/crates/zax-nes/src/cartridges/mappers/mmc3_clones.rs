@@ -79,6 +79,9 @@ pub enum Mmc3CloneKind {
     /// Mapper 165, Mesen2 `MMC3_165.h`: MMC2-style CHR latches over two 4 KiB halves, page 0 being
     /// 4 KiB of CHR-RAM (*Fire Emblem* Chinese translations).
     M165,
+    /// Mapper 198, nesdev "INES Mapper 198" / puNES `mapper_198.c`: 640 KiB of PRG, 8 KiB of
+    /// battery WRAM at `$6000` and 4 KiB more, not backed, at `$5000-$5FFF`.
+    M198,
 }
 
 impl Mmc3CloneKind {
@@ -111,6 +114,7 @@ impl Mmc3CloneKind {
             348 => Self::M348,
             366 => Self::M366,
             165 => Self::M165,
+            198 => Self::M198,
             _ => return None,
         })
     }
@@ -142,6 +146,7 @@ impl Mmc3CloneKind {
             Self::M348 => 348,
             Self::M366 => 366,
             Self::M165 => 165,
+            Self::M198 => 198,
         }
     }
 }
@@ -189,6 +194,17 @@ impl Mmc3Clone {
             self.outer[usize::from((address >> 12) & 0x01)] = u8::from(address & 0x08 != 0);
             self.outer[2] = 1;
         }
+    }
+
+    /// Mapper 198's non-backed 4 KiB at `$5000-$5FFF`, the head of the PRG-RAM.
+    pub const RAM_198_LOW: usize = 0x1000;
+
+    /// The PRG-RAM offset of a mapper-198 `$5000-$5FFF` access, `None` otherwise.
+    fn ram_198(&self, memory: &CartridgeMemory, address: u16) -> Option<usize> {
+        (self.kind == Mmc3CloneKind::M198
+            && (0x5000..=0x5FFF).contains(&address)
+            && memory.prg_ram().len() > Self::RAM_198_LOW)
+            .then(|| usize::from(address & 0x0FFF))
     }
 
     /// The CHR-RAM offset of a mapper-165 window on page 0, `None` otherwise.
@@ -313,6 +329,10 @@ impl Mmc3Clone {
             }
             // `BmcGn45.h:22-25`.
             Mmc3CloneKind::M366 => (page & 0x0F) | i32::from(r[0]),
+            // puNES `mapper_198.c` (`prg_swap_mmc3_198`): the 640 KiB board's second chip holds
+            // banks $40-$4F (nesdev, "INES Mapper 198"), so a number from $50 folds onto it; the
+            // MMC3's fixed pages land on $4E/$4F, as the page has them.
+            Mmc3CloneKind::M198 if page >= 0x50 => 0x40 | (page & 0x0F),
             _ => page,
         }
     }
@@ -433,9 +453,7 @@ impl Mmc3Clone {
             // or R4 (right) by its latch, in 4 KiB pages; page 0 is the CHR-RAM, which
             // `outer[3]` marks window by window.
             Mmc3CloneKind::M165 => {
-                let left = self
-                    .mmc3
-                    .bank_register(usize::from(self.outer[0] != 0));
+                let left = self.mmc3.bank_register(usize::from(self.outer[0] != 0));
                 let right = self
                     .mmc3
                     .bank_register(if self.outer[1] != 0 { 4 } else { 2 });
@@ -824,14 +842,28 @@ impl Mapper for Mmc3Clone {
 
     fn intercept_cpu_write(
         &mut self,
-        _memory: &mut CartridgeMemory,
+        memory: &mut CartridgeMemory,
         address: u16,
         value: u8,
     ) -> bool {
         if address >= 0x8000 {
             return false;
         }
+        if let Some(offset) = self.ram_198(memory, address) {
+            memory.prg_ram_mut()[offset] = value;
+            return true;
+        }
         self.write_outer(address, value).unwrap_or(false)
+    }
+
+    /// Mapper 198's `$6000-$7FFF` is the tail of the PRG-RAM, after the 4 KiB of `$5000`.
+    fn prg_ram_window(&self, memory: &CartridgeMemory) -> (usize, usize) {
+        let len = memory.prg_ram().len();
+        if self.kind == Mmc3CloneKind::M198 && len > Self::RAM_198_LOW {
+            (Self::RAM_198_LOW, len)
+        } else {
+            (0, len)
+        }
     }
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
@@ -865,6 +897,9 @@ impl Mapper for Mmc3Clone {
     }
 
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
+        if let Some(offset) = self.ram_198(memory, address) {
+            return Some(memory.prg_ram()[offset]);
+        }
         if self.kind == Mmc3CloneKind::M238 && (0x4020..=0x7FFF).contains(&address) {
             return Some(self.outer[0]);
         }

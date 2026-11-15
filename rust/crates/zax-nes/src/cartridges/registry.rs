@@ -447,6 +447,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     196,
     #[cfg(feature = "board-197")]
     197,
+    #[cfg(feature = "board-198")]
+    198,
     #[cfg(feature = "board-200")]
     200,
     #[cfg(feature = "board-201")]
@@ -952,6 +954,15 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // A CHR-RAM-only image keeps the header's size: the 2 KiB is the chip beside the CHR-ROM.
         // MAPPERS-N: the 2 KiB beside the CHR-ROM (cartridge database `8B7EE49B`, puNES
         // `mapper_252.c` mapping it through `vram`).
+        // MAPPERS-N: nesdev ("INES Mapper 198"): 8 KiB of battery WRAM at `$6000`, "an
+        // additional non-backed 4 KiB of WRAM at $5000-$5FFF" (the head, as on 195) and 8 KiB of
+        // CHR-RAM.
+        #[cfg(feature = "board-198")]
+        198 => BoardMemorySizes {
+            prg_ram: Some(Mmc3Clone::RAM_198_LOW + 0x2000),
+            chr_ram: Some(0x2000),
+            ..BoardMemorySizes::default()
+        },
         // MAPPERS-N: "GetChrRamSize() { return 0x1000; }" (Mesen2 `MMC3_165.h:13`).
         #[cfg(feature = "board-165")]
         165 => BoardMemorySizes {
@@ -1419,6 +1430,9 @@ pub(crate) const fn battery_offset(mapper: i32, prg_ram_size: usize) -> usize {
         // arrangement with the sizes swapped.
         #[cfg(feature = "board-195-prg-ram-5000")]
         195 if prg_ram_size > Mmc3ChrRamBoard::EXTRA_RAM_SIZE => Mmc3ChrRamBoard::EXTRA_RAM_SIZE,
+        // MAPPERS-N: mapper 198's battery is on the 8 KiB at `$6000`, after the 4 KiB of `$5000`.
+        #[cfg(feature = "board-198")]
+        198 if prg_ram_size > Mmc3Clone::RAM_198_LOW => Mmc3Clone::RAM_198_LOW,
         _ => 0,
     }
 }
@@ -2435,6 +2449,11 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         )))),
         #[cfg(feature = "board-165")]
         165 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-198")]
+        198 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
             memory,
             Mmc3CloneKind::of(mapper)?,
         )))),

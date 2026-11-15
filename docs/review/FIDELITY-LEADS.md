@@ -928,6 +928,15 @@ cartridge database gives the dump 2 KiB of CHR-RAM. The two good Hackset dumps (
 `_b2`) show the Waixing logo and the Chinese menu, whose text is drawn in that RAM; `_b1` is a bad
 dump.
 
+### J20. Mapper 198: nesdev/puNES, not Mesen2; two translation patches glitch
+Mesen2's own header calls its `MMC3_198.h` "Most likely incorrect/incomplete" (4 KiB of WRAM
+mirrored at `$5000-$7FFF`, CHR-RAM only while every CHR register is 0). This board follows nesdev
+("INES Mapper 198": 640 KiB PRG, 8 KiB battery WRAM at `$6000`, 4 KiB more at `$5000-$5FFF`, 8 KiB
+CHR-RAM) and puNES (`mapper_198.c`, banks from `$50` folding onto `$40-$4F`). The Hackset's
+*Tenchi o Kurau II* `[T-ChS]` (`7DE81BC5`, the cartridge database's dump) shows its title and
+password screen cleanly; the later `[T+ChSFIX2]` and `[T+ChTFIX2]` patches show stray glyphs on
+the password screen, not investigated (translation hacks; their CHR use may differ).
+
 ### J15. Mapper 15: CHR-RAM write protection only on the K-1029
 MR-15-1 (from nesdev: "CHR-RAM is write-protected in PRG banking modes 0 and 3") write-protected
 every mapper-15 image. The same nesdev page says the K-1029 multicarts are the only genuine

@@ -668,3 +668,20 @@ fn mappers_n_165_latches_its_chr_halves_and_maps_page_0_to_ram() {
             .ppu_peek(0x0123, zax_nes::cartridges::ChrFetch::Background)
     );
 }
+
+/// nesdev ("INES Mapper 198") and puNES `mapper_198.c`: 640 KiB of PRG, bank numbers from `$50`
+/// folding onto `$40-$4F`, the MMC3's fixed pages on `$4E`/`$4F`, and 4 KiB of RAM at
+/// `$5000-$5FFF` apart from the WRAM at `$6000`.
+#[cfg(feature = "board-198")]
+#[test]
+fn mappers_n_198_folds_its_banks_and_has_ram_at_5000() {
+    let mut core = MapperRom::new(198).prg(80).chr_ram(8192).load();
+    core.mmc3_bank(6, 0x45);
+    core.mmc3_bank(7, 0x5A); // folds to $4A
+    assert_eq!([0x45, 0x4A, 0x4E, 0x4F], core.prg_windows());
+    core.mapper_write(0xA001, 0x80); // WRAM on
+    core.mapper_write(0x5123, 0x11);
+    core.mapper_write(0x6123, 0x22);
+    assert_eq!(0x11, core.read_memory(0x5123));
+    assert_eq!(0x22, core.read_memory(0x6123));
+}
