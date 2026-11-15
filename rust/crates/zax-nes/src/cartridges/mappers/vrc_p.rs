@@ -25,6 +25,9 @@ pub enum VrcPKind {
     /// 524, `mapper_524.c` (BTL-900218, *Lord of King* pirate): a VRC2b with a CPU-cycle IRQ of
     /// its own at `$F008`/`$F00C`.
     M524,
+    /// 527, `mapper_527.c` (AX-40G, *Fudou Myouou Den* pirate): a VRC2b whose CIRAM page is D7
+    /// of CHR register 0 for `$2000`/`$2400` and of register 1 for `$2800`/`$2C00`.
+    M527,
 }
 
 impl VrcPKind {
@@ -36,6 +39,7 @@ impl VrcPKind {
             384 => Self::M384,
             447 => Self::M447,
             524 => Self::M524,
+            527 => Self::M527,
             _ => return None,
         })
     }
@@ -46,6 +50,7 @@ impl VrcPKind {
             Self::M384 => 384,
             Self::M447 => 447,
             Self::M524 => 524,
+            Self::M527 => 527,
         }
     }
 }
@@ -68,7 +73,7 @@ impl VrcP {
     pub(crate) fn new(memory: &CartridgeMemory, kind: VrcPKind) -> Self {
         let number = kind.number();
         let vrc = match kind {
-            VrcPKind::M308 | VrcPKind::M524 => Vrc2Vrc4::new_vrc2b(memory, number),
+            VrcPKind::M308 | VrcPKind::M524 | VrcPKind::M527 => Vrc2Vrc4::new_vrc2b(memory, number),
             VrcPKind::M384 | VrcPKind::M447 => Vrc2Vrc4::new_vrc4e(memory, number),
         };
         Self {
@@ -112,7 +117,7 @@ impl VrcP {
                 }
                 b.remap_chr_banks(0x7F, r << 7);
             }
-            VrcPKind::M308 | VrcPKind::M524 => {}
+            VrcPKind::M308 | VrcPKind::M524 | VrcPKind::M527 => {}
         }
     }
 }
@@ -162,7 +167,7 @@ impl Mapper for VrcP {
     fn irq_asserted(&self) -> bool {
         match self.kind {
             VrcPKind::M308 | VrcPKind::M524 => self.irq_pending,
-            VrcPKind::M384 | VrcPKind::M447 => self.vrc.irq_asserted(),
+            VrcPKind::M384 | VrcPKind::M447 | VrcPKind::M527 => self.vrc.irq_asserted(),
         }
     }
 
@@ -190,7 +195,7 @@ impl Mapper for VrcP {
                     }
                 }
             }
-            VrcPKind::M384 | VrcPKind::M447 => self.vrc.on_cpu_cycle(memory),
+            VrcPKind::M384 | VrcPKind::M447 | VrcPKind::M527 => self.vrc.on_cpu_cycle(memory),
         }
     }
 
@@ -223,6 +228,16 @@ impl Mapper for VrcP {
         }
         self.apply();
         true
+    }
+
+    /// `mirroring_fix_vrc2and4_527`: `chr[0] >> 7` for the first two tables, `chr[1] >> 7` for
+    /// the other two.
+    fn nametable_page(&self, table: i32) -> i32 {
+        if self.kind == VrcPKind::M527 {
+            let register = usize::try_from((table >> 1) & 0x01).unwrap_or(0);
+            return (self.vrc.chr_register(register) >> 7) & 0x01;
+        }
+        self.vrc.nametable_page(table)
     }
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {

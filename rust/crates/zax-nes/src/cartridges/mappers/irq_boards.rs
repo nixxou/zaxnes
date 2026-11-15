@@ -686,7 +686,8 @@ impl Mapper for IrqBoard {
         feature = "board-284",
         feature = "board-682",
         feature = "board-irq-p",
-        feature = "board-mmc3-p"
+        feature = "board-mmc3-p",
+        feature = "board-vrc-p"
     ))]
     #[inline(never)]
     fn nametable_page(&self, table: i32) -> i32 {

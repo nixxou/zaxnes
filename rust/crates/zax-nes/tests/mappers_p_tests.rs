@@ -1033,3 +1033,16 @@ fn mappers_p_269_reads_chr_from_permuted_prg() {
     // PRG offset 4 ORed with the chip's banks under mask 7: 1, 2 and the fixed 6, 7.
     assert_eq!([5, 6, 6, 7], core.prg_windows());
 }
+
+/// `mapper_527.c`: D7 of CHR register 0 (`$B001` high nibble) pages `$2000`/`$2400`.
+#[cfg(feature = "board-527")]
+#[test]
+fn mappers_p_527_pages_ciram_from_chr() {
+    let mut core = MapperRom::new(527).prg(16).chr(256).load();
+    core.mapper_write(0xB001, 0x08);
+    let cartridge = core.cartridge_mut().unwrap();
+    assert_eq!(
+        [1, 1, 0, 0],
+        [0, 1, 2, 3].map(|table| cartridge.nametable_page(table))
+    );
+}

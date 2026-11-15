@@ -369,6 +369,13 @@ impl Vrc2Vrc4 {
         (self.prg0, self.prg1)
     }
 
+    /// One of the eight CHR registers as written (lot MAPPERS-P, mapper 527's nametables;
+    /// puNES `vrc2and4.chr[n]`).
+    #[cfg(feature = "board-vrc-p")]
+    pub(crate) const fn chr_register(&self, index: usize) -> i32 {
+        self.chr[index & 0x07]
+    }
+
     /// Sets all eight CHR registers without a register write.
     ///
     /// nesdev ("INES Mapper 116") has the VRC2's CHR registers powering up to **`$FF`** on that
