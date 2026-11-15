@@ -1972,6 +1972,13 @@ impl Ppu2C02 {
         self.dot = 1 + self.phase_offset;
     }
 
+    /// Diagnostic (lot FIDPLUS-C, C3c): starts the dot accumulator at `phase`, so that on PAL
+    /// (16 dots for 5 CPU cycles, the cycle of 4 dots every fifth) the 4-dot cycle falls where the
+    /// netlist's does. Taken modulo the region's denominator; 0 on NTSC changes nothing.
+    pub const fn set_dot_accumulator_phase(&mut self, phase: i32) {
+        self.dot_accumulator = phase.rem_euclid(self.timing.dots_per_cycle_denominator);
+    }
+
     /// Study `study/access-phase`: see `phase_offset`.
     pub const fn set_phase_offset(&mut self, dots: i32) {
         self.phase_offset = dots;

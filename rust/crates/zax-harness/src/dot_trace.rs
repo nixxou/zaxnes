@@ -20,9 +20,11 @@ use crate::HarnessError;
 
 /// The command's usage line.
 pub const USAGE: &str =
-    "  zax-harness dot-trace <rom.nes> --frames <first>-<last> [--alignment <0-3>] [--phase <dots>] [--flip-parity] [--bus-conflicts] [--fidelity-plus] --out <file>
-      (per dot: frame, scanline, dot, v, t, PPU bus address; needs the `dot-trace` feature)";
+    "  zax-harness dot-trace <rom.nes> --frames <first>-<last> [--alignment <0-3>] [--phase <dots>] [--flip-parity] [--bus-conflicts] [--fidelity-plus] [--region ntsc|pal] [--dot-phase <0-4>] --out <file>
+      (per dot: frame, scanline, dot, v, t, PPU bus address; needs the `dot-trace` feature;
+      --region pal and --dot-phase for the 2C07 differential, lot FIDPLUS-C C3c)";
 
+#[allow(clippy::struct_excessive_bools)] // One flag per command-line switch.
 struct Options {
     rom: PathBuf,
     first: u32,
@@ -32,6 +34,8 @@ struct Options {
     flip_parity: bool,
     bus_conflicts: bool,
     fidelity_plus: bool,
+    pal: bool,
+    dot_phase: i32,
     out: PathBuf,
 }
 
@@ -44,6 +48,8 @@ fn parse(args: &[String]) -> Result<Options, HarnessError> {
     let mut flip_parity = false;
     let mut bus_conflicts = false;
     let mut fidelity_plus = false;
+    let mut pal = false;
+    let mut dot_phase = 0;
     let mut out = None;
     let mut index = 0;
     while index < args.len() {
@@ -69,6 +75,14 @@ fn parse(args: &[String]) -> Result<Options, HarnessError> {
                 }
                 "--alignment" => alignment = Some(value.parse::<u8>().map_err(|_| usage())?),
                 "--phase" => phase = value.parse::<i32>().map_err(|_| usage())?,
+                "--dot-phase" => dot_phase = value.parse::<i32>().map_err(|_| usage())?,
+                "--region" => {
+                    pal = match value.as_str() {
+                        "pal" => true,
+                        "ntsc" => false,
+                        _ => return Err(usage()),
+                    };
+                }
                 "--out" => out = Some(PathBuf::from(value)),
                 _ => return Err(usage()),
             }
@@ -91,6 +105,8 @@ fn parse(args: &[String]) -> Result<Options, HarnessError> {
         flip_parity,
         bus_conflicts,
         fidelity_plus,
+        pal,
+        dot_phase,
         out: out.ok_or_else(usage)?,
     })
 }
@@ -118,7 +134,13 @@ pub fn command(args: &[String]) -> Result<(), HarnessError> {
     if !info.success {
         return Err(HarnessError::Rom("Zaxnes refused the image".to_owned()));
     }
+    if options.pal {
+        core.set_region(zax_nes::NesRegion::Pal);
+    }
     core.reset();
+    core.bus_mut()
+        .ppu_mut()
+        .set_dot_accumulator_phase(options.dot_phase);
     // `emu.ppu_bus_conflicts` (FIDELITY-LEADS C1), off in the application by default; after
     // the load, which builds the PPU afresh.
     core.set_bus_conflicts(options.bus_conflicts);
