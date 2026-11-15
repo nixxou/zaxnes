@@ -2405,6 +2405,12 @@ impl NesCore {
         self.bus.ppu().wide().save_state(&mut writer);
         // Fidélité+: the edges pending (an empty block otherwise); run-ahead must stay exact.
         self.bus.ppu().save_edge_state(&mut writer);
+        // A console profile's filters and expansion signal (lot FIDPLUS-D1e), likewise.
+        let filter = self.bus.apu().has_profile_filter();
+        writer.write_u8(u8::from(filter));
+        if filter {
+            self.bus.apu().save_profile_filter(&mut writer);
+        }
 
         state.end(writer);
         Ok(())
@@ -2458,6 +2464,9 @@ impl NesCore {
             .wide_mut()
             .load_state(&mut reader, true, true)?;
         self.bus.ppu_mut().load_edge_state(&mut reader)?;
+        if reader.read_u8()? != 0 {
+            self.bus.apu_mut().load_profile_filter(&mut reader)?;
+        }
 
         self.frame_count = frame_count;
         if region != self.region {

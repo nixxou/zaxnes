@@ -1266,7 +1266,7 @@ impl Apu2A03 {
     pub const MAX_STATE_SIZE: usize = 512 + BandLimitedResampler::STATE_SIZE;
 
     /// Bytes the console profile's filter block occupies (lot FIDPLUS-D1b).
-    pub const PROFILE_FILTER_STATE_SIZE: usize = console_profile::ProfileFilter::STATE_SIZE;
+    pub const PROFILE_FILTER_STATE_SIZE: usize = BandLimitedResampler::PROFILE_STATE_SIZE + 8;
 
     /// Whether a console audio profile is set, so that a savestate carries its filters' memory.
     #[must_use]
@@ -1276,7 +1276,14 @@ impl Apu2A03 {
 
     /// Appends the console profile's filter memory (nothing without a profile).
     pub fn save_profile_filter(&self, writer: &mut StateWriter) {
-        self.resampler.save_profile_filter(writer);
+        if self.resampler.has_profile_filter() {
+            self.resampler.save_profile_filter(writer);
+            // The expansion level the band-limited signal stands at (lot FIDPLUS-D1e): the plain
+            // block leaves `M` out and restarts it at 0, which with a profile would add the
+            // board's level a second time when it pushes it back.
+            writer.write_i32(self.expansion_level);
+            writer.write_i32(self.level_expansion);
+        }
     }
 
     /// Reads the console profile's filter memory into the filters in force, or skips it.
@@ -1284,7 +1291,14 @@ impl Apu2A03 {
     /// # Errors
     /// [`InvalidState`] when the block is truncated.
     pub fn load_profile_filter(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
-        self.resampler.load_profile_filter(reader)
+        self.resampler.load_profile_filter(reader)?;
+        let expansion_level = reader.read_i32()?;
+        let level_expansion = reader.read_i32()?;
+        if self.resampler.has_profile_filter() {
+            self.expansion_level = expansion_level;
+            self.level_expansion = level_expansion;
+        }
+        Ok(())
     }
 
     /// Appends the APU state to `writer` (REQ-CORE-090).

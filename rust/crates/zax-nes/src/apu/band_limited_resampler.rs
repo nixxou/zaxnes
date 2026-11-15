@@ -82,7 +82,7 @@ pub(crate) struct BandLimitedResampler {
     /// With a console profile, the cartridge's expansion audio as a band-limited signal of its
     /// own, which the profile's chain adds between its second and third high-pass (owner,
     /// 2026-11-15, an exception to AMD-061 §6.2 inside the profile option; `BeesNES` `PostHpf`).
-    /// Not in the state: a load restarts it at silence, as the expansion level itself.
+    /// In the profile block of a state (lot FIDPLUS-D1e), with the filters.
     expansion_ring: [f64; RING_SIZE],
     expansion_signal: f64,
 }
@@ -402,10 +402,19 @@ impl BandLimitedResampler {
         self.profile_filter.is_some()
     }
 
-    /// Appends the profile filters' memory (nothing without a profile).
+    /// Bytes [`Self::save_profile_filter`] writes with a profile.
+    pub(crate) const PROFILE_STATE_SIZE: usize =
+        super::console_profile::ProfileFilter::STATE_SIZE + 8 * (RING_SIZE + 1);
+
+    /// Appends the profile filters' memory and the expansion audio's own band-limited signal
+    /// (lots FIDPLUS-D1b and D1e; nothing without a profile).
     pub(crate) fn save_profile_filter(&self, writer: &mut StateWriter) {
         if let Some(filter) = self.profile_filter.as_ref() {
             filter.save_state(writer);
+            for value in self.expansion_ring {
+                writer.write_f64(value);
+            }
+            writer.write_f64(self.expansion_signal);
         }
     }
 
@@ -418,11 +427,22 @@ impl BandLimitedResampler {
         &mut self,
         reader: &mut StateReader,
     ) -> Result<(), InvalidState> {
-        let mut scratch = super::console_profile::ProfileFilter::at_rest();
-        self.profile_filter
-            .as_mut()
-            .unwrap_or(&mut scratch)
-            .load_state(reader)
+        let keep = self.profile_filter.is_some();
+        match self.profile_filter.as_mut() {
+            Some(filter) => filter.load_state(reader)?,
+            None => super::console_profile::ProfileFilter::at_rest().load_state(reader)?,
+        }
+        for slot in 0..RING_SIZE {
+            let value = reader.read_f64()?;
+            if keep {
+                self.expansion_ring[slot] = value;
+            }
+        }
+        let signal = reader.read_f64()?;
+        if keep {
+            self.expansion_signal = signal;
+        }
+        Ok(())
     }
 
     /// Bytes a saved resampler state occupies, for the APU's `MAX_STATE_SIZE`.

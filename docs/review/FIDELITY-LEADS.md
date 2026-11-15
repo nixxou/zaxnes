@@ -853,8 +853,13 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   a load gives the same samples as the machine that went on (test, exact). Found on the way: every
   recomputation of the resampling ratio (speed, the host's fine pacing adjustment, a load's region)
   rebuilt the filters at rest, a click each time; the same profile at the same rate now keeps them.
-  Open: run-ahead's in-memory restore keeps the filters where the frames ahead left them (their
-  audio is not heard; a few samples of filter memory apart); (6) the
+  Run-ahead's in-memory restore and the expansion signal — **done 2026-11-15 (FIDPLUS-D1e)**: the
+  in-memory state carries the profile block too, and the block now holds the expansion audio's own
+  band-limited signal and its level `M`. Before, with a profile and a board with expansion audio
+  (5B, VRC6, MMC5, N163, FDS...), every load reset `M` to 0 but kept the signal, so the board's
+  level was added a second time when pushed back (an offset and a thump, 1.6e-3 in the test), and
+  run-ahead left the filters 4e-5 apart; both now give the same samples as the machine that went
+  on (tests `fidplus_profile_expansion_state_tests`); (6) the
   N20914398 profile was measured with a Sunsoft 5B cartridge and has no low-pass and no
   inversion — kept as BeesNES lists it. Found by D1c, for D1d: BeesNES never leaves the CPU-rate
   low-pass out — a profile with it disabled (N20914398, Twin Famicom 475711 SCART) or above the
