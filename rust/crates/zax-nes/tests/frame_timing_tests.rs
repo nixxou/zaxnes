@@ -227,3 +227,34 @@ fn fidplus_b1_exact_frame_rates_are_the_consoles() {
         assert!((49.0..61.0).contains(&rate), "{region:?}: {rate}");
     }
 }
+
+/// Lot FIDPLUS-B step 4: at the console's rate the APU makes the samples of real time, so the
+/// sound neither drifts nor changes pitch: N frames give N / 60.0988 seconds of samples, where the
+/// nominal rate gives N / 60.
+#[test]
+fn fidplus_b4_the_exact_rate_makes_the_samples_of_real_time() {
+    for (exact, rate) in [(false, 60.0), (true, 60.098_8)] {
+        let mut core = machine_with(&minimal_rom(0x00, None, None), "audio.nes");
+        core.set_sample_rate(48_000).unwrap();
+        core.set_exact_rate(exact);
+        core.reset();
+        let mut buffer = vec![0.0_f32; 4096];
+        let reader = core.audio_reader();
+        let frames = 3600_u32;
+        let mut samples = 0_usize;
+        for _ in 0..frames {
+            core.run_frame(0);
+            let waiting = reader.available_samples().min(buffer.len());
+            if waiting > 0 {
+                samples += reader.read_samples(&mut buffer[..waiting], false).unwrap();
+            }
+        }
+        let expected = f64::from(frames) * 48_000.0 / rate;
+        #[allow(clippy::cast_precision_loss)]
+        let got = samples as f64;
+        assert!(
+            (got - expected).abs() < 48.0,
+            "exact {exact}: {got} samples for {expected}"
+        );
+    }
+}

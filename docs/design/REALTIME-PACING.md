@@ -103,3 +103,17 @@ For a real latency gain, two pieces, planned as B5:
 
 Then a button pressed while the console builds a frame can be seen in that frame, as on the
 console; the gain (up to about half a frame on average) is to be measured in B4/B5.
+
+## B4 as measured (2026-11-15)
+
+* Rate: with `emu.exact_rate` the host's pacer runs at 60.0988 Hz; ten simulated minutes give
+  36 059-36 061 frames (the pacer hands a frame out at once and starts frames 1 ms early),
+  59 more than the nominal rate counted the same way (`realtime_slices_tests`).
+* Audio: 3600 frames at 48 kHz give 3600 x 48 000 / 60.0988 samples within one millisecond at
+  the exact rate, 3600 x 800 at the nominal one: no drift, no pitch change (`frame_timing_tests`,
+  `fidplus_b4_the_exact_rate_makes_the_samples_of_real_time`).
+* Latency: a button given in the middle of a frame is read by the game's next strobe in that frame
+  (`fidplus_slice_tests`); the host's slices spread a frame over half-frame ticks, the frames still
+  at the right count (`realtime_slices_tests`). The gain for a player waits on B5 (pad poll faster
+  than the display, real-time emulation thread); measured then, with an input timestamp log.
+* Every existing test passes at head e07e6a79 (FIDPLUS-A final validation).

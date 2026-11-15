@@ -87,3 +87,43 @@ fn fidplus_b3_run_ahead_keeps_whole_frames() {
         assert!(!in_progress(&harness));
     }
 }
+
+/// Lot FIDPLUS-B step 4, the rate judge of `docs/design/REALTIME-PACING.md`: with
+/// `emu.exact_rate` the host paces at the console's rate, and ten minutes are 36 059 frames, not
+/// 36 000 (the pacer alone, on a simulated clock: 36 000 emulated frames would take a debug build
+/// minutes).
+#[test]
+fn fidplus_b4_ten_minutes_at_the_exact_rate_are_36059_frames() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use zax_app::emulation::frame_pacer::FramePacer;
+
+    let mut harness = harness(false);
+    harness.host.update_settings(|settings| {
+        settings.set(SettingId::EmuExactRate, SettingValue::Bool(true))
+    });
+    harness.tick_frame();
+    let rate = harness.host.pacer.nominal_rate;
+    assert!((rate - 60.098_8).abs() < 1e-3, "{rate}");
+
+    // The pacer hands a frame out at once and starts frames a little early: counted the same way
+    // at the nominal rate, ten minutes differ by the 59 frames of the console's own rate.
+    let count = |rate: f64| {
+        let now = Rc::new(Cell::new(0.0_f64));
+        let source = Rc::clone(&now);
+        let mut pacer = FramePacer::new(rate, Box::new(move || source.get()));
+        let mut frames = 0_u64;
+        while now.get() < 600.0 {
+            now.set(now.get() + 1.0 / 60.0);
+            frames += u64::from(pacer.due_frames());
+        }
+        frames
+    };
+    let exact = count(rate);
+    let nominal = count(60.0);
+    assert!((36_059..=36_061).contains(&exact), "{exact}");
+    assert!(
+        (58..=60).contains(&(exact - nominal)),
+        "{exact} against {nominal}"
+    );
+}
