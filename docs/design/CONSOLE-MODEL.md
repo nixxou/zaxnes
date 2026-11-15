@@ -66,6 +66,13 @@ Revision A fails `5-MMC3` (both suites) and `6.MMC3_rev_B`: no single model pass
   difference the loop's 7-cycle instruction boundaries). The bench is sound; next, the A-lot
   programs run on it against Zaxnes's PAL mode (register-write dots, read merge, OAMADDR defects,
   OAM refresh on lines 265-310, logic defects).
+  Step 3 (2026-11-15), the per-dot judge (`benchdotpal`, `paljudge.py`, `palglitch.py`; harness
+  `dot-trace --region pal --dot-phase`): `g2000` at the five reset phases (0, 3, 6, 9, 12 grid
+  steps), accesses all on the netlist's dots at four of them. **The 2C07 has no `$2000` dot-257
+  glitch**: 31 212 to 37 140 differing dots with it, 23 322 without (the rest is the bench's
+  power-on frame, as on NTSC, and 3 dots a frame: line 239 dot 256 and the pre-render's vertical
+  copy, line 311 dots 278-279, to look at next). Zaxnes: no glitch on PAL (`write_control`), test
+  `fidelity_2000_write_on_dot_257_takes_nametable_x_from_open_bus`.
 * C3 (the goal's list, for the record): RP2A03 letter revisions (the DMC/OAM DMA and `$4015` read
   differences), the PAL 2C07 measured as the 2C02 was, random CPU/PPU alignment and RAM at power-on
   as a model choice; each with the test ROM or netlist that judges it.

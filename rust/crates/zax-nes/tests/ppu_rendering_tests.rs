@@ -961,7 +961,13 @@ fn fidelity_2000_write_on_dot_257_takes_nametable_x_from_open_bus() {
         nametable_x_in(3, dot, glitch)
     }
     fn nametable_x_in(alignment: u8, dot: i32, glitch: bool) -> u16 {
+        nametable_x_on(alignment, dot, glitch, false)
+    }
+    fn nametable_x_on(alignment: u8, dot: i32, glitch: bool, pal: bool) -> u16 {
         let mut fixture = TileFixture::new();
+        if pal {
+            fixture.core.set_region(zax_nes::NesRegion::Pal);
+        }
         fixture.core.set_cpu_ppu_alignment(alignment);
         fixture.core.set_glitch_2000(glitch);
         fixture.set_mask(0x0A);
@@ -987,6 +993,8 @@ fn fidelity_2000_write_on_dot_257_takes_nametable_x_from_open_bus() {
             );
         }
     }
+    // Lot FIDPLUS-C C3c: the PAL 2C07 has no such glitch, at any CPU/PPU phase (Visual 2C07).
+    assert_eq!(1, nametable_x_on(3, 257, true, true), "PAL: no glitch");
 }
 
 /// Lot FIDELITY steps 30 and 32 (transistor netlist, `VisualNes`): a `$2005` write that lands on a

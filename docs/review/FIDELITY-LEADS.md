@@ -702,7 +702,11 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   in its source (`main.s`): the counter counts the first frame of a press while rendering is still on
   (PPUMASK is written with the old value before the mask is cleared), so the true figure may be 6;
   its readout writes back each byte it reads, so a readout re-seeds OAM. Other consoles' results
-  are asked for on the thread; the `$E3` bytes it shows are the attribute bytes' missing bits 2-4.
+  are asked for on the thread; the `$E3` bytes it shows are the attribute bytes' missing bits 2-4. Asked
+  whether OAM goes all at once or row by row, they answer: **random bits decay, more of them the
+  longer rendering stays off**. Zaxnes's `emu.oam_decay` drops a whole row at once after 8 frames
+  without access: a gradual, per-bit model (a per-bit retention time drawn once per console, bits
+  past it lost) would be closer; what a decayed bit becomes (0, 1, either) is still to ask.
 
 ### D2b. Performance lead found on the way (lot FIDELITY, not fidelity) — tried and dropped (FIDPLUS-1)
 - Callgrind `f4185fa8` vs `27e2c3e2`: the APU stage costs +0.8 to +0.9 % on every game (+17 to

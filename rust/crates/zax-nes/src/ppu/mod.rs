@@ -1833,7 +1833,14 @@ impl Ppu2C02 {
     fn write_control<K: BoardKind>(&mut self, value: u8, cartridge: Option<&mut Cartridge>) {
         // Alignment 3 only, on dot 257: the netlist with the CPU's hold time shows it there and
         // nowhere else (step 33); TriCNES's second case, alignment 0 on dot 258, does not appear.
-        if self.alignment == 3 && self.dot == 257 && self.glitch_2000 && self.fetching() {
+        // The PAL 2C07 has none, at any of its five CPU/PPU phases (Visual 2C07 netlist, lot
+        // FIDPLUS-C C3c, `g2000`: 23 322 differing dots without it, 31 212 to 37 140 with it).
+        if self.alignment == 3
+            && self.dot == 257
+            && self.glitch_2000
+            && self.timing.region != NesRegion::Pal
+            && self.fetching()
+        {
             self.control_write_glitch();
         }
         self.control = value;
