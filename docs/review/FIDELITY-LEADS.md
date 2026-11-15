@@ -952,6 +952,12 @@ places where puNES itself is incomplete are copied, not invented around:
   RAM, which is puNES's reading of the BTL-MARIO1-MALEE2 board; nesdev describes 2 KiB of RAM
   mirrored. Unverified on a dump (none in the Hackset).
 * 122 runs puNES's `mapper_184.c` with the `$6000-$7FFF` decode puNES gives it.
+* Batch 2 adds two DIP-switch boards with the switches at 0, as puNES's default: 360 (the switch
+  *is* the game selector, so only the first game runs) and 338's two DIP reads. 352 and 381 pick
+  the game by counting resets: `Mapper::soft_reset` is the hook, and its default doc already
+  allows the reset-detecting multicarts; a power cycle starts again at 0.
+* 281/282/295 apply puNES's outer bank to ROM nametables too (`mirroring_swap_jyasic_28x`); with
+  no dump in the Hackset this is untested on a real image.
 
 ### J36. Mapper 682 (Rainbow): the ESP is modelled from the protocol document
 The ESP (`rainbow_esp.rs`) follows Broke Studio's `rainbow-net.md` and `mapper-doc.md`; no

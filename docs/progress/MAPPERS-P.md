@@ -31,12 +31,12 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 256 | `mapper_256.c` | 123 | 241 | 0 | todo |
 | 267 | `mapper_267.c` | 87 | 1 | 0 | todo |
 | 269 | `mapper_269.c` | 130 | 3 | 0 | todo |
-| 271 | `mapper_271.c` | 69 | 1 | 0 | todo |
+| 271 | `mapper_271.c` | 69 | 1 | 0 | done (batch 2, `MultiP`) |
 | 272 | `mapper_272.c` | 160 | 1 | 0 | todo |
-| 281 | `mapper_281.c` | 69 | 11 | 0 | todo |
-| 282 | `mapper_282.c` | 76 | 13 | 0 | todo |
+| 281 | `mapper_281.c` | 69 | 11 | 0 | done (batch 2, `JyCompany` + `JyMulticart`) |
+| 282 | `mapper_282.c` | 76 | 13 | 0 | done (batch 2, `JyCompany` + `JyMulticart`) |
 | 291 | `mapper_291.c` | 90 | 1 | 0 | todo |
-| 295 | `mapper_295.c` | 69 | 12 | 0 | todo |
+| 295 | `mapper_295.c` | 69 | 12 | 0 | done (batch 2, `JyCompany` + `JyMulticart`) |
 | 297 | `mapper_297.c` | 119 | 1 | 0 | todo |
 | 308 | `mapper_308.c` | 90 | 1 | 0 | todo |
 | 311 | `mapper_311.c` | 97 | 1 | 0 | todo |
@@ -44,20 +44,20 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 322 | `mapper_322.c` | 101 | 1 | 0 | todo |
 | 327 | `mapper_327.c` | 89 | 0 | 0 | todo |
 | 334 | `mapper_334.c` | 95 | 1 | 0 | todo |
-| 335 | `mapper_335.c` | 85 | 1 | 0 | todo |
+| 335 | `mapper_335.c` | 85 | 1 | 0 | done (batch 2, `MultiP`) |
 | 337 | `mapper_337.c` | 92 | 0 | 0 | todo |
-| 338 | `mapper_338.c` | 86 | 1 | 0 | todo |
+| 338 | `mapper_338.c` | 86 | 1 | 0 | done (batch 2, `MultiP`) |
 | 339 | `mapper_339.c` | 97 | 1 | 0 | todo |
 | 340 | `mapper_340.c` | 79 | 1 | 0 | todo |
-| 341 | `mapper_341.c` | 67 | 1 | 0 | todo |
+| 341 | `mapper_341.c` | 67 | 1 | 0 | done (batch 2, `MultiP`) |
 | 342 | `mapper_342.c` | 2381 | 9 | 0 | todo |
-| 343 | `mapper_343.c` | 71 | 0 | 0 | todo |
+| 343 | `mapper_343.c` | 71 | 0 | 0 | done (batch 2, `MultiP`) |
 | 344 | `mapper_344.c` | 125 | 3 | 0 | todo |
 | 345 | `mapper_345.c` | 102 | 0 | 0 | todo |
 | 347 | `mapper_347.c` | 122 | 2 | 0 | todo |
 | 350 | `mapper_350.c` | 99 | 0 | 0 | todo |
 | 351 | `mapper_351.c` | 305 | 0 | 0 | todo |
-| 352 | `mapper_352.c` | 66 | 0 | 0 | todo |
+| 352 | `mapper_352.c` | 66 | 0 | 0 | done (batch 2, `MultiP`) |
 | 353 | `mapper_353.c` | 149 | 1 | 0 | todo |
 | 354 | `mapper_354.c` | 111 | 0 | 0 | todo |
 | 355 | `mapper_355.c` | 258 | 4 | 1 | todo |
@@ -65,7 +65,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 357 | `mapper_357.c` | 118 | 1 | 0 | todo |
 | 358 | `mapper_358.c` | 76 | 4 | 0 | todo |
 | 359 | `mapper_359.c` | 293 | 3 | 0 | todo |
-| 360 | `mapper_360.c` | 54 | 1 | 0 | todo |
+| 360 | `mapper_360.c` | 54 | 1 | 0 | done (batch 2, `MultiP`) |
 | 361 | `mapper_361.c` | 85 | 5 | 0 | todo |
 | 362 | `mapper_362.c` | 99 | 2 | 0 | todo |
 | 368 | `mapper_368.c` | 106 | 2 | 0 | todo |
@@ -76,7 +76,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 375 | `mapper_375.c` | 77 | 1 | 0 | todo |
 | 377 | `mapper_377.c` | 86 | 3 | 0 | todo |
 | 380 | `mapper_380.c` | 89 | 9 | 0 | todo |
-| 381 | `mapper_381.c` | 60 | 0 | 0 | todo |
+| 381 | `mapper_381.c` | 60 | 0 | 0 | done (batch 2, `MultiP`) |
 | 382 | `mapper_382.c` | 70 | 1 | 0 | todo |
 | 384 | `mapper_384.c` | 65 | 0 | 0 | todo |
 | 386 | `mapper_386.c` | 76 | 1 | 0 | todo |
@@ -170,3 +170,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   Unit tests in `tests/mappers_p_tests.rs`; leads in FIDELITY-LEADS J37. The `additions` table of
   `mapper_tests.rs` is now kept in ascending order (the scratchpad helper sorts it after each
   registration).
+* Batch 2: the J.Y. ASIC multicarts 281, 282 and 295 reuse `JyCompany` (`jy_company.rs`) with a
+  `JyMulticart` decode of `$D003` (puNES replaces the same two bank functions); they join 209's
+  latch lists in `cartridges/mod.rs`. `MultiP` gains 271, 335, 338, 341, 343, 352, 360 and 381
+  (`MultiP::map_b2`); 352 and 381 count the console's resets through `Mapper::soft_reset`.

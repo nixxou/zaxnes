@@ -121,6 +121,13 @@ pub struct JyCompany {
     outer_prg_bank: u8,
     /// `$D003` bit 0, `C`: the 256 KiB outer CHR bank, CHR A18. Ignored when `L` is set.
     outer_chr_a18: bool,
+    /// Lot MAPPERS-P: the multicart that reuses `$D003` as a wider outer bank (281, 282 or 295),
+    /// or `None` for the four single-game numbers. puNES (`mapper_281.c`, `mapper_282.c`,
+    /// `mapper_295.c`) keeps the ASIC as it is and replaces only the two bank functions that
+    /// place an 8 KiB PRG bank and a 1 KiB CHR bank in the outer bank; so does this board.
+    multicart: Option<JyMulticart>,
+    /// `$D003` as written, for [`JyCompany::multicart`]'s decodes, which use all eight bits.
+    outer_raw: u8,
 
     /// The two MMC4-like latches, one per pattern table, each 0 or 1.
     chr_latch: [u8; 2],
@@ -200,6 +207,8 @@ impl JyCompany {
             outer_chr_bank: 0,
             outer_prg_bank: 0,
             outer_chr_a18: false,
+            multicart: JyMulticart::of(mapper_number),
+            outer_raw: 0,
             chr_latch: [0; 2],
             irq_enabled: false,
             irq_source: 0,
@@ -251,6 +260,9 @@ impl JyCompany {
     /// "The PRG-ROM bank selected via $8000-$8003 is always masked to the outer bank size …
     /// Accessing more than that requires manipulating the Outer Bank register at $D003."
     fn prg_bank(&self, bank_8k: i32) -> i32 {
+        if let Some(multicart) = self.multicart {
+            return multicart.prg_bank(self.outer_raw, bank_8k);
+        }
         (bank_8k & (Self::OUTER_PRG_BANKS - 1))
             | (i32::from(self.outer_prg_bank) * Self::OUTER_PRG_BANKS)
     }
@@ -276,6 +288,9 @@ impl JyCompany {
     fn chr_bank(&self, index: usize) -> i32 {
         let register = i32::from(self.chr_low[index]) | (i32::from(self.chr_high[index]) << 8);
         let bank_1k = register * Self::CHR_UNIT_1K[usize::from(self.chr_mode) & 3];
+        if let Some(multicart) = self.multicart {
+            return multicart.chr_bank(self.outer_raw, bank_1k);
+        }
         let outer = i32::from(self.outer_chr_bank) * Self::OUTER_CHR_BANKS_512K;
         if self.outer_chr_512k {
             (bank_1k & (Self::OUTER_CHR_BANKS_512K - 1)) | outer
@@ -513,6 +528,7 @@ impl JyCompany {
                 self.outer_chr_bank = (value >> 3) & 0x03;
                 self.outer_prg_bank = (value >> 1) & 0x03;
                 self.outer_chr_a18 = value & 0x01 != 0;
+                self.outer_raw = value;
             }
         }
     }
@@ -668,6 +684,10 @@ impl Mapper for JyCompany {
         writer.write_u8(self.outer_chr_bank);
         writer.write_u8(self.outer_prg_bank);
         writer.write_bool(self.outer_chr_a18);
+        // Only the multicarts write it, so a single-game state keeps its old layout.
+        if self.multicart.is_some() {
+            writer.write_u8(self.outer_raw);
+        }
         writer.write_raw(&self.chr_latch);
         writer.write_bool(self.irq_enabled);
         writer.write_u8(self.irq_source);
@@ -707,6 +727,9 @@ impl Mapper for JyCompany {
         self.outer_chr_bank = reader.read_u8()?;
         self.outer_prg_bank = reader.read_u8()?;
         self.outer_chr_a18 = reader.read_bool()?;
+        if self.multicart.is_some() {
+            self.outer_raw = reader.read_u8()?;
+        }
         reader.read_into(&mut self.chr_latch)?;
         // Validated and not masked: a latch of 2 or more would index `chr_low` out of its eight
         // registers through `chr_4k_register`, so a corrupt block has to be refused rather than
@@ -928,8 +951,13 @@ impl Mapper for JyCompany {
     /// VRAM. The write is dropped, which is right for the write and loses the byte underneath.
     fn read_nametable(&self, memory: &CartridgeMemory, address: u16) -> u8 {
         let table = usize::from(address >> 10) & 3;
-        let bank =
+        let mut bank =
             usize::from(self.nametable_low[table]) | (usize::from(self.nametable_high[table]) << 8);
+        // puNES's `mirroring_swap_jyasic_28x` passes ROM nametables through the same outer bank.
+        if let Some(multicart) = self.multicart {
+            let placed = multicart.chr_bank(self.outer_raw, i32::try_from(bank).unwrap_or(0));
+            bank = usize::try_from(placed).unwrap_or(0);
+        }
         memory.read_chr_direct(bank * Self::CHR_BANK_SIZE + (usize::from(address) & 0x03FF))
     }
 
@@ -999,5 +1027,57 @@ impl Mapper for JyCompany {
         }
 
         self.update_banks();
+    }
+}
+
+/// The three J.Y. multicarts of lot MAPPERS-P: the ASIC of mappers 209/211 with `$D003` read as
+/// a wider outer bank. Each decode is puNES's `prg_bank`/`chr_bank` of its file; nesdev has a
+/// page for none of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum JyMulticart {
+    /// `mapper_281.c`: 256 KiB outer PRG banks (`$D003` from A18 up), 256 KiB outer CHR banks.
+    M281,
+    /// `mapper_282.c`: PRG `$D003` bits 1-7 from A18 up; CHR bit 0 at A18 and bits 3-4 at
+    /// A19-A20, widened to 512 KiB (bits 3-4 only) when bit 5 is set.
+    M282,
+    /// `mapper_295.c`: 128 KiB outer PRG and CHR banks.
+    M295,
+}
+
+impl JyMulticart {
+    fn of(mapper: i32) -> Option<Self> {
+        match mapper {
+            281 => Some(Self::M281),
+            282 => Some(Self::M282),
+            295 => Some(Self::M295),
+            _ => None,
+        }
+    }
+
+    /// An 8 KiB PRG bank placed in the outer bank `outer` (`$D003`).
+    fn prg_bank(self, outer: u8, bank_8k: i32) -> i32 {
+        let outer = i32::from(outer);
+        match self {
+            Self::M281 => (outer << 5) | (bank_8k & 0x1F),
+            Self::M282 => ((outer << 4) & !0x1F) | (bank_8k & 0x1F),
+            Self::M295 => (outer << 4) | (bank_8k & 0x0F),
+        }
+    }
+
+    /// A 1 KiB CHR bank placed in the outer bank `outer` (`$D003`).
+    fn chr_bank(self, outer: u8, bank_1k: i32) -> i32 {
+        let outer = i32::from(outer);
+        match self {
+            Self::M281 => (outer << 8) | (bank_1k & 0xFF),
+            Self::M282 => {
+                let base = ((outer & 0x01) << 8) | ((outer & 0x18) << 6);
+                if outer & 0x20 == 0 {
+                    base | (bank_1k & 0xFF)
+                } else {
+                    (base & 0x0600) | (bank_1k & 0x1FF)
+                }
+            }
+            Self::M295 => (outer << 7) | (bank_1k & 0x7F),
+        }
     }
 }

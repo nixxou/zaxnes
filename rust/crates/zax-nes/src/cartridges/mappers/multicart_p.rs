@@ -34,6 +34,22 @@ pub enum MultiPKind {
     /// 517, `mapper_517.c` (Kkachi-wa Norae Chingu, a karaoke with a microphone ADC at
     /// `$6000-$6FFF`).
     M517,
+    /// 271, `mapper_271.c` (TXC 22026): one data latch, D4-D7 the 32 KiB bank, D0-D3 the CHR bank.
+    M271,
+    /// 335, `mapper_335.c` (CTC-09): `$8000-$BFFF` the CHR bank, `$C000-$FFFF` PRG and mirroring.
+    M335,
+    /// 338, `mapper_338.c` (SA005-A): address latch, NROM-128 bank, two DIP reads.
+    M338,
+    /// 341, `mapper_341.c` (TJ-03): address latch, A8 up the 32 KiB and CHR bank.
+    M341,
+    /// 343, `mapper_343.c` (reset-based 4-in-1 Gamestar): inverted data latch.
+    M343,
+    /// 352, `mapper_352.c` (Kaiser KS-106C): no register, the game chosen by counting resets.
+    M352,
+    /// 360, `mapper_360.c` (Bit Corp 31-in-1): the game chosen by a DIP switch, no register.
+    M360,
+    /// 381, `mapper_381.c` (KN-42): UNROM data latch with scrambled bits, outer bank by reset.
+    M381,
 }
 
 impl MultiPKind {
@@ -47,6 +63,14 @@ impl MultiPKind {
             237 => Self::M237,
             389 => Self::M389,
             517 => Self::M517,
+            271 => Self::M271,
+            335 => Self::M335,
+            338 => Self::M338,
+            341 => Self::M341,
+            343 => Self::M343,
+            352 => Self::M352,
+            360 => Self::M360,
+            381 => Self::M381,
             _ => return None,
         })
     }
@@ -59,6 +83,14 @@ impl MultiPKind {
             Self::M237 => 237,
             Self::M389 => 389,
             Self::M517 => 517,
+            Self::M271 => 271,
+            Self::M335 => 335,
+            Self::M338 => 338,
+            Self::M341 => 341,
+            Self::M343 => 343,
+            Self::M352 => 352,
+            Self::M360 => 360,
+            Self::M381 => 381,
         }
     }
 
@@ -85,6 +117,8 @@ pub struct MultiP {
     regs: [u16; 4],
     /// Mapper 517's ADC: state, and the two counters it reads out.
     adc: [i16; 3],
+    /// The PRG-ROM size in bytes, which 338's and 341's decodes depend on.
+    prg_size: usize,
 }
 
 impl MultiP {
@@ -92,8 +126,14 @@ impl MultiP {
         let mut board = Self {
             banks: windows_for(memory),
             kind,
-            regs: [0; 4],
+            // `map_init_343`: the latch powers on as `$FF` (inverted, bank 0 of the last game).
+            regs: if matches!(kind, MultiPKind::M343) {
+                [0xFF, 0, 0, 0]
+            } else {
+                [0; 4]
+            },
             adc: [0; 3],
+            prg_size: memory.rom().prg_rom().len(),
         };
         let _ = board.map();
         board
@@ -103,10 +143,7 @@ impl MultiP {
     fn latch(&mut self, address: u16, value: u8) {
         let r = &mut self.regs;
         match self.kind {
-            MultiPKind::M55 => {}
             // `extcl_cpu_wr_mem_081`: the whole address is the register.
-            MultiPKind::M81 => r[0] = address,
-            MultiPKind::M122 => r[0] = u16::from(value),
             // `extcl_cpu_wr_mem_237`: with bit 1 of the address register set (the lock), only the
             // inner three bits of the data register move.
             MultiPKind::M237 => {
@@ -134,6 +171,15 @@ impl MultiP {
                 }
                 r[0] = u16::from(value);
             }
+            MultiPKind::M122 | MultiPKind::M271 | MultiPKind::M381 => r[0] = u16::from(value),
+            // `extcl_cpu_wr_mem_335`: by A13-A14.
+            MultiPKind::M335 => match address & 0xE000 {
+                0x8000 | 0xA000 => r[0] = u16::from(value),
+                _ => r[1] = u16::from(value),
+            },
+            MultiPKind::M81 | MultiPKind::M338 | MultiPKind::M341 => r[0] = address,
+            MultiPKind::M343 => r[0] = u16::from(!value),
+            MultiPKind::M55 | MultiPKind::M352 | MultiPKind::M360 => {}
         }
     }
 
@@ -195,12 +241,96 @@ impl MultiP {
                 b.map_prg_16k(2, -1);
                 None
             }
+            _ => self.map_b2(),
+        }
+    }
+
+    /// [`MultiP::map`] for the kinds of batch 2 (`docs/progress/MAPPERS-P.md`).
+    fn map_b2(&mut self) -> Option<NametableMirroring> {
+        let r = self.regs.map(i32::from);
+        let b = &mut self.banks;
+        let mirror = |vertical: bool| {
+            Some(if vertical {
+                NametableMirroring::Vertical
+            } else {
+                NametableMirroring::Horizontal
+            })
+        };
+        match self.kind {
+            MultiPKind::M271 => {
+                b.map_prg_32k(r[0] >> 4);
+                b.map_chr_8k(r[0] & 0x0F);
+                mirror(r[0] & 0x20 != 0)
+            }
+            // `prg_fix_335`: D4 picks NROM-128 (bank D0-D2 with D3 as its low bit) over NROM-256.
+            MultiPKind::M335 => {
+                if r[1] & 0x10 != 0 {
+                    let bank = ((r[1] & 0x07) << 1) | ((r[1] & 0x08) >> 3);
+                    b.map_prg_16k(0, bank);
+                    b.map_prg_16k(2, bank);
+                } else {
+                    b.map_prg_32k(r[1] & 0x07);
+                }
+                b.map_chr_8k(r[0]);
+                mirror(r[1] & 0x20 == 0)
+            }
+            MultiPKind::M338 => {
+                b.map_prg_16k(0, r[0]);
+                b.map_prg_16k(2, r[0]);
+                b.map_chr_8k(r[0]);
+                mirror(r[0] & 0x08 != 0)
+            }
+            // `mirroring_fix_341`: the mirroring bit is A11 on a 256 KiB image, A9 otherwise.
+            MultiPKind::M341 => {
+                b.map_prg_32k(r[0] >> 8);
+                b.map_chr_8k(r[0] >> 8);
+                let bit = if self.prg_size & 0x4_0000 != 0 {
+                    0x800
+                } else {
+                    0x200
+                };
+                mirror(r[0] & bit == 0)
+            }
+            MultiPKind::M343 => {
+                b.map_prg_32k(r[0]);
+                b.map_chr_8k(r[0]);
+                mirror(r[0] & 0x80 != 0)
+            }
+            // `prg_fix_352`: the reset count is the 32 KiB bank, the CHR bank and the mirroring.
+            MultiPKind::M352 => {
+                b.map_prg_32k(r[3]);
+                b.map_chr_8k(r[3]);
+                mirror(r[3] & 0x01 != 0)
+            }
+            // `prg_fix_360` with the DIP switch at 0 (J37): NROM-256 bank 0, CHR bank 0, vertical.
+            MultiPKind::M360 => {
+                b.map_prg_32k(0);
+                b.map_chr_8k(0);
+                mirror(true)
+            }
+            // `prg_fix_381`: D0-D3 rotated left (D3 → bit 0), the reset count as the outer bank.
+            MultiPKind::M381 => {
+                let outer = r[3] << 4;
+                b.map_prg_16k(0, (((r[0] << 1) | (r[0] >> 4)) & 0x0F) | outer);
+                b.map_prg_16k(2, outer | 0x0F);
+                None
+            }
+            _ => None,
         }
     }
 
     /// Whether reads of `$8000-$FFFF` cannot come from the cached windows now.
     const fn reads_are_special(&self) -> bool {
-        matches!(self.kind, MultiPKind::M237) && self.regs[0] & 0x01 != 0
+        match self.kind {
+            MultiPKind::M237 => self.regs[0] & 0x01 != 0,
+            // `extcl_cpu_rd_mem_338`: `$F004` (on a 64 KiB image or smaller) and `$F008` latched
+            // read the DIP switches.
+            MultiPKind::M338 => {
+                let latched = self.regs[0] & 0xFF0F;
+                latched == 0xF008 || (latched == 0xF004 && self.prg_size <= 0x1_0000)
+            }
+            _ => false,
+        }
     }
 
     /// A read of `$6000-$7FFF` the board answers itself, with its side effect: `Some(None)` is
@@ -294,6 +424,17 @@ impl Mapper for MultiP {
         }
     }
 
+    /// 352 and 381 count the console's resets (`map_init_352`/`map_init_381` on `RESET`): the
+    /// count picks the game. The other kinds keep the default, nothing.
+    fn soft_reset(&mut self, memory: &mut CartridgeMemory) {
+        if matches!(self.kind, MultiPKind::M352 | MultiPKind::M381) {
+            self.regs[3] = self.regs[3].wrapping_add(1) & 0xFF;
+            if let Some(mirroring) = self.map() {
+                memory.set_mirroring(mirroring);
+            }
+        }
+    }
+
     fn prg_ram_enabled(&self) -> bool {
         !self.kind.owns_6000()
     }
@@ -355,7 +496,7 @@ impl Mapper for MultiP {
             return self.clone().read_6000(memory, address);
         }
         // `extcl_cpu_rd_mem_237`: with A0 of the address register set, `$8000-$FFFF` reads the
-        // DIP switches (none set here: J37).
+        // DIP switches (none set here: J37); 338's two DIP reads the same way.
         if address >= 0x8000 && self.reads_are_special() {
             return Some(Some(0));
         }

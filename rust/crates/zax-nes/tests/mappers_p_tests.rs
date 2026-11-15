@@ -74,3 +74,115 @@ fn mappers_p_517_banks_and_reads_its_adc() {
     assert_eq!(Some(1), bus.try_cpu_read(0x6000));
     assert_eq!(Some(1), bus.try_cpu_read(0x6000));
 }
+
+/// `mapper_281.c`: J.Y. ASIC, `$D003` the 256 KiB outer PRG bank (8 KiB mode, last bank fixed).
+#[cfg(feature = "board-281")]
+#[test]
+fn mappers_p_281_places_the_asic_in_a_256k_outer_bank() {
+    let mut core = MapperRom::new(281).prg(128).chr(256).load();
+    core.mapper_write(0xD000, 0x02);
+    core.mapper_write(0x8000, 1);
+    core.mapper_write(0xD003, 1);
+    assert_eq!([33, 32, 32, 63], core.prg_windows());
+}
+
+/// `mapper_282.c`: PRG from `$D003` bits 1-7.
+#[cfg(feature = "board-282")]
+#[test]
+fn mappers_p_282_places_prg_from_d003_bit_1() {
+    let mut core = MapperRom::new(282).prg(128).chr(256).load();
+    core.mapper_write(0xD000, 0x02);
+    core.mapper_write(0x8000, 1);
+    core.mapper_write(0xD003, 2);
+    assert_eq!([33, 32, 32, 63], core.prg_windows());
+}
+
+/// `mapper_295.c`: 128 KiB outer PRG and CHR banks.
+#[cfg(feature = "board-295")]
+#[test]
+fn mappers_p_295_places_the_asic_in_128k_outer_banks() {
+    let mut core = MapperRom::new(295).prg(64).chr(256).load();
+    core.mapper_write(0xD000, 0x1A);
+    core.mapper_write(0x8000, 1);
+    core.mapper_write(0x9000, 5);
+    core.mapper_write(0xD003, 1);
+    assert_eq!([17, 16, 16, 31], core.prg_windows());
+    assert_eq!(133, core.chr_windows()[0]);
+}
+
+/// `mapper_271.c`: D4-D7 the 32 KiB bank, D0-D3 the CHR bank.
+#[cfg(feature = "board-271")]
+#[test]
+fn mappers_p_271_latches_prg_and_chr_from_the_data() {
+    let mut core = MapperRom::new(271).prg(16).chr(64).load();
+    core.mapper_write(0x8000, 0x13);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    assert_eq!(24, core.chr_windows()[0]);
+}
+
+/// `mapper_335.c`: `$C000` D4 picks NROM-128 with D3 the low bank bit; `$8000` the CHR bank.
+#[cfg(feature = "board-335")]
+#[test]
+fn mappers_p_335_switches_nrom_128_and_256() {
+    let mut core = MapperRom::new(335).prg(16).chr(32).load();
+    core.mapper_write(0xC000, 0x01);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    core.mapper_write(0xC000, 0x19);
+    assert_eq!([6, 7, 6, 7], core.prg_windows());
+    core.mapper_write(0x8000, 2);
+    assert_eq!(16, core.chr_windows()[0]);
+}
+
+/// `mapper_338.c`: the address is the NROM-128 bank; `$F008` latched reads the DIP switches.
+#[cfg(feature = "board-338")]
+#[test]
+fn mappers_p_338_latches_the_address_and_reads_its_dip() {
+    let mut core = MapperRom::new(338).prg(16).chr(64).load();
+    core.mapper_write(0x8003, 0);
+    assert_eq!([6, 7, 6, 7], core.prg_windows());
+    core.mapper_write(0xF008, 0);
+    assert_eq!([0, 0, 0, 0], core.prg_windows());
+}
+
+/// `mapper_341.c`: A8 up the 32 KiB and CHR bank.
+#[cfg(feature = "board-341")]
+#[test]
+fn mappers_p_341_banks_from_a8() {
+    let mut core = MapperRom::new(341).prg(16).chr(32).load();
+    core.mapper_write(0x8200, 0);
+    assert_eq!([8, 9, 10, 11], core.prg_windows());
+    assert_eq!(16, core.chr_windows()[0]);
+}
+
+/// `mapper_343.c`: the latch is the inverted data and powers on as `$FF`.
+#[cfg(feature = "board-343")]
+#[test]
+fn mappers_p_343_inverts_its_latch() {
+    let mut core = MapperRom::new(343).prg(16).chr(32).load();
+    assert_eq!([12, 13, 14, 15], core.prg_windows());
+    core.mapper_write(0x8000, 0xFE);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+}
+
+/// `mapper_352.c`: each reset moves to the next 32 KiB game.
+#[cfg(feature = "board-352")]
+#[test]
+fn mappers_p_352_counts_resets() {
+    let mut core = MapperRom::new(352).prg(16).chr(32).load();
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    core.soft_reset();
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    assert_eq!(8, core.chr_windows()[0]);
+}
+
+/// `mapper_381.c`: D0-D3 rotated into the inner bank, the reset count the outer 256 KiB bank.
+#[cfg(feature = "board-381")]
+#[test]
+fn mappers_p_381_rotates_its_bank_and_counts_resets() {
+    let mut core = MapperRom::new(381).prg(64).load();
+    core.mapper_write(0x8000, 0x10);
+    assert_eq!([2, 3, 30, 31], core.prg_windows());
+    core.soft_reset();
+    core.mapper_write(0x8000, 0x01);
+    assert_eq!([36, 37, 62, 63], core.prg_windows());
+}
