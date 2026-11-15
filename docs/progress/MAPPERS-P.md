@@ -236,4 +236,4 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 * Batch 21: 422 and 534 in `Mmc3P`, puNES's own `mapper_126.c` model (Zaxnes's 126 follows
   Mesen2's `MMC3_126.h` and is left as it is). 534 inverts `$C000`/`$C001` data.
 * Batch 22: `Mmc1Outer` 543 (outer register shifted in through `$5000` D3, WRAM bank from it and the MMC1's `$A000` D3, power-on `$E000` = `$0E` via `Mmc1::force_prg_register`).
-* Batch 23: `Mmc3P` 370 (CIRAM page per table from R0-R5 D7 in mode 1). **Fix**: `IrqBoard::nametable_page` was not forwarded for `board-irq-p`, so 417's per-table pages (batch 18) were never asked; it now is, for `board-mmc3-p` too (a cold, out-of-line dispatch run after register writes only). Both have a page test now.
+* Batch 23: `Mmc3P` 370 (CIRAM page per table from R0-R5 D7 in mode 1). The `cfg(any(...))` lists of `IrqBoard`'s forwards (`nametable_page`, `try_read_prg`, `prg_ram_enabled`) now name `board-irq-p`/`board-mmc3-p` too: the default build already compiled those forwards through other features, but a build with only these boards on would have dropped them. Both 370 and 417 have a page test.

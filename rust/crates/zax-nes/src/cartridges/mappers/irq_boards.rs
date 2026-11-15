@@ -589,6 +589,7 @@ impl Mapper for IrqBoard {
         feature = "board-irq-latch",
         feature = "board-176",
         feature = "board-682",
+        feature = "board-irq-p"
     ))]
     fn prg_ram_enabled(&self) -> bool {
         inner!(self, b => b.prg_ram_enabled())
@@ -756,6 +757,7 @@ impl Mapper for IrqBoard {
         feature = "board-mmc3-p",
         feature = "board-irq-latch",
         feature = "board-176",
+        feature = "board-irq-p"
     ))]
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
         inner!(self, b => b.try_read_prg(memory, address))
