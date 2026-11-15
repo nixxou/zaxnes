@@ -23,9 +23,9 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | ---: | --- | ---: | ---: | ---: | --- |
 | 55 | `mapper_055.c` | 38 | 3 | 0 | done (batch 1, `MultiP`) |
 | 81 | `mapper_081.c` | 60 | 3 | 0 | done (batch 1, `MultiP`) |
-| 100 | `mapper_100.c` | 175 | 1 | 0 | todo |
+| 100 | `mapper_100.c` | 175 | 1 | 0 | done (batch 29, `Mmc3P`) |
 | 122 | `mapper_184.c` | 64 | 0 | 0 | done (batch 1, `MultiP`) |
-| 186 | `mapper_186.c` | 82 | 1 | 0 | todo |
+| 186 | `mapper_186.c` | 82 | 1 | 0 | refused (MF-6 inventory §3.5, AMD-MAPPERS-N-200: the Study Box stays refused) |
 | 237 | `mapper_237.c` | 98 | 1 | 0 | done (batch 1, `MultiP`) |
 | 248 | `mapper_115.c` | 115 | 0 | 0 | done (batch 20, alias, `registry::board_number`) |
 | 256 | `mapper_256.c` | 123 | 241 | 0 | todo |
@@ -244,3 +244,11 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 * Batch 26: `Mmc3P` 269. Without CHR-ROM its CHR is the PRG-ROM with the data lines permuted; the copy lives in the board (`Mmc3P::chr_269`, derived at load) because the core clears the CHR-RAM after a board's power-on, and `ppu_peek`/`ppu_write` serve it as ROM. The CHR-RAM is sized to the PRG-ROM (`board_memory_sizes`) so that the windows wrap on it. `020-FFF` registers moved to `Mmc3P::write_5000`.
 * Batch 27: `VrcP` 527 (VRC2b, CIRAM page from D7 of CHR registers 0/1 through the new `Vrc2Vrc4::chr_register`; `IrqBoard::nametable_page` names `board-vrc-p`).
 * Batch 28: `Mmc3P` 353 (four games selected by a chip write to `$x080`).
+* Perf, batches 1-28 (f2989b02) against e4596884: mm2 core +0.000 %, total -0.001 %; zelda2 core
+  +0.000 %, total -0.006 %.
+* Batch 29: `Mmc3P` 100 (Nesticle's raw bank registers over the chip's IRQ and mirroring;
+  `Mmc3P::raw_100`, saved for that kind only). 186 was written and taken back out: the Fukutake
+  Study Box is refused on purpose (`cartridge_tests::req_core_102`, MF-6 inventory §3.5 and
+  AMD-MAPPERS-N-200 say it stays refused although FCEUX and puNES run it). Left for the owner to
+  decide; puNES's model (registers `$4200-$4203`, `$4202` reads `$40`, RAM at `$4400-$4FFF` and a
+  banked 8 KiB at `$6000`) is in the session notes if the decision changes.

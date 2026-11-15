@@ -1015,7 +1015,10 @@ fn mappers_p_356_has_a_four_screen_mode() {
     }
     assert_eq!([17, 18, 30, 31], core.prg_windows());
     let cartridge = core.cartridge_mut().unwrap();
-    assert_eq!(zax_nes::NametableMirroring::FourScreen, cartridge.mirroring());
+    assert_eq!(
+        zax_nes::NametableMirroring::FourScreen,
+        cartridge.mirroring()
+    );
 }
 
 /// `mapper_269.c`: without CHR-ROM the CHR is the PRG with its data lines permuted (D0 to D6);
@@ -1058,3 +1061,20 @@ fn mappers_p_353_selects_games_from_x080() {
     core.mapper_write(0xE080, 0);
     assert_eq!([97, 98, 113, 114], core.prg_windows());
 }
+
+/// `mapper_100.c`: the select byte loads PRG and CHR registers directly; `$46`/`$47` load
+/// `prg[2]` and `prg[1]`, `$80` the CHR pair at `$1000`.
+#[cfg(feature = "board-100")]
+#[test]
+fn mappers_p_100_loads_raw_bank_registers() {
+    let mut core = MapperRom::new(100).prg(32).chr(64).load();
+    assert_eq!([0, 1, 30, 31], core.prg_windows());
+    core.mmc3_bank(0x06, 5);
+    core.mmc3_bank(0x46, 9);
+    core.mmc3_bank(0x47, 12);
+    assert_eq!([5, 12, 9, 31], core.prg_windows());
+    core.mmc3_bank(0x80, 20);
+    core.mmc3_bank(0x85, 33);
+    assert_eq!([0, 1, 2, 33, 20, 21, 6, 7], core.chr_windows());
+}
+

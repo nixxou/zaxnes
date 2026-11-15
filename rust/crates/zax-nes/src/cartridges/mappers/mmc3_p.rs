@@ -103,6 +103,10 @@ pub enum Mmc3PKind {
     /// of four 256 KiB games from A13-A14; game 0 pages CIRAM like the `TxSROM`, game 2 has a
     /// CHR-RAM mode and game 3 its own `$C000`/`$E000` banks.
     M353,
+    /// 100, `mapper_100.c` (Nesticle's "buggy MMC3" images): the chip's IRQ and mirroring, but
+    /// the bank select is a whole byte whose values `$00-$07`, `$46`/`$47` and `$80-$85` load
+    /// eight 1 KiB CHR and four 8 KiB PRG registers directly, with no PRG/CHR mode.
+    M100,
 }
 
 impl Mmc3PKind {
@@ -141,6 +145,7 @@ impl Mmc3PKind {
             356 => Self::M356,
             269 => Self::M269,
             353 => Self::M353,
+            100 => Self::M100,
             _ => return None,
         })
     }
@@ -178,6 +183,7 @@ impl Mmc3PKind {
             Self::M356 => 356,
             Self::M269 => 269,
             Self::M353 => 353,
+            Self::M100 => 100,
         }
     }
 }
@@ -204,6 +210,9 @@ pub struct Mmc3P {
     /// The last value written to the chip's `$A000`, which 356 returns to when it leaves its
     /// four-screen mode (the chip keeps no copy).
     a000: u8,
+    /// Mapper 100's bank select, four PRG and eight CHR registers (`m100.reg`, `.prg`,
+    /// `.chr`), saved for that kind only.
+    raw_100: [u8; 13],
 }
 
 impl Mmc3P {
@@ -216,6 +225,7 @@ impl Mmc3P {
             chr_ram: memory.rom().chr_rom().is_empty(),
             prg_size: memory.rom().prg_rom().len(),
             a000: 0,
+            raw_100: Self::RAW_100_POWER_ON,
             chr_269: if kind == Mmc3PKind::M269 {
                 Self::chr_269(memory)
             } else {
@@ -232,9 +242,35 @@ impl Mmc3P {
         }
     }
 
+    /// `map_init_100`: PRG 0, 1, `$FE`, `$FF`, CHR 0-7.
+    const RAW_100_POWER_ON: [u8; 13] = [0, 0, 1, 0xFE, 0xFF, 0, 1, 2, 3, 4, 5, 6, 7];
+
+    /// `extcl_cpu_wr_mem_100`: `$8000` the select byte, `$8001` the register it names.
+    fn write_100(&mut self, address: u16, value: u8) {
+        let r = &mut self.raw_100;
+        match address & 0xE001 {
+            0x8000 => r[0] = value,
+            0x8001 => match r[0] {
+                0x00 => [r[5], r[6]] = [value & 0xFE, value | 0x01],
+                0x01 => [r[7], r[8]] = [value & 0xFE, value | 0x01],
+                0x02..=0x05 => r[usize::from(r[0]) + 7] = value,
+                0x06 | 0x07 => r[usize::from(r[0]) - 5] = value,
+                0x46 => r[3] = value,
+                // puNES's `0x47` loads `prg[1]`, as FCEUX's mapper 100 does.
+                0x47 => r[2] = value,
+                0x80 => [r[9], r[10]] = [value & 0xFE, value | 0x01],
+                0x81 => [r[11], r[12]] = [value & 0xFE, value | 0x01],
+                0x82..=0x85 => r[usize::from(r[0]) - 0x82 + 5] = value,
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
     fn power_on(&mut self) {
         self.outer = [0; 4];
         self.index = 0;
+        self.raw_100 = Self::RAW_100_POWER_ON;
         match self.kind {
             // `map_init_372`/`_401`/`_410`/`_420`: "reg[2] = 0x0F", the CHR mask fully open.
             Mmc3PKind::M356
@@ -714,10 +750,15 @@ impl Mmc3P {
     /// Recomputes the twelve windows from the chip and the outer registers.
     fn refresh(&mut self) {
         let raw_prg = self.mmc3_prg();
-        let prg: [i32; BankWindows::PRG_WINDOWS] =
-            std::array::from_fn(|slot| self.prg_page(slot, raw_prg[slot]));
+        let prg: [i32; BankWindows::PRG_WINDOWS] = if self.kind == Mmc3PKind::M100 {
+            std::array::from_fn(|slot| i32::from(self.raw_100[1 + slot]))
+        } else {
+            std::array::from_fn(|slot| self.prg_page(slot, raw_prg[slot]))
+        };
         let raw_chr = self.mmc3_chr();
-        let chr: [i32; BankWindows::CHR_WINDOWS] = if self.chr_ram_mode() {
+        let chr: [i32; BankWindows::CHR_WINDOWS] = if self.kind == Mmc3PKind::M100 {
+            std::array::from_fn(|slot| i32::from(self.raw_100[5 + slot]))
+        } else if self.chr_ram_mode() {
             std::array::from_fn(|slot| i32::try_from(slot).unwrap_or(0))
         } else if self.kind == Mmc3PKind::M412 && self.outer[2] & 0x02 != 0 {
             // `chr_swap_mmc3_412` in the NROM mode: an 8 KiB bank from `reg[0]` D2 up.
@@ -1025,6 +1066,9 @@ impl Mapper for Mmc3P {
         }
         writer.write_u8(self.index);
         writer.write_u8(self.a000);
+        if self.kind == Mmc3PKind::M100 {
+            writer.write_raw(&self.raw_100);
+        }
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -1034,6 +1078,9 @@ impl Mapper for Mmc3P {
         }
         self.index = reader.read_u8()? & 0x03;
         self.a000 = reader.read_u8()?;
+        if self.kind == Mmc3PKind::M100 {
+            reader.read_into(&mut self.raw_100)?;
+        }
         self.refresh();
         Ok(())
     }
@@ -1076,6 +1123,9 @@ impl Mapper for Mmc3P {
         }
         if address & 0xE001 == 0xA000 {
             self.a000 = value;
+        }
+        if self.kind == Mmc3PKind::M100 {
+            self.write_100(address, value);
         }
         // `extcl_cpu_wr_mem_353`: `$x080` selects the game from A13-A14.
         if self.kind == Mmc3PKind::M353 && address & 0x0FFF == 0x0080 {

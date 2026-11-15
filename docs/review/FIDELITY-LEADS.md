@@ -991,6 +991,9 @@ places where puNES itself is incomplete are copied, not invented around:
   CHR-RAM mode of game 2. No dump in the Hackset.
 * 281/282/295 apply puNES's outer bank to ROM nametables too (`mirroring_swap_jyasic_28x`); with
   no dump in the Hackset this is untested on a real image.
+* 100 (`mapper_100.c`): puNES's `irqA12_delay = 1` for this board and its jump to a trainer's
+  `$7000` on power-up are not modelled; the chip's IRQ is the standard MMC3's and the trainer is
+  loaded where the core loads it. puNES's select value `$47` loads `prg[1]`, as written.
 
 ### J36. Mapper 682 (Rainbow): the ESP is modelled from the protocol document
 The ESP (`rainbow_esp.rs`) follows Broke Studio's `rainbow-net.md` and `mapper-doc.md`; no
