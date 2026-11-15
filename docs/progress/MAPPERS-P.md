@@ -50,7 +50,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 339 | `mapper_339.c` | 97 | 1 | 0 | done (batch 12, `Mmc3P`) |
 | 340 | `mapper_340.c` | 79 | 1 | 0 | done (batch 17, `MultiP`) |
 | 341 | `mapper_341.c` | 67 | 1 | 0 | done (batch 2, `MultiP`) |
-| 342 | `mapper_342.c` | 2381 | 9 | 0 | todo |
+| 342 | `mapper_342.c` | 2381 | 9 | 0 | done (batch 56, `IrqP` + `cool_girl.rs`) |
 | 343 | `mapper_343.c` | 71 | 0 | 0 | done (batch 2, `MultiP`) |
 | 344 | `mapper_344.c` | 125 | 3 | 0 | done (batch 24, `Mmc3P`) |
 | 345 | `mapper_345.c` | 102 | 0 | 0 | done (batch 12, `Mmc3P`) |
@@ -403,3 +403,16 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   `FlashRom`'s and `CartridgeMemory`'s flash `cfg`s take `board-446`. `IrqBoard` forwards
   `rom_windows` and `expansion_audio_output` for it; 446 is in both PPU-bus lists (MMC3) and in
   `nametable_pages_vary` (VRC6, MMC3).
+* Batch 56: 342 (COOLGIRL) as an `IrqP` kind over a new `cool_girl.rs` holding the FPGA
+  (`mapper_342.c`, after FCEUX `m342.cpp`): the `$5000-$5007` configuration until `$5007` D7
+  locks it, the 1 GiB PRG bank space through `prg.base`/`prg.mask` and modes 0-7, the CHR-RAM
+  modes 0-7 through `chr.mask` (mapper 24's halved banks), `$6000` as work RAM (four 8 KiB pages)
+  or a ROM bank, the personalities 1-37 (UxROM, CNROM, 78, 97, 93, 18, AxROM/BNROM, 228, Color
+  Dreams, GxROM, 87, 90, 65, MMC5 subset, MMC1, MMC2/MMC4, 152, VRC3, MMC3/TxSROM/189, 112,
+  33/48, 42, VRC2/VRC4, FME-7, G-101, 79/146, 133, 36, 70, 184, 38, VRC1, 83, 67, 89, 163) with
+  their CPU-cycle IRQs, the MMC2 latches, the mapper-189 CIRAM pages, and the NOR flash command
+  set (sector erase, byte program, CFI table) over the save area, the top 8 MiB of the bank
+  space, kept by 8 KiB page as written. Reads go through `cpu_read_override` (the `$5204`
+  acknowledge); `IrqBoard` forwards that override for `board-342`. 342 is in `irq_p_a12_board`,
+  `nametable_pages_vary` and the mf_3b sweep. The MAPPERS-P list is done: 133 of the 135
+  numbers, 186 refused, 355, 532 and 562 blocked.

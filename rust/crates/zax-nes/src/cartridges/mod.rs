@@ -575,6 +575,8 @@ const fn nametable_pages_vary(mapper: i32) -> bool {
             | 560
             // MAPPERS-P: 547 serves the console's tables and its QT RAM itself.
             | 547
+            // MAPPERS-P: 342 (COOLGIRL) pages CIRAM from the CHR registers' D7 as mapper 189.
+            | 342
             // MAPPERS-P: 446's VRC6 and MMC3 arrange the tables themselves (`ChipSwitch`).
             | 446
             // MAPPERS-P: 559, a 1 KiB nametable register per table.
@@ -633,6 +635,8 @@ const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
             | 529
             // MAPPERS-N: mapper 266's VRC4 IRQ (nesdev "NES 2.0 Mapper 266").
             | 266
+            // MAPPERS-P: mapper 342, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
+            | 342
             // MAPPERS-P: mapper 446, `ChipSwitch` (its VRC4 IRQ, puNES `EXTCL_CPU_EVERY_CYCLE`).
             | 446
             // MAPPERS-P: mapper 436, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
@@ -918,10 +922,10 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
 
 /// Lot MAPPERS-P's `IrqP` boards with an A12 counter, in both PPU-bus lists: 471 (an IRQ on
 /// every rise), 413 and the `OneBus` chips 256 and 436 (MMC3-style counters), 359 and 540 (their
-/// IRQ clocked on rises). A list of its own, as [`mmc3_p_board`] is, to keep both functions
+/// IRQ clocked on rises), 342 (its scanline counters and MMC2 latches on the fetches). A list of its own, as [`mmc3_p_board`] is, to keep both functions
 /// under `clippy::too_many_lines`.
 const fn irq_p_a12_board(mapper: i32) -> bool {
-    matches!(mapper, 471 | 413 | 256 | 436 | 359 | 540)
+    matches!(mapper, 471 | 413 | 256 | 436 | 359 | 540 | 342)
 }
 
 /// The second of the two lists [`watches_ppu_reads`] documents: the boards that also move when
@@ -2403,6 +2407,8 @@ mod tests {
             // A13 latch and 413 an A12 counter (`IrqP`); 369 and 512 are `Mmc3P` boards.
             556, 351, 560, 413, 369, 512, 406, 451, 256,
             436,
+            // MAPPERS-P: 342 (COOLGIRL) tracks its lines and MMC2 latches on the fetches.
+            342,
             // MAPPERS-P: 272 is latched too but absent here: its counter only moves once a game
             // enables it, and the sweep enables nothing.
         ] {

@@ -1082,6 +1082,19 @@ places where puNES itself is incomplete are copied, not invented around:
   read (puNES `extcl_cpu_rd_mem_VRC2and4`) is whatever `Vrc2Vrc4` answers for mapper 22. The board
   reports expansion audio always (0 unless the VRC6 runs), so the APU is stepped every cycle for
   every 446 image. The flash chip uses the shared `JedecFlash` (`SST39SF040.c`, 128 KiB sectors).
+* 342 (`mapper_342.c`, COOLGIRL): puNES runs the scanline work (the MMC3 counter, the MMC5 line
+  compare, mapper 163's latch at lines 127 and 239) at dot 260 of each rendered line. No hook
+  sees PPU dots here, so `CoolGirl` finds the lines on its own bus as the MMC5 does (three
+  identical nametable reads end a line) and runs that work on the first fetch at or past 259
+  dots into a line; a gap of two lines leaves the frame. With rendering off nothing counts,
+  which matches the hardware's view of the bus but not puNES's. The `$5204` in-frame bit uses
+  the same tracker. The save area (the top 8 MiB of the 1 GiB bank space, puNES's
+  `SAVE_FLASH_SIZE`) is in the savestate but not persisted by the host: puNES writes it to the
+  game's save file, and the host here has no flash save beyond `FlashRom` (lead: route it
+  through `CartridgeMemory` like the flash boards). Unwritten save pages read 0, as puNES's
+  zeroed buffer does, not `$FF` like an erased chip. The PRG flash outside the save area is
+  read-only here, as puNES's ROM is. Mapper 75's `$9000` write sets `chr.e` from `chr.a`'s other
+  bits, a reading of puNES's code kept as written.
 
 ### J36. Mapper 682 (Rainbow): the ESP is modelled from the protocol document
 The ESP (`rainbow_esp.rs`) follows Broke Studio's `rainbow-net.md` and `mapper-doc.md`; no

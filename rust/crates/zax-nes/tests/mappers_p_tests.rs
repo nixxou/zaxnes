@@ -1855,3 +1855,61 @@ fn mappers_p_446_flashes_its_menu_and_locks_a_personality() {
     assert_eq!([16, 17, 18, 31], core.prg_windows());
     assert!(core.cartridge().unwrap().expansion_audio_output().is_some());
 }
+
+/// `mapper_342.c` (COOLGIRL): power-on 16 KiB banks `prg.a` = 0 and `prg.c` = `$FE` through the
+/// `$F8` mask; unlocked, `$5000-$5007` set the base, mask and personality (here `UxROM`, then the
+/// MMC3); the top 8 MiB of the bank space is the flash's save area, programmed by the JEDEC
+/// sequence while `$5007` D2 is set, and `$98` at `$0AAA` shows the CFI table.
+#[cfg(feature = "board-342")]
+#[test]
+fn mappers_p_342_runs_its_personalities_and_flashes_its_save_area() {
+    let mut core = MapperRom::new(342).prg(32).load();
+    assert_eq!([0, 1, 14, 15], core.prg_windows());
+    // `UxROM` (mapper 1) with the whole bank space.
+    core.mapper_write(0x5002, 0x00);
+    core.mapper_write(0x5006, 0x01);
+    core.mapper_write(0x8000, 0x05);
+    assert_eq!([10, 11, 30, 31], core.prg_windows());
+
+    // The save area: base `$FE00` maps `prg.a` 0 to bank `$1FC00`.
+    core.mapper_write(0x5000, 0xFE);
+    core.mapper_write(0x5001, 0x00);
+    core.mapper_write(0x5006, 0x00);
+    core.mapper_write(0x5007, 0x04);
+    assert_eq!(0, core.read_memory(0x8000));
+    for (address, value) in [
+        (0x8AAA, 0xAA),
+        (0x8555, 0x55),
+        (0x8AAA, 0xA0),
+        (0x8000, 0x42),
+    ] {
+        core.mapper_write(address, value);
+    }
+    assert_eq!(0x42, core.read_memory(0x8000));
+    core.mapper_write(0x8AAA, 0x98);
+    assert_eq!(0x51, core.read_memory(0x8020));
+    core.mapper_write(0x8000, 0xF0);
+    assert_eq!(0x42, core.read_memory(0x8000));
+
+    // The MMC3 (mapper 20): its counter runs at dot 260 of the lines the board sees end.
+    core.mapper_write(0x5007, 0x00);
+    core.mapper_write(0x5006, 0x14);
+    core.mapper_write(0xC000, 1);
+    core.mapper_write(0xC001, 0);
+    core.mapper_write(0xE001, 0);
+    let cartridge = core.cartridge_mut().unwrap();
+    for line in 0..2 {
+        assert!(!cartridge.irq_asserted(), "line {line}");
+        let base = line * 341;
+        for (address, dot) in [
+            (0x2400, 0),
+            (0x2400, 1),
+            (0x2400, 2),
+            (0x23C0, 3),
+            (0x1000, 263),
+        ] {
+            cartridge.on_ppu_address_bus(address, base + dot);
+        }
+    }
+    assert!(cartridge.irq_asserted());
+}

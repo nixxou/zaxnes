@@ -815,7 +815,8 @@ impl Mapper for IrqBoard {
         feature = "board-529",
         feature = "board-284",
         feature = "board-682",
-        feature = "board-413"
+        feature = "board-413",
+        feature = "board-342"
     ))]
     #[inline(never)]
     fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
@@ -830,7 +831,8 @@ impl Mapper for IrqBoard {
         feature = "board-529",
         feature = "board-284",
         feature = "board-682",
-        feature = "board-413"
+        feature = "board-413",
+        feature = "board-342"
     ))]
     #[inline(never)]
     fn cpu_peek_override(&self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {

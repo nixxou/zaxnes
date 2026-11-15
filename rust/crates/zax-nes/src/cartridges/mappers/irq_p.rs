@@ -6,6 +6,8 @@
 //! [`Mapper::on_cpu_cycle`] and the line on [`Mapper::irq_asserted`], which that enum forwards.
 //! The PRG-ROM these boards show at `$5000`/`$6000` is answered by [`Mapper::try_read_prg`], with
 //! the work RAM disabled ([`Mapper::prg_ram_enabled`]).
+#[cfg(feature = "board-342")]
+use super::cool_girl::CoolGirl;
 #[cfg(any(feature = "board-256", feature = "board-436"))]
 use super::one_bus::OneBus;
 use super::vrc_irq::VrcIrq;
@@ -103,6 +105,9 @@ pub enum IrqPKind {
     /// 436, `mapper_436.c`: a `OneBus` multicart, its outer PRG and CHR banks from `$4100` and
     /// `$410F` (submapper 0) or `$411C`/`$410F` (submapper 1).
     M436,
+    /// 342, `mapper_342.c` (COOLGIRL): an FPGA re-implementing some thirty mappers, its PRG a
+    /// NOR flash with a save area ([`super::cool_girl`]).
+    M342,
 }
 
 impl IrqPKind {
@@ -129,6 +134,7 @@ impl IrqPKind {
             561 => Self::M561,
             256 => Self::M256,
             436 => Self::M436,
+            342 => Self::M342,
             _ => return None,
         })
     }
@@ -154,6 +160,7 @@ impl IrqPKind {
             Self::M561 => 561,
             Self::M256 => 256,
             Self::M436 => 436,
+            Self::M342 => 342,
         }
     }
 }
@@ -207,6 +214,9 @@ pub struct IrqP {
     /// 256's and 436's `OneBus` chip, `None` for the other kinds; saved for those kinds.
     #[cfg(any(feature = "board-256", feature = "board-436"))]
     one_bus: Option<Box<OneBus>>,
+    /// 342's FPGA, `None` for the other kinds; saved for that kind.
+    #[cfg(feature = "board-342")]
+    cool_girl: Option<Box<CoolGirl>>,
     /// 528's VRC7 IRQ (`init_VRC7(0x01, 0x00)`), saved for that kind only.
     vrc_irq: VrcIrq,
     /// Whether the image has CHR-ROM, which 359's CHR banking needs (`chrrom_size()`).
@@ -252,6 +262,8 @@ impl IrqP {
                 IrqPKind::M436 => Some(Box::new(OneBus::new(memory, 436))),
                 _ => None,
             },
+            #[cfg(feature = "board-342")]
+            cool_girl: (kind == IrqPKind::M342).then(|| Box::new(CoolGirl::new())),
             nt_560: match kind {
                 IrqPKind::M560 => vec![0; NT_560],
                 IrqPKind::M547 => vec![0; NT_547],
@@ -350,8 +362,9 @@ impl IrqP {
             // `prg_fix_547`: three 8 KiB banks, `$E000` bank `$4F`; the CHR is read by
             // `ppu_peek`.
             IrqPKind::M547 => self.map_547(),
-            // `prg_fix_561`/`chr_fix_561` read the copier RAM in `try_read_prg`/`ppu_peek`.
-            IrqPKind::M561 => {}
+            // `prg_fix_561`/`chr_fix_561` read the copier RAM in `try_read_prg`/`ppu_peek`; 342
+            // decodes its own windows (`CoolGirl`).
+            IrqPKind::M561 | IrqPKind::M342 => {}
             IrqPKind::M256 | IrqPKind::M436 => self.map_one_bus(),
             // `prg_fix_560`.
             IrqPKind::M560 => {
@@ -597,6 +610,57 @@ impl IrqP {
             for (slot, bank) in chip.prg_banks().into_iter().enumerate() {
                 self.banks.map_prg_8k(slot, i32::from(bank));
             }
+        }
+    }
+
+    /// `mirroring_fix_342`.
+    fn cool_girl_mirroring(&self) -> Option<NametableMirroring> {
+        #[cfg(feature = "board-342")]
+        if let Some(chip) = &self.cool_girl {
+            return chip.mirroring();
+        }
+        None
+    }
+
+    /// Mapper 189's CIRAM page of `table` on the COOLGIRL.
+    #[allow(clippy::unused_self)]
+    fn cool_girl_page(&self, table: i32) -> Option<i32> {
+        #[cfg(feature = "board-342")]
+        if let Some(chip) = &self.cool_girl {
+            return chip
+                .nametable_page(usize::try_from(table & 0x03).unwrap_or(0))
+                .map(i32::from);
+        }
+        let _ = table;
+        None
+    }
+
+    /// `extcl_cpu_every_cycle_342`.
+    fn step_cool_girl(&mut self) {
+        #[cfg(feature = "board-342")]
+        if let Some(chip) = &mut self.cool_girl {
+            chip.step_cpu();
+        }
+    }
+
+    /// A COOLGIRL read of `$4020-$FFFF` past its registers: the work RAM or the ROM bank at
+    /// `$6000`, the windows at `$8000`, open bus below `$6000`.
+    #[cfg(feature = "board-342")]
+    fn read_cool_girl(chip: &CoolGirl, memory: &CartridgeMemory, address: u16) -> Option<u8> {
+        let rom = memory.rom().prg_rom();
+        match address {
+            0x8000.. => Some(chip.read_prg(rom, address)),
+            0x6000.. => Some(match chip.ram_offset(address) {
+                Some(offset) => {
+                    let ram = memory.prg_ram();
+                    if ram.is_empty() {
+                        return None;
+                    }
+                    ram[offset % ram.len()]
+                }
+                None => chip.read_low_rom(rom, address),
+            }),
+            _ => None,
         }
     }
 
@@ -999,6 +1063,7 @@ impl IrqP {
                 _ => NametableMirroring::Horizontal,
             }),
             IrqPKind::M256 | IrqPKind::M436 => self.one_bus_mirroring(),
+            IrqPKind::M342 => self.cool_girl_mirroring(),
             // `mirroring_fix_547`.
             IrqPKind::M547 => Some(if self.ext_547[10] & 0x02 != 0 {
                 NametableMirroring::Horizontal
@@ -1153,8 +1218,9 @@ impl IrqP {
                     r[0] = value;
                 }
             }
-            // `extcl_cpu_wr_mem_558` decodes `$5000-$53FF` only ([`IrqP::write_558`]).
-            IrqPKind::M558 => {}
+            // `extcl_cpu_wr_mem_558` decodes `$5000-$53FF` only ([`IrqP::write_558`]); 342's writes
+            // go to its FPGA before this decode.
+            IrqPKind::M558 | IrqPKind::M342 => {}
         }
     }
 }
@@ -1208,6 +1274,10 @@ impl Mapper for IrqP {
         if self.kind == IrqPKind::M471 {
             self.a12.save_state(writer);
         }
+        #[cfg(feature = "board-342")]
+        if let Some(chip) = &self.cool_girl {
+            chip.save_state(writer);
+        }
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -1252,17 +1322,31 @@ impl Mapper for IrqP {
         if self.kind == IrqPKind::M471 {
             self.a12.load_state(reader)?;
         }
+        #[cfg(feature = "board-342")]
+        if let Some(chip) = &mut self.cool_girl {
+            chip.load_state(reader)?;
+        }
         self.map();
         Ok(())
     }
 
     fn reset(&mut self, memory: &mut CartridgeMemory) {
         let kind = self.kind;
-        *self = Self::new(memory, kind);
+        #[allow(unused_mut)]
+        let mut old = std::mem::replace(self, Self::new(memory, kind));
+        #[cfg(feature = "board-342")]
+        if let (Some(chip), Some(previous)) = (&mut self.cool_girl, &mut old.cool_girl) {
+            chip.keep_save(previous);
+        }
+        let _ = old;
         self.settle(memory);
     }
 
     fn irq_asserted(&self) -> bool {
+        #[cfg(feature = "board-342")]
+        if let Some(chip) = &self.cool_girl {
+            return chip.irq;
+        }
         #[cfg(any(feature = "board-256", feature = "board-436"))]
         if let Some(chip) = &self.one_bus {
             return chip.irq_pending || chip.pcm_irq();
@@ -1344,6 +1428,8 @@ impl Mapper for IrqP {
             // `extcl_cpu_every_cycle_561`: the FDS-style timer gains 3 a cycle and asserts every
             // 448 while `irq.reg` D7 is set; the count-up asserts on reaching 0 from below.
             IrqPKind::M561 => self.step_561(),
+            // `extcl_cpu_every_cycle_342`.
+            IrqPKind::M342 => self.step_cool_girl(),
             // `extcl_cpu_every_cycle_547`: a 16-bit up-counter, reloaded and asserting on its wrap.
             IrqPKind::M547 => {
                 if self.irq_enabled {
@@ -1366,6 +1452,11 @@ impl Mapper for IrqP {
     /// `irq_clock_471`: puNES compares the background and sprite pattern addresses through the
     /// line and asserts on a rise of A12, which is the filtered rise the MMC3 counts.
     fn on_ppu_address_bus(&mut self, _memory: &mut CartridgeMemory, address: u16, clock: i64) {
+        #[cfg(feature = "board-342")]
+        if let Some(chip) = &mut self.cool_girl {
+            chip.on_ppu_bus(address, clock);
+            return;
+        }
         if self.kind == IrqPKind::M471 && self.a12.rose(address, clock) {
             self.irq_pending = true;
         }
@@ -1501,6 +1592,22 @@ impl Mapper for IrqP {
         address: u16,
         value: u8,
     ) -> bool {
+        #[cfg(feature = "board-342")]
+        if let Some(chip) = &mut self.cool_girl {
+            if address >= 0x8000 {
+                return false;
+            }
+            if let Some(offset) = chip.ram_offset(address) {
+                let ram = memory.prg_ram_mut();
+                if !ram.is_empty() {
+                    let len = ram.len();
+                    ram[offset % len] = value;
+                }
+            }
+            chip.write(address, value);
+            self.settle(memory);
+            return true;
+        }
         // 547's work RAM, in 4 KiB windows.
         if self.kind == IrqPKind::M547 && (0x6000..0x8000).contains(&address) {
             let offset = self.ram_offset_547(address);
@@ -1531,6 +1638,12 @@ impl Mapper for IrqP {
         if address < 0x8000 {
             return;
         }
+        #[cfg(feature = "board-342")]
+        if let Some(chip) = &mut self.cool_girl {
+            chip.write(address, value);
+            self.settle(memory);
+            return;
+        }
         // `memmap_auto_wp_8k(…, !(reg1m & 2))`: with the latch off the copier RAM takes the write.
         if self.kind == IrqPKind::M561 && self.ext_561[2] & 0x02 == 0 {
             let offset = self.prg_offset_561(address);
@@ -1553,6 +1666,7 @@ impl Mapper for IrqP {
                 | IrqPKind::M561
                 | IrqPKind::M256
                 | IrqPKind::M436
+                | IrqPKind::M342
         ) {
             return None;
         }
@@ -1570,6 +1684,17 @@ impl Mapper for IrqP {
     fn ppu_peek(&self, memory: &CartridgeMemory, address: u16, fetch: ChrFetch) -> u8 {
         if self.kind == IrqPKind::M547 && address < 0x2000 {
             return self.chr_547(memory, address, fetch);
+        }
+        #[cfg(feature = "board-342")]
+        if let Some(chip) = &self.cool_girl {
+            if address < 0x2000 {
+                let ram = memory.chr_ram();
+                return if ram.is_empty() {
+                    0
+                } else {
+                    ram[chip.chr_offset(address) % ram.len()]
+                };
+            }
         }
         #[cfg(any(feature = "board-256", feature = "board-436"))]
         if let Some(chip) = &self.one_bus {
@@ -1622,6 +1747,18 @@ impl Mapper for IrqP {
     /// 547's CHR-RAM, as its non-background reads see it.
     fn ppu_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         if address >= 0x2000 {
+            return;
+        }
+        #[cfg(feature = "board-342")]
+        if let Some(chip) = &self.cool_girl {
+            if chip.chr_writable() {
+                let offset = chip.chr_offset(address);
+                let ram = memory.chr_ram_mut();
+                if !ram.is_empty() {
+                    let len = ram.len();
+                    ram[offset % len] = value;
+                }
+            }
             return;
         }
         // The OneBus patterns are ROM.
@@ -1713,7 +1850,17 @@ impl Mapper for IrqP {
         })
     }
 
-    fn cpu_read_override(&mut self, _memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+    fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+        #[cfg(feature = "board-342")]
+        if let Some(chip) = &mut self.cool_girl {
+            if address < 0x6000 {
+                if let Some(value) = chip.read_register(address) {
+                    return Some(Some(value));
+                }
+            }
+            return Some(Self::read_cool_girl(chip, memory, address));
+        }
+        let _ = memory;
         let value = self.read_413(address)?;
         if self.nametables[1] & 0x02 != 0 {
             self.serial_413 = self.serial_413.wrapping_add(1);
@@ -1721,7 +1868,17 @@ impl Mapper for IrqP {
         Some(value)
     }
 
-    fn cpu_peek_override(&self, _memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+    fn cpu_peek_override(&self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+        #[cfg(feature = "board-342")]
+        if let Some(chip) = &self.cool_girl {
+            if address < 0x6000 {
+                if let Some(value) = chip.peek_register(address) {
+                    return Some(Some(value));
+                }
+            }
+            return Some(Self::read_cool_girl(chip, memory, address));
+        }
+        let _ = memory;
         self.read_413(address)
     }
 
@@ -1731,8 +1888,8 @@ impl Mapper for IrqP {
         if matches!(self.kind, IrqPKind::M413 | IrqPKind::M547) {
             windows[2] = super::NO_ROM_WINDOW;
         }
-        // 561's PRG is its own copier RAM.
-        if self.kind == IrqPKind::M561 {
+        // 561's PRG is its own copier RAM; 342 reads through its own windows.
+        if matches!(self.kind, IrqPKind::M561 | IrqPKind::M342) {
             windows = [super::NO_ROM_WINDOW; 4];
         }
         windows
@@ -1779,6 +1936,8 @@ impl Mapper for IrqP {
             i32::from(self.nametables[usize::try_from(table & 0x03).unwrap_or(0)] & 0x01)
         } else if matches!(self.kind, IrqPKind::M560 | IrqPKind::M547) {
             super::super::Cartridge::SERVED_BY_CARTRIDGE
+        } else if let Some(page) = self.cool_girl_page(table) {
+            page
         } else {
             super::super::Cartridge::FOLLOW_MIRRORING
         }

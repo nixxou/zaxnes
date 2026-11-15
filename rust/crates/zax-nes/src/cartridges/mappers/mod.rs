@@ -41,6 +41,8 @@ mod city_fighter;
 mod cnrom_protect;
 #[cfg(feature = "board-cony")]
 mod cony;
+#[cfg(feature = "board-342")]
+mod cool_girl;
 mod daou306;
 #[cfg(feature = "board-decode-boards")]
 mod decode_boards;

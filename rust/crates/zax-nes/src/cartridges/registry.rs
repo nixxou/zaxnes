@@ -762,6 +762,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     340,
     #[cfg(feature = "board-341")]
     341,
+    #[cfg(feature = "board-342")]
+    342,
     #[cfg(feature = "board-343")]
     343,
     #[cfg(feature = "board-344")]
@@ -1117,6 +1119,14 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         },
         // MAPPERS-P: 446's PRG-ROM is a flash chip with 128 KiB sectors, its menu's save medium
         // (puNES `sst39sf040_init(…, 131072)`, `force_battery_io`).
+        // MAPPERS-P: 342 (COOLGIRL) has 32 KiB of work RAM in four pages and, when the header
+        // states none, 256 KiB of CHR-RAM (puNES `map_init_342`).
+        #[cfg(feature = "board-342")]
+        342 => BoardMemorySizes {
+            prg_ram: Some(0x8000),
+            chr_ram: (header.chr_rom_size == 0).then_some(0x4_0000),
+            ..BoardMemorySizes::default()
+        },
         #[cfg(feature = "board-446")]
         446 => BoardMemorySizes {
             flash_sector: Some(0x2_0000),
@@ -3685,6 +3695,11 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         446 => Board::IrqBoard(IrqBoard::ChipSwitch(Box::new(ChipSwitch::new(
             memory,
             ChipSwitchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-342")]
+        342 => Board::IrqBoard(IrqBoard::IrqP(Box::new(IrqP::new(
+            memory,
+            IrqPKind::of(mapper)?,
         )))),
         #[cfg(feature = "board-299")]
         299 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
