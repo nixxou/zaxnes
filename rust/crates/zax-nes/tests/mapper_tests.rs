@@ -256,7 +256,7 @@ fn req_core_100_every_required_mapper_is_registered() {
     let sachen8259 = cfg!(feature = "board-sachen8259");
     let huang1 = cfg!(feature = "board-huang1");
     let cony = cfg!(feature = "board-cony");
-    let additions: [(i32, bool); 152] = [
+    let additions: [(i32, bool); 170] = [
         (12, huang1),
         (14, huang1),
         (19, true),
@@ -270,13 +270,18 @@ fn req_core_100_every_required_mapper_is_registered() {
         (38, cfg!(feature = "board-38")),
         (44, cfg!(feature = "board-44")),
         (45, cfg!(feature = "board-45")),
+        (46, cfg!(feature = "board-46")),
         (47, multicart),
         (48, true),
         (49, cfg!(feature = "board-49")),
+        (51, cfg!(feature = "board-51")),
         (52, cfg!(feature = "board-52")),
         (57, cfg!(feature = "board-57")),
         (58, cfg!(feature = "board-58")),
         (59, cfg!(feature = "board-59")),
+        (60, cfg!(feature = "board-60")),
+        (61, cfg!(feature = "board-61")),
+        (62, cfg!(feature = "board-62")),
         (63, cfg!(feature = "board-63")),
         (65, true),
         (67, true),
@@ -309,17 +314,22 @@ fn req_core_100_every_required_mapper_is_registered() {
         // MF-VS step 4: mapper 99 is the VS. System board itself and 151 the VRC1 on a VS board,
         // two numbers that exist only on that machine.
         (99, cfg!(feature = "board-vs-system")),
+        (104, cfg!(feature = "board-104")),
         (105, cfg!(feature = "board-105")),
         (107, cfg!(feature = "board-107")),
+        (108, cfg!(feature = "board-108")),
         (111, cfg!(feature = "board-111")),
         (112, cfg!(feature = "board-112")),
+        (113, cfg!(feature = "board-113")),
         (114, scramble),
         (115, scramble),
         (116, cfg!(feature = "board-116")),
         (118, true),
         (119, cfg!(feature = "board-119")),
+        (120, cfg!(feature = "board-120")),
         (121, scramble),
         (123, scramble),
+        (125, cfg!(feature = "board-125")),
         (132, jv001),
         (133, cfg!(feature = "board-133")),
         (134, cfg!(feature = "board-134")),
@@ -348,9 +358,13 @@ fn req_core_100_every_required_mapper_is_registered() {
         (162, cfg!(feature = "board-162")),
         (163, cfg!(feature = "board-163")),
         (164, cfg!(feature = "board-164")),
+        (170, cfg!(feature = "board-170")),
         (172, jv001),
         (173, jv001),
+        (174, cfg!(feature = "board-174")),
+        (177, cfg!(feature = "board-177")),
         (178, cfg!(feature = "board-178")),
+        (179, cfg!(feature = "board-179")),
         (180, true),
         (182, scramble),
         (184, small),
@@ -380,6 +394,7 @@ fn req_core_100_every_required_mapper_is_registered() {
         (213, cfg!(feature = "board-213")),
         (214, cfg!(feature = "board-214")),
         (215, cfg!(feature = "board-215")),
+        (216, cfg!(feature = "board-216")),
         (218, cfg!(feature = "board-218")),
         (219, cfg!(feature = "board-219")),
         (221, cfg!(feature = "board-221")),
@@ -404,10 +419,13 @@ fn req_core_100_every_required_mapper_is_registered() {
         (250, cfg!(feature = "board-250")),
         (253, cfg!(feature = "board-253")),
         (255, cfg!(feature = "board-255")),
+        (261, cfg!(feature = "board-261")),
         (262, cfg!(feature = "board-262")),
         (263, cfg!(feature = "board-263")),
         (264, cony),
         (268, cfg!(feature = "board-268")),
+        (274, cfg!(feature = "board-274")),
+        (286, cfg!(feature = "board-286")),
         (292, cfg!(feature = "board-292")),
         (298, cfg!(feature = "board-298")),
         (552, taito_x1),
@@ -430,7 +448,7 @@ fn req_core_102_any_other_mapper_is_refused() {
     // REQ-CORE-011 refuses it"; MF-6a3 step 4 implements it instead, behind `board-116`, so the
     // sweep drops it exactly when that feature is on. REQ-CORE-102's own acceptance criterion
     // (mapper 200) is untouched either way, which is the other half of Q-130.
-    let mut refused = vec![6usize, 177, 200];
+    let mut refused = vec![6usize, 84, 200];
     if !cfg!(feature = "board-116") {
         refused.insert(1, 116);
     }

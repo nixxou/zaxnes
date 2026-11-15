@@ -390,6 +390,14 @@ impl Mapper for DecodeBoard {
     /// **Behaviour-neutral for every other board here**: none of them overrides it, so each takes
     /// `Mapper`'s own default — the four offsets of its `BankWindows` — which is what the
     /// un-forwarded dispatch gave the whole variant.
+    /// Forwarded for lot MAPPERS-N's `LatchMulti` alone, whose kinds 46, 51, 108, 120, 125 and
+    /// 170 put PRG-ROM or a register — never work RAM — at `$6000-$7FFF`. Asked once per CPU write,
+    /// through `cpu_read_windows`, and not once per read, as `prg_ram_window` above.
+    #[cfg(feature = "board-latch-multi")]
+    fn prg_ram_enabled(&self) -> bool {
+        inner!(self, b => b.prg_ram_enabled())
+    }
+
     #[cfg(any(feature = "board-246", feature = "board-latch-multi"))]
     fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {
         inner!(self, b => b.rom_windows(memory))

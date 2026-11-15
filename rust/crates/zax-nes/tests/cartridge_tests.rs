@@ -45,7 +45,9 @@ fn req_core_102_an_unimplemented_mapper_is_refused_by_name() {
     // `break`s out of, with "They are **not** candidates for any sub-lot", and §6 item 2 names
     // **186** among them: the Study Box, "which Mesen loads as a BIOS and not as a ROM". A number
     // that is not a cartridge board at all cannot be implemented by a later mapper lot.
-    for mapper in [6, 177, 186, 200] {
+    // MAPPERS-N implemented 177 (Henggedianzi), so 84 took its place: nesdev's "INES Mapper 084"
+    // is the Pasofami hack format and not a board, so no mapper lot can implement it.
+    for mapper in [6, 84, 186, 200] {
         assert!(!Cartridge::is_supported(mapper));
         let mut image = minimal();
         image[6] = (image[6] & 0x0F) | (((mapper & 0x0F) as u8) << 4);

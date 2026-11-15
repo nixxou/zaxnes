@@ -121,13 +121,7 @@ fn run(opcode: u8, long: bool) -> Vec<String> {
     cpu.step(&mut bus);
     bus.log
         .iter()
-        .map(|&(write, address)| {
-            format!(
-                "{}:{}",
-                if write { "W" } else { "R" },
-                class(address)
-            )
-        })
+        .map(|&(write, address)| format!("{}:{}", if write { "W" } else { "R" }, class(address)))
         .collect()
 }
 
@@ -138,8 +132,15 @@ fn every_opcode_matches_the_2a03_bus_table() {
     let mut checked = 0;
     for line in table.lines().filter(|line| !line.starts_with('#')) {
         let mut parts = line.split('|');
-        let head: Vec<&str> = parts.next().unwrap_or_default().split_whitespace().collect();
-        let Some(opcode) = head.first().and_then(|hex| u8::from_str_radix(hex, 16).ok()) else {
+        let head: Vec<&str> = parts
+            .next()
+            .unwrap_or_default()
+            .split_whitespace()
+            .collect();
+        let Some(opcode) = head
+            .first()
+            .and_then(|hex| u8::from_str_radix(hex, 16).ok())
+        else {
             continue;
         };
         if head.get(2) == Some(&"jam") {

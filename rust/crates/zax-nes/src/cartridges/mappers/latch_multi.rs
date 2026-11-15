@@ -91,6 +91,42 @@ pub enum LatchKind {
     M244,
     /// 255, `Unlicensed/Bmc255.h`.
     M255,
+    /// 46, `Unlicensed/ColorDreams46.h` (Rumble Station).
+    M46,
+    /// 51, `Unlicensed/Bmc51.h` (11-in-1 Ball Games).
+    M51,
+    /// 60, `Unlicensed/Mapper60.h` (reset-based 4-in-1).
+    M60,
+    /// 61, `Txc/Mapper61.h`.
+    M61,
+    /// 62, `Unlicensed/Mapper62.h`.
+    M62,
+    /// 104, `Codemasters/GoldenFive.h` (Golden Five / Pegasus 5-in-1).
+    M104,
+    /// 108, `Unlicensed/Bb.h` (FDS conversions).
+    M108,
+    /// 113, `Unlicensed/Nina03_06.h`, multicart mode.
+    M113,
+    /// 120, `Unlicensed/Mapper120.h` (Tobidase Daisakusen FDS conversion).
+    M120,
+    /// 125, `Whirlwind/Lh32.h` (Monty no Doki Doki Daisasso FDS conversion).
+    M125,
+    /// 170, `Unlicensed/Mapper170.h` (Fujiya protection).
+    M170,
+    /// 174, `Ntdec/Mapper174.h`.
+    M174,
+    /// 177, `Unlicensed/Henggedianzi177.h`.
+    M177,
+    /// 179, `Unlicensed/Henggedianzi179.h`.
+    M179,
+    /// 216, `Unlicensed/Mapper216.h` (Magic Jewelry II, Bonza).
+    M216,
+    /// 261, `Unlicensed/Bmc810544CA1.h`.
+    M261,
+    /// 274, `Unlicensed/Bmc80013B.h`.
+    M274,
+    /// 286, `Waixing/Bs5.h` (BS-5).
+    M286,
 }
 
 impl LatchKind {
@@ -124,6 +160,24 @@ impl LatchKind {
             242 => Self::M242,
             244 => Self::M244,
             255 => Self::M255,
+            46 => Self::M46,
+            51 => Self::M51,
+            60 => Self::M60,
+            61 => Self::M61,
+            62 => Self::M62,
+            104 => Self::M104,
+            108 => Self::M108,
+            113 => Self::M113,
+            120 => Self::M120,
+            125 => Self::M125,
+            170 => Self::M170,
+            174 => Self::M174,
+            177 => Self::M177,
+            179 => Self::M179,
+            216 => Self::M216,
+            261 => Self::M261,
+            274 => Self::M274,
+            286 => Self::M286,
             _ => return None,
         })
     }
@@ -156,6 +210,24 @@ impl LatchKind {
             Self::M242 => 242,
             Self::M244 => 244,
             Self::M255 => 255,
+            Self::M46 => 46,
+            Self::M51 => 51,
+            Self::M60 => 60,
+            Self::M61 => 61,
+            Self::M62 => 62,
+            Self::M104 => 104,
+            Self::M108 => 108,
+            Self::M113 => 113,
+            Self::M120 => 120,
+            Self::M125 => 125,
+            Self::M170 => 170,
+            Self::M174 => 174,
+            Self::M177 => 177,
+            Self::M179 => 179,
+            Self::M216 => 216,
+            Self::M261 => 261,
+            Self::M274 => 274,
+            Self::M286 => 286,
         }
     }
 
@@ -176,6 +248,10 @@ impl LatchKind {
                 | Self::M230
                 | Self::M242
                 | Self::M255
+                | Self::M174
+                | Self::M261
+                | Self::M274
+                | Self::M51
         )
     }
 }
@@ -188,12 +264,14 @@ pub struct LatchMulti {
     /// The latched write address (most kinds), or 221's mode register.
     addr: u16,
     /// The latched data registers, their meaning per kind.
-    regs: [u8; 4],
+    regs: [u8; 8],
     /// 230's *Contra* mode, 233's reset-toggled PRG bit, 59's DIP-switch read, 236's DIP read
     /// mode: one per-kind flag.
     flag: bool,
     /// The 8 KiB PRG windows that read open bus (235, 63), one bit each. Derived.
     open_bus: u8,
+    /// The 8 KiB PRG-ROM bank `$6000-$7FFF` shows (51, 108, 120, 125), or `None`. Derived.
+    rom_6000: Option<i32>,
     /// Mapper 235's mode, from the size of its PRG-ROM (`Bmc235.h`, the `switch` on
     /// `GetPrgPageCount()`).
     size_mode: u8,
@@ -209,9 +287,10 @@ impl LatchMulti {
             banks: windows_for(memory),
             kind,
             addr: 0,
-            regs: [0; 4],
+            regs: [0; 8],
             flag: false,
             open_bus: 0,
+            rom_6000: None,
             size_mode: match pages_16k {
                 64 => 0,
                 128 => 1,
@@ -235,6 +314,8 @@ impl LatchMulti {
         let r0 = i32::from(self.regs[0]);
         let r1 = i32::from(self.regs[1]);
         self.open_bus = 0;
+        self.rom_6000 = None;
+        let regs = self.regs;
         match self.kind {
             // `Mapper57.h:20-33`.
             LatchKind::M57 => {
@@ -541,6 +622,168 @@ impl LatchMulti {
                     .map_chr_8k(i32::from(CHR[(c >> 4) & 0x07][c & 0x07]));
                 None
             }
+            // `ColorDreams46.h:24-28`, 32 KiB pages: `regs[0]` at `$6000-$7FFF`, `regs[1]` above.
+            LatchKind::M46 => {
+                self.banks.map_prg_32k(((r0 & 0x0F) << 1) | (r1 & 0x01));
+                self.banks
+                    .map_chr_8k(((r0 & 0xF0) >> 1) | ((r1 & 0x70) >> 4));
+                None
+            }
+            // `Bmc51.h:27-39`, 8 KiB pages; `regs[0]` the bank, `regs[1]` the mode (power-on 1).
+            LatchKind::M51 => {
+                let bank = r0 << 2;
+                if r1 & 0x01 != 0 {
+                    self.banks.map_prg_32k(r0);
+                    self.rom_6000 = Some(0x23 | bank);
+                } else {
+                    let low = bank | r1;
+                    let high = bank | 0x0E;
+                    self.banks.map_prg_8k(0, low);
+                    self.banks.map_prg_8k(1, low + 1);
+                    self.banks.map_prg_8k(2, high);
+                    self.banks.map_prg_8k(3, high + 1);
+                    self.rom_6000 = Some(0x2F | bank);
+                }
+                self.banks.map_chr_8k(0);
+                Some(pick(r1 == 0x03, H, V))
+            }
+            // `Mapper60.h:20-27`: the reset counter selects a 16 KiB bank and its CHR.
+            LatchKind::M60 => {
+                self.prg_16k(r0, r0);
+                self.banks.map_chr_8k(r0);
+                None
+            }
+            // `Mapper61.h:20-30`.
+            LatchKind::M61 => {
+                let page = ((a & 0x0F) << 1) | ((a >> 5) & 0x01);
+                if a & 0x10 != 0 {
+                    self.prg_16k(page, page);
+                } else {
+                    self.prg_16k(page & 0xFE, (page & 0xFE) + 1);
+                }
+                self.banks.map_chr_8k(0);
+                self.flag.then(|| pick(a & 0x80 != 0, H, V))
+            }
+            // `Mapper62.h:26-38`: the address and the data's low two bits.
+            LatchKind::M62 => {
+                let page = ((a & 0x3F00) >> 8) | (a & 0x40);
+                if a & 0x20 != 0 {
+                    self.prg_16k(page, page);
+                } else {
+                    self.prg_16k(page & 0xFE, (page & 0xFE) + 1);
+                }
+                self.banks.map_chr_8k(((a & 0x1F) << 2) | (r0 & 0x03));
+                self.flag.then(|| pick(a & 0x80 != 0, H, V))
+            }
+            // `GoldenFive.h:14-33`: `regs[0]` the PRG register, `regs[1]` the outer block.
+            LatchKind::M104 => {
+                self.prg_16k(r0, r1 | 0x0F);
+                self.banks.map_chr_8k(0);
+                None
+            }
+            // `Bb.h:14-38`: `$8000-$FFFF` is the last 32 KiB, `$6000-$7FFF` an 8 KiB bank
+            // (power-on $FF); `regs[0]` PRG, `regs[1]` CHR.
+            LatchKind::M108 => {
+                self.banks.map_prg_32k(-1);
+                self.rom_6000 = Some(r0);
+                self.banks.map_chr_8k(r1);
+                None
+            }
+            // `Nina03_06.h:22-26`, multicart mode, 32 KiB pages.
+            LatchKind::M113 => {
+                self.banks.map_prg_32k((r0 >> 3) & 0x07);
+                self.banks.map_chr_8k((r0 & 0x07) | ((r0 >> 3) & 0x08));
+                self.flag.then(|| pick(r0 & 0x80 != 0, V, H))
+            }
+            // `Mapper120.h:15-27`: 8 KiB pages 8-11 at `$8000`, the register's bank at `$6000`.
+            LatchKind::M120 => {
+                self.banks.map_prg_8k(0, 8);
+                self.banks.map_prg_8k(1, 9);
+                self.banks.map_prg_8k(2, 10);
+                self.banks.map_prg_8k(3, 11);
+                self.rom_6000 = Some(r0);
+                self.banks.map_chr_8k(0);
+                None
+            }
+            // `Lh32.h:16-30`: -4, -3, work RAM at `$C000`, -1; the register's bank at `$6000`.
+            LatchKind::M125 => {
+                self.banks.map_prg_8k(0, -4);
+                self.banks.map_prg_8k(1, -3);
+                self.banks.map_prg_ram_8k(2, 0);
+                self.banks.map_prg_8k(3, -1);
+                self.rom_6000 = Some(r0);
+                self.banks.map_chr_8k(0);
+                None
+            }
+            // `Mapper170.h`: NROM with a one-bit protection latch.
+            LatchKind::M170 => {
+                self.banks.map_prg_32k(0);
+                self.banks.map_chr_8k(0);
+                None
+            }
+            // `Mapper174.h:14-23`.
+            LatchKind::M174 => {
+                let bank = (a >> 4) & 0x07;
+                if a & 0x80 != 0 {
+                    self.prg_16k(bank & 0x06, (bank & 0x06) + 1);
+                } else {
+                    self.prg_16k(bank, bank);
+                }
+                self.banks.map_chr_8k((a >> 1) & 0x07);
+                Some(pick(a & 0x01 != 0, H, V))
+            }
+            // `Henggedianzi177.h:16-20`, 32 KiB pages.
+            LatchKind::M177 => {
+                self.banks.map_prg_32k(r0);
+                self.banks.map_chr_8k(0);
+                self.flag.then(|| pick(r0 & 0x20 != 0, H, V))
+            }
+            // `Henggedianzi179.h:17-24`: `$5000-$5FFF` the 32 KiB bank, `$8000+` the mirroring.
+            LatchKind::M179 => {
+                self.banks.map_prg_32k(r0 >> 1);
+                self.banks.map_chr_8k(0);
+                self.flag.then(|| pick(r1 & 0x01 != 0, H, V))
+            }
+            // `Mapper216.h:22-25`, 32 KiB pages.
+            LatchKind::M216 => {
+                self.banks.map_prg_32k(a & 0x01);
+                self.banks.map_chr_8k((a & 0x0E) >> 1);
+                None
+            }
+            // `Bmc810544CA1.h:20-30`.
+            LatchKind::M261 => {
+                let bank = (a >> 6) & 0xFFFE;
+                if a & 0x40 != 0 {
+                    self.prg_16k(bank, bank + 1);
+                } else {
+                    let page = bank | ((a >> 5) & 0x01);
+                    self.prg_16k(page, page);
+                }
+                self.banks.map_chr_8k(a & 0x0F);
+                Some(pick(a & 0x10 != 0, H, V))
+            }
+            // `Bmc80013B.h:23-32`: `regs[0]`, `regs[1]` and the mode in `regs[2]`.
+            LatchKind::M274 => {
+                let low = if regs[2] & 0x02 != 0 {
+                    (r0 & 0x0F) | (r1 & 0x70)
+                } else {
+                    r0 & 0x03
+                };
+                self.prg_16k(low, r1 & 0x7F);
+                self.banks.map_chr_8k(0);
+                Some(pick(r0 & 0x10 != 0, V, H))
+            }
+            // `Bs5.h:14-35`, 8 KiB PRG and 2 KiB CHR pages: `regs[0..4]` PRG, `regs[4..8]` CHR,
+            // power-on all -1 (`$FF`, wrapped).
+            LatchKind::M286 => {
+                for (slot, bank) in regs.iter().take(4).enumerate() {
+                    self.banks.map_prg_8k(slot, i32::from(*bank));
+                }
+                for (slot, bank) in regs.iter().skip(4).enumerate() {
+                    self.banks.map_chr_2k(slot * 2, i32::from(*bank));
+                }
+                None
+            }
             // `Bmc255.h:14-21`.
             LatchKind::M255 => {
                 let bit = i32::from(a & 0x1000 == 0);
@@ -553,6 +796,8 @@ impl LatchMulti {
     }
 
     /// Latches a write. `addr` is the CPU address, `value` the data.
+    // One arm per board, each with its Mesen2 lines: a flat table, as `map` above it.
+    #[allow(clippy::too_many_lines)]
     fn latch(&mut self, address: u16, value: u8) {
         match self.kind {
             // `Mapper57.h:36-40`.
@@ -600,6 +845,77 @@ impl LatchMulti {
                     self.regs[0] = value;
                 }
             }
+            // `ColorDreams46.h:31-37`: `$8000+` here, `$6000-$7FFF` in `intercept_cpu_write`.
+            LatchKind::M46 => self.regs[1] = value,
+            // `Bmc51.h:42-52`.
+            LatchKind::M51 => {
+                if (0x6000..=0x7FFF).contains(&address) {
+                    self.regs[1] = ((value >> 3) & 0x02) | ((value >> 1) & 0x01);
+                } else if (0xC000..=0xDFFF).contains(&address) {
+                    self.regs[0] = value & 0x0F;
+                    self.regs[1] = ((value >> 3) & 0x02) | (self.regs[1] & 0x01);
+                } else {
+                    self.regs[0] = value & 0x0F;
+                }
+            }
+            // `Mapper62.h:26-28`.
+            LatchKind::M62 => {
+                self.addr = address;
+                self.regs[0] = value;
+                self.flag = true;
+            }
+            // `GoldenFive.h:22-33`.
+            LatchKind::M104 => {
+                if address >= 0xC000 {
+                    self.regs[0] = (self.regs[0] & 0xF0) | (value & 0x0F);
+                } else if address <= 0x9FFF && value & 0x08 != 0 {
+                    self.regs[0] = (self.regs[0] & 0x0F) | ((value << 4) & 0x70);
+                    self.regs[1] = (value << 4) & 0x70;
+                }
+            }
+            // `Bb.h:31-38`.
+            LatchKind::M108 => {
+                if address & 0x9000 == 0x8000 || address >= 0xF000 {
+                    self.regs[0] = value;
+                    self.regs[1] = value;
+                } else {
+                    self.regs[1] = value & 0x01;
+                }
+            }
+            LatchKind::M113 | LatchKind::M177 => {
+                self.regs[0] = value;
+                self.flag = true;
+            }
+            // `Henggedianzi179.h:17-24`.
+            LatchKind::M179 => {
+                if address >= 0x8000 {
+                    self.regs[1] = value;
+                    self.flag = true;
+                } else {
+                    self.regs[0] = value;
+                }
+            }
+            // `Bmc80013B.h:35-44`.
+            LatchKind::M274 => {
+                let reg = (address >> 13) & 0x03;
+                if reg == 0 {
+                    self.regs[0] = value;
+                } else {
+                    self.regs[1] = value;
+                    self.regs[2] = low_byte(reg);
+                }
+            }
+            // `Bs5.h:20-33`: A10-A11 the slot; `$A000` writes only when A4 (DIP 0) is set.
+            LatchKind::M286 => {
+                let slot = usize::from((address >> 10) & 0x03);
+                match address & 0xF000 {
+                    0x8000 => self.regs[4 + slot] = low_byte(address & 0x1F),
+                    0xA000 if address & 0x10 != 0 => self.regs[slot] = low_byte(address & 0x0F),
+                    _ => {}
+                }
+            }
+            // No register reached through here: 60 has none, the others' are below `$8000`.
+            LatchKind::M60 | LatchKind::M120 | LatchKind::M125 | LatchKind::M170 => {}
             LatchKind::M203 | LatchKind::M240 | LatchKind::M241 => self.regs[0] = value,
             _ => {
                 self.addr = address;
@@ -610,11 +926,18 @@ impl LatchMulti {
 
     fn power_on(&mut self, memory: &mut CartridgeMemory) {
         self.addr = 0;
-        self.regs = [0; 4];
+        self.regs = [0; 8];
         self.flag = false;
         // `Mapper230.h:14`: `InitMapper` calls `Reset(true)`, which toggles into *Contra* mode.
-        if self.kind == LatchKind::M230 {
-            self.flag = true;
+        match self.kind {
+            LatchKind::M230 => self.flag = true,
+            // `Bmc51.h:17-18`: "_mode = 1".
+            LatchKind::M51 => self.regs[1] = 1,
+            // `Bb.h:17`: "_prgReg = -1".
+            LatchKind::M108 => self.regs[0] = 0xFF,
+            // `Bs5.h:16-19`: every slot -1.
+            LatchKind::M286 => self.regs = [0xFF; 8],
+            _ => {}
         }
         let mirroring = self.map();
         if self.kind.mirrors_at_power_on() {
@@ -662,7 +985,7 @@ impl Mapper for LatchMulti {
         self.power_on(memory);
     }
 
-    /// Mappers 230 and 233 react to RESET, which is what they are for: nesdev, "INES Mapper
+    /// Mappers 60, 230 and 233 react to RESET, which is what they are for: nesdev, "INES Mapper
     /// 230" ("pressing reset switches between the Contra game and the multicart menu") and
     /// Mesen2 `Mapper230.h:19-34`, `Mapper233.h:14-24`. 233 also takes 226's register clear
     /// (`Mapper226.h:24-33`).
@@ -675,8 +998,14 @@ impl Mapper for LatchMulti {
                     memory.set_mirroring(mirroring);
                 }
             }
+            // `Mapper60.h:18-27`: "_resetCounter = (_resetCounter + 1) % 4", the board's whole
+            // function, a reset-switched 4-in-1 (nesdev, "INES Mapper 060").
+            LatchKind::M60 => {
+                self.regs[0] = (self.regs[0] + 1) % 4;
+                let _ = self.map();
+            }
             LatchKind::M233 => {
-                self.regs = [0; 4];
+                self.regs = [0; 8];
                 self.flag = !self.flag;
                 let _ = self.map();
             }
@@ -686,27 +1015,93 @@ impl Mapper for LatchMulti {
 
     fn intercept_cpu_write(
         &mut self,
-        _memory: &mut CartridgeMemory,
+        memory: &mut CartridgeMemory,
         address: u16,
         value: u8,
     ) -> bool {
-        // `Mapper240.h:9-10`: the register is `$4020-$5FFF`.
-        if self.kind == LatchKind::M240 && (0x4020..=0x5FFF).contains(&address) {
+        let consumed = match self.kind {
+            // `Mapper240.h:9-10`: the register is `$4020-$5FFF`.
+            LatchKind::M240 => (0x4020..=0x5FFF).contains(&address),
+            // `ColorDreams46.h:9,33`: `regs[0]` at `$6000-$7FFF`.
+            LatchKind::M46 if (0x6000..=0x7FFF).contains(&address) => {
+                self.regs[0] = value;
+                let _ = self.map();
+                return true;
+            }
+            // `Bmc51.h:10` (registers from `$6000`), `Nina03_06.h:12,20` (`$4100-$5FFF` under
+            // `$E100`) and `Henggedianzi179.h:13` (`$5000-$5FFF`) go through `latch`.
+            LatchKind::M51 => (0x6000..=0x7FFF).contains(&address),
+            LatchKind::M113 => (0x4100..=0x5FFF).contains(&address) && address & 0xE100 == 0x4100,
+            LatchKind::M179 => (0x5000..=0x5FFF).contains(&address),
+            // `Mapper120.h:9` (`$41FF`) and `Lh32.h:12` (`$6000`): the register is the bank of
+            // `$6000-$7FFF`.
+            LatchKind::M120 if address == 0x41FF => {
+                self.regs[0] = value;
+                let _ = self.map();
+                return true;
+            }
+            LatchKind::M125 if address == 0x6000 => {
+                self.regs[0] = value;
+                let _ = self.map();
+                return true;
+            }
+            // `Mapper170.h:14-20`: writes at `$6502` and `$7000` latch `(value << 1) & $80`.
+            LatchKind::M170 if address == 0x6502 || address == 0x7000 => {
+                self.regs[0] = (value << 1) & 0x80;
+                return true;
+            }
+            // `Mapper216.h:16`: `$5000` is a register too.
+            LatchKind::M216 if address == 0x5000 => {
+                self.addr = address;
+                let _ = self.map();
+                return true;
+            }
+            _ => false,
+        };
+        if consumed {
             self.latch(address, value);
-            let _ = self.map();
-            return true;
+            if let Some(mirroring) = self.map() {
+                memory.set_mirroring(mirroring);
+            }
         }
-        false
+        consumed
     }
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
-        if address < 0x8000 || self.kind == LatchKind::M240 {
+        if address < 0x8000
+            || matches!(
+                self.kind,
+                LatchKind::M113 | LatchKind::M120 | LatchKind::M170 | LatchKind::M240
+            )
+        {
+            return;
+        }
+        // `Lh32.h:18`: `$C000-$DFFF` is work RAM, the board's only register being `$6000`.
+        if self.kind == LatchKind::M125 {
+            let _ = self
+                .banks
+                .try_write_prg_window(address, value, memory.prg_ram_mut(), true);
             return;
         }
         self.latch(address, value);
         if let Some(mirroring) = self.map() {
             memory.set_mirroring(mirroring);
         }
+    }
+
+    /// `$6000-$7FFF` is PRG-ROM (51, 108, 120, 125) or the board's register window (46, 170,
+    /// 212's read-back), never work RAM, on these kinds.
+    fn prg_ram_enabled(&self) -> bool {
+        !matches!(
+            self.kind,
+            LatchKind::M46
+                | LatchKind::M212
+                | LatchKind::M51
+                | LatchKind::M108
+                | LatchKind::M120
+                | LatchKind::M125
+                | LatchKind::M170
+        )
     }
 
     fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {
@@ -722,13 +1117,28 @@ impl Mapper for LatchMulti {
         // `Mapper212.h:19-25`: bit 7 of a `$6000-$7FFF` read under mask `$E010` is driven high.
         // The other bits are open bus, which a board cannot see; the high address byte is what
         // an absolute read leaves on the bus. FIDELITY-LEADS records the approximation.
-        if self.kind == LatchKind::M212 && (0x6000..=0x7FFF).contains(&address) && ram.is_empty() {
+        if self.kind == LatchKind::M212 && (0x6000..=0x7FFF).contains(&address) {
             let open = address.to_be_bytes()[0];
             return Some(if address & 0xE010 == 0x6000 {
                 open | 0x80
             } else {
                 open
             });
+        }
+        if (0x6000..=0x7FFF).contains(&address) {
+            if let Some(bank) = self.rom_6000 {
+                let count = i32::try_from(rom.len() / 0x2000).unwrap_or(1).max(1);
+                let offset = usize::try_from(bank.rem_euclid(count)).unwrap_or(0) * 0x2000;
+                return rom.get(offset + usize::from(address & 0x1FFF)).copied();
+            }
+            // `Mapper170.h:24-27`: `$7001` and `$7777` read the latch over the high address bits.
+            if self.kind == LatchKind::M170 && (address == 0x7001 || address == 0x7777) {
+                return Some(self.regs[0] | (address.to_be_bytes()[0] & 0x7F));
+            }
+        }
+        // `Mapper216.h:18-21`: "For Videopoker Bonza?", `$5000` reads 0.
+        if self.kind == LatchKind::M216 && address == 0x5000 {
+            return Some(0);
         }
         if address >= 0x8000 {
             if self.open_bus & (1 << ((address - 0x8000) >> 13)) != 0 {

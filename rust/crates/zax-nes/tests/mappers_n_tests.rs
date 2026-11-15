@@ -262,3 +262,63 @@ fn mappers_n_233_toggles_a_bank_bit_on_reset() {
     core.soft_reset();
     assert_eq!([64, 65, 66, 67], core.prg_windows());
 }
+
+/// `Bmc51.h:27-39`: in mode 1, `$6000` shows 8 KiB page `$23 | bank << 2`.
+#[cfg(feature = "board-51")]
+#[test]
+fn mappers_n_51_maps_rom_at_6000() {
+    let mut core = MapperRom::new(51).prg(64).load();
+    core.mapper_write(0x8000, 0x02);
+    assert_eq!([8, 9, 10, 11], core.prg_windows());
+    assert_eq!(0x2B, core.read_memory(0x6100));
+}
+
+/// `Mapper60.h:18-27`: each RESET selects the next of four games.
+#[cfg(feature = "board-60")]
+#[test]
+fn mappers_n_60_steps_through_its_games_on_reset() {
+    let mut core = MapperRom::new(60).prg(8).chr(32).load();
+    assert_eq!([0, 1, 0, 1], core.prg_windows());
+    core.soft_reset();
+    assert_eq!([2, 3, 2, 3], core.prg_windows());
+    assert_eq!(8, core.chr_windows()[0]);
+}
+
+/// `Mapper120.h:15-27`: `$41FF` banks `$6000-$7FFF`; `$8000` is pages 8-11.
+#[cfg(feature = "board-120")]
+#[test]
+fn mappers_n_120_banks_6000_from_41ff() {
+    let mut core = MapperRom::new(120).prg(16).load();
+    assert_eq!([8, 9, 10, 11], core.prg_windows());
+    core.mapper_write(0x41FF, 5);
+    assert_eq!(5, core.read_memory(0x6100));
+}
+
+/// `Lh32.h:16-30`: work RAM at `$C000-$DFFF`.
+#[cfg(feature = "board-125")]
+#[test]
+fn mappers_n_125_has_work_ram_at_c000() {
+    let mut core = MapperRom::new(125).prg(16).load();
+    core.mapper_write(0xC123, 0x5A);
+    assert_eq!(0x5A, core.read_memory(0xC123));
+    core.mapper_write(0x6000, 3);
+    assert_eq!(3, core.read_memory(0x6100));
+    assert_eq!(
+        [12, 13, 0x5A, 15],
+        [
+            core.prg_windows()[0],
+            core.prg_windows()[1],
+            core.read_memory(0xC123),
+            core.prg_windows()[3]
+        ]
+    );
+}
+
+/// `Mapper170.h:14-27`: the protection latch.
+#[cfg(feature = "board-170")]
+#[test]
+fn mappers_n_170_reads_back_its_latch() {
+    let mut core = MapperRom::new(170).prg(4).load();
+    core.mapper_write(0x6502, 0x40);
+    assert_eq!(0x80 | 0x77, core.read_memory(0x7777));
+}
