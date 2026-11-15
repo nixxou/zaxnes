@@ -623,12 +623,14 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let fidelity = self.fidelity_switches();
                 let console_profile = self.console_audio_profile();
                 let alignment = self.cpu_ppu_alignment();
+                let fidelity_plus = self.settings.get(SettingId::EmuFidelityPlus).as_bool();
                 let console = self.console_hardware();
                 let result = match self.session.as_mut() {
                     Some(session) => {
                         session.core_mut().set_cartridge_db(cartridge_db);
                         apply_fidelity_switches(session.core_mut(), fidelity);
                         session.core_mut().set_cpu_ppu_alignment(alignment);
+                        session.core_mut().set_fidelity_plus(fidelity_plus);
                         session
                             .core_mut()
                             .set_console_audio_profile(console_profile);

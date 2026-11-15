@@ -2239,6 +2239,20 @@ fn ppu_write_timings(out: &mut Vec<SettingDescriptor>) {
         ]))
         .with_label("CPU/PPU alignment"),
     );
+    // Lot FIDPLUS-A (docs/design/HALF-CYCLE.md): the Fidelite+ machine, register effects on
+    // their measured edges. Off by default: its own frame loop costs speed.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuFidelityPlus,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Fidelity+"),
+    );
 }
 
 fn video_rust_only(out: &mut Vec<SettingDescriptor>) {

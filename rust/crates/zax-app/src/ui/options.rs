@@ -319,6 +319,7 @@ const EMULATION: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::EmuPaletteCorruption),
     LayoutEntry::Row(SettingId::EmuPpuResetLine),
     LayoutEntry::Row(SettingId::EmuCpuPpuAlignment),
+    LayoutEntry::Row(SettingId::EmuFidelityPlus),
 ];
 
 /// The rows of the **Interface** tab, from the most common to the most advanced.

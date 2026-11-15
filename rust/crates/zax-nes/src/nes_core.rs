@@ -417,8 +417,11 @@ impl NesCore {
         // here and the host would stop recognising it, which is the one way bumping the format
         // could have broken a file it still loads.
         match i32::from_le_bytes([header[4], header[5], header[6], header[7]]) {
-            Self::STATE_VERSION | Self::STATE_VERSION_8 => Some(false),
+            Self::STATE_VERSION | Self::STATE_VERSION_8 | Self::FIDPLUS_STATE_VERSION => {
+                Some(false)
+            }
             Self::WIDE_STATE_VERSION
+            | Self::FIDPLUS_WIDE_STATE_VERSION
             | Self::WIDE_STATE_VERSION_9
             | Self::WIDE_STATE_VERSION_6
             | Self::WIDE_STATE_VERSION_5 => Some(true),
@@ -485,6 +488,14 @@ impl NesCore {
     /// The earlier widescreen block, without the flash chip's changed sectors; still read.
     pub const WIDE_STATE_VERSION_9: i32 = 9;
 
+    /// [`Self::STATE_VERSION`] followed by the PPU's pending Fidélité+ edges
+    /// (`Ppu2C02::save_edge_state`): written only when a state is taken with edges pending, so
+    /// every other block keeps the version earlier builds read.
+    pub const FIDPLUS_STATE_VERSION: i32 = 12;
+
+    /// [`Self::WIDE_STATE_VERSION`] followed by the PPU's pending Fidélité+ edges.
+    pub const FIDPLUS_WIDE_STATE_VERSION: i32 = 13;
+
     /// The earlier widescreen block, without the MMC5's sound registers; still read.
     pub const WIDE_STATE_VERSION_7: i32 = 7;
 
@@ -504,6 +515,7 @@ impl NesCore {
         matches!(
             version,
             Self::WIDE_STATE_VERSION
+                | Self::FIDPLUS_WIDE_STATE_VERSION
                 | Self::WIDE_STATE_VERSION_9
                 | Self::WIDE_STATE_VERSION_7
                 | Self::WIDE_STATE_VERSION_6
@@ -514,6 +526,7 @@ impl NesCore {
     /// Whether `version` is one this build reads at all.
     const fn is_known_state_version(version: i32) -> bool {
         version == Self::STATE_VERSION
+            || version == Self::FIDPLUS_STATE_VERSION
             || version == Self::STATE_VERSION_8
             || version == Self::STATE_VERSION_4
             || Self::is_wide_state_version(version)
@@ -2061,12 +2074,14 @@ impl NesCore {
         let rom = cartridge.rom();
 
         let wide = self.bus.ppu().wide();
+        let edges = self.bus.ppu().edges_pending();
         let mut writer = StateWriter::reusing(std::mem::take(buffer));
         writer.write_u32(Self::STATE_MAGIC);
-        writer.write_i32(if wide.unlocked() {
-            Self::WIDE_STATE_VERSION
-        } else {
-            Self::STATE_VERSION
+        writer.write_i32(match (wide.unlocked(), edges) {
+            (true, false) => Self::WIDE_STATE_VERSION,
+            (false, false) => Self::STATE_VERSION,
+            (true, true) => Self::FIDPLUS_WIDE_STATE_VERSION,
+            (false, true) => Self::FIDPLUS_STATE_VERSION,
         });
         writer.write_string(Self::CORE_NAME);
         writer.write_bool(include_rom_image);
@@ -2084,6 +2099,9 @@ impl NesCore {
         cartridge.save_state(&mut writer);
         if wide.unlocked() {
             wide.save_state(&mut writer);
+        }
+        if edges {
+            self.bus.ppu().save_edge_state(&mut writer);
         }
 
         *buffer = writer.into_vec();
@@ -2156,6 +2174,8 @@ impl NesCore {
         self.bus.input().save_state(&mut writer);
         cartridge.save_state(&mut writer);
         self.bus.ppu().wide().save_state(&mut writer);
+        // Fidélité+: the edges pending (an empty block otherwise); run-ahead must stay exact.
+        self.bus.ppu().save_edge_state(&mut writer);
 
         state.end(writer);
         Ok(())
@@ -2208,6 +2228,7 @@ impl NesCore {
             .ppu_mut()
             .wide_mut()
             .load_state(&mut reader, true, true)?;
+        self.bus.ppu_mut().load_edge_state(&mut reader)?;
 
         self.frame_count = frame_count;
         if region != self.region {
@@ -2237,6 +2258,34 @@ impl NesCore {
         }
 
         loaded
+    }
+
+    /// The widescreen block of a state and, after it, the Fidélité+ edges. When the widescreen
+    /// block is skipped (a hack's state restored without the hack) the edges cannot be found and
+    /// are dropped with it.
+    fn restore_wide_and_edges(
+        &mut self,
+        reader: &mut StateReader,
+        version: i32,
+        unpatched_hack: bool,
+    ) -> Result<(), InvalidState> {
+        let wide = self.bus.ppu_mut().wide_mut();
+        let wide_read = Self::is_wide_state_version(version) && !unpatched_hack;
+        if wide_read {
+            wide.load_state(
+                reader,
+                version != Self::WIDE_STATE_VERSION_5,
+                version >= Self::WIDE_STATE_VERSION_7,
+            )?;
+        } else {
+            wide.reset();
+        }
+        if version == Self::FIDPLUS_STATE_VERSION
+            || (version == Self::FIDPLUS_WIDE_STATE_VERSION && wide_read)
+        {
+            self.bus.ppu_mut().load_edge_state(reader)?;
+        }
+        Ok(())
     }
 
     fn restore_state(&mut self, data: &[u8], offset: usize) -> Result<StateLoaded, InvalidState> {
@@ -2331,16 +2380,7 @@ impl NesCore {
         // A state of the hack restored without it: the original ROM never unlocks the
         // extension, which must not stay as the hack left it (four nametables, margins).
         let unpatched_hack = patch.1.is_none() && patchable;
-        let wide = self.bus.ppu_mut().wide_mut();
-        if Self::is_wide_state_version(version) && !unpatched_hack {
-            wide.load_state(
-                &mut reader,
-                version != Self::WIDE_STATE_VERSION_5,
-                version >= Self::WIDE_STATE_VERSION_7,
-            )?;
-        } else {
-            wide.reset();
-        }
+        self.restore_wide_and_edges(&mut reader, version, unpatched_hack)?;
 
         // A state made the other way (the patch ran and does not now, or the reverse).
         let made_with_patch = Self::is_wide_state_version(version);

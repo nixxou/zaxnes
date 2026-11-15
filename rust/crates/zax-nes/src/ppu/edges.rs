@@ -15,13 +15,15 @@
 use super::{is_palette_address, Cart, Ppu2C02, PpuBusAccess};
 use crate::cartridges::{BoardKind, ChrFetch};
 use crate::fidplus::MasterClock;
+use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NesRegion;
 
 /// Edges pending at once: an access posts one, and the next can only come a cycle later.
 pub(super) const EDGE_SLOTS: usize = 4;
 
-/// What an edge does when it is reached.
+/// What an edge does when it is reached. The discriminants are the savestate's bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub(super) enum EdgeKind {
     /// The second `$2006` write: `v` takes `t`.
     LoadAddress,
@@ -49,6 +51,23 @@ pub(super) enum EdgeKind {
     /// the dot, before the switch (applied after dot 257's work, which with the rendering off
     /// does nothing else to `v`).
     CopyAfterSwitchOff,
+}
+
+impl EdgeKind {
+    const ALL: [Self; 8] = [
+        Self::LoadAddress,
+        Self::StoreData,
+        Self::ReadLatch,
+        Self::ReadIncrement,
+        Self::RefetchLow,
+        Self::ReadLatchAfterFetch,
+        Self::SwitchRendering,
+        Self::CopyAfterSwitchOff,
+    ];
+
+    fn from_u8(byte: u8) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| *kind as u8 == byte)
+    }
 }
 
 /// One pending edge: applied after the work of the `dots`-th dot from now.
@@ -91,6 +110,52 @@ impl Ppu2C02 {
     /// for each Fidélité+ frame; off, the PPU is the standard one.
     pub const fn set_fidelity_plus(&mut self, enabled: bool) {
         self.fidelity_plus = enabled;
+    }
+
+    /// Whether edges are pending: a state taken now has to carry them
+    /// ([`Self::save_edge_state`]).
+    #[must_use]
+    pub const fn edges_pending(&self) -> bool {
+        self.edge_count != 0
+    }
+
+    /// Appends the pending edges and the data latch to `writer`: the Fidélité+ block of a
+    /// savestate (`docs/design/HALF-CYCLE.md`, "Savestates").
+    pub fn save_edge_state(&self, writer: &mut StateWriter) {
+        writer.write_u8(self.edge_count);
+        for edge in &self.edges[..usize::from(self.edge_count)] {
+            writer.write_i32(edge.dots);
+            writer.write_u8(edge.kind as u8);
+            writer.write_u8(edge.value);
+        }
+        writer.write_u8(self.data_latch);
+    }
+
+    /// Restores what [`Self::save_edge_state`] wrote.
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated or names an edge this build does not know.
+    pub fn load_edge_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        let count = reader.read_u8()?;
+        if usize::from(count) > EDGE_SLOTS {
+            return Err(InvalidState::corrupt(format!(
+                "Corrupt savestate: {count} pending PPU edges (at most {EDGE_SLOTS})."
+            )));
+        }
+        let mut edges = [Edge::NONE; EDGE_SLOTS];
+        for edge in &mut edges[..usize::from(count)] {
+            let dots = reader.read_i32()?;
+            let byte = reader.read_u8()?;
+            let kind = EdgeKind::from_u8(byte).ok_or_else(|| {
+                InvalidState::corrupt(format!("Corrupt savestate: unknown PPU edge {byte}."))
+            })?;
+            let value = reader.read_u8()?;
+            *edge = Edge { dots, kind, value };
+        }
+        self.data_latch = reader.read_u8()?;
+        self.edges = edges;
+        self.edge_count = count;
+        Ok(())
     }
 
     /// Whether edges place the register effects: Fidélité+ on the NTSC 2C02's timing.

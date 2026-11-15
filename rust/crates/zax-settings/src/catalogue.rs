@@ -158,6 +158,7 @@ setting_ids! {
     EmuPpuRevision => "emu.ppu_revision",
     EmuOamaddrWriteCorruption => "emu.oamaddr_write_corruption",
     EmuCpuPpuAlignment => "emu.cpu_ppu_alignment",
+    EmuFidelityPlus => "emu.fidelity_plus",
     EmuPpuBusConflicts => "emu.ppu_bus_conflicts",
     EmuCatchUp => "emu.catch_up",
     // AMD-041 REQ-LOOP-064, exposed as `RunAheadFrames` (AMD-040 REQ-LUA-114).

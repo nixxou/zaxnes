@@ -530,6 +530,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.palette_corruption", "Corruption de palette"),
     ("setting.emu.ppu_reset_line", "Reset du PPU"),
     ("setting.emu.cpu_ppu_alignment", "Alignement CPU/PPU"),
+    ("setting.emu.fidelity_plus", "Fidélité+"),
     ("option.Alignment 0", "Alignement 0"),
     ("option.Alignment 1", "Alignement 1"),
     ("option.Alignment 2", "Alignement 2"),
@@ -1201,6 +1202,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (
         "detail.emu.ppu_2000_glitch",
         "Un défaut de la puce vidéo : une écriture dans son registre de contrôle qui commence sur un point précis d'une ligne peut faire dessiner la ligne suivante depuis la moitié gauche de l'écran, et une écriture dans son registre de défilement qui tombe sur la recopie du défilement peut décaler une ligne ou une image de ce qui était sur le bus de données. Cela n'arrive que sur certaines consoles, selon l'alignement des puces à l'allumage. Les jeux écrits pour la console l'évitent. Prend effet au prochain chargement. Par défaut : activé.",
+    ),
+    (
+        "detail.emu.fidelity_plus",
+        "Fait tourner la console dans la machine Fidélité+ : les effets des accès du jeu à la puce vidéo tombent sur les fronts d'horloge mesurés sur le modèle au transistor près des puces, au lieu des délais du cœur standard. Au plus près de la console, plus lent. En construction : consoles NTSC seulement pour l'instant (PAL et Dendy tournent comme sans l'option). Prend effet au prochain chargement. Par défaut : désactivé.",
     ),
     (
         "detail.emu.ppu_reset_line",

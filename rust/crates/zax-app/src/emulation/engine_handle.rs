@@ -872,6 +872,13 @@ impl EngineHandle {
         }
     }
 
+    /// `emu.fidelity_plus` (lot FIDPLUS-A); Zaxnes only.
+    pub fn set_fidelity_plus(&mut self, enabled: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_fidelity_plus(enabled);
+        }
+    }
+
     /// Whether a power-on puts the PPU at the top of the picture (lot FIDELITY); likewise.
     pub fn set_power_on_top(&mut self, enabled: bool) {
         if let Some(core) = self.zaxnes_mut() {
