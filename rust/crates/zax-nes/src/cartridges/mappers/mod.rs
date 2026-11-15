@@ -45,6 +45,8 @@ mod eeprom93c66;
 mod fine_rom;
 #[cfg(feature = "board-111")]
 mod mmc1_parallel;
+#[cfg(feature = "board-234")]
+mod maxi15;
 #[cfg(feature = "board-176")]
 mod fk23c;
 mod fme7;
@@ -194,6 +196,8 @@ pub use eeprom93c66::Eeprom93C66;
 pub use fine_rom::{FineRom, FineRomKind};
 #[cfg(feature = "board-111")]
 pub use mmc1_parallel::Mmc1Parallel;
+#[cfg(feature = "board-234")]
+pub use maxi15::Maxi15;
 #[cfg(feature = "board-176")]
 pub use fk23c::Fk23c;
 pub use fme7::Fme7;

@@ -605,3 +605,22 @@ fn mappers_n_111_with_chr_rom_is_a_parallel_mmc1() {
     assert_eq!([252, 253, 254, 255, 4, 5, 6, 7], core.chr_windows());
     assert_eq!([10, 11, 14, 15], core.prg_windows());
 }
+
+/// Mesen2 `Mapper234.h` and puNES `mapper_234.c`: a CPU **read** of `$FF80-$FF9F` latches the
+/// ROM byte under it into register 0 (here 3, bank 3 of the fixture's last page, so CNROM mode and
+/// 32 KiB bank 3), which then locks while its low six bits are nonzero; register 1 at
+/// `$FFE8-$FFF7` always takes the byte.
+#[cfg(feature = "board-234")]
+#[test]
+fn mappers_n_234_latches_on_reads_and_locks() {
+    let mut core = MapperRom::new(234).prg(32).chr(64).load();
+    let latched = core.cartridge_mut().unwrap().try_cpu_read(0xFF80).unwrap();
+    let bank = usize::from(latched & 0x0F) * 4;
+    let expected: [u8; 4] = std::array::from_fn(|i| u8::try_from((bank + i) % 32).unwrap());
+    assert_eq!(expected, core.prg_windows());
+    // Locked: a later read of another register-0 address changes nothing.
+    if latched & 0x3F != 0 {
+        core.cartridge_mut().unwrap().try_cpu_read(0xFF90);
+        assert_eq!(expected, core.prg_windows());
+    }
+}

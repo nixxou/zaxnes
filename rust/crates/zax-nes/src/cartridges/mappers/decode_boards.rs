@@ -26,6 +26,7 @@
     feature = "board-jaleco-72-92-86",
     feature = "board-jv001",
     feature = "board-fine-rom",
+    feature = "board-234",
     feature = "board-latch-multi",
     feature = "board-nina03",
     feature = "board-sachen-8reg",
@@ -52,6 +53,8 @@ use super::LatchMulti;
 #[cfg(feature = "board-218")]
 use super::MagicFloor;
 use super::Mapper;
+#[cfg(feature = "board-234")]
+use super::Maxi15;
 #[cfg(feature = "board-111")]
 use super::Mmc1Parallel;
 #[cfg(feature = "board-nina03")]
@@ -155,6 +158,9 @@ pub enum DecodeBoard {
     /// ([`Mmc1Parallel`]).
     #[cfg(feature = "board-111")]
     Mmc1Parallel(Mmc1Parallel),
+    /// Mapper 234, the Maxi 15 ([`Maxi15`]).
+    #[cfg(feature = "board-234")]
+    Maxi15(Maxi15),
     // Appended by MF-VS step 4, the lot's one board: the register is a `$4016` write and not a
     // cartridge write, which is the only thing that makes it unusual here.
     /// Mapper 99, the Nintendo VS. System board.
@@ -255,6 +261,8 @@ macro_rules! inner {
             DecodeBoard::Cheapocabra($b) => $body,
             #[cfg(feature = "board-111")]
             DecodeBoard::Mmc1Parallel($b) => $body,
+            #[cfg(feature = "board-234")]
+            DecodeBoard::Maxi15($b) => $body,
             #[cfg(feature = "board-vs-system")]
             DecodeBoard::VsBoard($b) => $body,
             #[cfg(feature = "board-jv001")]
@@ -422,7 +430,25 @@ impl Mapper for DecodeBoard {
         inner!(self, b => b.prg_ram_enabled())
     }
 
-    #[cfg(any(feature = "board-246", feature = "board-latch-multi"))]
+    /// Forwarded for mapper 234 (MAPPERS-N), whose registers latch on a CPU read. Reached only
+    /// for a read the cached ROM windows do not serve (`NesBus::read_internal_body_as`), so the
+    /// other boards of this enum, which leave their windows cacheable, are not on it for ROM.
+    #[cfg(feature = "board-234")]
+    #[inline(never)]
+    fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+        inner!(self, b => b.cpu_read_override(memory, address))
+    }
+
+    #[cfg(feature = "board-234")]
+    fn cpu_peek_override(&self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+        inner!(self, b => b.cpu_peek_override(memory, address))
+    }
+
+    #[cfg(any(
+        feature = "board-234",
+        feature = "board-246",
+        feature = "board-latch-multi"
+    ))]
     fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {
         inner!(self, b => b.rom_windows(memory))
     }

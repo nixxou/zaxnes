@@ -910,6 +910,14 @@ CHR-ROM. Mesen2 and FCEUX implement only GTROM under 111; the behaviour (`Mmc1Pa
 puNES's (`mapper_111.c`), the only source, and the Hackset dump (`15E688C0`) now plays its intro.
 The page also mentions a later MMC3 version of the translation, not handled.
 
+### J18. Mapper 234 (Maxi 15): register 1's range, mirroring on a read
+Register 1 is decoded at `$FFE8-$FFF7` as puNES does (`mapper_234.c`, `$FFE8`/`$FFF0` under
+`$FFF8`); Mesen2 adds `$FFF8` (`Mapper234.h`, `AddRegisterRange(0xFFE8, 0xFFF8)`). The read path
+gives a board no mutable access to the cartridge memory, so a mirroring change latched by a
+**read** reaches the nametables at the board's next write. The three Hackset dumps (Maxi 15 Rev 1,
+Maxi 15, Maxi 1P) go from the menu into a game correctly. Every PRG read of the board goes
+through `cpu_read_override` (no cached window), its cost bounded to this board.
+
 ### J15. Mapper 15: CHR-RAM write protection only on the K-1029
 MR-15-1 (from nesdev: "CHR-RAM is write-protected in PRG banking modes 0 and 3") write-protected
 every mapper-15 image. The same nesdev page says the K-1029 multicarts are the only genuine

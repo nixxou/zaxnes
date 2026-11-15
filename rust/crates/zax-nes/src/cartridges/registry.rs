@@ -28,6 +28,8 @@ use super::mappers::JyCompany;
 use super::mappers::MagicFloor;
 #[cfg(feature = "board-91")]
 use super::mappers::Mapper091;
+#[cfg(feature = "board-234")]
+use super::mappers::Maxi15;
 #[cfg(feature = "board-111")]
 use super::mappers::Mmc1Parallel;
 #[cfg(feature = "board-219")]
@@ -507,6 +509,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     232,
     #[cfg(feature = "board-233")]
     233,
+    #[cfg(feature = "board-234")]
+    234,
     #[cfg(feature = "board-235")]
     235,
     #[cfg(feature = "board-236")]
@@ -1495,6 +1499,9 @@ pub(crate) fn has_bus_conflicts(mapper: i32, header: &InesHeader) -> bool {
         // MAPPERS-N: `FaridUnrom.h:9`, `HasBusConflicts` true.
         #[cfg(feature = "board-324")]
         324 => true,
+        // MAPPERS-N: Mesen2 gives the Maxi 15 conflicts (`Mapper234.h`, `HasBusConflicts`).
+        #[cfg(feature = "board-234")]
+        234 => true,
         #[cfg(feature = "board-149")]
         149 => true, // Q-147 for the two numbers of this lot that are absent by a choice
         11 | 13 | 66 | 70 | 78 | 89 | 93 | 152 | 180 | 185 => true,
@@ -2122,6 +2129,8 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
             memory,
             LatchKind::of(mapper)?,
         ))),
+        #[cfg(feature = "board-234")]
+        234 => Board::DecodeBoard(DecodeBoard::Maxi15(Maxi15::new(memory))),
         #[cfg(feature = "board-233")]
         233 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
             memory,

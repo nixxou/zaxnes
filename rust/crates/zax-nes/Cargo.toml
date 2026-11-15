@@ -109,6 +109,7 @@ default = [
     "board-59",
     "board-63",
     "board-200",
+    "board-234",
     "board-201",
     "board-202",
     "board-203",
@@ -318,6 +319,8 @@ board-142 = ["board-irq-latch"]
 
 # MAPPERS-N umbrella.
 board-fine-rom = ["board-decode-boards"]
+# MAPPERS-N: the Maxi 15 multicart, registers latched on reads too (`Maxi15`).
+board-234 = ["board-decode-boards"]
 board-302 = ["board-fine-rom"]
 board-305 = ["board-fine-rom"]
 board-306 = ["board-latch-multi"]
