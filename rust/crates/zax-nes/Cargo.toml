@@ -104,6 +104,31 @@ default = [
     "board-249",
     "board-250",
     "board-253",
+    "board-57",
+    "board-58",
+    "board-59",
+    "board-63",
+    "board-201",
+    "board-202",
+    "board-203",
+    "board-204",
+    "board-212",
+    "board-213",
+    "board-214",
+    "board-221",
+    "board-226",
+    "board-227",
+    "board-229",
+    "board-230",
+    "board-231",
+    "board-233",
+    "board-235",
+    "board-236",
+    "board-240",
+    "board-241",
+    "board-242",
+    "board-244",
+    "board-255",
 ]
 
 # MAPPERS-N umbrella (docs/progress/MAPPERS-N.md).
@@ -133,6 +158,38 @@ board-249 = ["board-mmc3-clones"]
 
 board-250 = ["board-mmc3-clones"]
 board-253 = []
+
+# MAPPERS-N umbrella.
+board-latch-multi = ["board-decode-boards"]
+board-57 = ["board-latch-multi"]
+board-58 = ["board-latch-multi"]
+board-59 = ["board-latch-multi"]
+board-63 = ["board-latch-multi"]
+# Mapper 200 is implemented but **off by default**: SPEC-02 REQ-CORE-102's acceptance criterion is
+# "en-tête annonçant le mapper 200 -> échec". docs/review/AMD-MAPPERS-N-200.md proposes moving the
+# criterion to 186 (the Study Box, never a cartridge board); until the owner answers, 200 is refused.
+board-200 = ["board-latch-multi"]
+board-201 = ["board-latch-multi"]
+board-202 = ["board-latch-multi"]
+board-203 = ["board-latch-multi"]
+board-204 = ["board-latch-multi"]
+board-212 = ["board-latch-multi"]
+board-213 = ["board-latch-multi"]
+board-214 = ["board-latch-multi"]
+board-221 = ["board-latch-multi"]
+board-226 = ["board-latch-multi"]
+board-227 = ["board-latch-multi"]
+board-229 = ["board-latch-multi"]
+board-230 = ["board-latch-multi"]
+board-231 = ["board-latch-multi"]
+board-233 = ["board-latch-multi"]
+board-235 = ["board-latch-multi"]
+board-236 = ["board-latch-multi"]
+board-240 = ["board-latch-multi"]
+board-241 = ["board-latch-multi"]
+board-242 = ["board-latch-multi"]
+board-244 = ["board-latch-multi"]
+board-255 = ["board-latch-multi"]
 # MAPPERS-N end
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four

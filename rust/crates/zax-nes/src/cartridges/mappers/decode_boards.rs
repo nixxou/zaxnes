@@ -25,6 +25,7 @@
     feature = "board-246",
     feature = "board-jaleco-72-92-86",
     feature = "board-jv001",
+    feature = "board-latch-multi",
     feature = "board-nina03",
     feature = "board-sachen-8reg",
     feature = "board-sachen8259",
@@ -43,6 +44,8 @@ use super::ChrWindowBoard;
 use super::IremLrog017;
 #[cfg(feature = "board-jv001")]
 use super::Jv001;
+#[cfg(feature = "board-latch-multi")]
+use super::LatchMulti;
 #[cfg(feature = "board-218")]
 use super::MagicFloor;
 use super::Mapper;
@@ -216,6 +219,10 @@ pub enum DecodeBoard {
     /// `$6800-$6FFF`, and PRG A17 forced high on a read of `$FFE4-$FFE7` and three more ranges.
     #[cfg(feature = "board-246")]
     G0151(G0151),
+    // Appended by MAPPERS-N: the discrete multicarts, twenty-six numbers on one variant.
+    /// Lot MAPPERS-N's discrete multicarts ([`LatchMulti`]).
+    #[cfg(feature = "board-latch-multi")]
+    LatchMulti(LatchMulti),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as [`SmallBoard`]'s own `inner!` does.
@@ -267,6 +274,8 @@ macro_rules! inner {
             DecodeBoard::Pec9588($b) => $body,
             #[cfg(feature = "board-246")]
             DecodeBoard::G0151($b) => $body,
+            #[cfg(feature = "board-latch-multi")]
+            DecodeBoard::LatchMulti($b) => $body,
         }
     };
 }
@@ -381,7 +390,7 @@ impl Mapper for DecodeBoard {
     /// **Behaviour-neutral for every other board here**: none of them overrides it, so each takes
     /// `Mapper`'s own default — the four offsets of its `BankWindows` — which is what the
     /// un-forwarded dispatch gave the whole variant.
-    #[cfg(feature = "board-246")]
+    #[cfg(any(feature = "board-246", feature = "board-latch-multi"))]
     fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {
         inner!(self, b => b.rom_windows(memory))
     }
@@ -397,7 +406,7 @@ impl Mapper for DecodeBoard {
     ///
     /// **Behaviour-neutral for every other board here**: none of them overrides it, so each
     /// answers `false` through `Mapper`'s own default exactly as the un-forwarded dispatch did.
-    #[cfg(feature = "board-246")]
+    #[cfg(any(feature = "board-246", feature = "board-latch-multi"))]
     fn intercept_cpu_write(
         &mut self,
         memory: &mut CartridgeMemory,
@@ -442,6 +451,7 @@ impl Mapper for DecodeBoard {
         feature = "board-164",
         feature = "board-246",
         feature = "board-jv001",
+        feature = "board-latch-multi",
         feature = "board-sachen-8reg"
     ))]
     #[inline(never)]

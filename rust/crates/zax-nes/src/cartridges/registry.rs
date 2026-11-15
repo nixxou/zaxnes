@@ -107,6 +107,8 @@ use super::mappers::{JalecoJf13, JalecoJf17};
     feature = "board-190"
 ))]
 use super::mappers::{LatchBoard, SingleLatch};
+#[cfg(feature = "board-latch-multi")]
+use super::mappers::{LatchKind, LatchMulti};
 #[cfg(feature = "board-mmc3-clones")]
 use super::mappers::{Mmc3Clone, Mmc3CloneKind};
 #[cfg(feature = "board-taito-x1")]
@@ -182,6 +184,14 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     49,
     #[cfg(feature = "board-52")]
     52,
+    #[cfg(feature = "board-57")]
+    57,
+    #[cfg(feature = "board-58")]
+    58,
+    #[cfg(feature = "board-59")]
+    59,
+    #[cfg(feature = "board-63")]
+    63,
     64,
     65,
     66,
@@ -353,6 +363,16 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     196,
     #[cfg(feature = "board-197")]
     197,
+    #[cfg(feature = "board-200")]
+    200,
+    #[cfg(feature = "board-201")]
+    201,
+    #[cfg(feature = "board-202")]
+    202,
+    #[cfg(feature = "board-203")]
+    203,
+    #[cfg(feature = "board-204")]
+    204,
     #[cfg(feature = "board-205")]
     205,
     #[cfg(feature = "board-namcot108")]
@@ -368,6 +388,12 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     210,
     #[cfg(feature = "board-jy-asic")]
     211,
+    #[cfg(feature = "board-212")]
+    212,
+    #[cfg(feature = "board-213")]
+    213,
+    #[cfg(feature = "board-214")]
+    214,
     // The Sugar Softec UNL-8237 and UNL-8237A, an MMC3 clone with one of eight run-time
     // selectable register scrambles (MF-UNL-11 step 1).
     #[cfg(feature = "board-215")]
@@ -377,14 +403,40 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     // The Kasheng A9461, an MMC3 clone with an extended banking mode (MF-UNL-11 step 3).
     #[cfg(feature = "board-219")]
     219,
+    #[cfg(feature = "board-221")]
+    221,
     225,
+    #[cfg(feature = "board-226")]
+    226,
+    #[cfg(feature = "board-227")]
+    227,
     228,
+    #[cfg(feature = "board-229")]
+    229,
+    #[cfg(feature = "board-230")]
+    230,
+    #[cfg(feature = "board-231")]
+    231,
     #[cfg(feature = "board-small-boards")]
     232,
+    #[cfg(feature = "board-233")]
+    233,
+    #[cfg(feature = "board-235")]
+    235,
+    #[cfg(feature = "board-236")]
+    236,
     #[cfg(feature = "board-238")]
     238,
+    #[cfg(feature = "board-240")]
+    240,
+    #[cfg(feature = "board-241")]
+    241,
+    #[cfg(feature = "board-242")]
+    242,
     #[cfg(feature = "board-sachen-8reg")]
     243,
+    #[cfg(feature = "board-244")]
+    244,
     #[cfg(feature = "board-245")]
     245,
     // The G0151-1 of 封神榜: eight bank registers, battery PRG-RAM at $6800-$6FFF and a forced
@@ -397,6 +449,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     250,
     #[cfg(feature = "board-253")]
     253,
+    #[cfg(feature = "board-255")]
+    255,
     // The Sachen UNL-SHERO, an MMC3 clone with 8 KiB of CHR-RAM, four CHR A18 lines at $4100 and
     // four-screen mirroring (MF-UNL-12 step 1).
     #[cfg(feature = "board-262")]
@@ -1740,6 +1794,136 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         )))),
         #[cfg(feature = "board-253")]
         253 => Board::IrqBoard(IrqBoard::Waixing253(Box::new(Waixing253::new(memory)))),
+        #[cfg(feature = "board-57")]
+        57 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-58")]
+        58 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-59")]
+        59 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-63")]
+        63 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-200")]
+        200 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-201")]
+        201 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-202")]
+        202 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-203")]
+        203 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-204")]
+        204 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-212")]
+        212 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-213")]
+        213 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-214")]
+        214 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-221")]
+        221 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-226")]
+        226 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-227")]
+        227 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-229")]
+        229 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-230")]
+        230 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-231")]
+        231 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-233")]
+        233 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-235")]
+        235 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-236")]
+        236 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-240")]
+        240 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-241")]
+        241 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-242")]
+        242 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-244")]
+        244 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-255")]
+        255 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
         _ => return None,
     })
 }

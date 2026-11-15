@@ -174,3 +174,91 @@ fn mappers_n_253_irq_fires_after_the_counter_wraps() {
     }
     assert!(core.cartridge().unwrap().irq_asserted());
 }
+
+/// `Mapper58.h:19-29`: the address is the register; bit 6 picks 16 or 32 KiB.
+#[cfg(feature = "board-58")]
+#[test]
+fn mappers_n_58_banks_from_the_address() {
+    let mut core = MapperRom::new(58).prg(16).chr(64).load();
+    core.mapper_write(0x8000 | 0x40 | 0x03 | (0x05 << 3), 0);
+    assert_eq!([6, 7, 6, 7], core.prg_windows());
+    assert_eq!(40, core.chr_windows()[0]);
+    core.mapper_write(0x8002, 0);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+}
+
+/// `Mapper241.h:13-16`: the data is a 32 KiB bank.
+#[cfg(feature = "board-241")]
+#[test]
+fn mappers_n_241_switches_32_kib() {
+    let mut core = MapperRom::new(241).prg(32).load();
+    core.mapper_write(0x8000, 3);
+    assert_eq!([12, 13, 14, 15], core.prg_windows());
+}
+
+/// `Mapper227.h:14-46`: UNROM-like mode with the last bank of the 128 KiB block fixed.
+#[cfg(feature = "board-227")]
+#[test]
+fn mappers_n_227_has_an_unrom_mode() {
+    let mut core = MapperRom::new(227).prg(64).load();
+    // prg bank 2, L set, mode 0, S clear: (2, 2 | 7).
+    core.mapper_write(0x8000 | (2 << 2) | 0x200, 0);
+    assert_eq!([4, 5, 14, 15], core.prg_windows());
+}
+
+/// `Bmc235.h:24-55`: with 1 MiB of PRG-ROM, chip select 1 is open bus.
+#[cfg(feature = "board-235")]
+#[test]
+fn mappers_n_235_reads_open_bus_on_a_missing_chip() {
+    let mut core = MapperRom::new(235).prg(128).load();
+    core.mapper_write(0x8000 | 0x0003, 0);
+    assert_eq!([12, 13, 14, 15], core.prg_windows());
+    core.mapper_write(0x8000 | 0x0100, 0);
+    // Open bus: whatever the bus held, not the ROM's bank number pattern.
+    let windows = core.prg_windows();
+    assert_ne!([0, 1, 2, 3], windows);
+}
+
+/// `Mapper230.h:19-50`: power-on in *Contra* mode, RESET switches to the multicart.
+#[cfg(feature = "board-230")]
+#[test]
+fn mappers_n_230_switches_mode_on_reset() {
+    let mut core = MapperRom::new(230).prg(64).load();
+    assert_eq!([0, 1, 14, 15], core.prg_windows());
+    core.mapper_write(0x8000, 3);
+    assert_eq!([6, 7, 14, 15], core.prg_windows());
+    core.soft_reset();
+    assert_eq!([16, 17, 18, 19], core.prg_windows());
+    core.soft_reset();
+    assert_eq!([0, 1, 14, 15], core.prg_windows());
+}
+
+/// `Mapper240.h:9-18`: the register is at `$4020-$5FFF`.
+#[cfg(feature = "board-240")]
+#[test]
+fn mappers_n_240_takes_its_register_below_8000() {
+    let mut core = MapperRom::new(240).prg(32).chr(64).load();
+    core.mapper_write(0x4100, 0x23);
+    assert_eq!([8, 9, 10, 11], core.prg_windows());
+    assert_eq!(24, core.chr_windows()[0]);
+}
+
+/// `UnlD1038.h:22-41`: A8 makes `$8000-$FFFF` read the DIP switches (none set).
+#[cfg(feature = "board-59")]
+#[test]
+fn mappers_n_59_reads_its_dip_switches() {
+    let mut core = MapperRom::new(59).prg(16).chr(64).load();
+    core.mapper_write(0x8000 | 0x80 | 0x20, 0);
+    assert_eq!([4, 5, 4, 5], core.prg_windows());
+    core.mapper_write(0x8100, 0);
+    assert_eq!([0, 0, 0, 0], core.prg_windows());
+}
+
+/// `Mapper233.h:14-30`: RESET toggles PRG A20 (the second 1 MiB chip... here bit 5 of the bank).
+#[cfg(feature = "board-233")]
+#[test]
+fn mappers_n_233_toggles_a_bank_bit_on_reset() {
+    let mut core = MapperRom::new(233).prg(128).load();
+    core.soft_reset();
+    assert_eq!([64, 65, 66, 67], core.prg_windows());
+}

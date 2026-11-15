@@ -349,7 +349,7 @@ impl Mmc3Clone {
             // `MMC3_250.h:9`: "(addr & 0xE000) | ((addr & 0x0400) >> 10), addr & 0xFF".
             Mmc3CloneKind::M250 => {
                 let port = (address & 0xE000) | ((address & 0x0400) >> 10);
-                (port, (address & 0xFF) as u8)
+                (port, address.to_le_bytes()[0])
             }
             // `MMC3_196.h:30-38`: A0 of the chip comes from A1, A2 or A3.
             Mmc3CloneKind::M196 => {
