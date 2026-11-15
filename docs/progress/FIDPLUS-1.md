@@ -32,3 +32,5 @@ mm2, smb1, z2, smb3, metroid): the two new regions add a test on the `$4000`/`$4
 Test-ROM campaign 215 pass / 4 fail (as CORE-3), AccuracyCoin 147/147 in the four alignments,
 golden-core identical to CORE-3 (the three SMB3 Japan pictures listed by `check.sh` against its old
 base move since FIDELITY step 31, unchanged here).
+
+Tests: 1666 (core, harness, settings, NesHawk, ignored included) and 867 (application), all green.
