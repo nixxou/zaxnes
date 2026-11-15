@@ -240,6 +240,41 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   `$2000` glitch now follow the netlist in all four alignments.
 - Still open: random alignment at power-on.
 
+### A5. Per-dot differential against the netlist — started (lot FIDPLUS-2, 2026-11-15)
+- **Instrument.** Zaxnes: feature `ppu-dot-trace` (never in `default`), harness `dot-trace`
+  (`v`, `t`, PPU bus address and CPU register access after every dot; the PPU runs every dot
+  through `step_dot`, no span). Netlist: `ext-tools/visualnes-bench/benchdot.cpp` (hold-time
+  bench of step 33, one line per dot at the end of the dot, accesses at the /CS-fall dot),
+  `mkines.py` (the bench's cartridge as an iNES image), `dotcmp.py` (frames paired by their
+  access sequence, then `v`/`t` compared at every dot). Outside the repo: VisualNes has no licence.
+- **Phase**: the netlist's power-on puts the CPU 7 dots later against the PPU than Zaxnes's;
+  `dot-trace --phase 7` (or -14) makes every access land on the same dot (4 412 of 4 412 in
+  `g2006px`, TriCNES alignment 3 = a4). The other alignments use their own reset hold.
+- **`g2006px` (rendering on and off, `$2006`/`$2007`), alignment 3**: once the access dot itself
+  is set aside (Zaxnes records it before applying the access), 370 dots of 89 342 differ a frame,
+  all with rendering off and none observable:
+  - `$2006` second write: the netlist loads `v` on D+3 with rendering off too; Zaxnes on D+1. A
+    CPU access can only follow 3 dots later, and the rendering-off pixel at `v` was already
+    matched on D+2 in step 32 (`emu.ppu_2006_delay` covers rendering on).
+  - `$2007` write: the netlist moves `v` and stores to VRAM about 4 dots after the CPU write;
+    Zaxnes at once. Observable only by a second `$2007` access 3 dots later, i.e. a
+    read-modify-write instruction — measured below.
+  - Line 241 of the first frame: the netlist's `v` = `$0802` from its power-on, not a model point.
+- **`INC $2007`, rendering off, measured** (`mkrmw.py`: `$2000-$2007` = 0..7, `v` = `$2002`,
+  `INC $2007`, read back): the netlist leaves **00 01 02 01 01 05 06 07** in all four alignments:
+  the read moves `v` to `$2003`, the dummy write (00) and the write (01) come 3 dots apart, and
+  the PPU stores each one ~4 dots after its CPU write from its data latch, which the second write
+  has already replaced, so `$2003` gets 01 too. TriCNES: the same in alignments 0 and 1, `$2004`
+  unchanged in alignment 2, garbled in 3 (its latch chain, `Emulator.cs:2484-2594`). Zaxnes
+  before: 00 01. **Done**: `Ppu2C02::rewrite_pending_vram_write` (two `$2007` writes 1 to 4 dots
+  apart outside rendering: the first address gets the second value), on, no option: a cold path
+  (one test per `$2007` write), no state change; test `fidplus2_rmw_2007_tests.rs`.
+  Not measured: palette addresses (internal RAM, kept one write each), rendering on (C1's path),
+  the `$2007` read + write pairs of other RMW opcodes (same mechanism expected), PAL.
+- **Next**: the same differential on the other bench programs (`g2000`, `g2001px`, `g2005px`,
+  `g3e01px`, `oam`, `r2007`) in the four alignments, then rendering-on programs; the PPU bus
+  column (`bus`) is recorded but not compared yet (Zaxnes reads a fetch on one dot of its pair).
+
 ---
 
 ## B. Power-on and reset

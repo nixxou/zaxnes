@@ -20,7 +20,7 @@ use crate::HarnessError;
 
 /// The command's usage line.
 pub const USAGE: &str =
-    "  zax-harness dot-trace <rom.nes> --frames <first>-<last> [--alignment <0-3>] --out <file>
+    "  zax-harness dot-trace <rom.nes> --frames <first>-<last> [--alignment <0-3>] [--phase <dots>] --out <file>
       (per dot: frame, scanline, dot, v, t, PPU bus address; needs the `dot-trace` feature)";
 
 struct Options {
@@ -28,6 +28,7 @@ struct Options {
     first: u32,
     last: u32,
     alignment: Option<u8>,
+    phase: i32,
     out: PathBuf,
 }
 
@@ -36,6 +37,7 @@ fn parse(args: &[String]) -> Result<Options, HarnessError> {
     let mut rom = None;
     let mut frames = None;
     let mut alignment = None;
+    let mut phase = 0;
     let mut out = None;
     let mut index = 0;
     while index < args.len() {
@@ -51,6 +53,7 @@ fn parse(args: &[String]) -> Result<Options, HarnessError> {
                     ));
                 }
                 "--alignment" => alignment = Some(value.parse::<u8>().map_err(|_| usage())?),
+                "--phase" => phase = value.parse::<i32>().map_err(|_| usage())?,
                 "--out" => out = Some(PathBuf::from(value)),
                 _ => return Err(usage()),
             }
@@ -69,6 +72,7 @@ fn parse(args: &[String]) -> Result<Options, HarnessError> {
         first,
         last,
         alignment,
+        phase,
         out: out.ok_or_else(usage)?,
     })
 }
@@ -90,6 +94,8 @@ pub fn command(args: &[String]) -> Result<(), HarnessError> {
     if let Some(alignment) = options.alignment {
         core.set_cpu_ppu_alignment(alignment);
     }
+    // The CPU/PPU phase at power-on, in dots (study `study/access-phase`), to match the netlist's.
+    core.set_phase_offset(options.phase);
     let info = core.load_rom(&image, &name);
     if !info.success {
         return Err(HarnessError::Rom("Zaxnes refused the image".to_owned()));

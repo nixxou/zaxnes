@@ -227,6 +227,10 @@ pub struct Ppu2C02 {
     /// Whether the 2C02's OAMADDR copy at the start of rendering is emulated
     /// ([`Self::oamaddr_row_copy`]). A core setting, on by default; not part of the state.
     oamaddr_bug: bool,
+    /// The last `$2007` write outside rendering: the PPU clock it came on and the address it
+    /// stored to (lot FIDPLUS-2, [`Self::rewrite_pending_vram_write`]). Not part of the state:
+    /// the two writes it pairs belong to one instruction, and a state is never taken inside one.
+    last_data_write: (i64, u16),
     /// Per-dot trace (feature `ppu-dot-trace`): on, the PPU runs every dot through
     /// [`Self::step_dot`] (no span, no idle skip) and records it. Not part of the state.
     #[cfg(feature = "ppu-dot-trace")]
@@ -632,6 +636,7 @@ impl Ppu2C02 {
             oam_corrupt_rows: 0,
             oam_seed_row: 0,
             oamaddr_bug: true,
+            last_data_write: (i64::MIN, 0),
             #[cfg(feature = "ppu-dot-trace")]
             dot_trace: None,
             #[cfg(feature = "ppu-dot-trace")]
@@ -3083,6 +3088,7 @@ impl Ppu2C02 {
             7 => {
                 // A `$2007` access is an ALE of `v` (step 39).
                 self.ale_low = self.v.to_le_bytes()[0];
+                self.rewrite_pending_vram_write(value, &mut cartridge);
                 self.write_vram_inner(self.v & 0x3FFF, value, PpuBusAccess::Cpu, &mut cartridge);
                 self.increment_vram_address(&mut cartridge);
             }
@@ -3090,6 +3096,31 @@ impl Ppu2C02 {
             // $2002 is read-only; the write only loaded the bus latch.
             _ => {}
         }
+    }
+
+    /// Two `$2007` writes on consecutive CPU cycles (the dummy write and the write of a
+    /// read-modify-write instruction, `INC $2007`): the PPU stores a write to VRAM about four dots
+    /// after the CPU's, from its data latch, and the second CPU write, three dots after the first,
+    /// has already replaced that latch, so **the first address receives the second value** too
+    /// (lot FIDPLUS-2, transistor netlist, the four alignments: `INC $2007` over 03 04 leaves
+    /// 01 01, not 00 01; TriCNES agrees in its alignments 0 and 1;
+    /// `docs/review/FIDELITY-LEADS.md` A5). Rendering off only: during rendering the write path
+    /// is another one (C1), not measured here; palette entries are internal to the PPU and
+    /// not measured either, so they keep one write each.
+    fn rewrite_pending_vram_write<K: BoardKind>(&mut self, value: u8, cart: Cart<'_, '_, K>) {
+        let rendering = self.rendering_enabled()
+            && (self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline());
+        let now = self.ppu_clock;
+        let (then, address) = self.last_data_write;
+        // One CPU cycle is 3 dots (3.2 on PAL): "the previous cycle" is 4 dots at most.
+        if !rendering && then != i64::MIN && (1..=4).contains(&(now - then)) && !is_palette_address(address) {
+            self.write_vram_inner(address, value, PpuBusAccess::Inert, cart);
+        }
+        self.last_data_write = if rendering {
+            (i64::MIN, 0)
+        } else {
+            (now, self.v & 0x3FFF)
+        };
     }
 
     /// Writes one OAM byte, used by OAM DMA ($4014).
