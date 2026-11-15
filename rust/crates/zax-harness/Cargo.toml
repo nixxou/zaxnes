@@ -17,6 +17,8 @@ default = ["ppu-2007-render-read"]
 # The configuration that turns the parked boards on, `zax-nes`'s `parked-boards` with this
 # crate's own `vs` subcommand beside it, so that one flag gives the same machine on both sides.
 parked-boards = ["vs-system", "zax-nes/parked-boards"]
+# Lot FIDPLUS-2: the `dot-trace` subcommand (the PPU dot by dot). Diagnostics only.
+dot-trace = ["zax-nes/ppu-dot-trace"]
 
 # The wgpu renderer (`render --backend vulkan|dx12`), desktop only.
 wgpu = ["zax-render/wgpu"]

@@ -37,6 +37,9 @@ pub mod profile_tool;
 // so that a Zaxnes run can be held against a third machine's. Not behind `fceux-core` either.
 pub mod ram_trace;
 pub mod render;
+// Lot FIDPLUS-2: the PPU dot by dot, for the differential against the transistor netlist.
+#[cfg(feature = "dot-trace")]
+pub mod dot_trace;
 pub mod test_roms;
 #[cfg(feature = "vs-system")]
 pub mod vs;

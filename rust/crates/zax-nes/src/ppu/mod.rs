@@ -183,6 +183,27 @@ pub enum SpriteLimit {
     Smart,
 }
 
+/// One dot of a per-dot trace (feature `ppu-dot-trace`, lot FIDPLUS-2): where the scan is after
+/// the dot ran, the two address registers, and the last address the PPU put on its bus during
+/// the dot (`0xFFFF` when it put none). Compared with the transistor netlist dot by dot.
+#[cfg(feature = "ppu-dot-trace")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DotRecord {
+    /// Scanline after the dot.
+    pub scanline: i16,
+    /// Dot after the dot ran.
+    pub dot: i16,
+    /// `v` after the dot.
+    pub v: u16,
+    /// `t` after the dot.
+    pub t: u16,
+    /// Last address put on the PPU bus during the dot, `0xFFFF` for none.
+    pub bus: u16,
+    /// CPU access to a PPU register on this dot (the access dot, as the core places it):
+    /// `$2000-$2007`, bit 15 set for a write, with its value in bits 16-23; 0 for none.
+    pub access: u32,
+}
+
 /// The picture processing unit.
 #[derive(Debug, Clone)]
 #[allow(clippy::struct_excessive_bools)] // The chip's flags, one field each like the C#.
@@ -206,6 +227,13 @@ pub struct Ppu2C02 {
     /// Whether the 2C02's OAMADDR copy at the start of rendering is emulated
     /// ([`Self::oamaddr_row_copy`]). A core setting, on by default; not part of the state.
     oamaddr_bug: bool,
+    /// Per-dot trace (feature `ppu-dot-trace`): on, the PPU runs every dot through
+    /// [`Self::step_dot`] (no span, no idle skip) and records it. Not part of the state.
+    #[cfg(feature = "ppu-dot-trace")]
+    dot_trace: Option<Vec<DotRecord>>,
+    /// Last address put on the bus in the current dot, for [`DotRecord::bus`].
+    #[cfg(feature = "ppu-dot-trace")]
+    dot_trace_bus: std::cell::Cell<u16>,
     /// Whether OAM decays while the rendering is off ([`Self::refresh_oam_row`]). A core
     /// setting, off by default; not part of the state.
     oam_decay: bool,
@@ -604,6 +632,10 @@ impl Ppu2C02 {
             oam_corrupt_rows: 0,
             oam_seed_row: 0,
             oamaddr_bug: true,
+            #[cfg(feature = "ppu-dot-trace")]
+            dot_trace: None,
+            #[cfg(feature = "ppu-dot-trace")]
+            dot_trace_bus: std::cell::Cell::new(0xFFFF),
             oam_decay: false,
             power_on_top: true,
             reset_line: false,
@@ -2080,6 +2112,28 @@ impl Ppu2C02 {
     /// Runs `count` dots, skipping in one go the stretches where a dot does nothing but
     /// move the counters (or, on a visible line with rendering off, draw the backdrop).
     fn run_dots<K: BoardKind>(&mut self, mut count: i64, cart: Cart<'_, '_, K>) {
+        #[cfg(feature = "ppu-dot-trace")]
+        if self.dot_trace.is_some() {
+            while count > 0 {
+                self.dot_trace_bus.set(0xFFFF);
+                self.step_dot(cart);
+                let record = DotRecord {
+                    #[allow(clippy::cast_possible_truncation)] // Below 312.
+                    scanline: self.scanline as i16,
+                    #[allow(clippy::cast_possible_truncation)] // Below 341.
+                    dot: self.dot as i16,
+                    v: self.v,
+                    t: self.t,
+                    bus: self.dot_trace_bus.get(),
+                    access: 0,
+                };
+                if let Some(trace) = self.dot_trace.as_mut() {
+                    trace.push(record);
+                }
+                count -= 1;
+            }
+            return;
+        }
         while count > 0 {
             let idle = self.idle_dots_ahead().min(count);
             if idle > 0 {
@@ -2301,6 +2355,8 @@ impl Ppu2C02 {
     ) -> u8 {
         let mut cartridge = CartSlot::<K>::new(cartridge);
         self.apply_decay();
+        #[cfg(feature = "ppu-dot-trace")]
+        self.trace_access(0x2000 | u32::from(register & 7));
 
         match register & 0x07 {
             2 => {
@@ -2886,6 +2942,7 @@ impl Ppu2C02 {
     }
 
     /// [`Self::write`] with the board reached through `K` (lot CORE-2).
+    #[cfg_attr(feature = "ppu-dot-trace", allow(clippy::too_many_lines))] // The trace's mark.
     pub fn write_as<K: BoardKind>(
         &mut self,
         register: u16,
@@ -2894,6 +2951,8 @@ impl Ppu2C02 {
     ) {
         let mut cartridge = CartSlot::<K>::new(cartridge);
         self.apply_decay();
+        #[cfg(feature = "ppu-dot-trace")]
+        self.trace_access(0x2000 | 0x8000 | u32::from(register & 7) | (u32::from(value) << 16));
 
         // A write to any PPU register, $2002 included, loads the whole bus latch
         // (ppu_open_bus test 2).
@@ -3334,6 +3393,8 @@ impl Ppu2C02 {
         let address = address & 0x3FFF;
 
         if access != PpuBusAccess::Inert {
+            #[cfg(feature = "ppu-dot-trace")]
+            self.dot_trace_bus.set(address);
             self.notify_address_bus(address, cart);
         }
 
@@ -3460,9 +3521,31 @@ impl Ppu2C02 {
         address: u16,
         cart: Cart<'_, '_, K>,
     ) {
+        #[cfg(feature = "ppu-dot-trace")]
+        self.dot_trace_bus.set(address);
         if let Some(cartridge) = cart.as_deref_mut() {
             cartridge.on_ppu_address_bus_without_read_as::<K>(address, self.ppu_clock);
         }
+    }
+
+    /// Starts a per-dot trace (feature `ppu-dot-trace`), dropping any previous one.
+    #[cfg(feature = "ppu-dot-trace")]
+    pub fn start_dot_trace(&mut self) {
+        self.dot_trace = Some(Vec::new());
+    }
+
+    /// Marks the last traced dot with a CPU register access (feature `ppu-dot-trace`).
+    #[cfg(feature = "ppu-dot-trace")]
+    fn trace_access(&mut self, access: u32) {
+        if let Some(last) = self.dot_trace.as_mut().and_then(|trace| trace.last_mut()) {
+            last.access = access;
+        }
+    }
+
+    /// Stops the per-dot trace and returns its records.
+    #[cfg(feature = "ppu-dot-trace")]
+    pub fn take_dot_trace(&mut self) -> Vec<DotRecord> {
+        self.dot_trace.take().unwrap_or_default()
     }
 
     /// Reads a nametable byte, from console VRAM or from the cartridge when the board
