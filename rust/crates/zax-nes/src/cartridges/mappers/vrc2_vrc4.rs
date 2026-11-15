@@ -296,7 +296,7 @@ impl Vrc2Vrc4 {
     /// behind its own decode: mapper 530's AX5705 (puNES `mapper_530.c`,
     /// `init_VRC2and4(VRC24_VRC4, 0x01, 0x02, …)`; lot MAPPERS-N). No Microwire latch, for
     /// [`Vrc2Vrc4::new_vrc2b`]'s reason.
-    #[cfg(feature = "board-530")]
+    #[cfg(any(feature = "board-530", feature = "board-vrc-p"))]
     pub(crate) fn new_vrc4f(memory: &CartridgeMemory, mapper_number: i32) -> Self {
         Self::new_vrc4_wired(memory, mapper_number, VrcVariant::Vrc4f)
     }

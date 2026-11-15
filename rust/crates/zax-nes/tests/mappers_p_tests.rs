@@ -986,7 +986,7 @@ fn mappers_p_344_has_nrom_and_a_dip_read() {
     core.mapper_write(0x6005, 0);
     assert_eq!([20, 21, 22, 23], core.prg_windows());
     core.mapper_write(0x6008, 0);
-    assert_eq!(0, core.read_memory(0x8001));    // The CPU's cached path must not answer ROM there (`Mapper::rom_windows`).
+    assert_eq!(0, core.read_memory(0x8001)); // The CPU's cached path must not answer ROM there (`Mapper::rom_windows`).
     assert_eq!(None, core.cartridge().unwrap().read_rom_window(0x8001));
 }
 
@@ -1002,7 +1002,7 @@ fn mappers_p_432_has_nrom_128_and_a_pad_read() {
     core.mapper_write(0x6001, 0x50);
     assert_eq!([37, 38, 37, 38], core.prg_windows());
     core.mapper_write(0x6000, 0x01);
-    assert_eq!(0, core.read_memory(0x8001));    // The CPU's cached path must not answer ROM there (`Mapper::rom_windows`).
+    assert_eq!(0, core.read_memory(0x8001)); // The CPU's cached path must not answer ROM there (`Mapper::rom_windows`).
     assert_eq!(None, core.cartridge().unwrap().read_rom_window(0x8001));
 }
 
@@ -1316,4 +1316,35 @@ fn mappers_p_452_latches_rom_writes_and_moves_its_ram() {
     core.mapper_write(0xA010, 0x77);
     assert_eq!(0x77, core.read_memory(0xA010));
     assert_eq!([4, 0, 6, 7], core.prg_windows());
+}
+
+/// `mapper_362.c`: game 0 takes the outer banks from D7-D8 of the CHR register of the window
+/// the PPU last fetched from; a reset of an image above 512 KiB switches to game 1 (`$40`).
+#[cfg(feature = "board-362")]
+#[test]
+fn mappers_p_362_follows_the_fetched_chr_window() {
+    let mut core = MapperRom::new(362).prg(128).chr(1024).load();
+    core.mapper_write(0xB000, 0x00);
+    core.mapper_write(0xB001, 0x18);
+    core.mapper_write(0x8000, 0x03);
+    assert_eq!([51, 49, 62, 63], core.prg_windows());
+    core.cartridge_mut().unwrap().on_ppu_address_bus(0x0400, 0);
+    assert_eq!([3, 1, 14, 15], core.prg_windows());
+    assert_eq!(None, core.cartridge().unwrap().read_rom_window(0x8000));
+    core.soft_reset();
+    assert_eq!([67, 65, 78, 79], core.prg_windows());
+}
+
+/// `mapper_398.c`: with D7 of the last write's low address byte set, a 32 KiB bank from its
+/// D6-D7 and D2 of the fetched window's CHR register, an 8 KiB CHR bank from D6 and D0-D2.
+#[cfg(feature = "board-398")]
+#[test]
+fn mappers_p_398_banks_from_the_address_and_the_fetched_window() {
+    let mut core = MapperRom::new(398).prg(64).chr(1024).load();
+    core.mapper_write(0xB0C0, 0x05);
+    assert_eq!([28, 29, 30, 31], core.prg_windows());
+    // 8 KiB bank `$4D`, whose first 1 KiB bank is 616 (`$68` in the fixture's byte).
+    assert_eq!(0x68, core.chr_windows()[0]);
+    core.mapper_write(0x8000, 0x02);
+    assert_eq!([2, 1, 14, 15], core.prg_windows());
 }

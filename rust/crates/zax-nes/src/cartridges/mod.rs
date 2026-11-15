@@ -612,6 +612,10 @@ const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
             | 529
             // MAPPERS-N: mapper 266's VRC4 IRQ (nesdev "NES 2.0 Mapper 266").
             | 266
+            // MAPPERS-P: mapper 398, `VrcP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
+            | 398
+            // MAPPERS-P: mapper 362, `VrcP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
+            | 362
             // MAPPERS-P: mapper 526, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
             | 526
             // MAPPERS-P: mapper 555's competition timer, `Mmc3P` (puNES `EXTCL_CPU_EVERY_CYCLE`).
@@ -848,6 +852,10 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 284
             // MAPPERS-N: 682 counts every fetch for its scanline IRQ and extended modes.
             | 682
+            // MAPPERS-P: 362 and 398 take their outer banks from the CHR window last fetched
+            // (`extcl_rd_chr_362`/`_398`, reads only).
+            | 362
+            | 398
     ) || mmc3_p_board(mapper)
 }
 
@@ -2278,9 +2286,10 @@ mod tests {
             // MAPPERS-P: 248 and 536 run the boards of 115 and 195 (`registry::board_number`).
             248, 536, 422, 534, 370, 344, 432, 356, 269, 353, 100, 555,
             // MAPPERS-P: 471, an IRQ on every A12 rise (`IrqP`).
-            471,
-            // MAPPERS-P: 442, the 1 bpp latch of PPU A0/A9 on A13's rise (`IrqP`).
-            442,
+            471, // MAPPERS-P: 442, the 1 bpp latch of PPU A0/A9 on A13's rise (`IrqP`).
+            442, // MAPPERS-P: 362 and 398 follow the CHR window fetched (`VrcP`).
+            362,
+            398,
             // MAPPERS-P: 272 is latched too but absent here: its counter only moves once a game
             // enables it, and the sweep enables nothing.
         ] {

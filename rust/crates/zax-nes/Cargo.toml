@@ -196,6 +196,8 @@ default = [
     "board-266",
     "board-284",
     "board-682",
+    "board-398",
+    "board-362",
     "board-452",
     "board-442",
     "board-347",
@@ -378,6 +380,8 @@ board-357 = ["board-irq-p"]
 board-311 = ["board-irq-p"]
 # MAPPERS-P umbrella: the VRC2/VRC4 boards of `vrc_p.rs`.
 board-vrc-p = []
+board-398 = ["board-vrc-p"]
+board-362 = ["board-vrc-p"]
 board-559 = ["board-vrc-p"]
 board-527 = ["board-vrc-p"]
 board-524 = ["board-vrc-p"]

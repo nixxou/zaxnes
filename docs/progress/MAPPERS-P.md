@@ -67,7 +67,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 359 | `mapper_359.c` | 293 | 3 | 0 | todo |
 | 360 | `mapper_360.c` | 54 | 1 | 0 | done (batch 2, `MultiP`) |
 | 361 | `mapper_361.c` | 85 | 5 | 0 | done (batch 12, `Mmc3P`) |
-| 362 | `mapper_362.c` | 99 | 2 | 0 | todo |
+| 362 | `mapper_362.c` | 99 | 2 | 0 | done (batch 41, `VrcP`) |
 | 368 | `mapper_368.c` | 106 | 2 | 0 | done (batch 18, `IrqP`) |
 | 369 | `mapper_369.c` | 221 | 1 | 0 | todo |
 | 370 | `mapper_370.c` | 117 | 1 | 0 | done (batch 23, `Mmc3P`) |
@@ -89,7 +89,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 395 | `mapper_395.c` | 88 | 4 | 0 | done (batch 13, `Mmc3P`) |
 | 396 | `mapper_396.c` | 68 | 5 | 0 | done (batch 6, `MultiP`) |
 | 397 | `mapper_397.c` | 69 | 1 | 0 | done (batch 6, `JyCompany` + `JyMulticart`) |
-| 398 | `mapper_398.c` | 89 | 1 | 0 | todo |
+| 398 | `mapper_398.c` | 89 | 1 | 0 | done (batch 41, `VrcP`) |
 | 399 | `mapper_399.c` | 79 | 1 | 0 | done (batch 13, `Mmc3P`) |
 | 400 | `mapper_400.c` | 105 | 1 | 0 | done (batch 6, `MultiP`) |
 | 401 | `mapper_401.c` | 97 | 1 | 0 | done (batch 13, `Mmc3P`) |
@@ -303,3 +303,10 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   where 344 and 432 answer their DIP / solder-pad read; the tests read through `peek`, which
   goes to `try_read_prg`, and missed it. The forward is now there behind
   `board-mmc3-p`/`board-vrc-p`, out of line, and both tests check `read_rom_window` too.
+* Batch 41: `VrcP` 362 and 398 (VRC4f, `new_vrc4f` now also behind `board-vrc-p`): the outer
+  banks follow D7-D8 (362) or D0-D2 (398) of the CHR register of the window the PPU last
+  fetched from, through `on_ppu_address_bus` (`watches_ppu_reads` and the mf_3b sweep; the
+  notification comes before the read, as puNES switches before `chr_rd`). While that holds,
+  `rom_windows` answers `NO_ROM_WINDOW`, now reached through the `IrqBoard` forward. 362 toggles
+  to its second game on a reset of an image above 512 KiB (`soft_reset`); 398 latches the low
+  address byte of every write.

@@ -32,6 +32,14 @@ pub enum VrcPKind {
     /// `$9C00-$9FFF` holding the `$C000` bank (A2 clear) or four 1 KiB nametable pages (A2 set),
     /// and the high-nibble registers of `$B000-$FFFF` taking the data's high nibble.
     M559,
+    /// 362, `mapper_362.c` (830506C, *Contra* / *Gradius* 2-in-1): a VRC4f whose outer PRG and
+    /// CHR banks come from D7-D8 of the CHR register of the window the PPU last fetched from;
+    /// on an image above 512 KiB a reset toggles to the second game, which has fixed outer banks.
+    M362,
+    /// 398, `mapper_398.c` (JY-048): a VRC4f; with D7 of the last write's low address byte set,
+    /// a 32 KiB PRG and an 8 KiB CHR bank from that byte's D6-D7 and the CHR register of the
+    /// window the PPU last fetched from.
+    M398,
 }
 
 impl VrcPKind {
@@ -45,6 +53,8 @@ impl VrcPKind {
             524 => Self::M524,
             527 => Self::M527,
             559 => Self::M559,
+            362 => Self::M362,
+            398 => Self::M398,
             _ => return None,
         })
     }
@@ -57,6 +67,8 @@ impl VrcPKind {
             Self::M524 => 524,
             Self::M527 => 527,
             Self::M559 => 559,
+            Self::M362 => 362,
+            Self::M398 => 398,
         }
     }
 }
@@ -76,6 +88,9 @@ pub struct VrcP {
     /// 559's four nametable registers (`m559.mir`), saved for that kind only; its `$C000` bank
     /// (`m559.prg`) is [`VrcP::outer`].
     pages: [u8; 4],
+    /// 362's and 398's last fetched CHR window (`m362.reg`, `m398.reg[1]`), saved for those two
+    /// kinds only; 362's game and 398's address byte are [`VrcP::outer`].
+    chr_window: u8,
 }
 
 impl VrcP {
@@ -85,6 +100,7 @@ impl VrcP {
             VrcPKind::M308 | VrcPKind::M524 | VrcPKind::M527 => Vrc2Vrc4::new_vrc2b(memory, number),
             VrcPKind::M384 | VrcPKind::M447 => Vrc2Vrc4::new_vrc4e(memory, number),
             VrcPKind::M559 => Vrc2Vrc4::new_vrc4_lines(memory, number, [10, 11]),
+            VrcPKind::M362 | VrcPKind::M398 => Vrc2Vrc4::new_vrc4f(memory, number),
         };
         Self {
             vrc,
@@ -95,6 +111,17 @@ impl VrcP {
             irq_high: 0,
             irq_pending: false,
             pages: Self::PAGES_559,
+            chr_window: 0,
+        }
+    }
+
+    /// Whether `$8000-$FFFF` follows the PPU's fetches now, so that the CPU's cached windows
+    /// cannot stand for it.
+    const fn prg_follows_ppu(&self) -> bool {
+        match self.kind {
+            VrcPKind::M362 => self.outer == 0,
+            VrcPKind::M398 => self.outer & 0x80 != 0,
+            _ => false,
         }
     }
 
@@ -103,10 +130,11 @@ impl VrcP {
 
     /// `map_init_559`: the `$C000` bank powers on as `$FE`; the other kinds' outer register 0.
     const fn outer_power_on(kind: VrcPKind) -> u8 {
-        if matches!(kind, VrcPKind::M559) {
-            0xFE
-        } else {
-            0
+        match kind {
+            VrcPKind::M559 => 0xFE,
+            // `map_init_398`: `reg[0] = $C0`.
+            VrcPKind::M398 => 0xC0,
+            _ => 0,
         }
     }
 
@@ -116,6 +144,7 @@ impl VrcP {
         let r = i32::from(self.outer);
         let (reg0, reg1) = self.vrc.prg_registers();
         let (reg0, reg1) = (i32::from(reg0), i32::from(reg1));
+        let fetched = self.vrc.chr_register(usize::from(self.chr_window));
         let Some(b) = self.vrc.banks_mut() else {
             return;
         };
@@ -146,6 +175,26 @@ impl VrcP {
                 b.remap_prg_banks(0x1F, 0);
                 b.map_prg_8k(2, r);
             }
+            // `prg_swap_vrc2and4_362`/`chr_swap_vrc2and4_362`: game 0 takes D7-D8 of the fetched
+            // window's register as the outer bank, game 1 the fixed `$40`/`$200`.
+            VrcPKind::M362 => {
+                if r == 0 {
+                    b.remap_prg_banks(0x0F, (fetched & 0x180) >> 3);
+                    b.remap_chr_banks(0x7F, fetched & 0x180);
+                } else {
+                    b.remap_prg_banks(0x0F, 0x40);
+                    b.remap_chr_banks(0x1FF, 0x200);
+                }
+            }
+            // `prg_swap_vrc2and4_398`/`chr_swap_vrc2and4_398`.
+            VrcPKind::M398 => {
+                if r & 0x80 != 0 {
+                    b.map_prg_32k(((r & 0xC0) >> 5) | ((fetched & 0x04) >> 2));
+                    b.map_chr_8k(0x40 | ((r & 0x40) >> 3) | (fetched & 0x07));
+                } else {
+                    b.remap_prg_banks(0x0F, 0);
+                }
+            }
             VrcPKind::M308 | VrcPKind::M524 | VrcPKind::M527 => {}
         }
     }
@@ -174,6 +223,9 @@ impl Mapper for VrcP {
         if self.kind == VrcPKind::M559 {
             writer.write_raw(&self.pages);
         }
+        if matches!(self.kind, VrcPKind::M362 | VrcPKind::M398) {
+            writer.write_u8(self.chr_window);
+        }
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -185,6 +237,9 @@ impl Mapper for VrcP {
         self.irq_pending = reader.read_bool()?;
         if self.kind == VrcPKind::M559 {
             reader.read_into(&mut self.pages)?;
+        }
+        if matches!(self.kind, VrcPKind::M362 | VrcPKind::M398) {
+            self.chr_window = reader.read_u8()? & 0x07;
         }
         self.apply();
         Ok(())
@@ -198,15 +253,48 @@ impl Mapper for VrcP {
         self.irq_pending = false;
         self.pages = Self::PAGES_559;
         self.outer = Self::outer_power_on(self.kind);
+        self.chr_window = 0;
         self.apply();
+    }
+
+    /// `map_init_362` on `RESET`: an image above 512 KiB toggles to the other game.
+    fn soft_reset(&mut self, memory: &mut CartridgeMemory) {
+        if self.kind == VrcPKind::M362 && memory.rom().prg_rom().len() > 0x8_0000 {
+            self.outer ^= 1;
+            self.apply();
+        }
+    }
+
+    /// `extcl_rd_chr_362`/`_398`: the window the PPU fetches from picks the outer banks.
+    fn on_ppu_address_bus(&mut self, _memory: &mut CartridgeMemory, address: u16, _clock: i64) {
+        if matches!(self.kind, VrcPKind::M362 | VrcPKind::M398) && address < 0x2000 {
+            let window = address.to_be_bytes()[0] >> 2;
+            if window != self.chr_window {
+                self.chr_window = window;
+                self.apply();
+            }
+        }
+    }
+
+    /// 362's game 0 and 398's latched mode move `$8000-$FFFF` on PPU fetches.
+    fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {
+        if self.prg_follows_ppu() {
+            return [super::NO_ROM_WINDOW; 4];
+        }
+        self.vrc.banks().map_or([super::NO_ROM_WINDOW; 4], |banks| {
+            banks.rom_windows(memory.rom().prg_rom().len())
+        })
     }
 
     fn irq_asserted(&self) -> bool {
         match self.kind {
             VrcPKind::M308 | VrcPKind::M524 => self.irq_pending,
-            VrcPKind::M384 | VrcPKind::M447 | VrcPKind::M527 | VrcPKind::M559 => {
-                self.vrc.irq_asserted()
-            }
+            VrcPKind::M384
+            | VrcPKind::M447
+            | VrcPKind::M527
+            | VrcPKind::M559
+            | VrcPKind::M362
+            | VrcPKind::M398 => self.vrc.irq_asserted(),
         }
     }
 
@@ -234,9 +322,12 @@ impl Mapper for VrcP {
                     }
                 }
             }
-            VrcPKind::M384 | VrcPKind::M447 | VrcPKind::M527 | VrcPKind::M559 => {
-                self.vrc.on_cpu_cycle(memory);
-            }
+            VrcPKind::M384
+            | VrcPKind::M447
+            | VrcPKind::M527
+            | VrcPKind::M559
+            | VrcPKind::M362
+            | VrcPKind::M398 => self.vrc.on_cpu_cycle(memory),
         }
     }
 
@@ -315,6 +406,10 @@ impl Mapper for VrcP {
                 self.apply();
             }
             _ => {
+                // `extcl_cpu_wr_mem_398`: the low address byte of every write.
+                if self.kind == VrcPKind::M398 {
+                    self.outer = address.to_le_bytes()[0];
+                }
                 self.vrc.write_register(memory, address, value);
                 self.apply();
             }
