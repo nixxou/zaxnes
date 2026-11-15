@@ -2102,3 +2102,34 @@ fn mappers_p_186_reads_a_study_box_tape() {
     assert!(core.try_load_state(&state, 0).is_ok());
     assert_eq!(state, core.save_state(true).unwrap());
 }
+
+/// The COOLGIRL's save area goes through `export_flash_save`/`import_flash_save`, so a host keeps
+/// it on disk like a flash chip's sectors: what a game wrote comes back in a new session.
+#[cfg(feature = "board-342")]
+#[test]
+fn mappers_p_342_save_area_survives_a_new_session() {
+    let select_save = |core: &mut zax_nes::NesCore| {
+        core.mapper_write(0x5000, 0xFE);
+        core.mapper_write(0x5001, 0x00);
+        core.mapper_write(0x5007, 0x04);
+    };
+    let mut core = MapperRom::new(342).prg(32).load();
+    assert_eq!(Vec::<u8>::new(), core.export_flash_save());
+    select_save(&mut core);
+    for (address, value) in [
+        (0x8AAA, 0xAA),
+        (0x8555, 0x55),
+        (0x8AAA, 0xA0),
+        (0x8123, 0x42),
+    ] {
+        core.mapper_write(address, value);
+    }
+    let file = core.export_flash_save();
+    assert_eq!(b"ZXCG", &file[..4]);
+
+    let mut again = MapperRom::new(342).prg(32).load();
+    assert!(!again.import_flash_save(b"not a save"));
+    assert!(again.import_flash_save(&file));
+    select_save(&mut again);
+    assert_eq!(0x42, again.read_memory(0x8123));
+}

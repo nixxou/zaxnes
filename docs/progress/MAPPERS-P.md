@@ -479,3 +479,16 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   +0.003 %), on the 532 frame hooks inlined into `run_frame` and the 256-byte snapshot on its
   frame. With them cold, out of line and the snapshot boxed (a8a846bd): mm2 core +0.003 % and
   total +0.001 %, zelda2 core +0.002 % and total +0.002 %, smb3 core +0.002 % and total +0.007 %.
+* Flash saves kept on disk (owner, 2026-11-16: "il faut que ce point marche"). The core already
+  wrote a flash chip's changed sectors as a save file (`export/import_flash_save`, MF-UNL-9) but
+  no host called it, so a game that saves in its flash (111, 406, 451, 446, 682) lost it when it
+  closed. The app now keeps it in `<rom>.flash` beside the `.srm` (`BatteryRamStore::for_flash`):
+  read before the first frame (not over a savestate, which carries its own), written every 30 s
+  when it changed and when the game stops; the export is assembled only when a write is due.
+  The COOLGIRL's save area goes through the same calls (`Mapper::export_save_area`, file `ZXCG`
+  with the written pages). Tests: `a_flash_save_survives_a_restart` (a 342 program writes its
+  save area, the file appears and comes back) and `mappers_p_342_save_area_survives_a_new_session`.
+* The app's full suite (with `bundled`) had five failures left by MAPPERS-N (its VS coins,
+  service, DIP switches and Rainbow network option had not reached the command, action, binding
+  and option-tree tests and goldens); updated, the suite passes (863 tests).
+

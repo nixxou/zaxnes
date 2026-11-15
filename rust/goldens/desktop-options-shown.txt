@@ -35,6 +35,15 @@ emu.oam_corruption
 emu.ppu_bus_conflicts
 emu.oamaddr_bug
 emu.oam_decay
+emu.rainbow_network
+emu.vs_dip_1
+emu.vs_dip_2
+emu.vs_dip_3
+emu.vs_dip_4
+emu.vs_dip_5
+emu.vs_dip_6
+emu.vs_dip_7
+emu.vs_dip_8
 emu.power_on_top
 emu.ppu_2006_delay
 emu.ppu_2006_glitch

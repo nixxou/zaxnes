@@ -2114,6 +2114,19 @@ impl Mapper for IrqP {
         let _ = memory;
     }
 
+    /// The COOLGIRL's save area ([`CoolGirl::export_save`]).
+    #[cfg(feature = "board-342")]
+    fn export_save_area(&self) -> Option<Vec<u8>> {
+        self.cool_girl.as_ref().map(|chip| chip.export_save())
+    }
+
+    #[cfg(feature = "board-342")]
+    fn import_save_area(&mut self, data: &[u8]) -> bool {
+        self.cool_girl
+            .as_mut()
+            .is_some_and(|chip| chip.import_save(data))
+    }
+
     /// The Study Box's tape audio, mixed while the motor runs (Mesen `StudyBox::MixAudio`).
     #[cfg(feature = "board-186")]
     fn expansion_audio_output(&self) -> Option<i32> {

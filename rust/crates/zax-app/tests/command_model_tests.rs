@@ -100,6 +100,10 @@ fn req_ui_205_the_model_enumerates_every_menu_command() {
         // Rust-only (owner request): stepping frame by frame.
         FrameBack,
         FrameAdvance,
+        // Lot MAPPERS-N: the VS. System cabinet's coin slots and service button.
+        InsertCoin1,
+        InsertCoin2,
+        VsService,
     ];
     for command in expected {
         assert!(

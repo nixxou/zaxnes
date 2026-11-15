@@ -1158,10 +1158,17 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             self.log("the battery RAM file could not be renamed after the ROM.");
         }
         let saved = self.battery.attach(&self.paths, &name);
+        let flash = self.flash.attach(&self.paths, &name);
         // A savestate carries its own cartridge RAM, exactly as a console would, so it must not
         // be overwritten by the file on disk (REQ-PERS-060, notes).
         if let (true, Some(saved), Some(session)) = (import_saved, saved, self.session.as_mut()) {
             session.core_mut().import_battery_ram(&saved);
+        }
+        // Lot MAPPERS-P: the flash save the same way, and a savestate carries its flash too.
+        if let (true, Some(flash), Some(session)) = (import_saved, flash, self.session.as_mut()) {
+            if !session.core_mut().import_flash_save(&flash) {
+                self.log("the flash save file could not be applied to this ROM.");
+            }
         }
     }
 

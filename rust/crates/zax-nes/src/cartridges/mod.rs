@@ -1313,6 +1313,26 @@ impl Cartridge {
     pub const fn board_number(&self) -> i32 {
         registry::board_number(self.mapper_number)
     }
+
+    /// The save file of a board whose save medium is not battery RAM: the flash chip's changed
+    /// sectors, or a save area the board keeps itself (lot MAPPERS-P, the COOLGIRL's); empty when
+    /// there is none or nothing was written.
+    #[must_use]
+    pub fn export_flash_save(&self) -> Vec<u8> {
+        if self.memory.flash().is_some() {
+            return self.memory.export_flash_save();
+        }
+        self.board.export_save_area().unwrap_or_default()
+    }
+
+    /// Applies such a file; `false` when the board has no such medium or the file is not one it
+    /// reads, the medium then left as it was.
+    pub fn import_flash_save(&mut self, data: &[u8]) -> bool {
+        if self.memory.flash().is_some() {
+            return self.memory.import_flash_save(data);
+        }
+        self.board.import_save_area(data)
+    }
     /// Current nametable layout (SPEC-02 §2, "current mirroring").
     #[must_use]
     pub const fn mirroring(&self) -> NametableMirroring {

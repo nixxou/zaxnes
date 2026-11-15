@@ -505,8 +505,9 @@ fn ro_3_every_console_setting_is_a_row_the_console_can_step() {
     // shaders' share of the window), and `emu.engine` (owner request, 2026-11-12): a setting may
     // move in the tree, never leave the console. Lot CARTDB adds `emu.cartridge_db` and
     // `emu.power_on_ram`. Lot FIDELITY step 28 adds `emu.cpu_ppu_alignment`, step 32
-    // `emu.palette_corruption`.
-    assert_eq!(77, advanced::ROW_SETTINGS.len());
+    // `emu.palette_corruption`. Lot MAPPERS-N adds `emu.rainbow_network` (mapper 682's ESP) and
+    // the eight `emu.vs_dip_N` (the VS. System cabinet's DIP switches).
+    assert_eq!(86, advanced::ROW_SETTINGS.len());
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::EmuEngine));
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::AudioClassicOutput));
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::EmuSmoothScrollAhead));

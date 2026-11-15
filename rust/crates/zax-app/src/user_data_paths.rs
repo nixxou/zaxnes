@@ -34,6 +34,11 @@ pub enum UserDataRootKind {
     Explicit,
 }
 
+/// The extension of a battery RAM file.
+pub const BATTERY_EXTENSION: &str = "srm";
+/// The extension of a flash save file (lot MAPPERS-P).
+pub const FLASH_EXTENSION: &str = "flash";
+
 /// The folders and files of the user data.
 #[derive(Debug, Clone)]
 pub struct UserDataPaths {
@@ -146,7 +151,20 @@ impl UserDataPaths {
     /// request), or, as the files were named before, the ROM's fingerprint.
     #[must_use]
     pub fn battery_file(&self, name: &str) -> PathBuf {
-        self.battery_directory.join(format!("{name}.srm"))
+        self.save_file(name, BATTERY_EXTENSION)
+    }
+
+    /// The flash save of the ROM `name` (lot MAPPERS-P): `<name>.flash` beside its RAM file,
+    /// the changed sectors of a board whose save medium is its flash chip.
+    #[must_use]
+    pub fn flash_file(&self, name: &str) -> PathBuf {
+        self.save_file(name, FLASH_EXTENSION)
+    }
+
+    /// `<name>.<extension>` in the cartridge saves' folder.
+    #[must_use]
+    pub fn save_file(&self, name: &str, extension: &str) -> PathBuf {
+        self.battery_directory.join(format!("{name}.{extension}"))
     }
 
     /// Movie `number` of the ROM `rom`: `<rom>.mv<number>` (owner request).

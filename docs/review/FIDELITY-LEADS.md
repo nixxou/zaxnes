@@ -1119,9 +1119,9 @@ places where puNES itself is incomplete are copied, not invented around:
   dots into a line; a gap of two lines leaves the frame. With rendering off nothing counts,
   which matches the hardware's view of the bus but not puNES's. The `$5204` in-frame bit uses
   the same tracker. The save area (the top 8 MiB of the 1 GiB bank space, puNES's
-  `SAVE_FLASH_SIZE`) is in the savestate but not persisted by the host: puNES writes it to the
-  game's save file, and the host here has no flash save beyond `FlashRom` (lead: route it
-  through `CartridgeMemory` like the flash boards). Unwritten save pages read 0, as puNES's
+  `SAVE_FLASH_SIZE`) is in the savestate and, since the flash-save batch, in the host's
+  `<rom>.flash` file as puNES keeps it in the game's save file (`Mapper::export_save_area`; only
+  the written 8 KiB pages are stored). Unwritten save pages read 0, as puNES's
   zeroed buffer does, not `$FF` like an erased chip. The PRG flash outside the save area is
   read-only here, as puNES's ROM is. Mapper 75's `$9000` write sets `chr.e` from `chr.a`'s other
   bits, a reading of puNES's code kept as written.

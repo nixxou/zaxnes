@@ -861,6 +861,17 @@ impl Mapper for IrqBoard {
         inner!(self, b => b.take_dac_write())
     }
 
+    /// Forwarded for the COOLGIRL's save area (lot MAPPERS-P), asked when a host saves.
+    #[cfg(feature = "board-342")]
+    fn export_save_area(&self) -> Option<Vec<u8>> {
+        inner!(self, b => b.export_save_area())
+    }
+
+    #[cfg(feature = "board-342")]
+    fn import_save_area(&mut self, data: &[u8]) -> bool {
+        inner!(self, b => b.import_save_area(data))
+    }
+
     /// Forwarded for the copier loaders (lot MAPPERS-P), asked once at power-on.
     #[cfg(any(feature = "board-561", feature = "board-562"))]
     fn boot_program(&self, memory: &CartridgeMemory) -> Option<super::BootProgram> {

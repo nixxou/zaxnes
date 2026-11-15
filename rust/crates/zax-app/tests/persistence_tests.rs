@@ -462,3 +462,74 @@ fn a_study_box_tape_is_read_with_its_bios() {
     assert_eq!(16 + 0x4_0000 + tape.len(), rom.image.len());
     assert_eq!(&rom.image[..4], b"NES\x1A");
 }
+
+/// Lot MAPPERS-P: a board whose save medium is its flash (here the COOLGIRL's save area) keeps
+/// it in `<rom>.flash` beside the RAM files, written when the game stops and read back before
+/// the first frame of the next launch.
+#[test]
+fn a_flash_save_survives_a_restart() {
+    // A COOLGIRL image (mapper 342, NES 2.0): 128 KiB of PRG, CHR-RAM. The reset code at $E000
+    // copies a routine to $0300 (moving the PRG base moves every window) that maps the save area
+    // at $8000, enables flash writes and programs $5A at $8000 by the JEDEC sequence.
+    let mut routine = Vec::new();
+    for (value, address) in [
+        (0xFE, 0x5000u16),
+        (0x00, 0x5001),
+        (0x04, 0x5007),
+        (0xAA, 0x8AAA),
+        (0x55, 0x8555),
+        (0xA0, 0x8AAA),
+        (0x5A, 0x8000),
+    ] {
+        routine.extend_from_slice(&[0xA9, value, 0x8D]);
+        routine.extend_from_slice(&address.to_le_bytes());
+    }
+    let here = 0x0300 + u16::try_from(routine.len()).unwrap();
+    routine.push(0x4C);
+    routine.extend_from_slice(&here.to_le_bytes());
+    let length = u8::try_from(routine.len() - 1).unwrap();
+    let mut code = vec![
+        0xA2, length, 0xBD, 0x10, 0xE0, 0x9D, 0x00, 0x03, 0xCA, 0x10, 0xF7,
+    ];
+    code.extend_from_slice(&[0x4C, 0x00, 0x03]);
+    code.resize(0x10, 0xEA);
+    code.extend_from_slice(&routine);
+
+    let prg = 128 * 1024;
+    let mut image = vec![0u8; 16 + prg];
+    image[..16].copy_from_slice(&[
+        0x4E, 0x45, 0x53, 0x1A, 8, 0, 0x60, 0x58, 0x01, 0, 0, 0, 0, 0, 0, 0,
+    ]);
+    let last_bank = 16 + prg - 0x2000;
+    image[last_bank..last_bank + code.len()].copy_from_slice(&code);
+    for vector in 0..3 {
+        image[16 + prg - 6 + vector * 2] = 0x00;
+        image[16 + prg - 5 + vector * 2] = 0xE0;
+    }
+
+    let mut harness = LoopHarness::create();
+    let rom = harness.write_rom(&image, "coolgirl.nes");
+    harness.catalog().add("cg", Some(&rom));
+    harness.run_with(Command::LaunchGame, CommandArgs::of_text("cg"));
+    harness.run_frames(5);
+    let saved = harness.host.session().unwrap().core().export_flash_save();
+    assert_eq!(b"ZXCG", &saved[..4]);
+    harness.run(Command::Stop);
+    let files: Vec<_> = std::fs::read_dir(&harness.paths.battery_directory)
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "flash")
+        })
+        .collect();
+    assert_eq!(1, files.len());
+    assert_eq!(saved, std::fs::read(&files[0]).unwrap());
+    // The next launch reads it back before the first frame runs.
+    harness.run_with(Command::LaunchGame, CommandArgs::of_text("cg"));
+    assert_eq!(
+        saved,
+        harness.host.session().unwrap().core().export_flash_save()
+    );
+}

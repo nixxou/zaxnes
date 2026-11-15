@@ -1754,6 +1754,55 @@ impl CoolGirl {
         Ok(())
     }
 
+    /// The save file's tag and version.
+    const SAVE_MAGIC: &'static [u8; 4] = b"ZXCG";
+    const SAVE_VERSION: u8 = 1;
+
+    /// The save area as a file: `ZXCG`, a version byte, then each written 8 KiB page as its
+    /// 16-bit index (little-endian) and its bytes; empty when nothing was ever written.
+    pub(crate) fn export_save(&self) -> Vec<u8> {
+        let pages: Vec<(usize, &[u8])> = self
+            .save
+            .iter()
+            .enumerate()
+            .filter_map(|(index, page)| page.as_deref().map(|data| (index, data)))
+            .collect();
+        if pages.is_empty() {
+            return Vec::new();
+        }
+        let mut file = Self::SAVE_MAGIC.to_vec();
+        file.push(Self::SAVE_VERSION);
+        for (index, data) in pages {
+            file.extend_from_slice(&u16::try_from(index).unwrap_or(0).to_le_bytes());
+            file.extend_from_slice(data);
+        }
+        file
+    }
+
+    /// Applies a file of [`Self::export_save`]; `false`, the area untouched, when it is not one.
+    pub(crate) fn import_save(&mut self, data: &[u8]) -> bool {
+        let Some(body) = data
+            .strip_prefix(Self::SAVE_MAGIC.as_slice())
+            .and_then(|rest| rest.strip_prefix(&[Self::SAVE_VERSION]))
+        else {
+            return false;
+        };
+        let record = 2 + SAVE_PAGE;
+        if body.len() % record != 0 {
+            return false;
+        }
+        let mut save = vec![None; SAVE_SIZE / SAVE_PAGE];
+        for chunk in body.chunks_exact(record) {
+            let index = usize::from(u16::from_le_bytes([chunk[0], chunk[1]]));
+            let Some(slot) = save.get_mut(index) else {
+                return false;
+            };
+            *slot = Some(chunk[2..].to_vec().into_boxed_slice());
+        }
+        self.save = save;
+        true
+    }
+
     /// Takes the save area of the board `old` replaces (a reset keeps the flash).
     pub(crate) fn keep_save(&mut self, old: &mut Self) {
         self.save = std::mem::take(&mut old.save);

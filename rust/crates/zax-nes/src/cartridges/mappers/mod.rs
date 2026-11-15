@@ -820,6 +820,19 @@ pub trait Mapper {
         None
     }
 
+    /// A save medium the board keeps itself, outside [`CartridgeMemory`]'s PRG-RAM and flash
+    /// (lot MAPPERS-P: the COOLGIRL's save area), as the file a host keeps; `None` for every
+    /// other board.
+    fn export_save_area(&self) -> Option<Vec<u8>> {
+        None
+    }
+
+    /// Applies a file written by [`Mapper::export_save_area`]; `false` when the board has no such
+    /// medium or the file is not one it reads, the medium then left as it was.
+    fn import_save_area(&mut self, _data: &[u8]) -> bool {
+        false
+    }
+
     /// A CPU write to an APU register (`$4000-$4013`, `$4015`, `$4017`) seen by a board whose
     /// chip shares the APU's address space, and the value the APU then gets (lot MAPPERS-P,
     /// the `OneBus` PCM channel of 256 and 436, puNES `extcl_wr_apu_OneBus`).

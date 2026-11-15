@@ -901,7 +901,7 @@ impl NesCore {
     pub fn export_flash_save(&self) -> Vec<u8> {
         self.bus
             .cartridge()
-            .map_or_else(Vec::new, |cartridge| cartridge.memory().export_flash_save())
+            .map_or_else(Vec::new, crate::cartridges::Cartridge::export_flash_save)
     }
 
     /// Loads a file written by [`Self::export_flash_save`] (REQ-CORE-095). Returns `false` when
@@ -914,7 +914,7 @@ impl NesCore {
     pub fn import_flash_save(&mut self, data: &[u8]) -> bool {
         self.bus
             .cartridge_mut()
-            .is_some_and(|cartridge| cartridge.memory_mut().import_flash_save(data))
+            .is_some_and(|cartridge| cartridge.import_flash_save(data))
     }
 
     fn power_on(&mut self) {
