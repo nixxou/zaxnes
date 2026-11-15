@@ -853,3 +853,25 @@ update; this build holds it until `$5000` is written again. Which one the BMC-SP
 `Kaiser7017.h` acknowledges its IRQ on a **read** of `$4030`. That needs `Mapper::cpu_read_override`
 in `IrqBoard`, the hook whose body cost `mmc5exram` +1.098 % in MF-UNL-12 (`board-292` parked), so the
 board was not taken.
+
+### J11. Mapper 108 follows nesdev's submappers, not Mesen2
+Mesen2 `Bb.h` takes one register at every `$8000-$FFFF` address of `(addr & $9000) == $8000` plus
+`$F000+`, powering on at `$FF`. nesdev ("INES Mapper 108") and puNES `mapper_108.c:37-87` split the
+FDS conversions into four submappers: the register from `$F000` (1), `$E000` (2) or `$8000` (3, 4),
+power-on 0, `$6000` fixed to the last bank on 4, CHR banked only from CHR-ROM. Mesen2's reading hangs
+the Hackset's Bubble Bobble conversion (`AF799590`, submapper 1 in the cartridge DB) on a black
+screen; FCEUX `108.cpp` (writes at `$8000-$8FFF` and `$F000-$FFFF`) runs it, and so does this build
+since. Falsion (submapper 2) has no local dump.
+
+### J12. iNES 1.0 CHR-RAM of the MAPPERS-N boards is 8 KiB
+REQ-CORE-012 gives an iNES 1.0 image without CHR-ROM 32 KiB of CHR-RAM. On the 111 boards of
+`MAPPERS_N_CHR_RAM_8K` (`registry.rs`) this build gives 8 KiB, as Mesen2 (`BaseMapper`,
+`GetChrRamSize` 0x2000 unless overridden), FCEUX (`108.cpp`, one 8 KiB `setchr8(0)` page) and
+BizHawk (`Cart.VramSize = 8`, `Mapper108.cs`) do: their CHR registers wrap inside it, and a stray
+bank number otherwise shows an empty page. Boards that override the size keep their own (6/8/17,
+176, 191, 253). NES 2.0 images keep their declared size.
+
+### J13. FK23C CHR-RAM bit without CHR-RAM
+Mesen2 `Fk23C.h:160` selects CHR-RAM for the `$5xx0` bit 5 only when the cartridge has CHR-RAM
+("_selectChrRam && _chrRamSize > 0"). The first port missed that condition, so the NES 2.0 dump of
+Zhi Li Xiao Zhuang Yuan (CHR-ROM only, `$5FF0 = $60`) read zeros; it now matches Mesen2 and FCEUX.

@@ -410,6 +410,8 @@ pub struct LatchMulti {
     /// Whether mapper 236 has CHR-RAM, so that its register drives the outer PRG bank instead of
     /// CHR (`Bmc70in1.h`, `_useOuterBank`).
     chr_ram: bool,
+    /// Mapper 108's submapper, 1 to 4 (nesdev "INES Mapper 108"); 0 on every other kind.
+    submapper: u8,
 }
 
 impl LatchMulti {
@@ -430,6 +432,33 @@ impl LatchMulti {
                 _ => 3,
             },
             chr_ram: memory.rom().chr_rom().is_empty(),
+            submapper: if kind == LatchKind::M108 {
+                Self::submapper_108(memory)
+            } else {
+                0
+            },
+        }
+    }
+
+    /// nesdev ("INES Mapper 108") splits the FDS conversions into four submappers by where the
+    /// register sits; puNES `mapper_108.c:37-40` guesses a missing one the same way the page's
+    /// table reads: no CHR-ROM is 1 (Bubble Bobble) unless the mirroring is vertical (3,
+    /// Meikyuu Jiin Dababa), and CHR-ROM is 4 (Pro Wrestling, 32 KiB) or 2 (Falsion).
+    fn submapper_108(memory: &CartridgeMemory) -> u8 {
+        let header = memory.rom().header();
+        if (1..=4).contains(&header.submapper) {
+            return u8::try_from(header.submapper).unwrap_or(1);
+        }
+        if memory.rom().chr_rom().is_empty() {
+            if header.mirroring == NametableMirroring::Vertical {
+                3
+            } else {
+                1
+            }
+        } else if memory.rom().prg_rom().len() <= 0x8000 {
+            4
+        } else {
+            2
         }
     }
 
@@ -814,12 +843,14 @@ impl LatchMulti {
                 self.banks.map_chr_8k(0);
                 None
             }
-            // `Bb.h:14-38`: `$8000-$FFFF` is the last 32 KiB, `$6000-$7FFF` an 8 KiB bank
-            // (power-on $FF); `regs[0]` PRG, `regs[1]` CHR.
+            // puNES `mapper_108.c:75-87` (nesdev "INES Mapper 108"): `$8000-$FFFF` is the last
+            // 32 KiB; `$6000-$7FFF` the register's 8 KiB bank, the last one on submapper 4;
+            // CHR-ROM follows the register, CHR-RAM is never banked. Mesen2 `Bb.h` merges the
+            // submappers and hangs submapper 1's Bubble Bobble (FIDELITY-LEADS J11).
             LatchKind::M108 => {
                 self.banks.map_prg_32k(-1);
-                self.rom_6000 = Some(r0);
-                self.banks.map_chr_8k(r1);
+                self.rom_6000 = Some(if self.submapper == 4 { -1 } else { r0 });
+                self.banks.map_chr_8k(if self.chr_ram { 0 } else { r0 });
                 None
             }
             // `Nina03_06.h:22-26`, multicart mode, 32 KiB pages.
@@ -1270,13 +1301,16 @@ impl LatchMulti {
                     self.regs[1] = (value << 4) & 0x70;
                 }
             }
-            // `Bb.h:31-38`.
+            // puNES `mapper_108.c:41-55,63-69`: one register from `$F000` (submapper 1), `$E000`
+            // (2) or `$8000` (3 and 4).
             LatchKind::M108 => {
-                if address & 0x9000 == 0x8000 || address >= 0xF000 {
+                let start = match self.submapper {
+                    1 => 0xF000,
+                    2 => 0xE000,
+                    _ => 0x8000,
+                };
+                if address >= start {
                     self.regs[0] = value;
-                    self.regs[1] = value;
-                } else {
-                    self.regs[1] = value & 0x01;
                 }
             }
             // `Henggedianzi179.h:17-24`.
@@ -1477,8 +1511,6 @@ impl LatchMulti {
             LatchKind::M230 => self.flag = true,
             // `Bmc51.h:17-18`: "_mode = 1".
             LatchKind::M51 => self.regs[1] = 1,
-            // `Bb.h:17`: "_prgReg = -1".
-            LatchKind::M108 => self.regs[0] = 0xFF,
             // `Kaiser7016.h`: "_prgReg = 8".
             LatchKind::M306 => self.regs[0] = 8,
             // `Kaiser7012.h:11`: "SelectPrgPage(0, 1)".

@@ -72,3 +72,18 @@ Owner's request (2026-11-15): implement the mappers missing compared with the ot
 * Next: 176 (FK23C), then 199/198, Kaiser FDS conversions (56/142, 171, 175, 302-307, 312), Subor
   166/167, 252, 265, 266, 283, 288-290, 300-301, 314, 319-320, 323-324, 328-333, 336, 346, 348-349,
   366, 513, 518-522, 529-530.
+* 6446182e — 117 of 142 done (see the summary above for the 25 left).
+* Hackset (`C:\Users\…\Downloads\Hackset-NES`, owner's local set; its per-archive JSON gives each
+  ROM's mapper, so nothing is scanned blind): 31 of the 117 new mappers have dumps, plus 7 of the
+  25 left (165 168 188 198 199 234 252). Dumps chosen [!]/[!!] first, then GoodSet without hack tags,
+  hacks last (owner: some hacks do not work). Rendered at frame 900 with Start presses; suspects
+  checked against FCEUX (`zax-harness fceux-run/fceux-compare`, harness built with `fceux-core`).
+  - Verified (boot + picture): 6 8 17 42 46 56 62 106 113 120 142 148 177 183 191 196 216 222 238
+    240 241 242 244 245 250 253 254 290 521, then 108 and 176 after the fixes below.
+  - Not the board: 42 Rush'n Attack conversion (FCEUX garbles it too), 244 Asmik-kun Land [t1]
+    (trainer hack, FCEUX grey too), 254 [b1] bad dump.
+* Fixes from the Hackset: 108 per nesdev/puNES submappers (FIDELITY-LEADS J11); 8 KiB iNES 1.0
+  CHR-RAM on the new boards (J12); FK23C CHR-RAM bit needs CHR-RAM (J13); `registry.rs` 262 arm
+  had lost its `cfg` to the 6/8/17 arm in a scripted insertion, restored.
+* Next: cross-check every new board against nesdev + puNES (+ FCEUX where it has the board), log
+  divergences in FIDELITY-LEADS; then the 7 remaining mappers that have Hackset dumps.

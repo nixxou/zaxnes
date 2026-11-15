@@ -690,6 +690,17 @@ fn datach_has_external_eeprom(header: &InesHeader) -> bool {
     header.is_nes20 && header.byte10 == 0x10
 }
 
+/// The MAPPERS-N boards whose iNES 1.0 CHR-RAM is Mesen2's 8 KiB default (see
+/// [`board_memory_sizes`]).
+const MAPPERS_N_CHR_RAM_8K: &[i32] = &[
+    39, 40, 42, 43, 44, 45, 46, 49, 50, 51, 52, 54, 56, 57, 58, 59, 60, 61, 62, 63, 104, 106, 108,
+    113, 117, 120, 125, 126, 134, 142, 148, 166, 167, 170, 171, 174, 177, 179, 183, 196, 197, 200,
+    201, 202, 203, 204, 205, 212, 213, 214, 216, 217, 221, 222, 224, 226, 227, 229, 230, 231, 233,
+    235, 236, 238, 240, 241, 242, 244, 245, 249, 250, 254, 255, 258, 259, 261, 265, 274, 283, 285,
+    286, 287, 288, 289, 290, 299, 300, 301, 302, 304, 305, 306, 309, 312, 313, 314, 319, 320, 324,
+    325, 329, 331, 332, 333, 336, 346, 348, 349, 366, 521, 522,
+];
+
 /// The volatile-memory sizes of `mapper`'s board for `header`.
 #[must_use]
 // One arm per board that dictates a size, each with the page that says so: a flat table, like
@@ -892,10 +903,6 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // The 4 KiB of "additional VRAM for four-screen mirroring" the same sentence gives the
         // board is **not** here: it is the console's own nametable RAM, `ppu::VRAM_SIZE` being
         // 4 KiB, which is mapper 77's arm's reading of the same shape.
-        #[cfg(feature = "board-262")]
-        // MAPPERS-N: "GetChrRamSize() { return 0x800; }" (Mesen2 `Mapper253.h:21`).
-        // A CHR-RAM-only image keeps the header's size: the 2 KiB is the chip beside the CHR-ROM.
-        // MAPPERS-N: mapper 125's LH32 has 8 KiB of work RAM at `$C000-$DFFF` (Mesen2 `Lh32.h:18`).
         // MAPPERS-N: the Front Fareast formats give a CHR-RAM image 32 KiB (Mesen2
         // `FrontFareast.h:12`, `GetChrRamSize() { return 0x8000; }`).
         #[cfg(feature = "board-irq-latch")]
@@ -923,16 +930,20 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
             prg_ram: Some(0x2000),
             ..BoardMemorySizes::default()
         },
+        // MAPPERS-N: mapper 125's LH32 has 8 KiB of work RAM at `$C000-$DFFF` (Mesen2 `Lh32.h:18`).
         #[cfg(feature = "board-125")]
         125 => BoardMemorySizes {
             prg_ram: Some(0x2000),
             ..BoardMemorySizes::default()
         },
+        // MAPPERS-N: "GetChrRamSize() { return 0x800; }" (Mesen2 `Mapper253.h:21`).
+        // A CHR-RAM-only image keeps the header's size: the 2 KiB is the chip beside the CHR-ROM.
         #[cfg(feature = "board-253")]
         253 if header.chr_rom_size != 0 => BoardMemorySizes {
             chr_ram: Some(Waixing253::CHR_RAM_SIZE),
             ..BoardMemorySizes::default()
         },
+        #[cfg(feature = "board-262")]
         262 => BoardMemorySizes {
             chr_ram: Some(Mmc3Shero::CHR_RAM_SIZE),
             ..BoardMemorySizes::default()
@@ -1332,6 +1343,18 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // PRG-RAM and not one says the board has none. Nothing forces the question — 143's and
         // 145's ports are at $4100 under mask $E100 and 107's, 144's and 149's are above $8000 —
         // so the header decides. Mapper 144 is mapper 11's board, which has no arm here either.
+        // MAPPERS-N: an iNES 1.0 image without CHR-ROM gets 8 KiB of CHR-RAM on these boards, as
+        // Mesen2 gives it (`BaseMapper::GetChrRamSize`, 0x2000 unless the board overrides it,
+        // which none of these does), not REQ-CORE-012's 32 KiB: their CHR bank registers wrap
+        // inside 8 KiB there, and a game writing a stray bank number would show an empty page
+        // here (mapper 108's Bubble Bobble conversion, which FCEUX `108.cpp` and BizHawk
+        // `Mapper108.cs`, "Cart.VramSize = 8", also give 8 KiB).
+        n if !header.is_nes20 && header.chr_rom_size == 0 && MAPPERS_N_CHR_RAM_8K.contains(&n) => {
+            BoardMemorySizes {
+                chr_ram: Some(0x2000),
+                ..BoardMemorySizes::default()
+            }
+        }
         _ => BoardMemorySizes::default(),
     }
 }

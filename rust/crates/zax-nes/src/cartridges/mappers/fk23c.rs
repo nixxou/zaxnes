@@ -49,6 +49,9 @@ pub struct Fk23c {
     chr_pages: [i32; 8],
     chr_ram_windows: u8,
     has_chr_rom: bool,
+    /// Whether the cartridge carries CHR-RAM beside its CHR-ROM: without it the `$5xx0` CHR-RAM
+    /// bit selects nothing (Mesen2 `Fk23C.h:160`, "_selectChrRam && _chrRamSize > 0").
+    has_chr_ram: bool,
     /// "Subtype 1, 1024 KiB PRG-ROM, 1024 KiB CHR-ROM: boot in second 512 KiB of PRG-ROM."
     boot_high: bool,
     /// "Subtype 2, 16384 KiB PRG-ROM, no CHR-ROM: … MMC3 registers $46 and $47 swapped."
@@ -97,6 +100,7 @@ impl Fk23c {
             chr_pages: [0; 8],
             chr_ram_windows: 0,
             has_chr_rom: chr != 0,
+            has_chr_ram: !memory.chr_ram().is_empty(),
             boot_high: prg == 1024 * 1024 && prg == chr,
             swap_46_47: prg == 16384 * 1024 && chr == 0,
         }
@@ -211,7 +215,7 @@ impl Fk23c {
         self.chr_ram_windows = 0;
         for (slot, page) in pages.iter().enumerate() {
             let ram = self.has_chr_rom
-                && (self.select_chr_ram
+                && ((self.select_chr_ram && self.has_chr_ram)
                     || (self.wram_config && self.ram_in_first_chr_bank && *page <= 7));
             if ram {
                 self.chr_ram_windows |= 1 << slot;

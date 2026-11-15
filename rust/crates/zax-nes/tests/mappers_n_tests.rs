@@ -513,3 +513,47 @@ fn mappers_n_329_banks_its_work_ram() {
     core.mapper_write(0x8000, 0x41);
     assert_eq!(0x22, core.read_memory(0x6000));
 }
+
+/// nesdev ("INES Mapper 108") and puNES `mapper_108.c`: submapper 1's register is `$F000-$FFFF`
+/// only, so a write at `$A000` (which Mesen2 `Bb.h` takes) leaves `$6000` alone; the register
+/// powers on at 0. An iNES 1.0 image without CHR-ROM and with horizontal mirroring is submapper 1.
+#[cfg(feature = "board-108")]
+#[test]
+fn mappers_n_108_submapper_register_ranges() {
+    for rom in [
+        MapperRom::new(108).prg(16).submapper(1),
+        MapperRom::new(108).prg(16),
+    ] {
+        let mut core = rom.load();
+        assert_eq!(0, core.read_memory(0x6000));
+        core.mapper_write(0xA000, 3);
+        assert_eq!(0, core.read_memory(0x6000));
+        core.mapper_write(0xF000, 5);
+        assert_eq!(5, core.read_memory(0x6000));
+        assert_eq!([12, 13, 14, 15], core.prg_windows());
+    }
+    // Submapper 3 takes `$8000`; submapper 4 keeps `$6000` on the last bank.
+    let mut core = MapperRom::new(108).prg(16).submapper(3).load();
+    core.mapper_write(0x8000, 6);
+    assert_eq!(6, core.read_memory(0x6000));
+    let mut core = MapperRom::new(108).prg(4).chr(16).submapper(4).load();
+    core.mapper_write(0x8000, 1);
+    assert_eq!(3, core.read_memory(0x6100));
+    assert_eq!([8, 9, 10, 11, 12, 13, 14, 15], core.chr_windows());
+}
+
+/// Mesen2 `Fk23C.h:160`: the `$5xx0` CHR-RAM bit selects CHR-RAM only when the cartridge has
+/// some ("_selectChrRam && _chrRamSize > 0"); a NES 2.0 image declaring none keeps reading its
+/// CHR-ROM (Zhi Li Xiao Zhuang Yuan writes `$5FF0 = $60` and draws from CHR-ROM).
+#[cfg(feature = "board-176")]
+#[test]
+fn mappers_n_176_chr_ram_bit_without_chr_ram() {
+    let mut core = MapperRom::new(176)
+        .prg(16)
+        .chr(64)
+        .prg_ram(8192, 0)
+        .chr_ram(0)
+        .load();
+    core.mapper_write(0x5FF0, 0x60);
+    assert_eq!([0, 1, 2, 3, 4, 5, 6, 7], core.chr_windows());
+}
