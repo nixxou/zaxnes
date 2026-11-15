@@ -37,6 +37,21 @@ power-on timer (0-427) and bit counter (1, 7, 8) by hand does not align them, so
 undefined power-on value; next: trace the netlist's DMC timer, bit counter and rate nodes around
 the `$4010` write and the first output cycle.
 
+## DMC, step 2 (2026-11-15)
+
+* The netlist's DMC timer is a 9-bit LFSR (`cpu_pcm_t0-8`), with `cpu_pcm_bits0-2` and
+  `cpu_pcm_freq0-3` (the bench prefixes the 2A03's node names with `cpu_`). On `dmc.bin`, after the
+  rate-15 write the bit clocks fall at 432, then every 54 cycles; the bit counter wraps at 810 and
+  the fetch is at 813.
+* The recorder first logged a halted read at the cycle its call began; a DMA runs inside the call
+  before the read, so the read is now logged at the call's last cycle, the DMA before it.
+* With that, the first fetch after the `$4015` write differs too: the netlist halts on the data
+  read `$0200` (3 cycles after the write), Zaxnes on the operand fetch `$8019` before it (2
+  cycles). Two free power-on phases are in play: the DMC output unit's (`--dmc <timer>,<bits>`) and
+  the APU's get / put parity against the CPU (random per console). Next: a parity knob, a scan of
+  both, then the DMA's own cycles (halt, dummy, fetch addresses) traced on the Zaxnes side, before
+  anything is called a difference of the model.
+
 ## Meaning for A-bis
 
 Nothing measured needs the CPU on half-cycles: where the CPU differs, it is a timing value of the

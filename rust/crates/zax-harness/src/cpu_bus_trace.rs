@@ -111,17 +111,19 @@ struct Recorder<'a, B: CpuBus> {
 }
 
 impl<B: CpuBus> CpuBus for Recorder<'_, B> {
+    // A DMA halting a read runs its cycles inside the call, before the read: the read itself is
+    // the call's last cycle.
     fn read(&mut self, address: u16) -> u8 {
-        let cycle = self.bus.cycle_count();
         let value = self.bus.read(address);
-        self.lines.push((cycle, address, true, value));
+        self.lines
+            .push((self.bus.cycle_count() - 1, address, true, value));
         value
     }
 
     fn read_code(&mut self, address: u16) -> u8 {
-        let cycle = self.bus.cycle_count();
         let value = self.bus.read_code(address);
-        self.lines.push((cycle, address, true, value));
+        self.lines
+            .push((self.bus.cycle_count() - 1, address, true, value));
         value
     }
 
