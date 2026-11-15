@@ -714,6 +714,27 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   off should keep bytes `$40-$47` instead. One console, by hand: to confirm. Model it would give:
   per bit, a resting value and a retention time drawn once per console; past it without an access
   the bit takes its resting value; the row at OAMADDR exempt while rendering is off.
+- **Speculative per-bit model (lot FIDPLUS-E, 2026-11-16), replaces the whole-row model of step
+  20 under the same option (`emu.oam_decay`, still off).** `Ppu2C02::refresh_oam_row`,
+  `move_oam_address`, `decay_oam_row`, `OAM_RETENTION_US` (`ppu/mod.rs`):
+  - per bit, a retention drawn once from a log-normal law (DRAM retention), a 256-quantile table:
+    none before 125 ms (above blargg's ~123 ms), median 266 ms (16 NTSC frames), all by 566 ms;
+  - per bit, a resting value (0 or 1); both draws are a fixed hash of the bit's index (SplitMix64),
+    so a run replays identically and nothing new goes in the savestate;
+  - the OAMADDR row is held refreshed while rendering is off (hypothesis above): a row is settled
+    when OAMADDR enters it and stamped when OAMADDR leaves it; a `$2004` access to it decays nothing;
+  - no decay at all on the 2C07 (nesdev: the PAL PPU refreshes OAM itself); Dendy at its dot rate.
+  - Measured with our ROM (`ext-tools/oamdecay-rom/oamdecay.nes`, harness `ZAXNES_OAM_DECAY=1`):
+    0 bits lost for 1-7 frames, 6 at 8, 25 at 9, 69 at 10, 257 at 12, 816 at 15, 1 453 at 20,
+    1 798 from 30 frames (878 to 0, 920 to 1; the other bits already sat at their resting value);
+    the OAMADDR row (ROW31 in the ROM) keeps its bytes.
+  - Not measured: the law, its median and spread, the share of 0 and 1 resting values, temperature
+    (one internal scale, no option, owner 2026-11-16). One plausible console, not a measured one.
+- **Reading OAM on old PPUs (NESdev Discord, 2026-11-16)**: a tester ran a decay ROM on a
+  letterless and an E-revision PPU and read all `$00`; reply on the thread: PPU revisions before G
+  do not support reading OAMDATA (`$2004`). Zaxnes already models it (`pre_g_revision`). So any
+  `$2004`-based decay measurement, ours included, needs a G-or-later PPU; FireSide's figures come
+  from such a console.
 
 ### D2b. Performance lead found on the way (lot FIDELITY, not fidelity) — tried and dropped (FIDPLUS-1)
 - Callgrind `f4185fa8` vs `27e2c3e2`: the APU stage costs +0.8 to +0.9 % on every game (+17 to

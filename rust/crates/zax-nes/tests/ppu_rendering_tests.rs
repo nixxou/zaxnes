@@ -826,11 +826,12 @@ fn fidelity_oamaddr_at_8_or_more_copies_its_row_over_oam_0_when_rendering_starts
     );
 }
 
-/// Lot FIDELITY step 20: with the rendering off for more than 8 NTSC frames, an OAM row nothing
-/// accessed decays (each byte reads as its own address, as `BeesNES` leaves it); a row the CPU
-/// touched in the meantime, or the rendering on all along, keeps its bytes.
+/// Lot FIDPLUS-E (speculative model): with the rendering off, OAM keeps every bit for 7 NTSC
+/// frames; past ~34 frames every bit has fallen to its own resting value, the same on every run.
+/// The row `OAMADDR` points at is held refreshed; a row the address visited in the meantime keeps
+/// its bytes; with the rendering on all along, or the setting off, nothing changes.
 #[test]
-fn fidelity_oam_decays_after_8_frames_with_the_rendering_off() {
+fn fidplus_oam_decays_bit_by_bit_with_the_rendering_off() {
     fn oam_after_blank(frames: usize, decay: bool, touch_row_1: bool) -> Vec<u8> {
         let mut fixture = TileFixture::new();
         for sprite in 0..4u8 {
@@ -860,21 +861,17 @@ fn fidelity_oam_decays_after_8_frames_with_the_rendering_off() {
         0x40, 0x11, 0x01, 0x22, 0x40, 0x11, 0x01, 0x22, 0x40, 0x11, 0x01, 0x22, 0x40, 0x11, 0x01,
         0x22,
     ];
-    let row_0_decayed = [0, 1, 2, 3, 4, 5, 0x02, 7];
-    assert_eq!(kept, oam_after_blank(12, false, false), "setting off");
-    assert_eq!(kept, oam_after_blank(6, true, false), "6 frames: kept");
-    let both = oam_after_blank(12, true, false);
-    assert_eq!(row_0_decayed, both[0..8], "12 frames: row 0 decayed");
-    assert_eq!(
-        [8, 9, 0x02, 11, 12, 13, 0x02, 15],
-        both[8..16],
-        "12 frames: row 1 decayed"
-    );
-    let touched = oam_after_blank(12, true, true);
-    assert_eq!(row_0_decayed, touched[0..8], "row 0 untouched");
-    assert_eq!(kept[8..16], touched[8..16], "row 1 read every 4 frames");
+    assert_eq!(kept, oam_after_blank(40, false, false), "setting off");
+    assert_eq!(kept, oam_after_blank(7, true, false), "7 frames: kept");
+    let long = oam_after_blank(40, true, false);
+    assert_eq!(kept[0..8], long[0..8], "row 0, OAMADDR's, held refreshed");
+    assert_ne!(kept[8..16], long[8..16], "40 frames: row 1 decayed");
+    assert_eq!(long, oam_after_blank(40, true, false), "the same bits every run");
+    assert_eq!(long[8..16], oam_after_blank(80, true, false)[8..16], "settled at rest");
+    let touched = oam_after_blank(40, true, true);
+    assert_ne!(kept[0..8], touched[0..8], "row 0 left by OAMADDR at frame 0");
+    assert_eq!(kept[8..16], touched[8..16], "row 1 held by OAMADDR");
 }
-
 /// Plan step 2: with `set_power_on_top`, a power-on puts the PPU at the top of the picture (nesdev,
 /// "PPU power up state"; dot 11 as `BeesNES`), and without it at the start of vblank as before.
 #[test]

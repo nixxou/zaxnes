@@ -837,52 +837,89 @@ impl Ppu2C02 {
         self.oam_render_off = self.ppu_clock;
     }
 
-    /// The dots an OAM row holds its bytes without a refresh: 8 NTSC frames (~133 ms), `BeesNES`'s
-    /// figure (`CPpu2C0X::OamDecayRate`, `LSNPpu2C0X.h:1774-1790`, MIT). blargg's `oam_stress`
-    /// and `sprdma_and_dmc_dma`, verified on hardware, leave OAM untouched with the rendering off
-    /// for ~123 ms and ~37 ms, so it lasts at least that long; nesdev ("PPU OAM") only says it
-    /// lasts "at least as long as an NTSC vertical blank interval (~1.3ms), but not much longer",
-    /// which those tests contradict. Retention varies by console and temperature.
-    const fn oam_decay_dots(&self) -> i64 {
+    /// The PPU dots in a second, or `None` on the 2C07, which refreshes OAM itself while the
+    /// rendering is off (nesdev, "PPU OAM": the PAL PPU "refreshes OAM" in its long vertical
+    /// blank, and "OAM decay does not occur" on it).
+    const fn oam_dot_rate(&self) -> Option<i64> {
         match self.timing.region {
-            // 8 frames of 341 x 262 dots.
-            NesRegion::Ntsc | NesRegion::Multi => 714_736,
-            // The same 133 ms at the PAL and Dendy dot rate (341 x 312 dots at 50.007 Hz).
-            _ => 708_214,
+            NesRegion::Pal => None,
+            NesRegion::Dendy => Some(5_320_342),
+            _ => Some(5_369_318),
         }
+    }
+
+    /// The microseconds since `last` (a PPU clock stamp), or `None` where OAM does not decay.
+    fn oam_elapsed_us(&self, last: i64) -> Option<i64> {
+        let rate = self.oam_dot_rate()?;
+        Some((self.ppu_clock - last) * 1_000_000 / rate)
     }
 
     /// OAM is dynamic memory that the sprite evaluation refreshes, eight bytes a row, on every line
-    /// the rendering is on; with the rendering off, a row that nothing accessed for
-    /// [`Self::oam_decay_dots`] loses its bytes (nesdev, "PPU OAM": "OAM is a dynamic memory ...
-    /// if rendering is off, it will decay"). Called on every CPU access to a row and, for all rows,
-    /// when the rendering comes back; the dots themselves do nothing. A decayed row reads each byte
-    /// as its own OAM address, attribute bytes masked, as `BeesNES` does (`CPpu2C0X::RefreshOamRow`,
-    /// `LSNPpu2C0X.h:1801-1817`, MIT): real decay is console-dependent, and this spreads the
-    /// sprites down the screen rather than piling them on one line.
+    /// the rendering is on; with the rendering off a row decays unless something refreshes it
+    /// (nesdev, "PPU OAM": "OAM is a dynamic memory ... if rendering is off, it will decay").
+    ///
+    /// Lot FIDPLUS-E, speculative model (`docs/review/FIDELITY-LEADS.md`, "OAM decay"). What a
+    /// console shows (`FireSide`, 2026-11-15, an original NES): OAM intact for about seven frames,
+    /// then single bits lost at random, more the longer the rendering stays off; each bit falls to
+    /// its own resting value, 0 or 1; the first eight bytes never decay. Modelled as:
+    ///
+    /// - every bit has its own retention, drawn once from a log-normal law (DRAM cell retention;
+    ///   [`OAM_RETENTION_US`]): none before 125 ms (blargg's `oam_stress`, verified on hardware,
+    ///   keeps OAM ~123 ms), half by 266 ms (16 frames), all by 566 ms;
+    /// - every bit has its own resting value;
+    /// - both are fixed for the console, drawn from the bit's index, so a run replays identically;
+    /// - the row `OAMADDR` points at is held refreshed (assumed from the first eight bytes, with
+    ///   `OAMADDR` at 0 after a frame): it is settled when the address enters it and stamped when
+    ///   the address leaves it;
+    /// - no decay on the 2C07 ([`Self::oam_dot_rate`]).
+    ///
+    /// The probabilities and times are not measured: retention varies by console and temperature,
+    /// and this is one plausible console. Called on every CPU access to a row and, for all rows,
+    /// when the rendering comes back; the dots themselves do nothing.
     #[cold]
     #[inline(never)]
     fn refresh_oam_row(&mut self, row: usize) {
-        let now = self.ppu_clock;
-        if !self.rendering_enabled() {
+        if !self.rendering_enabled() && row != usize::from(self.oam_address >> 3) {
             let last = self.oam_row_refresh[row].max(self.oam_render_off);
-            if now - last > self.oam_decay_dots() {
-                self.decay_oam_row(row);
+            if let Some(elapsed) = self.oam_elapsed_us(last) {
+                self.decay_oam_row(row, elapsed);
             }
         }
-        self.oam_row_refresh[row] = now;
+        self.oam_row_refresh[row] = self.ppu_clock;
     }
 
-    /// A decayed row, as `BeesNES` leaves it: each byte its own OAM address, attribute bytes masked.
-    fn decay_oam_row(&mut self, row: usize) {
+    /// `OAMADDR` moves to `value` with the decay on: the row it leaves was refreshed until now,
+    /// and the row it enters settles what it lost while nothing refreshed it.
+    #[cold]
+    #[inline(never)]
+    fn move_oam_address(&mut self, value: u8) {
+        let (from, to) = (usize::from(self.oam_address >> 3), usize::from(value >> 3));
+        if from != to && !self.rendering_enabled() {
+            self.oam_row_refresh[from] = self.ppu_clock;
+            let last = self.oam_row_refresh[to].max(self.oam_render_off);
+            if let Some(elapsed) = self.oam_elapsed_us(last) {
+                self.decay_oam_row(to, elapsed);
+            }
+            self.oam_row_refresh[to] = self.ppu_clock;
+        }
+        self.oam_address = value;
+    }
+
+    /// The bits of `row` whose retention is shorter than `elapsed_us` fall to their resting value.
+    fn decay_oam_row(&mut self, row: usize, elapsed_us: i64) {
+        if elapsed_us <= i64::from(OAM_RETENTION_US[0]) {
+            return;
+        }
         for index in row * 8..row * 8 + 8 {
-            #[allow(clippy::cast_possible_truncation)] // 0..256.
-            let byte = index as u8;
-            self.oam[index] = if (index & 0x03) == 0x02 {
-                byte & 0xE3
-            } else {
-                byte
-            };
+            let mut byte = self.oam[index];
+            for bit in 0..8 {
+                let draw = oam_bit_draw(index * 8 + bit);
+                if elapsed_us > i64::from(OAM_RETENTION_US[(draw & 0xFF) as usize]) {
+                    let mask = 1u8 << bit;
+                    byte = if draw & 0x100 == 0 { byte & !mask } else { byte | mask };
+                }
+            }
+            self.oam[index] = if (index & 0x03) == 0x02 { byte & 0xE3 } else { byte };
         }
     }
 
@@ -891,14 +928,15 @@ impl Ppu2C02 {
     #[cold]
     #[inline(never)]
     fn refresh_oam_rows_on(&mut self) {
-        let now = self.ppu_clock;
-        let limit = self.oam_decay_dots();
+        let held = usize::from(self.oam_address >> 3);
         for row in 0..32 {
             let last = self.oam_row_refresh[row].max(self.oam_render_off);
-            if now - last > limit {
-                self.decay_oam_row(row);
+            if row != held {
+                if let Some(elapsed) = self.oam_elapsed_us(last) {
+                    self.decay_oam_row(row, elapsed);
+                }
             }
-            self.oam_row_refresh[row] = now;
+            self.oam_row_refresh[row] = self.ppu_clock;
         }
     }
 
@@ -3178,7 +3216,11 @@ impl Ppu2C02 {
                 if self.oamaddr_write_corruption && !self.pre_g_revision {
                     self.oamaddr_write_corruption(value);
                 }
-                self.oam_address = value;
+                if self.oam_decay {
+                    self.move_oam_address(value);
+                } else {
+                    self.oam_address = value;
+                }
             }
 
             4 => {
@@ -3464,7 +3506,12 @@ impl Ppu2C02 {
         } else {
             value
         };
-        self.oam_address = self.oam_address.wrapping_add(1);
+        let next = self.oam_address.wrapping_add(1);
+        if self.oam_decay {
+            self.move_oam_address(next);
+        } else {
+            self.oam_address = next;
+        }
     }
 
     /// The address increment a `$2007` access owes, which is **not the same increment** while the
@@ -4079,4 +4126,51 @@ const fn marked_palette(palette: &[u8; PALETTE_SIZE]) -> [u8; PALETTE_SIZE] {
         index += 1;
     }
     marked
+}
+
+/// Lot FIDPLUS-E: an OAM bit's retention without a refresh, in microseconds, at the quantiles
+/// `(k + 0.5) / 256` of a log-normal law with its median at 266 ms (16 NTSC frames) and its lowest
+/// quantile at 125 ms (sigma 0.262). Speculative: see [`Ppu2C02::refresh_oam_row`].
+const OAM_RETENTION_US: [u32; 256] = [
+    125_000, 137_534, 144_367, 149_310, 153_270, 156_617, 159_541, 162_155,
+    164_530, 166_715, 168_745, 170_645, 172_437, 174_134, 175_749, 177_293,
+    178_773, 180_197, 181_569, 182_896, 184_181, 185_428, 186_641, 187_821,
+    188_972, 190_095, 191_193, 192_268, 193_320, 194_352, 195_365, 196_360,
+    197_337, 198_299, 199_245, 200_178, 201_096, 202_002, 202_896, 203_779,
+    204_650, 205_511, 206_363, 207_205, 208_037, 208_862, 209_678, 210_486,
+    211_287, 212_081, 212_868, 213_649, 214_423, 215_192, 215_954, 216_712,
+    217_464, 218_210, 218_953, 219_690, 220_423, 221_152, 221_877, 222_598,
+    223_315, 224_029, 224_739, 225_446, 226_150, 226_851, 227_549, 228_244,
+    228_937, 229_627, 230_315, 231_001, 231_684, 232_366, 233_045, 233_723,
+    234_399, 235_073, 235_746, 236_417, 237_087, 237_755, 238_423, 239_089,
+    239_754, 240_418, 241_082, 241_744, 242_406, 243_067, 243_728, 244_388,
+    245_048, 245_707, 246_366, 247_025, 247_684, 248_343, 249_001, 249_660,
+    250_319, 250_978, 251_638, 252_297, 252_957, 253_618, 254_279, 254_940,
+    255_603, 256_266, 256_929, 257_594, 258_260, 258_926, 259_594, 260_262,
+    260_932, 261_603, 262_276, 262_949, 263_625, 264_301, 264_979, 265_659,
+    266_341, 267_024, 267_710, 268_397, 269_086, 269_777, 270_471, 271_166,
+    271_864, 272_564, 273_267, 273_972, 274_680, 275_391, 276_104, 276_820,
+    277_539, 278_262, 278_987, 279_715, 280_447, 281_182, 281_921, 282_663,
+    283_409, 284_159, 284_913, 285_670, 286_432, 287_198, 287_969, 288_743,
+    289_523, 290_307, 291_096, 291_890, 292_689, 293_494, 294_304, 295_119,
+    295_940, 296_767, 297_600, 298_439, 299_285, 300_137, 300_996, 301_862,
+    302_735, 303_615, 304_503, 305_398, 306_302, 307_214, 308_134, 309_063,
+    310_001, 310_948, 311_905, 312_872, 313_849, 314_836, 315_834, 316_843,
+    317_864, 318_897, 319_943, 321_001, 322_072, 323_157, 324_256, 325_370,
+    326_499, 327_643, 328_805, 329_983, 331_179, 332_393, 333_627, 334_880,
+    336_155, 337_451, 338_769, 340_112, 341_479, 342_872, 344_292, 345_741,
+    347_220, 348_730, 350_273, 351_851, 353_466, 355_120, 356_815, 358_553,
+    360_339, 362_173, 364_060, 366_004, 368_007, 370_075, 372_213, 374_426,
+    376_720, 379_103, 381_581, 384_165, 386_864, 389_691, 392_660, 395_787,
+    399_091, 402_597, 406_331, 410_331, 414_638, 419_308, 424_413, 430_049,
+    436_347, 443_496, 451_777, 461_642, 473_886, 490_113, 514_462, 566_048,
+];
+
+/// A fixed draw for OAM bit `bit`: its retention quantile in the low byte, its resting value in
+/// bit 8 (`SplitMix64`).
+const fn oam_bit_draw(bit: usize) -> u64 {
+    let mut z = (bit as u64).wrapping_add(0x9E37_79B9_7F4A_7C15).wrapping_mul(0x2C07);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }
