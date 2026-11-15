@@ -240,7 +240,7 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   `$2000` glitch now follow the netlist in all four alignments.
 - Still open: random alignment at power-on.
 
-### A5. Per-dot differential against the netlist — started (lot FIDPLUS-2, 2026-11-15)
+### A5. Per-dot differential against the netlist — in progress (lot FIDPLUS-2, 2026-11-15)
 - **Instrument.** Zaxnes: feature `ppu-dot-trace` (never in `default`), harness `dot-trace`
   (`v`, `t`, PPU bus address and CPU register access after every dot; the PPU runs every dot
   through `step_dot`, no span). Netlist: `ext-tools/visualnes-bench/benchdot.cpp` (hold-time
@@ -271,9 +271,45 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   (one test per `$2007` write), no state change; test `fidplus2_rmw_2007_tests.rs`.
   Not measured: palette addresses (internal RAM, kept one write each), rendering on (C1's path),
   the `$2007` read + write pairs of other RMW opcodes (same mechanism expected), PAL.
-- **Next**: the same differential on the other bench programs (`g2000`, `g2001px`, `g2005px`,
-  `g3e01px`, `oam`, `r2007`) in the four alignments, then rendering-on programs; the PPU bus
-  column (`bus`) is recorded but not compared yet (Zaxnes reads a fetch on one dot of its pair).
+- **Frame parity.** Which frame is odd is a power-on fact, not the program's: the netlist's and
+  Zaxnes's were opposite, which moves the CPU one dot against the PPU at every pre-render line
+  where rendering is on (the skipped dot). `dot-trace --flip-parity` (diagnostics only) matches
+  them; with it and the phase, every access of every frame lands on the same dot.
+- **`g2001px` (`$2001` switched every ~20 dots, rendering on), alignments 2 and 3**: 33 runs a
+  frame, all starting on dot 257 after a write landing on dot 254: the switch reaches the
+  fetches and increments on D+3 = 257, but **the horizontal copy of dot 257 still follows the old
+  state**: switched off, the netlist copies; switched on, it does not. Zaxnes did the opposite
+  in both, which leaves the wrong coarse X and nametable for the rest of the line and the next
+  one (visible). **Done** in `switch_rendering` (alignments 2 and 3, settled on the write, nothing
+  tested per dot); test `fidplus2_dot_257_copy_follows_the_state_before_a_switch_on_dot_256`.
+  After it: **0 dots differ** in every whole frame, both alignments. Alignments 0 and 1: the
+  switch-on race of step 33 (a mid-line horizontal copy, present or not with the hold time) makes
+  the comparison diverge; not trusted, not ported.
+- **`g2005px`**: 1 dot a frame in alignments 1, 2 and 3 (line 239, dot 256: the netlist's Y
+  carry still settling at the end of the dot; the next dot agrees). The netlist bench crashes
+  (VisualNes segfault) in alignment 0 on this program. **`g3e01px`**: 0 dots.
+- **`r2007` (`$2007` read on every 21st dot, rendering on), alignment 3, `emu.ppu_bus_conflicts`
+  (C1) on**: two rules missing from step 25's read model, both visible (the next fetches):
+  - when X (the latch dot, D+6 here) is a dot that increments coarse X anyway (every eighth, 328,
+    336), the read's X increment **merges** with it: one X increment, plus the read's Y. Dot 256
+    included (natural X and Y, plus the read's Y: fine Y steps twice);
+  - when X is 257 (odd: the residue case), the horizontal copy of 257 overrides the read's X
+    increment: only its Y is left.
+  **Done** in `read_buffer_from_fetch`. Visible lines then agree with the netlist in every whole
+  frame (no run longer than the 1-2 dot recording instant of an increment). Lines 240-261 still
+  differ: the program never writes `$2000` and the netlist powers on with PPUCTRL's +32
+  increment (seen with `INC $2007` too), so its vblank reads step by 32 — a bench artefact.
+  C1 stays off by default (SMB3 line 193, C1 above); whether these two rules settle that line is
+  the next question (golden SMB3 Japan with C1 on).
+- **Bench artefacts to keep in mind**: PPUCTRL/PPUMASK power-on values of the netlist (write
+  `$2000` after the warm-up); the PPU ignores writes during the warm-up; the `bus` column also
+  shows the netlist's pattern-table select of its power-on PPUCTRL.
+- **Cost** (callgrind, clean builds, `3d5319ab` against FIDPLUS-1 `6289064d`): +0.02 % to +0.10 %
+  on the PR-1 set (metroid +0.10 %, mm2 +0.09 %, smb1 +0.08 %, smb3 +0.04 %). A first version
+  testing dot 257 on every dot of `run_render_dot` cost +2 to +2.9 % (it changed the inlining of
+  `run_dots`); moving the rule to the `$2001` write removed it.
+- **Next**: `g2000`, `g2006px` with rendering on, `oam` in the four alignments; the `bus` column;
+  C1 against the SMB3 Japan line-193 video.
 
 ---
 
