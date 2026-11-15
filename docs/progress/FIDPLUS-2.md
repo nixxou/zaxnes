@@ -8,6 +8,7 @@ Branch `feat/fidplus-2`, from `feat/fidplus-1` (6289064d). Details: `docs/review
 | `INC $2007` double write (first address gets the final value) | done, all regions |
 | Dot-257 copy after a `$2001` switch on dot 256 (alignments 2-3) | done, NTSC/Multi |
 | `$2007` render-read merge rules | done, on: confirmed on Zelda II's title split replayed on the netlist; changes Zelda II Europe golden frame 600 |
+| Second `$2006` write: increment of D+4 applies to the new `v` | done, NTSC |
 | Tile latch of the first fetch after a switch on | open lead |
 
 ## Validation (7ee71a40)

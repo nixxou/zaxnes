@@ -2755,6 +2755,24 @@ impl Ppu2C02 {
         self.prepaid_dots = delay + 1;
     }
 
+    /// The netlist loads `v` in the middle of dot D+3 (`delay_address_load`), so the increment of
+    /// dot D+4, which this core has already run with the old `v`, belongs to the new one (lot
+    /// FIDPLUS-2, A5, `g2006x`): on a coarse-X increment dot the loaded address is incremented,
+    /// on dot 256 in X and Y. NTSC only, as the other netlist rules.
+    #[cold]
+    #[inline(never)]
+    fn increment_after_delayed_load(&mut self) {
+        let dot = self.dot;
+        let increments = (dot % 8 == 0 && (8..=256).contains(&dot)) || dot == 328 || dot == 336;
+        if !increments || !self.fetching() || !self.netlist_measured_region() {
+            return;
+        }
+        self.increment_coarse_x();
+        if dot == 256 {
+            self.increment_y();
+        }
+    }
+
     /// A `$2006` load that lands on a dot whose increment of `v` it collides with.
     ///
     /// nesdev ("PPU registers", PPUADDR): "at most one axis of scrolling will be set to the
@@ -3108,7 +3126,11 @@ impl Ppu2C02 {
                         self.delay_backdrop_address(&mut cartridge);
                     }
                     let previous = self.v;
+                    let delayed = self.prepaid_dots == 4;
                     self.v = self.t;
+                    if delayed {
+                        self.increment_after_delayed_load();
+                    }
                     if (previous & 0x3F00) == 0x3F00 {
                         self.palette_load_corruption(previous);
                     }

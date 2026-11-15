@@ -307,6 +307,15 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   increment). Lines 240-261 still differ: the program never writes `$2000` and the netlist powers
   on with PPUCTRL's +32 increment (seen with `INC $2007` too), so its vblank reads step by 32 — a
   bench artefact.
+- **`g2006x` (second `$2006` writes alternating `$2108`/`$2AD7`, rendering on), alignments 2 and
+  3**: the netlist loads `v` in the middle of D+3, so when D+4 is a coarse-X increment dot the new
+  address is incremented; Zaxnes loaded after running D+4 and lost that increment (the rest of
+  the line one tile left, visible). **Done**: `Ppu2C02::increment_after_delayed_load` (cold, NTSC).
+  Long runs 639 -> 20 a frame. Left: a write landing on dot 257 (load on 260): `v` differs on
+  dots 258-261 only (netlist 3100 / 3117 per alignment, Zaxnes 3108), in the garbage nametable
+  fetches of the sprite phase; no picture effect, not ported.
+- **`g2005`**: whole frames agree in alignments 2 and 3 (the third netlist frame pairs badly, a
+  pairing artefact of the sliding program).
 - **Regions**: every rule of A5 that depends on dots (dot 257, the read merge) applies to NTSC
   and Multi only (`Ppu2C02::netlist_measured_region`): the netlist is a 2C02; the PAL 2C07 (3.2
   dots a cycle) and the clones keep the previous model until a measurement of their own. The
