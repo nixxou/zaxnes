@@ -10,7 +10,10 @@
 //! * 518, `Dance2000.h`: `$5000` PRG and `$5200` mode, whose bit 1 switches CHR's first 4 KiB with
 //!   the nametable the PPU addresses, and whose `$5000` bit 6 opens the bus over `$8000-$FFFF`;
 //! * 519, `Eh8813A.h`: the bank in the **address** of a `$8000-$FFFF` write with A8 clear, and a
-//!   mode (A6) where reads see the DIP switches in place of the low nibble of the address.
+//!   mode (A6) where reads see the DIP switches in place of the low nibble of the address;
+//! * 328, `Rt01.h`: the RT-01 test cartridge, one 32 KiB bank and one 8 KiB of CHR, whose reads
+//!   of `$CE80-$CEFF` and `$FE80-$FEFF` return `$F2` with bits 0, 2 and 3 random — here from a
+//!   hash of the CPU cycle, so that a replay reads the same bytes (FIDELITY-LEADS J32).
 use super::{windows_for, Mapper, NO_ROM_WINDOW};
 use crate::cartridges::{BankWindows, CartridgeMemory};
 use crate::state::{InvalidState, StateReader, StateWriter};
@@ -27,6 +30,8 @@ pub enum MiscKind {
     M518,
     /// 519, EH8813A.
     M519,
+    /// 328, RT-01.
+    M328,
 }
 
 impl MiscKind {
@@ -38,6 +43,7 @@ impl MiscKind {
             487 => Some(Self::M487),
             518 => Some(Self::M518),
             519 => Some(Self::M519),
+            328 => Some(Self::M328),
             _ => None,
         }
     }
@@ -48,6 +54,7 @@ impl MiscKind {
             Self::M487 => 487,
             Self::M518 => 518,
             Self::M519 => 519,
+            Self::M328 => 328,
         }
     }
 }
@@ -149,6 +156,13 @@ impl MiscN {
                 }
                 horizontal(r1 & 0x01 != 0)
             }
+            // `Rt01.h` `InitMapper`: PRG page 0 twice, CHR page 0 four times; puNES `mapper_328.c`
+            // maps 32 KiB bank 0. The same windows once wrapped by a 16 KiB / 2 KiB image.
+            MiscKind::M328 => {
+                self.banks.map_prg_32k(0);
+                self.banks.map_chr_8k(0);
+                None
+            }
             // `Eh8813A.h` `WriteRegister`: the latched address in `regs[0..2]`, CHR in `regs[2]`.
             MiscKind::M519 => {
                 let address = u16::from_le_bytes([self.regs[0], self.regs[1]]);
@@ -176,7 +190,7 @@ impl MiscN {
         match self.kind {
             MiscKind::M518 => self.regs[0] & 0x40 != 0,
             MiscKind::M519 => self.state != 0,
-            MiscKind::M53 | MiscKind::M487 => false,
+            MiscKind::M53 | MiscKind::M487 | MiscKind::M328 => false,
         }
     }
 }
@@ -218,7 +232,13 @@ impl Mapper for MiscN {
         if self.reads_differ() {
             return [NO_ROM_WINDOW; 4];
         }
-        self.banks.rom_windows(memory.rom().prg_rom().len())
+        let mut windows = self.banks.rom_windows(memory.rom().prg_rom().len());
+        // 328's two random ranges sit in the windows of `$C000` and `$E000`.
+        if self.kind == MiscKind::M328 {
+            windows[2] = NO_ROM_WINDOW;
+            windows[3] = NO_ROM_WINDOW;
+        }
+        windows
     }
 
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
@@ -234,6 +254,14 @@ impl Mapper for MiscN {
             return self.banks.read_prg(address, rom, memory.prg_ram());
         }
         match self.kind {
+            // `Rt01.h` `ReadRegister`: "0xF2 | (rand() & 0x0D)".
+            MiscKind::M328 if matches!(address, 0xCE80..=0xCEFF | 0xFE80..=0xFEFF) => {
+                let cycle = memory.cpu_cycle().to_le_bytes();
+                let mixed = cycle.iter().fold(0x5Au8, |hash, byte| {
+                    hash.rotate_left(3) ^ byte.wrapping_mul(0x9D)
+                });
+                Some(0xF2 | (mixed & 0x0D))
+            }
             // `Dance2000.h` `ReadRegister`: "(_prgReg & 0x40) ? … GetOpenBus()".
             MiscKind::M518 if self.reads_differ() => None,
             // `Eh8813A.h` `ReadRegister`: "addr = (addr & 0xFFF0) + GetDipSwitches()".
@@ -267,6 +295,8 @@ impl Mapper for MiscN {
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         match self.kind {
+            // `Rt01.h`: no register.
+            MiscKind::M328 => return,
             MiscKind::M53 => {
                 if address < 0x6000 {
                     return;

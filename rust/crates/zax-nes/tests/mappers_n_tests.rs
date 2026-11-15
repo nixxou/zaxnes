@@ -979,3 +979,16 @@ fn mappers_n_266_crosses_a13_a14_and_adds_an_outer_bank() {
     core.mapper_write(0xD000, 5);
     assert_eq!(5, core.chr_windows()[0]);
 }
+
+/// Mesen2 `Rt01.h` and puNES `mapper_328.c`: one 32 KiB bank, and `$F2` with random bits 0, 2
+/// and 3 at `$CE80-$CEFF` and `$FE80-$FEFF`.
+#[cfg(feature = "board-328")]
+#[test]
+fn mappers_n_328_answers_its_random_ranges() {
+    let core = MapperRom::new(328).prg(4).chr(8).load();
+    assert_eq!([0, 1, 2, 3], core.prg_windows());
+    for address in [0xCE80, 0xCEFF, 0xFE80] {
+        assert_eq!(0xF2, core.read_memory(address) & 0xF2);
+    }
+    assert_eq!(2, core.read_memory(0xCE7F));
+}

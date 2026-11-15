@@ -187,6 +187,7 @@ default = [
     "board-487",
     "board-518",
     "board-519",
+    "board-328",
     "board-323",
     "board-513",
     "board-530",
@@ -361,6 +362,7 @@ board-53 = ["board-misc-n"]
 board-487 = ["board-misc-n"]
 board-518 = ["board-misc-n"]
 board-519 = ["board-misc-n"]
+board-328 = ["board-misc-n"]
 # MAPPERS-N: Farid's SLROM multicart, an MMC1 behind an outer register (`FaridSlrom`).
 board-323 = ["board-decode-boards"]
 board-305 = ["board-fine-rom"]

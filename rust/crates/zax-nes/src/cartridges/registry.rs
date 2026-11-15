@@ -659,6 +659,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     324,
     #[cfg(feature = "board-325")]
     325,
+    #[cfg(feature = "board-328")]
+    328,
     #[cfg(feature = "board-329")]
     329,
     #[cfg(feature = "board-331")]
@@ -2298,6 +2300,11 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         ))),
         #[cfg(feature = "board-518")]
         518 => Board::DecodeBoard(DecodeBoard::MiscN(MiscN::new(
+            memory,
+            MiscKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-328")]
+        328 => Board::DecodeBoard(DecodeBoard::MiscN(MiscN::new(
             memory,
             MiscKind::of(mapper)?,
         ))),

@@ -937,6 +937,13 @@ CHR-RAM) and puNES (`mapper_198.c`, banks from `$50` folding onto `$40-$4F`). Th
 password screen cleanly; the later `[T+ChSFIX2]` and `[T+ChTFIX2]` patches show stray glyphs on
 the password screen, not investigated (translation hacks; their CHR use may differ).
 
+### J32. Mapper 328: deterministic "random" bits
+Mesen2 (`Rt01.h`) and puNES (`mapper_328.c`) both answer `$CE80-$CEFF` and `$FE80-$FEFF` with
+`0xF2 | (rand() & 0x0D)`. The C library's `rand()` would make two runs differ; here the three
+bits are a hash of the CPU cycle count, the same on a replay, a rewind and a savestate load. The
+test cartridge's check reads bits that vary, which this keeps; what the hardware returns there
+(an unconnected bus, a counter?) is unknown. No dump at hand.
+
 ### J31. Mapper 266: the page's inner banks, and the DAC not emulated
 nesdev ("NES 2.0 Mapper 266") keeps the VRC4's own 8 KiB inner banks under `$900C`'s PRG
 A16-A15 ("PRG A13 and A14 stay connected to VRC4"); puNES (`mapper_266.c`) takes the inner bank
