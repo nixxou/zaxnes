@@ -13,10 +13,19 @@ compromise." Fidélité+ is therefore not one stepper but a mode with five parts
 | D. Analog output | audio from the APU at the CPU rate through the measured console chain (E1 profiles, no output-rate approximation of the low-pass); video as the composite signal (H1), not a palette lookup | BeesNES's measured filters; console recordings |
 | E. Proof | every claim backed by a measurement: netlist differential, TriCNES/AccuracyCoin, console videos the owner provides; every residual approximation listed in FIDELITY-LEADS | AccuracyCoin 147 in all four alignments; every suite any other emulator passes |
 
+**Placement rule (owner, 2026-11-15)**: what costs performance is gated behind the Fidélité+
+option (its own code, the standard core pays nothing); what costs nothing goes in the common base
+and benefits everyone. So: A (half-cycle machine) and D's per-CPU-rate audio chain are Fidélité+;
+composite video is an option of the shaders lot; B (real-time pacing, pad read at the strobe) and C
+(console model) go in the common base; rules found with A that can be written cold are ported to
+the standard core too (as A5's were, +0.02 to +0.10 %).
+
 Run-ahead, rewind, 3D, widescreen and the hack packs must keep working in Fidélité+ (they rebuild
 from savestates and per-frame records): part B paces the machine but the frame records and the
-savestate format stay the boundary they use. Where a feature cannot follow (run-ahead changes
-input timing by definition), Fidélité+ says so in the interface instead of silently degrading.
+savestate format stay the boundary they use. Run-ahead stays exact (it replays from a
+savestate; only what is shown is ahead); its depth is limited by the slower machine, measured and
+shown in the interface. Real-time pacing needs a presentation step that shows the last finished
+frame without stutter at any refresh rate (60 Hz, 120 Hz smooth scroll, VRR).
 
 Limits stated up front: effects decided by analogue charge (OAM corruption copy, the AD bus
 floating value of A5) are not settled by the netlist; for those the reference is a console
