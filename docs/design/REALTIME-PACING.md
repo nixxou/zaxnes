@@ -117,3 +117,17 @@ console; the gain (up to about half a frame on average) is to be measured in B4/
   at the right count (`realtime_slices_tests`). The gain for a player waits on B5 (pad poll faster
   than the display, real-time emulation thread); measured then, with an input timestamp log.
 * Every existing test passes at head e07e6a79 (FIDPLUS-A final validation).
+
+## B5 waits on an owner decision (2026-11-15)
+
+A pad poll faster than the display needs a thread reading the pads on its own. SDL's game
+controller state is updated by the main thread's event pump (not thread-safe with it), so the
+poll needs either:
+
+1. a new dependency with a safe API reading XInput / HID pads from any thread (`gilrs`): a
+   download, gated by the owner; or
+2. a direct `XInputGetState` call through `windows-sys` (already a dependency): an FFI call, so
+   `unsafe`, which the safe-Rust rule allows only for performance and behind an option.
+
+Without one of them B5 would run the machine along real time with the pads still read once per
+display frame, which gains nothing. Parked until the owner chooses; FIDPLUS-C goes on meanwhile.
