@@ -1916,6 +1916,14 @@ impl Cartridge {
         }
 
         self.memory.chr_ram.fill(0);
+        // MAPPERS-P: puNES `extcl_after_mapper_init_539` powers the CHR-RAM up as `$00 $00 $FF
+        // $FF` repeated (bit 1 of the offset), the pattern the conversion's real board shows.
+        #[cfg(feature = "board-539")]
+        if self.mapper_number == 539 {
+            for (offset, byte) in self.memory.chr_ram.iter_mut().enumerate() {
+                *byte = if offset & 0x02 != 0 { 0xFF } else { 0x00 };
+            }
+        }
     }
 }
 

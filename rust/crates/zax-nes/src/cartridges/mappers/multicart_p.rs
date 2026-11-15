@@ -120,6 +120,10 @@ pub enum MultiPKind {
     /// at `$8000`/`$8001`, R6/R7 4-bit PRG banks, CHR fixed (each 1 KiB window its own bank) and
     /// R5 D5 the mirroring.
     M557,
+    /// 539, `mapper_539.c` (*Kid Icarus* FDS conversion): fixed PRG banks `$0C`/`$0E`/`$0F` and
+    /// `$0D` at `$6000`, one switchable at `$A000`, with pieces of an 8 KiB work RAM laid over
+    /// `$6000-$65FF`, `$8200-$82FF`, `$C000-$D1FF` and `$DF00-$DFFF` (the FDS's RAM).
+    M539,
 }
 
 impl MultiPKind {
@@ -169,6 +173,7 @@ impl MultiPKind {
             554 => Self::M554,
             340 => Self::M340,
             557 => Self::M557,
+            539 => Self::M539,
             _ => return None,
         })
     }
@@ -217,6 +222,7 @@ impl MultiPKind {
             Self::M554 => 554,
             Self::M340 => 340,
             Self::M557 => 557,
+            Self::M539 => 539,
         }
     }
 
@@ -246,6 +252,7 @@ impl MultiPKind {
                 | Self::M354
                 | Self::M415
                 | Self::M428
+                | Self::M539
         )
     }
 }
@@ -281,6 +288,8 @@ impl MultiP {
                 MultiPKind::M350 | MultiPKind::M400 => [0x80, 0, 0, 0],
                 // `map_init_429`: the latch powers on as 4 (32 KiB bank 1).
                 MultiPKind::M429 => [0x04, 0, 0, 0],
+                // `map_init_539`: `reg[1] = $08`, horizontal mirroring.
+                MultiPKind::M539 => [0, 0x08, 0, 0],
                 _ => [0; 4],
             },
             adc: [0; 3],
@@ -427,6 +436,12 @@ impl MultiP {
                 0x8000 => r[0] = u16::from(value),
                 0x9000 => r[1] = u16::from(value),
                 0xB000 => self.chr[usize::from(address & 0x07)] = value,
+                _ => {}
+            },
+            // `extcl_cpu_wr_mem_539`: `$A000-$AFFF` the PRG bank, `$F000-$FFFF` the mirroring.
+            MultiPKind::M539 => match address & 0xF000 {
+                0xA000 => r[0] = u16::from(value),
+                0xF000 => r[1] = u16::from(value),
                 _ => {}
             },
             // `init_N118`: the 118's select byte, then the register it names (mask `$E001`); the
@@ -979,6 +994,15 @@ impl MultiP {
                 }
                 mirror(r[1] & 0x01 == 0)
             }
+            // `prg_fix_539`/`mirroring_fix_539`.
+            MultiPKind::M539 => {
+                b.map_prg_8k(0, 0x0C);
+                b.map_prg_8k(1, r[0] & 0x0F);
+                b.map_prg_8k(2, 0x0E);
+                b.map_prg_8k(3, 0x0F);
+                b.map_chr_8k(0);
+                mirror(r[1] & 0x08 == 0)
+            }
             // `prg_swap_n118_557`: R6/R7 `& $0F`, the last two banks fixed; `chr_swap_n118_557`:
             // window `n` is bank `n`; `mirroring_fix_557`: R5 D5 horizontal.
             MultiPKind::M557 => {
@@ -1064,6 +1088,51 @@ impl MultiP {
         }
     }
 
+    /// `prg_fix_539`/`wram_fix_539`: where `address` falls in the work RAM, if one of the RAM
+    /// pieces covers it (`memmap_*_256b` page numbers times `$100`).
+    fn ram_offset_539(address: u16) -> Option<usize> {
+        let a = usize::from(address);
+        let low = a & 0xFF;
+        Some(match address {
+            0x6000..=0x60FF => 0x1800 | low,
+            0x6200..=0x62FF => 0x1A00 | low,
+            0x6400..=0x65FF => 0x1C00 | (a & 0x01FF),
+            0x8200..=0x82FF => 0x1200 | low,
+            0xC000..=0xD1FF => a - 0xC000,
+            0xDF00..=0xDFFF => 0x1F00 | low,
+            _ => return None,
+        })
+    }
+
+    /// The byte of PRG-ROM 8 KiB bank `bank` at `address`, `None` (open bus) without PRG-ROM.
+    fn rom_8k(memory: &CartridgeMemory, bank: usize, address: u16) -> Option<u8> {
+        let rom = memory.rom().prg_rom();
+        if rom.is_empty() {
+            return None;
+        }
+        rom.get((bank * 0x2000 + usize::from(address & 0x1FFF)) % rom.len())
+            .copied()
+    }
+
+    /// 539's RAM at `address`, `None` when no piece covers it; `Some(None)` without RAM.
+    #[allow(clippy::option_option)]
+    fn ram_539(memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+        let offset = Self::ram_offset_539(address)?;
+        let ram = memory.prg_ram();
+        Some((!ram.is_empty()).then(|| ram[offset % ram.len()]))
+    }
+
+    /// A CPU write to one of 539's RAM pieces (puNES writes them like any work RAM).
+    fn write_ram_539(memory: &mut CartridgeMemory, address: u16, value: u8) {
+        if let Some(offset) = Self::ram_offset_539(address) {
+            let ram = memory.prg_ram_mut();
+            if !ram.is_empty() {
+                let len = ram.len();
+                ram[offset % len] = value;
+            }
+        }
+    }
+
     /// A read of `$6000-$7FFF` the board answers itself, with its side effect: `Some(None)` is
     /// open bus (the `Mapper::cpu_read_override` shape).
     #[allow(clippy::option_option)]
@@ -1090,15 +1159,8 @@ impl MultiP {
             MultiPKind::M122 | MultiPKind::M428 | MultiPKind::M434 => Some(None),
             // `wram_fix_415`: `$6000-$7FFF` an 8 KiB PRG-ROM bank from D0-D3.
             MultiPKind::M415 => {
-                let rom = memory.rom().prg_rom();
-                if rom.is_empty() {
-                    return Some(None);
-                }
                 let bank = usize::from(self.regs[0] & 0x0F);
-                Some(
-                    rom.get((bank * 0x2000 + usize::from(address & 0x1FFF)) % rom.len())
-                        .copied(),
-                )
+                Some(Self::rom_8k(memory, bank, address))
             }
             // `wram_fix_354`: mode 5 shows the 8 KiB half bank, every other mode disables it.
             MultiPKind::M354 => {
@@ -1106,44 +1168,25 @@ impl MultiP {
                 if a & 0x07 != 5 {
                     return Some(None);
                 }
-                let rom = memory.rom().prg_rom();
-                if rom.is_empty() {
-                    return Some(None);
-                }
                 let bank = usize::try_from((Self::bank_354(a, d) << 1) | (d >> 7)).unwrap_or(0);
-                Some(
-                    rom.get((bank * 0x2000 + usize::from(address & 0x1FFF)) % rom.len())
-                        .copied(),
-                )
+                Some(Self::rom_8k(memory, bank, address))
             }
             // `wram_fix_538`: `$6000-$7FFF` PRG-ROM 8 KiB bank `latch | 1`; `wram_fix_554`: the
             // latch itself.
             MultiPKind::M538 | MultiPKind::M554 => {
-                let rom = memory.rom().prg_rom();
-                if rom.is_empty() {
-                    return Some(None);
-                }
                 let bank = usize::from(if self.kind == MultiPKind::M538 {
                     self.regs[0] | 0x01
                 } else {
                     self.regs[0]
                 });
-                Some(
-                    rom.get((bank * 0x2000 + usize::from(address & 0x1FFF)) % rom.len())
-                        .copied(),
-                )
+                Some(Self::rom_8k(memory, bank, address))
+            }
+            // `wram_fix_539`: PRG-ROM bank `$0D` under the RAM pieces.
+            MultiPKind::M539 => {
+                Self::ram_539(memory, address).or_else(|| Some(Self::rom_8k(memory, 0x0D, address)))
             }
             // `wram_fix_337`/`wram_fix_350`: `$6000-$7FFF` is PRG-ROM 8 KiB bank 1.
-            MultiPKind::M337 | MultiPKind::M350 => {
-                let rom = memory.rom().prg_rom();
-                if rom.is_empty() {
-                    return Some(None);
-                }
-                Some(
-                    rom.get((0x2000 + usize::from(address & 0x1FFF)) % rom.len())
-                        .copied(),
-                )
-            }
+            MultiPKind::M337 | MultiPKind::M350 => Some(Self::rom_8k(memory, 1, address)),
             // `extcl_cpu_rd_mem_517`: the ADC's serial read-out.
             MultiPKind::M517 if address < 0x7000 => {
                 let bit = if address == 0x6000 {
@@ -1236,6 +1279,10 @@ impl Mapper for MultiP {
         address: u16,
         value: u8,
     ) -> bool {
+        if self.kind == MultiPKind::M539 && address < 0x8000 {
+            Self::write_ram_539(memory, address, value);
+            return (0x6000..=0x7FFF).contains(&address);
+        }
         if address >= 0x8000 || !self.kind.decodes_low(address) {
             // Mapper 55's `$7000-$7FFF` is RAM the board serves itself.
             if self.kind == MultiPKind::M55 && (0x7000..=0x7FFF).contains(&address) {
@@ -1259,6 +1306,9 @@ impl Mapper for MultiP {
         if address < 0x8000 {
             return;
         }
+        if self.kind == MultiPKind::M539 {
+            Self::write_ram_539(memory, address, value);
+        }
         self.latch(address, value);
         if let Some(mirroring) = self.map() {
             memory.set_mirroring(mirroring);
@@ -1276,7 +1326,13 @@ impl Mapper for MultiP {
         if self.reads_are_special() {
             return [NO_ROM_WINDOW; 4];
         }
-        self.banks.rom_windows(memory.rom().prg_rom().len())
+        let mut windows = self.banks.rom_windows(memory.rom().prg_rom().len());
+        // 539's RAM pieces at `$8200` and `$C000`/`$DF00` take those two windows off the cache.
+        if self.kind == MultiPKind::M539 {
+            windows[0] = NO_ROM_WINDOW;
+            windows[2] = NO_ROM_WINDOW;
+        }
+        windows
     }
 
     fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
@@ -1310,6 +1366,9 @@ impl Mapper for MultiP {
                 return Some(Some(0));
             }
             return self.clone().read_6000(memory, address);
+        }
+        if self.kind == MultiPKind::M539 && address >= 0x8000 {
+            return Self::ram_539(memory, address);
         }
         // `extcl_cpu_rd_mem_237`: with A0 of the address register set, `$8000-$FFFF` reads the
         // DIP switches (none set here: J37); 338's two DIP reads the same way.

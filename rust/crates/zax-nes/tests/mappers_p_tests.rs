@@ -1168,3 +1168,33 @@ fn mappers_p_526_banks_and_counts_cpu_cycles() {
     core.mapper_write(0x800F, 0);
     assert!(!core.cartridge().unwrap().irq_asserted());
 }
+
+/// `mapper_539.c`: banks `$0C`, `$A000`'s register, `$0E`, `$0F` and `$0D` at `$6000`, with RAM
+/// pieces over `$6000-$60FF`, `$8200-$82FF` and `$C000-$D1FF`; `$F000` D3 the mirroring; the
+/// CHR-RAM powers up as `$00 $00 $FF $FF`.
+#[cfg(feature = "board-539")]
+#[test]
+fn mappers_p_539_lays_ram_over_its_rom() {
+    let mut core = MapperRom::new(539).prg(32).chr(0).load();
+    core.mapper_write(0xA000, 5);
+    assert_eq!([12, 5, 0, 15], core.prg_windows());
+    assert_eq!(13, core.read_memory(0x6100));
+    core.mapper_write(0xC010, 0x44);
+    core.mapper_write(0x8210, 0x55);
+    core.mapper_write(0x6010, 0x66);
+    assert_eq!(
+        [0x44, 0x55, 0x66],
+        [0xC010, 0x8210, 0x6010].map(|address| core.read_memory(address))
+    );
+    let cartridge = core.cartridge().unwrap();
+    assert_eq!(
+        zax_nes::NametableMirroring::Horizontal,
+        cartridge.mirroring()
+    );
+    assert_eq!([0, 0, 0xFF, 0xFF], [0, 1, 2, 3].map(|a| core.chr_bank(a)));
+    core.mapper_write(0xF000, 0);
+    assert_eq!(
+        zax_nes::NametableMirroring::Vertical,
+        core.cartridge().unwrap().mirroring()
+    );
+}

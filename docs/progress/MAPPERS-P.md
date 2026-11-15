@@ -139,7 +139,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 534 | `mapper_126.c` | 153 | 10 | 0 | done (batch 21, `Mmc3P`) |
 | 536 | `mapper_195.c` | 148 | 0 | 0 | done (batch 20, alias, `registry::board_number`) |
 | 538 | `mapper_538.c` | 64 | 2 | 0 | done (batch 9, `MultiP`) |
-| 539 | `mapper_539.c` | 113 | 1 | 0 | todo |
+| 539 | `mapper_539.c` | 113 | 1 | 0 | done (batch 35, `MultiP`) |
 | 540 | `mapper_359.c` | 293 | 1 | 0 | todo |
 | 541 | `mapper_541.c` | 70 | 1 | 0 | done (batch 9, `MultiP`) |
 | 543 | `mapper_543.c` | 87 | 0 | 0 | done (batch 22, `Mmc1Outer`) |
@@ -269,3 +269,8 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 * Batch 34: `IrqP` 526 (four PRG and eight CHR registers, a free-running 16-bit CPU-cycle
   counter asserting while bit 12 is set; in `clocks_on_cpu_cycle` and in the mf_5a sweep, since
   it counts from power-on).
+* Batch 35: `MultiP` 539 (*Kid Icarus* FDS conversion): fixed banks with RAM pieces laid over
+  `$6000-$65FF`, `$8200-$82FF`, `$C000-$D1FF` and `$DF00-$DFFF` (`ram_offset_539`); windows 0
+  and 2 leave the ROM cache. Its CHR-RAM power-on pattern is set in
+  `Cartridge::clear_volatile_ram` behind `board-539`, since the core clears that RAM after a
+  board's power-on. `read_6000`'s 8 KiB ROM reads now share `MultiP::rom_8k`.
