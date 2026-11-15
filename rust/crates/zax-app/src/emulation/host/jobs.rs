@@ -541,6 +541,25 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         .map(|id| self.settings.get(id).as_bool())
     }
 
+    /// `emu.vs_dip_1` to `emu.vs_dip_8` as one byte, bit `n` being switch `n + 1` (lot
+    /// MAPPERS-N).
+    fn vs_dip_switches(&self) -> u8 {
+        [
+            SettingId::EmuVsDip1,
+            SettingId::EmuVsDip2,
+            SettingId::EmuVsDip3,
+            SettingId::EmuVsDip4,
+            SettingId::EmuVsDip5,
+            SettingId::EmuVsDip6,
+            SettingId::EmuVsDip7,
+            SettingId::EmuVsDip8,
+        ]
+        .iter()
+        .enumerate()
+        .filter(|(_, id)| self.settings.get(**id).as_bool())
+        .fold(0u8, |byte, (bit, _)| byte | (1 << bit))
+    }
+
     /// `emu.cpu_ppu_alignment` as the core takes it, 0 to 3 (lot FIDELITY step 28).
     fn cpu_ppu_alignment(&self) -> u8 {
         match self.settings.get(SettingId::EmuCpuPpuAlignment).as_int() {
@@ -621,6 +640,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let forced = self.forced_patch();
                 let cartridge_db = self.settings.get(SettingId::EmuCartridgeDb).as_bool();
                 let rainbow_network = self.settings.get(SettingId::EmuRainbowNetwork).as_bool();
+                let vs_dip_switches = self.vs_dip_switches();
                 let fidelity = self.fidelity_switches();
                 let console_profile = self.console_audio_profile();
                 let alignment = self.cpu_ppu_alignment();
@@ -629,6 +649,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                     Some(session) => {
                         session.core_mut().set_cartridge_db(cartridge_db);
                         session.core_mut().set_rainbow_network(rainbow_network);
+                        session.core_mut().set_vs_dip_switches(vs_dip_switches);
                         apply_fidelity_switches(session.core_mut(), fidelity);
                         session.core_mut().set_cpu_ppu_alignment(alignment);
                         session

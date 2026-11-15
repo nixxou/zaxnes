@@ -1730,6 +1730,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             (HotkeyEvents::QUICK_SAVE, Command::QuickSave),
             (HotkeyEvents::QUICK_LOAD, Command::QuickLoad),
             (HotkeyEvents::SOFT_RESET, Command::SoftReset),
+            (HotkeyEvents::COIN_1, Command::InsertCoin1),
+            (HotkeyEvents::COIN_2, Command::InsertCoin2),
+            (HotkeyEvents::SERVICE, Command::VsService),
         ] {
             if events.contains(flag) {
                 // Fast forward carries how many times it was pressed in a row (Rust-only).

@@ -606,11 +606,9 @@ fn written_at(entry: usize) -> u8 {
 /// Points `$2006` at `$3F00 | entry` and reads `$2007`, the way a game reads palette RAM back.
 fn read_palette_through_2007(core: &mut NesCore, entry: u8) -> u8 {
     for byte in [0x3F, entry] {
-        let (ppu, cartridge) = core.bus_mut().ppu_and_cartridge_mut();
-        ppu.write(6, byte, cartridge);
+        ppu_write(core, 6, byte);
     }
-    let (ppu, cartridge) = core.bus_mut().ppu_and_cartridge_mut();
-    ppu.read(7, cartridge) & 0x3F
+    ppu_read(core, 7) & 0x3F
 }
 
 /// Loads a synthetic VS image whose byte 13 asks for `model` and writes the 32 bytes `$00`..`$1F`
@@ -707,8 +705,15 @@ fn the_remap_reaches_the_pixel_image() {
     core.write_memory(0x2006, 0x3F);
     core.write_memory(0x2006, 0x00);
     core.write_memory(0x2007, 0x01);
+    // Point the VRAM address out of the palette: with rendering off, the PPU shows the palette
+    // entry it points at (lot FIDELITY), and $3F01 would hide the backdrop.
+    core.write_memory(0x2006, 0x00);
+    core.write_memory(0x2006, 0x00);
     // Rendering off, so every visible dot is the backdrop.
     core.write_memory(0x2001, 0x00);
+    // Two frames: since lot FIDELITY the machine powers on mid-frame, so the first frame run
+    // is not a whole picture.
+    core.run_frame(0);
     core.run_frame(0);
 
     let mut picture = Vec::new();
@@ -725,22 +730,27 @@ fn the_remap_reaches_the_pixel_image() {
 /// Loads a synthetic VS image whose byte 13 asks for `model`, with no palette written.
 fn vs_core(model: VsPpuModel) -> NesCore {
     let mut core = NesCore::new();
+    // Lot FIDELITY's reset line (`emu.ppu_reset_line`) holds $2000/$2001 after power-on; these
+    // tests write them at once, so it is off here (it predates nothing of the VS logic).
+    core.set_ppu_reset_line(false);
     let load = core.load_rom(&image(0, 0x09, byte13_of(model), 0), "SyntheticVs.nes");
     assert!(load.success, "{:?}", load.error);
     assert_eq!(core.vs_system().map(VsSystem::ppu), Some(model));
     core
 }
 
-/// Writes PPU register `register` as the CPU would.
+/// Writes PPU register `register` as the CPU does, **through the bus**: since lot MAPPERS-N the
+/// RC2C05's `$2000`/`$2001` swap and `$2002` identifier, and the palette remap, are applied by
+/// `NesBus` and no longer by the PPU (`Ppu2C02::remap_palette`).
 fn ppu_write(core: &mut NesCore, register: u16, value: u8) {
-    let (ppu, cartridge) = core.bus_mut().ppu_and_cartridge_mut();
-    ppu.write(register, value, cartridge);
+    use zax_nes::cpu::CpuBus;
+    core.bus_mut().write(0x2000 | register, value);
 }
 
-/// Reads PPU register `register` as the CPU would, side effects included.
+/// Reads PPU register `register` as the CPU does, side effects included, through the bus.
 fn ppu_read(core: &mut NesCore, register: u16) -> u8 {
-    let (ppu, cartridge) = core.bus_mut().ppu_and_cartridge_mut();
-    ppu.read(register, cartridge)
+    use zax_nes::cpu::CpuBus;
+    core.bus_mut().read(0x2000 | register)
 }
 
 /// nesdev, "PPU registers": "The 2C05 series of arcade PPUs returns an identifier in bits 4-0
@@ -831,8 +841,15 @@ fn backdrop_with(model: VsPpuModel, register: u16) -> u8 {
     ppu_write(&mut core, 6, 0x3F);
     ppu_write(&mut core, 6, 0x00);
     ppu_write(&mut core, 7, 0x21);
+    // Point the VRAM address out of the palette: with rendering off, the PPU shows the palette
+    // entry it points at (lot FIDELITY), and $3F01 would hide the backdrop.
+    ppu_write(&mut core, 6, 0x00);
+    ppu_write(&mut core, 6, 0x00);
     // The register under test, with the greyscale bit of PPUMASK and nothing else.
     ppu_write(&mut core, register, 0x01);
+    // Two frames: since lot FIDELITY the machine powers on mid-frame, so the first frame run
+    // is not a whole picture.
+    core.run_frame(0);
     core.run_frame(0);
 
     let mut picture = Vec::new();
@@ -880,6 +897,7 @@ fn the_rc2c05_swaps_2000_and_2001() {
 #[test]
 fn a_plain_nes_image_does_not_swap_2000_and_2001() {
     let mut core = NesCore::new();
+    core.set_ppu_reset_line(false);
     let load = core.load_rom(&image(0, 0x00, 0, 0), "SyntheticNes.nes");
     assert!(load.success, "{:?}", load.error);
     assert!(core.vs_system().is_none());
@@ -887,7 +905,14 @@ fn a_plain_nes_image_does_not_swap_2000_and_2001() {
     ppu_write(&mut core, 6, 0x3F);
     ppu_write(&mut core, 6, 0x00);
     ppu_write(&mut core, 7, 0x21);
+    // Point the VRAM address out of the palette: with rendering off, the PPU shows the palette
+    // entry it points at (lot FIDELITY), and $3F01 would hide the backdrop.
+    ppu_write(&mut core, 6, 0x00);
+    ppu_write(&mut core, 6, 0x00);
     ppu_write(&mut core, 1, 0x01);
+    // Two frames: since lot FIDELITY the machine powers on mid-frame, so the first frame run
+    // is not a whole picture.
+    core.run_frame(0);
     core.run_frame(0);
 
     let mut picture = Vec::new();
@@ -1673,6 +1698,9 @@ fn an_unknown_vs_crc_keeps_its_header() {
 #[test]
 fn a_non_vs_image_with_a_colliding_crc_is_not_touched() {
     let mut core = NesCore::new();
+    // Lot CARTDB (after MF-VS) corrects a known NES CRC from its own database; this test is about
+    // the VS table alone.
+    core.set_cartridge_db(false);
     let mut image = ines_1_0_vs_image(2, 8, 0xFFBE_F374);
     image[7] = 0x00; // Not a VS. System: byte 7 bit 0 clear, and mapper 2 is no VS number.
     assert_eq!(zax_nes::builtin_patches::data_crc(&image), 0xFFBE_F374);

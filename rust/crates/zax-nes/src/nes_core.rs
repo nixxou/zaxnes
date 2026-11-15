@@ -59,6 +59,8 @@ pub struct NesCore {
     advanced_patches_enabled: bool,
     /// `emu.rainbow_network`: mapper 682's ESP may use the host's network (off by default).
     rainbow_network: bool,
+    /// `emu.vs_dip_*`: the VS. System's DIP switches for the next load.
+    vs_dip_switches: u8,
     /// The built-in patch applied to a ROM none is made for (Rust-only, owner request: forced).
     forced_patch: Option<&'static crate::builtin_patches::BuiltinPatch>,
     /// CRC-32 of the data (iNES header excluded) of the ROM loaded as the host gave it, which
@@ -157,6 +159,7 @@ impl NesCore {
             power_on_battery_ram: crate::PowerOnRam::Random(Self::BATTERY_RAM_SEED),
             advanced_patches_enabled: false,
             rainbow_network: false,
+            vs_dip_switches: 0,
             forced_patch: None,
             rom_crc: None,
             pack: None,
@@ -348,6 +351,13 @@ impl NesCore {
     pub fn set_rainbow_network(&mut self, enabled: bool) {
         self.rainbow_network = enabled;
         self.apply_rainbow_network();
+    }
+
+    /// The end of a state load: [`Self::forget_real_frame`], and the VS PPU's palette remap put
+    /// back over the palette RAM the state restored (lot MAPPERS-N; `Ppu2C02::remap_palette`).
+    fn forget_real_frame_and_reshow_palette(&mut self) {
+        self.forget_real_frame();
+        self.bus.reapply_vs_palette();
     }
 
     /// Attaches a freshly built cartridge with the settings that live on the core.
@@ -631,7 +641,11 @@ impl NesCore {
         // the whole point — the board is chosen from the corrected header.
         #[cfg(feature = "board-vs-system")]
         let note = {
-            let vs = crate::vs::VsSystem::detect(rom.header(), crc);
+            let mut vs = crate::vs::VsSystem::detect(rom.header(), crc);
+            // Lot MAPPERS-N: the host's DIP switches (`emu.vs_dip_*`), set before the power-on.
+            if let Some(vs) = vs.as_mut() {
+                vs.set_dip_switches(self.vs_dip_switches);
+            }
             let note = vs.as_ref().map(crate::vs::VsSystem::load_note).map(|note| {
                 match rom.correct_vs_board(crc) {
                     Some(correction) => format!("{note}; {correction}"),
@@ -730,6 +744,44 @@ impl NesCore {
     #[cfg(feature = "board-vs-system")]
     pub fn vs_system_mut(&mut self) -> Option<&mut crate::vs::VsSystem> {
         self.bus.input_mut().vs_mut()
+    }
+
+    /// Whether the image loaded is a VS. System; always `false` in a build without
+    /// `board-vs-system`, so that a host needs no `cfg` (lot MAPPERS-N).
+    #[must_use]
+    pub fn is_vs_system(&self) -> bool {
+        #[cfg(feature = "board-vs-system")]
+        return self.vs_system().is_some();
+        #[cfg(not(feature = "board-vs-system"))]
+        false
+    }
+
+    /// Drops a coin into slot `slot` (1 or 2) of the VS. System loaded; nothing on a NES image.
+    #[allow(unused_variables)]
+    pub fn vs_insert_coin(&mut self, slot: usize) {
+        #[cfg(feature = "board-vs-system")]
+        if let Some(vs) = self.vs_system_mut() {
+            vs.insert_coin(slot);
+        }
+    }
+
+    /// Presses the VS. System's service button for a few frames (a free credit).
+    pub fn vs_press_service(&mut self) {
+        #[cfg(feature = "board-vs-system")]
+        if let Some(vs) = self.vs_system_mut() {
+            vs.press_service();
+        }
+    }
+
+    /// The eight DIP switches of the next VS. System loaded (and of the one loaded now), bit `n`
+    /// being switch `n + 1`; a cabinet reads most of them at power-on.
+    #[allow(unused_variables)]
+    pub fn set_vs_dip_switches(&mut self, switches: u8) {
+        self.vs_dip_switches = switches;
+        #[cfg(feature = "board-vs-system")]
+        if let Some(vs) = self.vs_system_mut() {
+            vs.set_dip_switches(switches);
+        }
     }
 
     /// Name the ROM was loaded under (REQ-CORE-014).
@@ -881,6 +933,8 @@ impl NesCore {
                 .ppu_mut()
                 .fill_power_on_memories(&palette, &oam, &vram);
         }
+        // Lot MAPPERS-N: the VS PPU's palette remap lives on the bus now (`Ppu2C02::remap_palette`).
+        self.bus.reapply_vs_palette();
         self.boot_patch_window(self.builtin_patch);
         self.boot_pack_zone();
         self.bus.apu_mut().reset();
@@ -2346,7 +2400,7 @@ impl NesCore {
         self.bus.apu_mut().drop_pending_samples(); // REQ-CORE-074, Q-006.
                                                    // REQ-LOOP-066: loading a state resumes at the next real frame with the same N. The
                                                    // state of a real frame of the machine that was replaced is dropped, not put back.
-        self.forget_real_frame();
+        self.forget_real_frame_and_reshow_palette();
 
         Ok(StateLoaded {
             consumed: reader.consumed(),

@@ -823,6 +823,29 @@ impl EngineHandle {
         }
     }
 
+    /// Whether the game loaded is a VS. System (lot MAPPERS-N); Zaxnes only.
+    #[must_use]
+    pub fn is_vs_system(&self) -> bool {
+        self.zaxnes().is_some_and(NesCore::is_vs_system)
+    }
+
+    /// A coin in slot `slot` (1 or 2), or the VS. System's service button with `None`.
+    pub fn drive_vs_cabinet(&mut self, slot: Option<usize>) {
+        if let Some(core) = self.zaxnes_mut() {
+            match slot {
+                Some(slot) => core.vs_insert_coin(slot),
+                None => core.vs_press_service(),
+            }
+        }
+    }
+
+    /// `emu.vs_dip_1` to `emu.vs_dip_8` as one byte, for the next load; Zaxnes only.
+    pub fn set_vs_dip_switches(&mut self, switches: u8) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_vs_dip_switches(switches);
+        }
+    }
+
     /// `emu.rainbow_network`: mapper 682's ESP may use the host's network; Zaxnes only.
     pub fn set_rainbow_network(&mut self, enabled: bool) {
         if let Some(core) = self.zaxnes_mut() {

@@ -83,7 +83,7 @@ pub const OAM_SIZE: usize = 256;
 /// The bits of a `$2002` read that come from the PPU's own bus latch on a 2C02: bits 0 to 4,
 /// which the flags of bits 5 to 7 leave alone (nesdev, "PPU registers"; `ppu_open_bus` tests 6
 /// and 7). An RC2C05 drives them with an identifier instead
-/// ([`Ppu2C02::vs_status_latch_mask`]).
+/// (`NesBus::vs_status`, lot MAPPERS-N).
 const STATUS_LATCH_BITS: u8 = 0x1F;
 
 /// Size of palette RAM, in bytes (REQ-CORE-045).
@@ -332,7 +332,7 @@ pub struct Ppu2C02 {
     /// This is the entry the whole output of the core resolves — the pixel image of
     /// REQ-CORE-048, the tile records, the backdrop and the frame batch's 32 bytes — so applying
     /// the remap *here*, once per palette write, is what keeps a VS palette out of every
-    /// per-pixel path (see [`Self::vs_palette`]).
+    /// per-pixel path (see [`Self::remap_palette`]).
     palette: [u8; PALETTE_SIZE],
     /// `palette` with the opacity bit of AMD-050 REQ-CORE-049 already set on every entry but
     /// entry 0: `palette[i] | 0x40` for `i ≥ 1`, `palette[0]` for entry 0.
@@ -346,38 +346,6 @@ pub struct Ppu2C02 {
     /// this table instead of `palette`, with the colour mask widened to `0x7F`/`0x70`, carries
     /// the bit with the same indexed load and the same `AND` as before the amendment.
     palette_marked: [u8; PALETTE_SIZE],
-    /// The VS. System PPU's master palette as a remap of the 64 colour indices, or `None` for a
-    /// NES image **and** for every VS PPU whose master palette is the ordered one — the RP2C03,
-    /// the RC2C03 and the RC2C05 (nesdev, "PPU palettes"; `crate::vs::VsPpuModel::palette_lut`).
-    ///
-    /// Chosen **once at load** by [`Self::set_vs_ppu`] and read in exactly one place, the
-    /// palette-RAM write of [`Self::write_vram_inner`]: a game writes a handful of palette bytes
-    /// a frame and the PPU draws 61 440 pixels, which is the same argument
-    /// [`Self::palette_marked`] exists for. Configuration, so no reset clears it.
-    #[cfg(feature = "board-vs-system")]
-    vs_palette: Option<&'static [u8; crate::vs::LUT_LEN]>,
-    /// Which bits of a `$2002` read come from the PPU's own bus latch: `0x1F` on every PPU but
-    /// an RC2C05, and **`0x00`** on one, because that chip drives those bits with an identifier
-    /// instead of leaving them open (nesdev, "PPU registers": "The 2C05 series of arcade PPUs
-    /// returns an identifier in bits 4-0 instead of PPU open bus").
-    ///
-    /// Chosen once at load with [`Self::vs_status_id`]. The pair is **arithmetic and not a
-    /// test**: the read computes `(decay & vs_status_latch_mask) | vs_status_id`, which for every
-    /// other PPU is `decay & 0x1F | 0` — the same value the register had before the lot — with no
-    /// branch and nothing asking which chip this is.
-    #[cfg(feature = "board-vs-system")]
-    vs_status_latch_mask: u8,
-    /// The identifier an RC2C05 drives into `$2002`, `0x00` on every other PPU; see
-    /// [`Self::vs_status_latch_mask`].
-    #[cfg(feature = "board-vs-system")]
-    vs_status_id: u8,
-    /// Whether `$2000` and `$2001` mean each other: the RC2C05 "swaps the meanings of `$2000`
-    /// and `$2001`" (nesdev, "Vs. System"), `false` on every other PPU.
-    ///
-    /// Read **only by the `$2000` and `$2001` arms** of [`Self::write`], the two rarest arms of
-    /// that dispatch, so the `$2003` to `$2007` paths are byte for byte what they were.
-    #[cfg(feature = "board-vs-system")]
-    vs_swap_control_mask: bool,
     decay_stamp: [i64; 8],
 
     timing: RegionTiming,
@@ -633,14 +601,6 @@ impl Ppu2C02 {
             palette_raw: [0; PALETTE_SIZE],
             palette: [0; PALETTE_SIZE],
             palette_marked: marked_palette(&[0; PALETTE_SIZE]),
-            #[cfg(feature = "board-vs-system")]
-            vs_palette: None,
-            #[cfg(feature = "board-vs-system")]
-            vs_status_latch_mask: STATUS_LATCH_BITS,
-            #[cfg(feature = "board-vs-system")]
-            vs_status_id: 0,
-            #[cfg(feature = "board-vs-system")]
-            vs_swap_control_mask: false,
             decay_stamp: [0; 8],
             timing: RegionTiming::default(),
             dot: 0,
@@ -1694,24 +1654,23 @@ impl Ppu2C02 {
         self.margin_palette
     }
 
-    /// Chooses the VS. System PPU, or goes back to the 2C02 with `None` (lot MF-VS).
+    /// Shows palette RAM through a VS. System PPU's master-palette remap (lot MF-VS step 2).
     ///
-    /// Called once, by `NesBus::set_vs_system` at load time and before the power-on. What it
-    /// stores are the *answers* — the master-palette remap, the two bytes a `$2002` read is built
-    /// from and one `bool` — and never the model, so that no path of the PPU ever asks which chip
-    /// this is. Palette RAM is rebuilt through the new remap so that choosing a PPU is correct
-    /// even on a machine that already has bytes in it.
+    /// **The PPU holds no VS. System state since lot MAPPERS-N** (owner's go-ahead,
+    /// 2026-11-15): its four fields — this remap, the two bytes of an RC2C05's `$2002`
+    /// identifier and the `$2000`/`$2001` swap — changed `Ppu2C02`'s layout, and with it the code
+    /// of `run_dots` for every game: callgrind of clean builds, Mega Man 2 and Zelda II (MMC1),
+    /// `core` **+0.090 %** / **+0.103 %** with `board-vs-system` on, all of it in
+    /// `run_dots::<Mmc1Kind>`, two adjacent bytes of the tile pipeline no longer loaded by one
+    /// instruction. `NesBus` now applies the three quirks from the `VsSystem` it already holds,
+    /// and calls this after every palette write of a VS image, the power-on fill and a state
+    /// load: 32 table lookups where a game writes a few palette bytes a frame.
     #[cfg(feature = "board-vs-system")]
-    pub fn set_vs_ppu(&mut self, vs: Option<&crate::vs::VsSystem>) {
-        self.vs_palette = vs.and_then(crate::vs::VsSystem::palette_lut);
-        let (latch_mask, id) = match vs.map(crate::vs::VsSystem::ppu) {
-            Some(model) => model.status_identifier(),
-            None => (STATUS_LATCH_BITS, 0),
-        };
-        self.vs_status_latch_mask = latch_mask;
-        self.vs_status_id = id;
-        self.vs_swap_control_mask = vs.is_some_and(crate::vs::VsSystem::is_rc2c05);
-        self.refresh_palette_views();
+    pub fn remap_palette(&mut self, lut: &[u8; crate::vs::LUT_LEN]) {
+        for index in 0..PALETTE_SIZE {
+            self.palette[index] = lut[usize::from(self.palette_raw[index] & 0x3F)];
+        }
+        self.palette_marked = marked_palette(&self.palette);
     }
 
     /// The bits of a `$2002` read that are **not** the three flags: the PPU's own bus latch on a
@@ -1720,33 +1679,11 @@ impl Ppu2C02 {
     /// Two field reads, an `and` and an `or`, with no branch and no model to test: on every PPU
     /// but an RC2C05 the mask is [`STATUS_LATCH_BITS`] and the identifier 0, so the value is the
     /// `decay & 0x1F` this register always answered.
-    #[cfg(feature = "board-vs-system")]
-    #[inline]
-    const fn status_open_bus(&self) -> u8 {
-        (self.decay & self.vs_status_latch_mask) | self.vs_status_id
-    }
-
     /// Without the VS. System there is no identifier and this is the expression the register
     /// always had.
-    #[cfg(not(feature = "board-vs-system"))]
     #[inline]
     const fn status_open_bus(&self) -> u8 {
         self.decay & STATUS_LATCH_BITS
-    }
-
-    /// Whether `$2000` and `$2001` mean each other; see [`Self::vs_swap_control_mask`].
-    #[cfg(feature = "board-vs-system")]
-    #[inline]
-    const fn swaps_control_and_mask(&self) -> bool {
-        self.vs_swap_control_mask
-    }
-
-    /// Without the VS. System they never do, and the two arms collapse to their old bodies.
-    #[cfg(not(feature = "board-vs-system"))]
-    #[allow(clippy::unused_self)]
-    #[inline]
-    const fn swaps_control_and_mask(&self) -> bool {
-        false
     }
 
     /// The `$2000` write: PPUCTRL, the two nametable bits of `t`, and the cartridge's hook.
@@ -1772,17 +1709,8 @@ impl Ppu2C02 {
     ///
     /// `written` is already six bits ([`Self::write_vram_inner`] masks it), so the lookup cannot
     /// leave the 64-entry table.
-    #[cfg(feature = "board-vs-system")]
-    const fn shown_palette_entry(&self, written: u8) -> u8 {
-        match self.vs_palette {
-            Some(lut) => lut[(written & 0x3F) as usize],
-            None => written,
-        }
-    }
-
     /// Without the VS. System there is no remap, and this is the identity the optimiser removes.
     /// It keeps the receiver so that the one call site reads the same in both configurations.
-    #[cfg(not(feature = "board-vs-system"))]
     #[allow(clippy::unused_self)]
     const fn shown_palette_entry(&self, written: u8) -> u8 {
         written
@@ -2909,11 +2837,7 @@ impl Ppu2C02 {
                     // The reset line still holds the register (`emu.ppu_reset_line`).
                     return;
                 }
-                if self.swaps_control_and_mask() {
-                    self.mask = value;
-                } else {
-                    self.write_control::<K>(value, cartridge.as_deref_mut());
-                }
+                self.write_control::<K>(value, cartridge.as_deref_mut());
             }
 
             1 => {
@@ -2921,15 +2845,11 @@ impl Ppu2C02 {
                     // The reset line still holds the register (`emu.ppu_reset_line`).
                     return;
                 }
-                if self.swaps_control_and_mask() {
-                    self.write_control::<K>(value, cartridge.as_deref_mut());
+                let was_rendering = self.rendering_enabled();
+                if was_rendering == ((value & 0x18) != 0) {
+                    self.mask = value;
                 } else {
-                    let was_rendering = self.rendering_enabled();
-                    if was_rendering == ((value & 0x18) != 0) {
-                        self.mask = value;
-                    } else {
-                        self.switch_rendering(value, &mut cartridge);
-                    }
+                    self.switch_rendering(value, &mut cartridge);
                 }
             }
 
