@@ -1,0 +1,20 @@
+# FIDPLUS-2 — per-dot differential against the transistor netlist (step 1)
+
+Branch `feat/fidplus-2`, from `feat/fidplus-1` (6289064d). Details: `docs/review/FIDELITY-LEADS.md` A5.
+
+| Item | State |
+|---|---|
+| Per-dot trace (`ppu-dot-trace`, harness `dot-trace`) | done, diagnostics only, never in `default` |
+| `INC $2007` double write (first address gets the final value) | done, all regions |
+| Dot-257 copy after a `$2001` switch on dot 256 (alignments 2-3) | done, NTSC/Multi |
+| `$2007` render-read merge rules | done behind feature `ppu-2007-read-merge`, off: moves Zelda II Europe frame 600 (owner's eye) |
+| Tile latch of the first fetch after a switch on | open lead |
+
+## Validation (7ee71a40)
+
+Campaign 215 pass / 4 fail (unchanged), AccuracyCoin 147/147 in the four alignments, golden-core
+identical to FIDPLUS-1, tests 1668 (core, harness, settings, NesHawk) and 867 (application), all green.
+
+## Measurement
+
+Callgrind, clean builds, against FIDPLUS-1 6289064d: +0.02 % to +0.10 % on the PR-1 set.
