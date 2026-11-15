@@ -179,6 +179,12 @@ pub fn corrected_header(header: &InesHeader, crc: u32) -> Option<Correction> {
         entry.save_ram_kib * 1024
     };
     fixed.byte10 = shift_of(entry.work_ram_kib * 1024) | (shift_of(non_volatile) << 4);
+    // An EEPROM is the one thing only byte 10 can say (mapper 157's external 24C01 has no other
+    // trace in a header), so it counts as a change on its own; plain RAM sizes are already the
+    // PRG-RAM change above.
+    if entry.save_eeprom_bytes != 0 && fixed.byte10 != header.byte10 {
+        changes.push(format!("EEPROM {} bytes", entry.save_eeprom_bytes));
+    }
 
     // CHR-RAM larger than the 32 KiB an iNES 1.0 image gets is taken; a smaller one is not. The
     // real 8 KiB of an UNROM or SxROM changes nothing a game can see, and a different size would
@@ -306,5 +312,20 @@ mod tests {
         let mut header = ines1(16, 16, 4);
         header.is_nes20 = true;
         assert!(corrected_header(&header, 0xE7DD_FEE3).is_none());
+    }
+
+    /// MAPPERS-N: the database writes *Battle Rush*'s external 24C01 as `b128`; the correction
+    /// carries it into NES 2.0 byte 10 as `$10` (nesdev, "INES Mapper 157"), even when nothing
+    /// else of the header changes, so the Datach gets its second EEPROM.
+    #[test]
+    fn the_datach_external_eeprom_reaches_byte_10() {
+        let mut header = ines1(16, 0, 157);
+        header.has_battery = true;
+        let correction = corrected_header(&header, 0x983D_8175).unwrap();
+        assert_eq!(
+            (true, 0x10),
+            (correction.header.is_nes20, correction.header.byte10)
+        );
+        assert_eq!(128, lookup(0x983D_8175).unwrap().save_eeprom_bytes);
     }
 }

@@ -895,6 +895,14 @@ left for a later lot. The 2 KiB work RAM keeps FCEUX's pattern (owner, 2026-11-1
 Blocks* (mapper 143) reads its VRAM ring head from uninitialised work RAM and boots only with zero
 or random work RAM — mapper 143 itself is right.
 
+### J16. Cartridge database EEPROM sizes (`bNNN`)
+The database writes a serial EEPROM's size in bytes in the save column (`b128`, `b256`, `b512`, 53
+entries). The parser read them as 0 KiB, so *Battle Rush* (Datach, `983D8175`) never got the
+external 24C01 that nesdev ("INES Mapper 157") signals with byte 10 `$10`, and waited forever for
+its acknowledge. The size now reaches byte 10's non-volatile nibble and counts as a correction on
+its own. Only mapper 157 reads it (`EepromPort::new`); the other 52 entries (16, 80, 159, 164, 529,
+558) now get NES 2.0 headers from the database too, which the final golden comparison checks.
+
 ### J15. Mapper 15: CHR-RAM write protection only on the K-1029
 MR-15-1 (from nesdev: "CHR-RAM is write-protected in PRG banking modes 0 and 3") write-protected
 every mapper-15 image. The same nesdev page says the K-1029 multicarts are the only genuine
