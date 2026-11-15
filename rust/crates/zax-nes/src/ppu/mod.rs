@@ -236,20 +236,9 @@ pub struct Ppu2C02 {
     /// landing on dot 256 (lot FIDPLUS-2, A5, [`Self::switch_rendering`]). Consumed on dot 257;
     /// not part of the state (a `$2001` write ends its instruction and the dot follows at once).
     copy_257_suppressed: bool,
-    /// Fidélité+ (`edges`): register effects through edges. Set by the core for each Fidélité+
-    /// frame; not part of the state (step 4).
-    fidelity_plus: bool,
-    /// The edges pending (`edges`), the first `edge_count` of them. Not part of the state yet
-    /// (step 4); cleared by a load.
-    edges: [edges::Edge; edges::EDGE_SLOTS],
-    edge_count: u8,
-    /// The PPU's data latch of a `$2007` write (`edges`): the byte the store takes when it comes.
-    data_latch: u8,
-    /// Fidélité+ step 3 (`edges`): the background fetch whose address an odd dot set up and whose
-    /// read the next dot makes (0 none, 1 nametable, 2 attribute, 3 and 4 the pattern planes), and
-    /// the address this core read it at. Not part of the state: it never outlives a dot pair.
-    fetch_pending: u8,
-    fetch_address: u16,
+    /// Fidélité+ (`edges`): the state of its own loop, kept apart (boxed) so the standard core's
+    /// layout stays its own (lot FIDPLUS-A, perf). Not part of the state but for the edges.
+    fid: Box<edges::FidState>,
     /// Per-dot trace (feature `ppu-dot-trace`): on, the PPU runs every dot through
     /// [`Self::step_dot`] (no span, no idle skip) and records it. Not part of the state.
     #[cfg(feature = "ppu-dot-trace")]
@@ -657,12 +646,7 @@ impl Ppu2C02 {
             oamaddr_bug: true,
             last_data_write: (i64::MIN, 0),
             copy_257_suppressed: false,
-            fidelity_plus: false,
-            edges: [edges::Edge::NONE; edges::EDGE_SLOTS],
-            edge_count: 0,
-            data_latch: 0,
-            fetch_pending: 0,
-            fetch_address: 0,
+            fid: Box::new(edges::FidState::NEW),
             #[cfg(feature = "ppu-dot-trace")]
             dot_trace: None,
             #[cfg(feature = "ppu-dot-trace")]

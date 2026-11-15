@@ -87,7 +87,7 @@ impl Ppu2C02 {
     pub fn load_machine_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
         self.sprite_line_stale = true;
         self.last_data_write = (i64::MIN, 0);
-        self.edge_count = 0;
+        self.fid.edge_count = 0;
         reader.read_blob_into(&mut self.vram)?;
         reader.read_blob_into(&mut self.oam)?;
         reader.read_blob_into(&mut self.palette_raw)?;

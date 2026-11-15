@@ -73,6 +73,36 @@ impl EdgeKind {
     }
 }
 
+/// The Fidélité+ loop's own state ([`Ppu2C02`]'s `fid`).
+#[derive(Debug, Clone)]
+pub(super) struct FidState {
+    /// Fidélité+ (`edges`): register effects through edges. Set by the core for each Fidélité+
+    /// frame; not part of the state (step 4).
+    pub(super) fidelity_plus: bool,
+    /// The edges pending (`edges`), the first `edge_count` of them. Not part of the state yet
+    /// (step 4); cleared by a load.
+    pub(super) edges: [Edge; EDGE_SLOTS],
+    pub(super) edge_count: u8,
+    /// The PPU's data latch of a `$2007` write (`edges`): the byte the store takes when it comes.
+    pub(super) data_latch: u8,
+    /// Fidélité+ step 3 (`edges`): the background fetch whose address an odd dot set up and whose
+    /// read the next dot makes (0 none, 1 nametable, 2 attribute, 3 and 4 the pattern planes), and
+    /// the address this core read it at. Not part of the state: it never outlives a dot pair.
+    pub(super) fetch_pending: u8,
+    pub(super) fetch_address: u16,
+}
+
+impl FidState {
+    pub(super) const NEW: Self = Self {
+        fidelity_plus: false,
+        edges: [Edge::NONE; EDGE_SLOTS],
+        edge_count: 0,
+        data_latch: 0,
+        fetch_pending: 0,
+        fetch_address: 0,
+    };
+}
+
 /// One pending edge: applied after the work of the `dots`-th dot from now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Edge {
@@ -112,26 +142,26 @@ impl Ppu2C02 {
     /// Fidélité+ (`docs/design/HALF-CYCLE.md`): register effects through edges. Set by the core
     /// for each Fidélité+ frame; off, the PPU is the standard one.
     pub const fn set_fidelity_plus(&mut self, enabled: bool) {
-        self.fidelity_plus = enabled;
+        self.fid.fidelity_plus = enabled;
     }
 
     /// Whether edges are pending: a state taken now has to carry them
     /// ([`Self::save_edge_state`]).
     #[must_use]
     pub const fn edges_pending(&self) -> bool {
-        self.edge_count != 0
+        self.fid.edge_count != 0
     }
 
     /// Appends the pending edges and the data latch to `writer`: the Fidélité+ block of a
     /// savestate (`docs/design/HALF-CYCLE.md`, "Savestates").
     pub fn save_edge_state(&self, writer: &mut StateWriter) {
-        writer.write_u8(self.edge_count);
-        for edge in &self.edges[..usize::from(self.edge_count)] {
+        writer.write_u8(self.fid.edge_count);
+        for edge in &self.fid.edges[..usize::from(self.fid.edge_count)] {
             writer.write_i32(edge.dots);
             writer.write_u8(edge.kind as u8);
             writer.write_u8(edge.value);
         }
-        writer.write_u8(self.data_latch);
+        writer.write_u8(self.fid.data_latch);
     }
 
     /// Restores what [`Self::save_edge_state`] wrote.
@@ -155,9 +185,9 @@ impl Ppu2C02 {
             let value = reader.read_u8()?;
             *edge = Edge { dots, kind, value };
         }
-        self.data_latch = reader.read_u8()?;
-        self.edges = edges;
-        self.edge_count = count;
+        self.fid.data_latch = reader.read_u8()?;
+        self.fid.edges = edges;
+        self.fid.edge_count = count;
         Ok(())
     }
 
@@ -169,7 +199,7 @@ impl Ppu2C02 {
 
     /// Whether edges place the register effects: Fidélité+ on the NTSC 2C02's timing.
     pub(super) const fn edges_on(&self) -> bool {
-        self.fidelity_plus && matches!(self.timing.region, NesRegion::Ntsc | NesRegion::Multi)
+        self.fid.fidelity_plus && matches!(self.timing.region, NesRegion::Ntsc | NesRegion::Multi)
     }
 
     /// The dot, counted from the access dot `D` (the dot just run), after whose work an effect of
@@ -195,28 +225,28 @@ impl Ppu2C02 {
     pub(super) fn post_edge_with(&mut self, dots: i32, kind: EdgeKind, value: u8) {
         // Dots another access already ran ahead are behind the edge's count.
         let dots = dots - self.prepaid_dots;
-        let count = usize::from(self.edge_count);
+        let count = usize::from(self.fid.edge_count);
         if count == EDGE_SLOTS {
             // Cannot happen (one access a cycle, each edge at most five dots out); apply at once
             // rather than lose it.
             debug_assert!(false, "edge queue full");
             return;
         }
-        self.edges[count] = Edge { dots, kind, value };
-        self.edge_count += 1;
+        self.fid.edges[count] = Edge { dots, kind, value };
+        self.fid.edge_count += 1;
     }
 
     /// Posts an edge from inside another edge: `dots` after the dot being applied, whatever dots
     /// an access ran ahead.
     pub(super) fn post_edge_now(&mut self, dots: i32, kind: EdgeKind) {
-        let count = usize::from(self.edge_count);
+        let count = usize::from(self.fid.edge_count);
         if count < EDGE_SLOTS {
-            self.edges[count] = Edge {
+            self.fid.edges[count] = Edge {
                 dots,
                 kind,
                 value: 0,
             };
-            self.edge_count += 1;
+            self.fid.edge_count += 1;
         }
     }
 
@@ -227,7 +257,7 @@ impl Ppu2C02 {
         cart: Cart<'_, '_, K>,
     ) {
         while count > 0 {
-            if self.edge_count == 0 && self.fetch_pending == 0 && !self.tracing() {
+            if self.fid.edge_count == 0 && self.fid.fetch_pending == 0 && !self.tracing() {
                 // Nothing pending: the standard core's stretches, up to the dot before 256 on a
                 // line that renders, whose Y increment may post the coarse-Y wrap's edge (A7).
                 let stretch = if self.rendering_now() && self.dot < 256 {
@@ -243,7 +273,7 @@ impl Ppu2C02 {
             }
             // Only the edges pending before this dot count it down: one its own work posts (the
             // coarse-Y wrap of dot 256) or an edge posts counts from the next.
-            let mut pending = usize::from(self.edge_count);
+            let mut pending = usize::from(self.fid.edge_count);
             let before = self.v;
             self.run_one_dot(cart);
             if self.dot == 256 && self.edges_on() {
@@ -257,12 +287,13 @@ impl Ppu2C02 {
             }
             let mut index = 0;
             while index < pending {
-                self.edges[index].dots -= 1;
-                if self.edges[index].dots <= 0 {
-                    let Edge { kind, value, .. } = self.edges[index];
-                    self.edges
-                        .copy_within(index + 1..usize::from(self.edge_count), index);
-                    self.edge_count -= 1;
+                self.fid.edges[index].dots -= 1;
+                if self.fid.edges[index].dots <= 0 {
+                    let Edge { kind, value, .. } = self.fid.edges[index];
+                    self.fid
+                        .edges
+                        .copy_within(index + 1..usize::from(self.fid.edge_count), index);
+                    self.fid.edge_count -= 1;
                     pending -= 1;
                     self.apply_edge(kind, value, cart);
                 } else {
@@ -354,8 +385,8 @@ impl Ppu2C02 {
             _ => return,
         };
         let address = self.background_fetch_address(slot);
-        self.fetch_pending = slot;
-        self.fetch_address = address;
+        self.fid.fetch_pending = slot;
+        self.fid.fetch_address = address;
         self.ale_low = address.to_le_bytes()[0];
     }
 
@@ -364,12 +395,12 @@ impl Ppu2C02 {
     /// load, `AccuracyCoin`'s `Hybrid Addresses`) or the latch took another byte (a `$2007` read
     /// latching on the ALE half, `ALE + Read`), the byte read is the one at that address.
     fn settle_fetch_read(&mut self, cartridge: Option<&super::Cartridge>) {
-        let slot = std::mem::take(&mut self.fetch_pending);
+        let slot = std::mem::take(&mut self.fid.fetch_pending);
         if slot == 0 || !self.rendering_now() {
             return;
         }
         let address = (self.background_fetch_address(slot) & 0xFF00) | u16::from(self.ale_low);
-        if address == self.fetch_address {
+        if address == self.fid.fetch_address {
             return;
         }
         let byte =
@@ -401,7 +432,7 @@ impl Ppu2C02 {
             EdgeKind::LoadAddress => self.edge_load_address(cart),
             EdgeKind::StoreData => {
                 let address = self.v & 0x3FFF;
-                self.write_vram_inner(address, self.data_latch, PpuBusAccess::Cpu, cart);
+                self.write_vram_inner(address, self.fid.data_latch, PpuBusAccess::Cpu, cart);
                 self.increment_vram_address(cart);
             }
             EdgeKind::ReadLatch => {
@@ -606,7 +637,7 @@ impl Ppu2C02 {
     /// A `$2007` write in Fidélité+ outside rendering: the data latch now, the store and the
     /// increment later.
     pub(super) fn post_data_store(&mut self, value: u8) {
-        self.data_latch = value;
+        self.fid.data_latch = value;
         let dots = self.edge_dot(STORE_DATA_LATENCY);
         self.post_edge(dots, EdgeKind::StoreData);
     }
