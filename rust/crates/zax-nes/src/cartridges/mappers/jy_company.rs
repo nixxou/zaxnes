@@ -186,7 +186,7 @@ impl JyCompany {
         let mut board = Self {
             banks: windows_for(memory),
             mapper_number,
-            jumper_inhibits_nametables: mapper_number == 90,
+            jumper_inhibits_nametables: mapper_number == 90 || mapper_number == 388,
             prg: [0; 4],
             chr_low: [0; 8],
             chr_high: [0; 8],
@@ -1045,6 +1045,14 @@ pub(crate) enum JyMulticart {
     /// `mapper_358.c`: 282's PRG decode; CHR bit 0 at A18 and bits 2-3 at A19-A20, widened to
     /// 512 KiB when bit 5 is set.
     M358,
+    /// `mapper_386.c`: PRG A18 from `$D003` bit 1 and A19 from bit 3; 358's CHR decode.
+    M386,
+    /// `mapper_387.c`: 386 with 128 KiB inner PRG banks.
+    M387,
+    /// `mapper_388.c`: PRG A18-A19 from `$D003` bits 2-3; CHR A18-A19 from bits 0-1, A18 alone
+    /// in the 512 KiB mode. The board's jumper inhibits ROM nametables and Extended Mirroring
+    /// (`init_JYASIC(FALSE, ...)`), as on mapper 90.
+    M388,
 }
 
 impl JyMulticart {
@@ -1054,6 +1062,9 @@ impl JyMulticart {
             282 => Some(Self::M282),
             295 => Some(Self::M295),
             358 => Some(Self::M358),
+            386 => Some(Self::M386),
+            387 => Some(Self::M387),
+            388 => Some(Self::M388),
             _ => None,
         }
     }
@@ -1065,6 +1076,9 @@ impl JyMulticart {
             Self::M281 => (outer << 5) | (bank_8k & 0x1F),
             Self::M282 | Self::M358 => ((outer << 4) & !0x1F) | (bank_8k & 0x1F),
             Self::M295 => (outer << 4) | (bank_8k & 0x0F),
+            Self::M386 => ((outer & 0x02) << 4) | ((outer & 0x08) << 3) | (bank_8k & 0x1F),
+            Self::M387 => ((outer & 0x02) << 3) | ((outer & 0x08) << 2) | (bank_8k & 0x0F),
+            Self::M388 => ((outer & 0x0C) << 3) | (bank_8k & 0x1F),
         }
     }
 
@@ -1073,7 +1087,15 @@ impl JyMulticart {
         let outer = i32::from(outer);
         match self {
             Self::M281 => (outer << 8) | (bank_1k & 0xFF),
-            Self::M282 | Self::M358 => {
+            Self::M388 => {
+                let base = ((outer & 0x01) << 8) | ((outer & 0x02) << 8);
+                if outer & 0x20 == 0 {
+                    base | (bank_1k & 0xFF)
+                } else {
+                    (base & 0x0200) | (bank_1k & 0x1FF)
+                }
+            }
+            Self::M282 | Self::M358 | Self::M386 | Self::M387 => {
                 let base = if self == Self::M282 {
                     ((outer & 0x01) << 8) | ((outer & 0x18) << 6)
                 } else {

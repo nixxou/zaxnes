@@ -64,6 +64,10 @@ pub enum MultiPKind {
     /// 380, `mapper_380.c` (970630C / KN-35A): address latch, a DIP read (submapper 0), CHR-RAM
     /// write protection, submapper-dependent last bank and mirroring bit.
     M380,
+    /// 382, `mapper_382.c` (830928C): lockable address latch (A5), data latch with bus conflicts.
+    M382,
+    /// 390, `mapper_390.c` (Realtec 8031): two address registers chosen by A14.
+    M390,
 }
 
 impl MultiPKind {
@@ -90,6 +94,8 @@ impl MultiPKind {
             375 => Self::M375,
             354 => Self::M354,
             380 => Self::M380,
+            382 => Self::M382,
+            390 => Self::M390,
             _ => return None,
         })
     }
@@ -115,6 +121,8 @@ impl MultiPKind {
             Self::M375 => 375,
             Self::M354 => 354,
             Self::M380 => 380,
+            Self::M382 => 382,
+            Self::M390 => 390,
         }
     }
 
@@ -218,6 +226,14 @@ impl MultiP {
             MultiPKind::M81 | MultiPKind::M338 | MultiPKind::M341 | MultiPKind::M380 => {
                 r[0] = address;
             }
+            // `extcl_cpu_wr_mem_382`: the data already ANDed with the ROM (`has_bus_conflicts`).
+            MultiPKind::M382 => {
+                if r[0] & 0x0020 == 0 {
+                    r[0] = address;
+                }
+                r[1] = u16::from(value);
+            }
+            MultiPKind::M390 => r[usize::from((address >> 14) & 0x01)] = address & 0xFF,
             MultiPKind::M354 => {
                 let start = if self.submapper == 1 { 0xE000 } else { 0xF000 };
                 if address >= start {
@@ -499,6 +515,33 @@ impl MultiP {
                 b.map_prg_16k(2, bank | (bit0 * bit9) | (7 * not9) | extra);
                 let bit = if self.submapper == 2 { 0x040 } else { 0x002 };
                 mirror(r[0] & bit == 0)
+            }
+            MultiPKind::M382 => {
+                let outer = r[0] & 0x07;
+                if r[0] & 0x0008 != 0 {
+                    b.map_prg_32k((outer << 2) | (r[1] & 0x03));
+                } else {
+                    b.map_prg_16k(0, (outer << 3) | (r[1] & 0x07));
+                    b.map_prg_16k(2, (outer << 3) | 0x07);
+                }
+                mirror(r[0] & 0x0010 == 0)
+            }
+            // `prg_fix_390`: the second register's D4-D5 the mode (its DIP read ORs 0: J37).
+            MultiPKind::M390 => {
+                let bank = r[1];
+                match r[1] & 0x30 {
+                    0x20 => b.map_prg_32k(bank >> 1),
+                    0x30 => {
+                        b.map_prg_16k(0, bank);
+                        b.map_prg_16k(2, bank);
+                    }
+                    _ => {
+                        b.map_prg_16k(0, bank);
+                        b.map_prg_16k(2, bank | 0x07);
+                    }
+                }
+                b.map_chr_8k(r[0]);
+                mirror(r[0] & 0x20 == 0)
             }
             _ => None,
         }

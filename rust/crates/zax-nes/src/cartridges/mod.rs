@@ -540,6 +540,9 @@ const fn nametable_pages_vary(mapper: i32) -> bool {
             | 282
             | 295
             | 358
+            | 386
+            | 387
+            | 388
             | 218
             | 243
             // MAPPERS-N: 307, the KS7037, a CIRAM page per table from four registers
@@ -627,6 +630,9 @@ const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
             | 282
             | 295
             | 358
+            | 386
+            | 387
+            | 388
             | 264
             | 298
     )
@@ -738,6 +744,9 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 282
             | 295
             | 358
+            | 386
+            | 387
+            | 388
             // MF-UNL-11 step 1: the UNL-8237 and UNL-8237A hold an `Mmc3`, counter included, and
             // the scramble of `$5007` leaves every one of the chip's IRQ ports reachable.
             | 215
@@ -844,6 +853,9 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 282
             | 295
             | 358
+            | 386
+            | 387
+            | 388
             // MF-UNL-11 step 1: the UNL-8237's MMC3 counter; see the list above.
             | 215
             // MF-UNL-11 step 3: the A9461's MMC3 counter; see the list above.
@@ -2114,6 +2126,12 @@ mod tests {
         expected.extend_from_slice(&[295, 295]);
         #[cfg(feature = "board-358")]
         expected.extend_from_slice(&[358, 358]);
+        #[cfg(feature = "board-386")]
+        expected.extend_from_slice(&[386, 386]);
+        #[cfg(feature = "board-387")]
+        expected.extend_from_slice(&[387, 387]);
+        #[cfg(feature = "board-388")]
+        expected.extend_from_slice(&[388, 388]);
         // MF-UNL-11 step 1: the UNL-8237 and UNL-8237A hold an `Mmc3`, so the number moves for
         // 114's reason. **Twice**: submapper 1 is the UNL-8237A and the board refuses neither.
         #[cfg(feature = "board-215")]

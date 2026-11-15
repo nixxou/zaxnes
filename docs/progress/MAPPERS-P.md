@@ -77,13 +77,13 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 377 | `mapper_377.c` | 86 | 3 | 0 | todo |
 | 380 | `mapper_380.c` | 89 | 9 | 0 | done (batch 4, `MultiP`) |
 | 381 | `mapper_381.c` | 60 | 0 | 0 | done (batch 2, `MultiP`) |
-| 382 | `mapper_382.c` | 70 | 1 | 0 | todo |
+| 382 | `mapper_382.c` | 70 | 1 | 0 | done (batch 5, `MultiP`) |
 | 384 | `mapper_384.c` | 65 | 0 | 0 | todo |
-| 386 | `mapper_386.c` | 76 | 1 | 0 | todo |
-| 387 | `mapper_387.c` | 76 | 4 | 0 | todo |
-| 388 | `mapper_388.c` | 76 | 2 | 0 | todo |
+| 386 | `mapper_386.c` | 76 | 1 | 0 | done (batch 5, `JyCompany` + `JyMulticart`) |
+| 387 | `mapper_387.c` | 76 | 4 | 0 | done (batch 5, `JyCompany` + `JyMulticart`) |
+| 388 | `mapper_388.c` | 76 | 2 | 0 | done (batch 5, `JyCompany` + `JyMulticart`) |
 | 389 | `mapper_389.c` | 90 | 1 | 1 | done (batch 1, `MultiP`) |
-| 390 | `mapper_390.c` | 93 | 0 | 0 | todo |
+| 390 | `mapper_390.c` | 93 | 0 | 0 | done (batch 5, `MultiP`) |
 | 393 | `mapper_393.c` | 123 | 1 | 0 | todo |
 | 394 | `mapper_394.c` | 193 | 0 | 0 | todo |
 | 395 | `mapper_395.c` | 88 | 4 | 0 | todo |
@@ -180,3 +180,8 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 * Batch 4: `MultiP` 354 and 380, the first two kinds that read the NES 2.0 submapper
   (`MultiP::submapper`): 354's latch window (`$F000`/`$E000`), 380's DIP read, last bank and
   mirroring bit.
+* Perf, batches 1-2 (adf16776) against the MAPPERS-N tip e4596884, clean builds
+  (`cleanroom/verify/rust-v2/cgp.sh`): mm2 core +0.000 %, total -0.001 %; zelda2 core +0.000 %,
+  total -0.004 %.
+* Batch 5: `MultiP` 382 (bus conflicts through `has_bus_conflicts`) and 390; `JyMulticart` 386,
+  387 and 388 (388 carries mapper 90's nametable jumper, puNES `init_JYASIC(FALSE, ...)`).

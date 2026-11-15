@@ -261,3 +261,42 @@ fn mappers_p_380_banks_from_the_address_and_reads_its_dip() {
     core.mapper_write(0x8100, 0);
     assert_eq!(0x34, core.read_memory(0x8134));
 }
+
+/// `mapper_382.c`: A0-A2 the outer bank, A3 NROM-256, A5 locks; the data is the inner bank.
+#[cfg(feature = "board-382")]
+#[test]
+fn mappers_p_382_locks_its_outer_bank() {
+    let mut core = MapperRom::new(382).prg(64).load();
+    core.mapper_write(0x8021, 0xFF);
+    // The data is ANDed with the ROM byte under the write: bank 0 holds zeros, so it is 0.
+    assert_eq!([16, 17, 30, 31], core.prg_windows());
+    core.mapper_write(0x8008, 0xFF);
+    assert_eq!([16, 17, 30, 31], core.prg_windows());
+}
+
+/// `mapper_390.c`: `$8000-$BFFF` the CHR register, `$C000-$FFFF` the PRG register from the
+/// address.
+#[cfg(feature = "board-390")]
+#[test]
+fn mappers_p_390_takes_two_registers_from_the_address() {
+    let mut core = MapperRom::new(390).prg(64).chr(64).load();
+    // Mode `$20`: NROM-256, 32 KiB bank `$22 >> 1` = 17, which wraps to 1 on 512 KiB.
+    core.mapper_write(0xC022, 0);
+    assert_eq!([4, 5, 6, 7], core.prg_windows());
+    // Mode `$30`: NROM-128, 16 KiB bank `$33` = 51, which wraps to 19.
+    core.mapper_write(0xC033, 0);
+    assert_eq!([38, 39, 38, 39], core.prg_windows());
+    core.mapper_write(0x8003, 0);
+    assert_eq!(24, core.chr_windows()[0]);
+}
+
+/// `mapper_388.c`: PRG A18-A19 from `$D003` bits 2-3.
+#[cfg(feature = "board-388")]
+#[test]
+fn mappers_p_388_places_prg_from_d003_bits_2_and_3() {
+    let mut core = MapperRom::new(388).prg(128).chr(256).load();
+    core.mapper_write(0xD000, 0x02);
+    core.mapper_write(0x8000, 1);
+    core.mapper_write(0xD003, 0x04);
+    assert_eq!([33, 32, 32, 63], core.prg_windows());
+}
