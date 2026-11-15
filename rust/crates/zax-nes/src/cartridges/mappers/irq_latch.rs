@@ -23,6 +23,8 @@ pub enum IrqLatchKind {
     M56,
     /// 142, `Kaiser/Kaiser202.h` (KS7032, FDS conversions).
     M142,
+    /// 304, `Whirlwind/Smb2j.h` (*SMB2J* conversion with 4 KiB pages at `$5000-$7FFF`).
+    M304,
     /// 40, `Whirlwind/Mapper40.h` (NTDEC 2722, *SMB2J* conversion).
     M40,
     /// 42, `Unlicensed/Mapper42.h` (*Ai Senshi Nicol* / *Mario Baby* conversions).
@@ -50,6 +52,7 @@ impl IrqLatchKind {
             8 => Self::M8,
             17 => Self::M17,
             40 => Self::M40,
+            304 => Self::M304,
             56 => Self::M56,
             142 => Self::M142,
             42 => Self::M42,
@@ -85,7 +88,7 @@ impl IrqLatchKind {
     const fn rom_at_6000(self) -> bool {
         matches!(
             self,
-            Self::M40 | Self::M42 | Self::M43 | Self::M50 | Self::M183
+            Self::M40 | Self::M42 | Self::M43 | Self::M50 | Self::M183 | Self::M304
         )
     }
 

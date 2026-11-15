@@ -934,6 +934,7 @@ impl Cartridge {
                     // MAPPERS-N: the CPU-clocked counters of `IrqLatch`.
                     | 56
                     | 142
+                    | 304
                     | 6
                     | 8
                     | 17
