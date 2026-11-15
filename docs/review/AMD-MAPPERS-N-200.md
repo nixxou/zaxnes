@@ -10,13 +10,16 @@ Mapper 200 is a real multicart board (Mesen2 `Unlicensed/Mapper200.h`, FCEUX `ma
 and the owner's request of 2026-11-15 is to implement the mappers the other emulators run. The
 requirement allows it; only the criterion's example number forbids it.
 
-**Proposed amendment:** the criterion becomes "en-tête annonçant le mapper 186 → échec". 186 is the
-Fukutake Study Box, which Mesen2 handles as a BIOS file and not as a cartridge board
-(`MapperFactory.cpp`, "The study box is handled as a bios file, not a iNES rom"), so no later
-mapper lot can implement it — `docs/review/MF-6-inventory.md` §6 item 2 already chose it for that
-reason, and `cartridge_tests.rs` already sweeps it.
+**Proposed amendment (revised the same day):** the criterion becomes "en-tête annonçant le mapper
+84 → échec". The first draft proposed 186, the Fukutake Study Box, on the grounds that no lot could
+ever implement it; that was wrong: FCEUX (`boards/186.cpp`) and puNES (`mapper_186.c`) run it as
+mapper 186, and Mesen2 runs it from its own `.studybox` tape format (`StudyBoxLoader.cpp`) while
+refusing the iNES number (`MapperFactory.cpp:459`). 186 would therefore walk into 200's trap again.
+Mapper 84 is implemented by none of Mesen2 (`MapperFactory.cpp`), FCEUX (`ines.cpp`) or puNES, and
+the refusal tests already use it (`mapper_tests.rs`, `cartridge_tests.rs`). Whether a cartridge of
+it was ever dumped is to be checked against nesdev ("INES Mapper 084") before the spec is changed.
 
 **Meanwhile:** `board-200` exists and is tested, but stays out of `default`, so the default build
 still refuses 200 and the criterion holds. Accepting the amendment means adding `board-200` to
-`default` and replacing 200 by 186 in `req_core_102_any_other_mapper_is_refused`,
+`default` and replacing 200 by 84 in `req_core_102_any_other_mapper_is_refused`,
 `amd002_tests.rs` and `cartridge_tests.rs`.

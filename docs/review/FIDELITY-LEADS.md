@@ -886,6 +886,14 @@ screen here and in FCEUX, and boots to its title with an all-`$FF` or random sav
 (`zax-harness render --sav`). The mapper itself is right. Changing the power-on state touches
 every battery game, the golden and determinism, so it is left to the owner: a seeded pattern
 for battery RAM without a save file is the likely fix.
+**Applied (owner: "fais ce qui te semble le mieux", 2026-11-15):** `NesCore::power_on_battery_ram`
+fills the battery slice with `PowerOnRam::Random(BATTERY_RAM_SEED)` when no save was imported;
+movie replay (`movie_sync`) sets it back to zero, FCEUX's convention. Mappers 16, 157, 159 and 164
+(serial EEPROM arrays) and 19 (Namco 163 internal RAM) keep zero: a non-zero 163 RAM exposed a
+three-byte save/restore mismatch in `req_core_090_the_mapper_state_survives_a_save_and_restore`,
+left for a later lot. The 2 KiB work RAM keeps FCEUX's pattern (owner, 2026-11-13); *Dancing
+Blocks* (mapper 143) reads its VRAM ring head from uninitialised work RAM and boots only with zero
+or random work RAM — mapper 143 itself is right.
 
 ### J15. Mapper 15: CHR-RAM write protection only on the K-1029
 MR-15-1 (from nesdev: "CHR-RAM is write-protected in PRG banking modes 0 and 3") write-protected

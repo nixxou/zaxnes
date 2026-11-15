@@ -38,6 +38,10 @@ pub struct CartEntry {
     pub work_ram_kib: usize,
     /// Battery-backed PRG-RAM in KiB.
     pub save_ram_kib: usize,
+    /// A serial EEPROM's size in **bytes**, which the database writes `b128`, `b256`, … in the
+    /// save-RAM column (MAPPERS-N: Datach's external 24C01 on *Battle Rush*); 0 otherwise. NES
+    /// 2.0 declares it as non-volatile memory in byte 10, not as PRG-RAM.
+    pub save_eeprom_bytes: usize,
     /// Whether the save RAM is battery backed.
     pub battery: bool,
     /// `h`, `v` or `4` (four-screen), as the database writes it.
@@ -72,6 +76,11 @@ fn parse(line: &'static str) -> Option<CartEntry> {
         chr_ram_kib: number(6),
         work_ram_kib: number(7),
         save_ram_kib: number(8),
+        save_eeprom_bytes: f
+            .get(8)
+            .and_then(|v| v.strip_prefix('b'))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
         battery: f.get(9).is_some_and(|v| *v == "1"),
         mirroring: f.get(10).and_then(|v| v.chars().next()).unwrap_or('h'),
         chip: f.get(11).copied().unwrap_or(""),
@@ -162,7 +171,14 @@ pub fn corrected_header(header: &InesHeader, crc: u32) -> Option<Correction> {
         ));
         fixed.prg_ram_size = prg_ram;
     }
-    fixed.byte10 = shift_of(entry.work_ram_kib * 1024) | (shift_of(entry.save_ram_kib * 1024) << 4);
+    // nesdev ("NES 2.0", byte 10): the high nibble is the non-volatile memory, EEPROM included —
+    // "INES Mapper 157" reads $10 there as the external 128-byte 24C01.
+    let non_volatile = if entry.save_eeprom_bytes != 0 {
+        entry.save_eeprom_bytes
+    } else {
+        entry.save_ram_kib * 1024
+    };
+    fixed.byte10 = shift_of(entry.work_ram_kib * 1024) | (shift_of(non_volatile) << 4);
 
     // CHR-RAM larger than the 32 KiB an iNES 1.0 image gets is taken; a smaller one is not. The
     // real 8 KiB of an UNROM or SxROM changes nothing a game can see, and a different size would

@@ -50,6 +50,12 @@ pub struct NesCore {
     power_on_ram: crate::PowerOnRam,
     /// What the PPU's palette RAM, OAM and nametable RAM hold at power-on (lot FIDELITY step 36).
     power_on_ppu_ram: crate::PowerOnPpuRam,
+    /// What a cartridge's battery-backed PRG-RAM holds at power-on when no save was imported
+    /// (MAPPERS-N, owner 2026-11-15): seeded pseudo-random bytes by default, as a real SRAM's
+    /// contents are undefined and Mesen2's `RamPowerOnState` defaults to `Random`
+    /// (`SettingTypes.h:659`). All zero made *Famicom Jump II* take the empty RAM for a valid
+    /// save and jump into it (FIDELITY-LEADS J14). The seed is fixed, so runs stay reproducible.
+    power_on_battery_ram: crate::PowerOnRam,
     advanced_patches_enabled: bool,
     /// The built-in patch applied to a ROM none is made for (Rust-only, owner request: forced).
     forced_patch: Option<&'static crate::builtin_patches::BuiltinPatch>,
@@ -146,6 +152,7 @@ impl NesCore {
             cartridge_db: true,
             power_on_ram: crate::PowerOnRam::Pattern,
             power_on_ppu_ram: crate::PowerOnPpuRam::Zero,
+            power_on_battery_ram: crate::PowerOnRam::Random(Self::BATTERY_RAM_SEED),
             advanced_patches_enabled: false,
             forced_patch: None,
             rom_crc: None,
@@ -196,6 +203,15 @@ impl NesCore {
     /// default (owner, 2026-11-13); REQ-CORE-004's zeros are one choice among four.
     pub fn set_power_on_ram(&mut self, pattern: crate::PowerOnRam) {
         self.power_on_ram = pattern;
+    }
+
+    /// The fixed seed of the default battery-RAM power-on pattern.
+    pub const BATTERY_RAM_SEED: u64 = 0x5A41_584E_4553_5241;
+
+    /// Chooses what a battery-backed PRG-RAM without an imported save holds at power-on; takes
+    /// effect at the next one. Movie tools set [`crate::PowerOnRam::Zero`], FCEUX's convention.
+    pub fn set_power_on_battery_ram(&mut self, pattern: crate::PowerOnRam) {
+        self.power_on_battery_ram = pattern;
     }
 
     /// Chooses what the PPU's palette RAM, OAM and nametable RAM hold at power-on; takes effect
@@ -843,6 +859,15 @@ impl NesCore {
         if let Some(cartridge) = self.bus.cartridge_mut() {
             cartridge.reset();
             cartridge.clear_volatile_ram(clear_prg_ram);
+            // Plain SRAM only: on 16, 157, 159 and 164 the battery slice is a serial EEPROM's
+            // array and on 19 it carries the Namco 163's internal RAM, which keep their
+            // all-zero power-on (FIDELITY-LEADS J14).
+            if clear_prg_ram
+                && self.power_on_battery_ram != crate::PowerOnRam::Zero
+                && !matches!(cartridge.mapper_number(), 16 | 19 | 157 | 159 | 164)
+            {
+                self.power_on_battery_ram.fill(cartridge.battery_ram_mut());
+            }
         }
 
         self.cpu.reset(&mut self.bus);
