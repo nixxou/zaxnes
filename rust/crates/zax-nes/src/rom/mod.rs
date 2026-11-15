@@ -6,6 +6,9 @@ mod region_exceptions;
 mod rom_image;
 mod unif;
 
+/// Lot MAPPERS-P: a `.studybox` tape and its BIOS as the image the core runs.
+#[cfg(feature = "board-186")]
+pub use crate::cartridges::mappers::study_box::package as package_study_box;
 pub use ines_header::InesHeader;
 pub use region_exceptions::region_exception;
 pub use rom_image::{RomImage, RomLoadError};

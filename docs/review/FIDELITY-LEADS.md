@@ -1078,6 +1078,14 @@ places where puNES itself is incomplete are copied, not invented around:
   (`strncasecmp(table, board, strlen(board))`); this loader compares the whole name. Single-
   screen `MIRR` values (2, 3) have no NES 2.0 header bit and are left to the board. ROM chunks
   that are not whole 16/8 KiB banks are padded by repeating them, as a smaller chip mirrors.
+* 186 (Study Box, Mesen 2 `StudyBox.h`): Mesen's model, itself a reconstruction (its own
+  comments mark several `$4201`/`$4202` bits as guesses): command `$86` past the last page goes
+  back to the first page, command 0 walks back from page 255 when at page 0, `$5000-$7FFF` are
+  mapped from power-on by `$4200` = 0 where Mesen maps `$5000` only once `$4200` is written. The
+  tape's timings use the NTSC CPU clock whatever the region. The tape's audio is mixed at full
+  scale (a WAV sample as the mixer's `M`) and advances at the WAV's rate against the CPU clock,
+  where Mesen resamples it to the host's output; 8-bit and 16-bit PCM, channels averaged. The
+  whole tape (audio included) is in the image a savestate carries when it includes the ROM.
 * 256, 436 (`OneBus.c`): as puNES, the VT02/VT03 are modelled in the console's ordinary 2 bpp
   rendering. In the 4 bpp modes (`$2010` D1/D2) the banks select the de-interleaved low planes
   puNES selects, but the PPU still draws two planes, so those games show what puNES shows, not

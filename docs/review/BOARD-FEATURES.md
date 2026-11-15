@@ -823,6 +823,7 @@ dispatch is the generic path of the exotic ones only.
 | `board-551` | 551 | `WaixingFs305` with `chr_banked`: puNES's mapper-178 code with `$4803` an 8 KiB CHR bank (puNES; MAPPERS-P). Requires `board-178` | — | — (unit test) | **on** |
 | `board-248` | 248 | alias of 115 (`registry::board_number`): puNES `map_init_115` (puNES; MAPPERS-P). Requires `board-mmc3-scramble` | — | — (unit test) | **on** |
 | `board-532` | 532 | alias of 19 (`registry::board_number`) with the font overlay of `ersan2_overlay.rs` (UNIF `CHINA_ER_SAN2`): puNES `mapper_532.c` (puNES; MAPPERS-P) | — | — (unit test) | **on** |
+| `board-186` | 186 | `IrqP` kind M186 (IrqBoard): the Fukutake Study Box, loaded only from a `.studybox` tape packaged with the user's `StudyBox.bin` (`zax_nes::rom::package_study_box`); a bare iNES 186 stays refused (Mesen 2 `StudyBox.h`; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
 | `board-536` | 536 | alias of 195 (`registry::board_number`): puNES `map_init_195` (puNES; MAPPERS-P). Requires `board-mmc3-chrram` | — | — (unit test) | **on** |
 | `board-422` | 422 | `Mmc3P` kind M422 (IrqBoard): BS-300/BS-400 multicarts, puNES's TEC9719 reading (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
 | `board-534` | 534 | `Mmc3P` kind M534 (IrqBoard): ING003C, 422 with inverted IRQ latch data (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |

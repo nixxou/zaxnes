@@ -641,6 +641,8 @@ const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
             | 562
             // MAPPERS-P: mapper 342, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
             | 342
+            // MAPPERS-P: the Study Box's tape drive (Mesen `StudyBox::ProcessCpuClock`).
+            | 186
             // MAPPERS-P: mapper 446, `ChipSwitch` (its VRC4 IRQ, puNES `EXTCL_CPU_EVERY_CYCLE`).
             | 446
             // MAPPERS-P: mapper 436, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
@@ -1118,7 +1120,7 @@ impl Cartridge {
     /// number is not implemented (REQ-CORE-102).
     pub fn create(rom: RomImage) -> Result<Self, RomLoadError> {
         let mapper = rom.mapper();
-        if !registry::is_supported(mapper) {
+        if !registry::is_supported(mapper) && !registry::is_study_box(&rom) {
             // Q-001: the wording is ours; REQ-CORE-011 only requires the number to appear,
             // and AMD-002 makes the typed cause the normative part.
             return Err(RomLoadError::new(

@@ -438,3 +438,27 @@ fn req_pers_060_a_rom_without_a_battery_writes_nothing() {
             .count()
     );
 }
+
+/// Lot MAPPERS-P: a `.studybox` tape loads with `StudyBox.bin` found beside it, packaged as the
+/// NES 2.0 image the core runs (mapper 186); without the BIOS the user is told where to put it.
+#[test]
+fn a_study_box_tape_is_read_with_its_bios() {
+    let root = TemporaryRoot::new("zax-pers-");
+    let mut tape = b"STBX".to_vec();
+    tape.extend_from_slice(&4u32.to_le_bytes());
+    tape.extend_from_slice(&0x100u32.to_le_bytes());
+    tape.extend_from_slice(b"PAGE");
+    tape.extend_from_slice(&14u32.to_le_bytes());
+    tape.extend_from_slice(&[0, 0, 0, 0, 4, 0, 0, 0, 0xC5, 1, 2, 3, 4, 0]);
+    let path = root.path().join("lesson.studybox");
+    std::fs::write(&path, &tape).unwrap();
+    assert_eq!(
+        zax_app::emulation::rom_file::STUDY_BOX_BIOS_MISSING_MESSAGE,
+        rom_file::read(&path).unwrap_err()
+    );
+    std::fs::write(root.path().join("StudyBox.bin"), vec![0u8; 0x4_0000]).unwrap();
+    let rom = rom_file::read(&path).unwrap();
+    assert_eq!("lesson.studybox", rom.name);
+    assert_eq!(16 + 0x4_0000 + tape.len(), rom.image.len());
+    assert_eq!(&rom.image[..4], b"NES\x1A");
+}

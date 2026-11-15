@@ -816,7 +816,8 @@ impl Mapper for IrqBoard {
         feature = "board-284",
         feature = "board-682",
         feature = "board-413",
-        feature = "board-342"
+        feature = "board-342",
+        feature = "board-186"
     ))]
     #[inline(never)]
     fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
@@ -832,7 +833,8 @@ impl Mapper for IrqBoard {
         feature = "board-284",
         feature = "board-682",
         feature = "board-413",
-        feature = "board-342"
+        feature = "board-342",
+        feature = "board-186"
     ))]
     #[inline(never)]
     fn cpu_peek_override(&self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
@@ -897,7 +899,12 @@ impl Mapper for IrqBoard {
     /// Forwarded for mapper 284 alone (lot MAPPERS-N), the one board of this enum with expansion
     /// audio: every other one keeps `Mapper`'s `None`, which `Cartridge::has_expansion_audio`
     /// reads once at attach, so their bus never asks again.
-    #[cfg(any(feature = "board-284", feature = "board-682", feature = "board-446"))]
+    #[cfg(any(
+        feature = "board-284",
+        feature = "board-682",
+        feature = "board-446",
+        feature = "board-186"
+    ))]
     fn expansion_audio_output(&self) -> Option<i32> {
         inner!(self, b => b.expansion_audio_output())
     }

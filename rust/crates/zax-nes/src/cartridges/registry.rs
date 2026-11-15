@@ -1014,6 +1014,23 @@ pub fn is_supported(mapper: i32) -> bool {
     SUPPORTED_MAPPERS.contains(&mapper)
 }
 
+/// Lot MAPPERS-P: whether `rom` is a Study Box tape packaged by
+/// [`super::mappers::study_box::package`] — mapper 186 with a `STBX` misc ROM, the one way 186
+/// loads; a bare iNES 186 (the BIOS alone) stays refused (AMD-MAPPERS-N-200).
+#[must_use]
+pub(crate) fn is_study_box(rom: &super::RomImage) -> bool {
+    #[cfg(feature = "board-186")]
+    if rom.mapper() == 186 {
+        let misc = rom
+            .raw()
+            .get(rom.header().announced_size()..)
+            .unwrap_or_default();
+        return super::mappers::study_box::is_tape(misc);
+    }
+    let _ = rom;
+    false
+}
+
 /// The sizes the *board* dictates for the volatile memories, settled once at load time
 /// (REQ-CORE-100).
 ///
@@ -1135,6 +1152,13 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         342 => BoardMemorySizes {
             prg_ram: Some(0x8000),
             chr_ram: (header.chr_rom_size == 0).then_some(0x4_0000),
+            ..BoardMemorySizes::default()
+        },
+        // MAPPERS-P: the Study Box's 64 KiB of work RAM and 8 KiB of CHR-RAM (Mesen `StudyBox.h`).
+        #[cfg(feature = "board-186")]
+        186 => BoardMemorySizes {
+            prg_ram: Some(super::mappers::study_box::WORK_RAM_SIZE),
+            chr_ram: Some(0x2000),
             ..BoardMemorySizes::default()
         },
         #[cfg(feature = "board-446")]
@@ -3705,6 +3729,11 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         446 => Board::IrqBoard(IrqBoard::ChipSwitch(Box::new(ChipSwitch::new(
             memory,
             ChipSwitchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-186")]
+        186 => Board::IrqBoard(IrqBoard::IrqP(Box::new(IrqP::new(
+            memory,
+            IrqPKind::of(mapper)?,
         )))),
         #[cfg(feature = "board-342")]
         342 => Board::IrqBoard(IrqBoard::IrqP(Box::new(IrqP::new(

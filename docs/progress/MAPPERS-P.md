@@ -25,7 +25,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 81 | `mapper_081.c` | 60 | 3 | 0 | done (batch 1, `MultiP`) |
 | 100 | `mapper_100.c` | 175 | 1 | 0 | done (batch 29, `Mmc3P`) |
 | 122 | `mapper_184.c` | 64 | 0 | 0 | done (batch 1, `MultiP`) |
-| 186 | `mapper_186.c` | 82 | 1 | 0 | refused (MF-6 inventory §3.5, AMD-MAPPERS-N-200: the Study Box stays refused) |
+| 186 | `mapper_186.c` | 82 | 1 | 0 | done (batch 60, from `.studybox` tapes as Mesen 2; a bare iNES 186 stays refused) |
 | 237 | `mapper_237.c` | 98 | 1 | 0 | done (batch 1, `MultiP`) |
 | 248 | `mapper_115.c` | 115 | 0 | 0 | done (batch 20, alias, `registry::board_number`) |
 | 256 | `mapper_256.c` | 123 | 241 | 0 | done (batch 53, `IrqP` + `one_bus.rs`) |
@@ -461,3 +461,16 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   trip found it). The app's ROM dialog and handheld list accept `.unf`/`.unif`. Mesen 2 notes
   that no such board is known (a VirtuaNES convention); there is no dump in the Hackset to check
   against, so only the synthetic tests cover it.
+* Batch 60: 186, the Fukutake Study Box, on the owner's go (2026-11-16) after Mesen 2's model:
+  the game is a `.studybox` tape (`STBX`: decoded `PAGE`s with their lead-in and data positions
+  in the audio, and an `AUDI` WAV) run with the user's `StudyBox.bin` (256 KiB). The new
+  `study_box.rs` packages them as a NES 2.0 image (`zax_nes::rom::package_study_box`: mapper
+  186, the BIOS as PRG-ROM, 64 KiB of work RAM, 8 KiB of CHR-RAM, four-screen, the tape as the
+  misc ROM) and runs `StudyBox.h` as an `IrqP` kind: `$4200` (work-RAM pages), `$4201` (the
+  `$8000` BIOS page), `$4202` (the drive: commands clocked on D4's falling edge, reset on D5's,
+  decoder and IRQ enables), the seek (3 000 000 cycles a page), the lead-in, the bytes every
+  3 355 cycles and their IRQ, and the tape's audio played from the data's start as the
+  expansion audio. The tape is read in place in the image. `Cartridge::create` accepts 186 only
+  when its misc ROM is a tape (`registry::is_study_box`), so `req_core_102`'s bare 186 is still
+  refused and 186 stays out of `SUPPORTED_MAPPERS`. The app finds `StudyBox.bin` beside the tape
+  or beside the executable. All 135 numbers are covered.

@@ -237,8 +237,8 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::KEYS_COMMANDS, "Menu commands"),
     // ------------------------------------------------------ file browser
     (keys::BROWSER_COMPUTER, "This computer"),
-    (keys::BROWSER_FILTER_NES_ROMS, "NES ROMs (*.nes, *.unf, *.zip)"),
-    (keys::BROWSER_FILTER_NES_FILES, ".nes and .unf files"),
+    (keys::BROWSER_FILTER_NES_ROMS, "NES ROMs (*.nes, *.unf, *.studybox, *.zip)"),
+    (keys::BROWSER_FILTER_NES_FILES, ".nes, .unf and .studybox files"),
     (keys::BROWSER_FILTER_MOVIES, "Movies (.fm2, .fcm, .bk2, .mv)"),
     (keys::MOVIE_BAR_PLAY, "Play"),
     (keys::MOVIE_BAR_PAUSE, "Pause"),

@@ -242,6 +242,7 @@ default = [
     "board-536",
     "board-248",
     "board-532",
+    "board-186",
     "board-551",
     "board-417",
     "board-416",
@@ -502,6 +503,9 @@ board-536 = ["board-mmc3-chrram"]
 board-248 = ["board-mmc3-scramble"]
 # MAPPERS-P: 532 (China Ersan 2), the Namco 163 with its font overlay.
 board-532 = []
+# MAPPERS-P: the Study Box (186), from a .studybox tape and StudyBox.bin; a bare iNES 186
+# stays refused.
+board-186 = ["board-irq-p"]
 board-551 = ["board-178"]
 board-340 = ["board-multi-p"]
 board-554 = ["board-multi-p"]

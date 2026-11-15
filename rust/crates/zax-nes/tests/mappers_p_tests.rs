@@ -2020,3 +2020,85 @@ fn mappers_p_532_loads_from_unif_with_its_font() {
     assert!(!load.success);
     assert!(format!("{:?}", load.error).contains("NO-SUCH-BOARD"));
 }
+
+/// Mesen `StudyBox.h`: a `.studybox` tape packaged with a 256 KiB BIOS loads as mapper 186
+/// (a bare iNES 186 stays refused); `$4201` pages the BIOS at `$8000`, `$4400-$4FFF` is work-RAM
+/// page 8; a drive command clocked in on `$4202` D4's falling edges (`$86`, the next page) reads
+/// the page's lead-in, then asserts the IRQ and serves the page's bytes at `$4200` while the
+/// tape's audio plays as the expansion audio.
+#[cfg(feature = "board-186")]
+#[test]
+fn mappers_p_186_reads_a_study_box_tape() {
+    fn chunk(file: &mut Vec<u8>, id: [u8; 4], body: &[u8]) {
+        file.extend_from_slice(&id);
+        file.extend_from_slice(&u32::try_from(body.len()).unwrap().to_le_bytes());
+        file.extend_from_slice(body);
+    }
+    fn page(lead_in: u32, audio: u32, data: &[u8]) -> Vec<u8> {
+        let mut body = lead_in.to_le_bytes().to_vec();
+        body.extend_from_slice(&audio.to_le_bytes());
+        body.extend_from_slice(data);
+        body
+    }
+    // 8 kHz, mono, 16-bit, a constant 1000.
+    let mut wave = b"RIFF\0\0\0\0WAVE".to_vec();
+    let mut format = 1u16.to_le_bytes().to_vec();
+    format.extend_from_slice(&1u16.to_le_bytes());
+    format.extend_from_slice(&8000u32.to_le_bytes());
+    format.extend_from_slice(&16000u32.to_le_bytes());
+    format.extend_from_slice(&2u16.to_le_bytes());
+    format.extend_from_slice(&16u16.to_le_bytes());
+    chunk(&mut wave, *b"fmt ", &format);
+    let samples: Vec<u8> = (0..4000).flat_map(|_| 1000i16.to_le_bytes()).collect();
+    chunk(&mut wave, *b"data", &samples);
+
+    let mut tape = b"STBX".to_vec();
+    tape.extend_from_slice(&4u32.to_le_bytes());
+    tape.extend_from_slice(&0x100u32.to_le_bytes());
+    chunk(&mut tape, *b"PAGE", &page(0, 4, &[0xC5, 1, 2, 3, 4, 0]));
+    chunk(&mut tape, *b"PAGE", &page(10, 18, &[0x5A, 9, 9, 9, 9, 1]));
+    let mut audio = 0u32.to_le_bytes().to_vec();
+    audio.extend_from_slice(&wave);
+    chunk(&mut tape, *b"AUDI", &audio);
+
+    let bios: Vec<u8> = (0..16u8).flat_map(|page| vec![page; 0x4000]).collect();
+    let image = zax_nes::rom::package_study_box(&tape, &bios).unwrap();
+    assert!(zax_nes::rom::package_study_box(&tape, &bios[..0x1000]).is_err());
+    let mut core = zax_nes::NesCore::new();
+    let load = core.load_rom(&image, "lesson.studybox");
+    assert!(load.success, "{:?}", load.error);
+    assert_eq!(186, core.cartridge().unwrap().mapper_number());
+    assert_eq!([0, 0, 0, 0], core.prg_windows());
+    core.mapper_write(0x4201, 5);
+    assert_eq!([5, 5, 0, 0], core.prg_windows());
+    core.mapper_write(0x4400, 0x42);
+    assert_eq!(0x42, core.read_memory(0x4400));
+
+    // `$86`, MSB first: D4 high, then low with the bit in D7.
+    for bit in (0..8).rev() {
+        core.mapper_write(0x4202, 0x10);
+        core.mapper_write(0x4202, ((0x86u8 >> bit) & 1) << 7);
+    }
+    core.mapper_write(0x4202, 0x03);
+    let cartridge = core.cartridge_mut().unwrap();
+    // Lead-in: 8 samples at 8 kHz, 1 789 CPU cycles from the command's last bit (the writes
+    // since then ran a few).
+    let mut cycles = 0;
+    while !cartridge.irq_asserted() && cycles < 4000 {
+        cartridge.step_cpu_cycle();
+        cycles += 1;
+    }
+    assert!((1770..1789).contains(&cycles), "{cycles}");
+    assert_eq!(Some(0xAA), cartridge.try_cpu_read(0x4200));
+    assert!(!cartridge.irq_asserted());
+    for _ in 0..7820 {
+        cartridge.step_cpu_cycle();
+    }
+    assert!(cartridge.irq_asserted());
+    assert_eq!(Some(0x5A), cartridge.try_cpu_read(0x4200));
+    assert_eq!(Some(1000), cartridge.expansion_audio_output());
+
+    let state = core.save_state(true).unwrap();
+    assert!(core.try_load_state(&state, 0).is_ok());
+    assert_eq!(state, core.save_state(true).unwrap());
+}

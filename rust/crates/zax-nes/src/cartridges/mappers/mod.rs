@@ -147,10 +147,10 @@ mod nrom;
 mod oeka_kids;
 #[cfg(any(feature = "board-256", feature = "board-436"))]
 mod one_bus;
-#[cfg(feature = "board-355")]
-mod pic16c54;
 #[cfg(feature = "board-164")]
 mod pec9588;
+#[cfg(feature = "board-355")]
+mod pic16c54;
 #[cfg(feature = "board-168")]
 mod racermate;
 #[cfg(feature = "board-682")]
@@ -179,6 +179,8 @@ mod single_latch;
 mod small_boards;
 #[cfg(feature = "board-116")]
 mod somari;
+#[cfg(feature = "board-186")]
+pub mod study_box;
 #[cfg(feature = "board-small-boards")]
 mod sunsoft1;
 #[cfg(feature = "board-small-boards")]

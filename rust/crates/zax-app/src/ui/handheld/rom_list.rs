@@ -141,8 +141,8 @@ pub fn scan(directory: &Path) -> Vec<RomEntry> {
         .filter(|path| {
             path.is_file()
                 && path.extension().is_some_and(|extension| {
-                    // Lot MAPPERS-P: UNIF images too (`zax_nes::rom::unif`).
-                    ["nes", "unf", "unif"]
+                    // Lot MAPPERS-P: UNIF images and Study Box tapes too.
+                    ["nes", "unf", "unif", "studybox"]
                         .iter()
                         .any(|known| extension.eq_ignore_ascii_case(known))
                 })
