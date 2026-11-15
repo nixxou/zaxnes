@@ -116,6 +116,10 @@ pub struct WaixingFs305 {
     outer: u8,
     /// `$4803`: `BBBB BBBB`, the PRG-RAM bank, PRG-RAM A20?..A13.
     ram_bank: u8,
+    /// Lot MAPPERS-P: NES 2.0 mapper **551**, which puNES runs on this board's code
+    /// (`mapper_178.c`, `info.mapper.id == 551`): `$4803` is an 8 KiB **CHR** bank and the work
+    /// RAM stays on bank 0, and the four ports decode under `$FF00` (`$4800-$48FF`, A0-A1).
+    chr_banked: bool,
 }
 
 impl WaixingFs305 {
@@ -132,12 +136,18 @@ impl WaixingFs305 {
     pub(crate) const CHR_RAM_SIZE: usize = 8 * 1024;
 
     pub(crate) fn new(memory: &CartridgeMemory) -> Self {
+        Self::with_number(memory, 178)
+    }
+
+    /// Mapper 178, or 551 with its CHR bank (see [`WaixingFs305::chr_banked`]).
+    pub(crate) fn with_number(memory: &CartridgeMemory, mapper: i32) -> Self {
         let mut board = Self {
             banks: windows_for(memory),
             mode: 0,
             inner: 0,
             outer: 0,
             ram_bank: 0,
+            chr_banked: mapper == 551,
         };
         board.update_banks();
         board
@@ -163,7 +173,11 @@ impl WaixingFs305 {
         };
         self.banks.map_prg_16k(0, outer | low);
         self.banks.map_prg_16k(2, outer | high);
-        self.banks.map_chr_8k(0);
+        self.banks.map_chr_8k(if self.chr_banked {
+            i32::from(self.ram_bank)
+        } else {
+            0
+        });
     }
 
     /// `$4800` bit 0: "Nametable mirroring — 0: Vertical, 1: Horizontal."
@@ -180,7 +194,11 @@ impl Mapper for WaixingFs305 {
     banked!();
 
     fn mapper_number(&self) -> i32 {
-        178
+        if self.chr_banked {
+            551
+        } else {
+            178
+        }
     }
 
     fn save_registers(&self, writer: &mut StateWriter) {
@@ -219,8 +237,9 @@ impl Mapper for WaixingFs305 {
     /// as that chip — the modulo standing in for the address lines the board does not have, which
     /// is `Fme7::prg_ram_window`'s own note in the same words.
     fn prg_ram_window(&self, memory: &CartridgeMemory) -> (usize, usize) {
+        let bank = if self.chr_banked { 0 } else { self.ram_bank };
         (
-            usize::from(self.ram_bank) * BankWindows::PRG_WINDOW_SIZE,
+            usize::from(bank) * BankWindows::PRG_WINDOW_SIZE,
             memory.prg_ram().len(),
         )
     }
@@ -228,7 +247,12 @@ impl Mapper for WaixingFs305 {
     /// `#[inline(never)]`, as every board of this shape since MF-6a step 1.
     #[inline(never)]
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
-        if !(Self::PORT_FIRST..=Self::PORT_LAST).contains(&address) {
+        let port = if self.chr_banked {
+            address & 0xFF00 == 0x4800
+        } else {
+            (Self::PORT_FIRST..=Self::PORT_LAST).contains(&address)
+        };
+        if !port {
             return;
         }
 

@@ -145,7 +145,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 543 | `mapper_543.c` | 87 | 0 | 0 | todo |
 | 547 | `mapper_547.c` | 241 | 8 | 4 | todo |
 | 550 | `mapper_550.c` | 86 | 1 | 0 | done (batch 11, `Mmc1Outer`) |
-| 551 | `mapper_178.c` | 109 | 4 | 0 | todo |
+| 551 | `mapper_178.c` | 109 | 4 | 0 | done (batch 19, `WaixingFs305`) |
 | 554 | `mapper_554.c` | 94 | 1 | 0 | done (batch 10, `MultiP`) |
 | 555 | `mapper_555.c` | 142 | 3 | 0 | todo |
 | 556 | `mapper_556.c` | 178 | 1 | 0 | todo |
@@ -227,3 +227,6 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   conversions 311, 357, 368, 416 and the *Batman* pirate 417 (CIRAM page per table, in
   `nametable_pages_vary`; its free-running counter is in the mf_5a sweep). All five join
   `clocks_on_cpu_cycle`.
+* Batch 19: 551 on `WaixingFs305` (mapper 178's board), whose PRG decode is puNES's `prg_fix_178`
+  exactly; a load-time `chr_banked` flag moves `$4803` to the CHR bank and the ports to the
+  `$FF00` decode puNES gives 551. Mapper 178's own path is unchanged apart from the flag's test.

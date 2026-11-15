@@ -889,3 +889,15 @@ fn mappers_p_417_has_three_prg_registers() {
     assert_eq!([5, 6, 7, 15], core.prg_windows());
     assert_eq!(9, core.chr_windows()[2]);
 }
+
+/// `mapper_178.c` as 551: `$4803` is an 8 KiB CHR bank; `$4800-$48FF` decode by A0-A1.
+#[cfg(feature = "board-551")]
+#[test]
+fn mappers_p_551_banks_chr_through_4803() {
+    let mut core = MapperRom::new(551).prg(32).chr(64).load();
+    core.mapper_write(0x4803, 0x03);
+    assert_eq!(24, core.chr_windows()[0]);
+    core.mapper_write(0x4880, 0x02);
+    core.mapper_write(0x4881, 0x02);
+    assert_eq!([4, 5, 14, 15], core.prg_windows());
+}

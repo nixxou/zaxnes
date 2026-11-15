@@ -881,6 +881,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     541,
     #[cfg(feature = "board-550")]
     550,
+    #[cfg(feature = "board-551")]
+    551,
     #[cfg(feature = "board-taito-x1")]
     552,
     #[cfg(feature = "board-554")]
@@ -2179,6 +2181,11 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // window at $6000-$7FFF, which is `Mapper::prg_ram_window`.
         #[cfg(feature = "board-178")]
         178 => Board::DecodeBoard(DecodeBoard::WaixingFs305(WaixingFs305::new(memory))),
+        // MAPPERS-P: 551 is puNES's `mapper_178.c` with `$4803` banking CHR.
+        #[cfg(feature = "board-551")]
+        551 => Board::DecodeBoard(DecodeBoard::WaixingFs305(WaixingFs305::with_number(
+            memory, mapper,
+        ))),
         // MF-UNL-7 step 5: the single-chip homebrew board of *Magic Floor*, whose whole content
         // is a PRG-ROM chip -- no register, no latch, no bank line and **no CHR memory**. The
         // header's byte 6 picks which PPU address line drives CIRAM A10, and the 2 KiB of CIRAM
