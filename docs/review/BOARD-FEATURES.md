@@ -715,6 +715,7 @@ dispatch is the generic path of the exotic ones only.
 | `board-198` | 198 | `Mmc3Clone` kind M198: 640 KiB PRG fold, 4 KiB RAM at `$5000` | ~40 | — | **on** |
 | `board-199` | 199 | `Mmc3Clone` kind M199: unbanked 8 KiB CHR-RAM, 32 KiB PRG-RAM with `$5000` | ~30 | — | **on** (not verified on a game) |
 | `board-513` | 513 | `Mmc3Clone` kind M513: Sachen SA-9602B, PRG block from bits 6-7 of a CHR register write, fixed `$3E`/`$3F`, 32 KiB CHR-RAM (Mesen2, puNES; J28) | ~25 | — (no dump) | **on** |
+| `board-260` | 260 | `Mmc3Clone` kind M260: HP10xx/HP20xx, four MMC3 sizes over PRG/CHR bases, NROM-128/256 and two CNROM modes, `$5000` lock, mirroring latch (nesdev, puNES; J33) | ~50 | — (no dump) | **on** |
 | `board-168` | 168 | `Racermate`: 16 KiB PRG bank plus fixed last bank, 4 KiB CHR-RAM bank `^ 8` out of 64 KiB, M2 IRQ counter (bit 10), U2 protection (nesdev, puNES; FIDELITY-LEADS J22) | ~150 | 1 of 3 (v3.12; v3.11 and v5.01 stuck in the core, J22) | **on** |
 | `board-188` | 188 | `BandaiKaraoke`: 16 KiB bank from the internal ROM or the expansion, `$C000` fixed, bus conflicts, the microphone at `$6000-$7FFF` from controller 1's A and B (nesdev, Mesen2, puNES; FIDELITY-LEADS J23) | ~120 | 3 of 3 (Karaoke Studio, Senyou Cassette Vol. 1 and 2) | **on** |
 | `board-31` | 31 | `FineRom` M31: eight 4 KiB PRG pages written at `$5000-$5FFF`, `$5FFF` = `$FF` at power-on (nesdev, Mesen2, puNES; J24) | ~20 | — (no dump) | **on** |

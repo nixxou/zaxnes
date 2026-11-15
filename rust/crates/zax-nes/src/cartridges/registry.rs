@@ -585,6 +585,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     258,
     #[cfg(feature = "board-259")]
     259,
+    #[cfg(feature = "board-260")]
+    260,
     #[cfg(feature = "board-261")]
     261,
     // The Sachen UNL-SHERO, an MMC3 clone with 8 KiB of CHR-RAM, four CHR A18 lines at $4100 and
@@ -2630,6 +2632,11 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         )))),
         #[cfg(feature = "board-199")]
         199 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-260")]
+        260 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
             memory,
             Mmc3CloneKind::of(mapper)?,
         )))),

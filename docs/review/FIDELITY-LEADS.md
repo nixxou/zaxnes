@@ -937,6 +937,16 @@ CHR-RAM) and puNES (`mapper_198.c`, banks from `$50` folding onto `$40-$4F`). Th
 password screen cleanly; the later `[T+ChSFIX2]` and `[T+ChTFIX2]` patches show stray glyphs on
 the password screen, not investigated (translation hacks; their CHR use may differ).
 
+### J33. Mapper 260: nesdev and puNES over Mesen2
+nesdev ("NES 2.0 Mapper 260") and puNES (`mapper_260.c`) agree: a six-bit 16 KiB PRG base and
+a seven-bit 8 KiB CHR base, "opposite-masked" with the MMC3's banks, the lock in `$5000` bit 7
+for every `$5xxx` write, and a `$8000-$FFFF` latch whose bit 2 gives "0 … vertical mirroring,
+and 1 … horizontal mirroring" in modes 4-7. Mesen2 (`BmcHpxx.h`) takes narrower bases
+(`$5001 & $18`, `& $10`), locks on bit 7 of any `$5xxx` write, and maps bit 2 the other way
+(vertical when set); puNES stores the latch as `value & 3`, so its bit 2 never sets. This board
+follows the page on all four. The `$5000` read's bits 7-2 are the bus, for which the high
+address byte stands; `$5003` is undocumented and dropped. No dump at hand.
+
 ### J32. Mapper 328: deterministic "random" bits
 Mesen2 (`Rt01.h`) and puNES (`mapper_328.c`) both answer `$CE80-$CEFF` and `$FE80-$FEFF` with
 `0xF2 | (rand() & 0x0D)`. The C library's `rand()` would make two runs differ; here the three

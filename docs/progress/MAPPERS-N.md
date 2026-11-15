@@ -138,3 +138,4 @@ Owner's request (2026-11-15): implement the mappers missing compared with the ot
 * 266 (`CityFighter`, a wrapper of `Vrc2Vrc4`), no dump; DAC silent (J31). Remaining: 260 284
   328 682.
 * 328 (`MiscN` M328), no dump. Remaining: 260 284 682.
+* 260 (`Mmc3Clone` M260), no dump. Remaining: 284 (Drip, with its sound chip), 682 (Rainbow).

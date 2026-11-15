@@ -992,3 +992,21 @@ fn mappers_n_328_answers_its_random_ranges() {
     }
     assert_eq!(2, core.read_memory(0xCE7F));
 }
+
+/// nesdev "NES 2.0 Mapper 260" and puNES `mapper_260.c`: an MMC3 under a PRG base, NROM modes,
+/// and the lock of `$5000` bit 7.
+#[cfg(feature = "board-260")]
+#[test]
+fn mappers_n_260_bases_the_mmc3_and_locks() {
+    let mut core = MapperRom::new(260).prg(64).chr(512).load();
+    core.mapper_write(0x5001, 0x10);
+    core.mmc3_bank(6, 3);
+    assert_eq!([0x23, 0x21, 0x3E, 0x3F], core.prg_windows());
+    core.mapper_write(0x5000, 0x85); // NROM-256, locked
+    core.mapper_write(0x5001, 0x06);
+    assert_eq!([0x20, 0x21, 0x22, 0x23], core.prg_windows());
+    assert_eq!(
+        Some(0x50),
+        core.cartridge_mut().unwrap().try_cpu_read(0x5000)
+    );
+}

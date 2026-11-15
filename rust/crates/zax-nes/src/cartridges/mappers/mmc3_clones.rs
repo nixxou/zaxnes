@@ -91,6 +91,12 @@ pub enum Mmc3CloneKind {
     /// switchable windows; the fixed windows stay at pages `$3E`/`$3F` of the first block; 32 KiB
     /// of CHR-RAM.
     M513,
+    /// NES 2.0 mapper 260, the HP10xx/HP20xx multicarts: nesdev "NES 2.0 Mapper 260" and puNES
+    /// `mapper_260.c` (Mesen2's `BmcHpxx.h` is followed where they agree). `$5000` mode (bits
+    /// 0-2: four MMC3 sizes, NROM-128, NROM-256, two CNROM sizes; bit 7 locks `$5xxx`), `$5001`
+    /// the 16 KiB PRG base, `$5002` the 8 KiB CHR base, and a CNROM/mirroring latch at
+    /// `$8000-$FFFF` (`outer[3]`).
+    M260,
 }
 
 impl Mmc3CloneKind {
@@ -126,6 +132,7 @@ impl Mmc3CloneKind {
             198 => Self::M198,
             199 => Self::M199,
             513 => Self::M513,
+            260 => Self::M260,
             _ => return None,
         })
     }
@@ -160,6 +167,7 @@ impl Mmc3CloneKind {
             Self::M198 => 198,
             Self::M199 => 199,
             Self::M513 => 513,
+            Self::M260 => 260,
         }
     }
 }
@@ -271,6 +279,12 @@ impl Mmc3Clone {
             // `Sachen9602.h`: `(page & 0x3F) | (_regs[1] << 6)`, then the fixed `$3E`/`$3F`
             // without the block (puNES `prg_fix_mmc3_513`, `~1 & 0x3F` and `~0 & 0x3F`).
             Mmc3CloneKind::M513 if page >= SECOND_LAST => page & 0x3F,
+            // nesdev: "masking the MMC3 bank register content according to the specified size
+            // … and OR'ing with the opposite-masked content" of `$5001` (16 KiB units).
+            Mmc3CloneKind::M260 => {
+                let mask = if r[0] & 0x02 != 0 { 0x0F } else { 0x1F };
+                ((i32::from(r[1] & 0x3F) << 1) & !mask) | (page & mask)
+            }
             // `MMC3_44.h:28-31`.
             Mmc3CloneKind::M44 => {
                 let block = i32::from(r[0]);
@@ -363,6 +377,10 @@ impl Mmc3Clone {
     fn chr_page(&self, page: i32) -> i32 {
         let r = &self.outer;
         match self.kind {
+            Mmc3CloneKind::M260 => {
+                let mask = if r[0] & 0x01 != 0 { 0x7F } else { 0xFF };
+                ((i32::from(r[2] & 0x7F) << 3) & !mask) | (page & mask)
+            }
             // `MMC3_44.h:21-24`.
             Mmc3CloneKind::M44 => {
                 let block = i32::from(r[0]);
@@ -495,6 +513,24 @@ impl Mmc3Clone {
             Mmc3CloneKind::M199 => chr = [0, 1, 2, 3, 4, 5, 6, 7],
             // `MMC3_196.h:20-27`: once `$6000-$6FFF` is written, one 32 KiB bank, bypassing the
             // chip's PRG mapping (`SelectPrgPage4x(0, _exRegs[1] << 2)`).
+            // Modes 4-7: NROM-128, NROM-256 and the two CNROM sizes, the chip's banks unused.
+            Mmc3CloneKind::M260 if self.outer[0] & 0x04 != 0 => {
+                let r = self.outer.map(i32::from);
+                prg = if r[0] & 0x07 == 4 {
+                    let base = (r[1] & 0x3F) << 1;
+                    [base, base + 1, base, base + 1]
+                } else {
+                    let base = (r[1] & 0x3E) << 1;
+                    [base, base + 1, base + 2, base + 3]
+                };
+                let inner = match r[0] & 0x07 {
+                    6 => 0x01,
+                    7 => 0x03,
+                    _ => 0x00,
+                };
+                let base = ((r[2] & !inner) | (r[3] & inner)) << 3;
+                chr = std::array::from_fn(|slot| base + i32::try_from(slot).unwrap_or(0));
+            }
             Mmc3CloneKind::M196 if self.outer[0] != 0 => {
                 let base = i32::from(self.outer[1]) << 2;
                 prg = [base, base + 1, base + 2, base + 3];
@@ -716,6 +752,13 @@ impl Mmc3Clone {
                     self.outer[index] = value;
                 }
             }
+            // nesdev: "Lock, do not respond to further writes in the $5xxx range"; `$5003` has
+            // no description and is not kept.
+            Mmc3CloneKind::M260 if (0x5000..=0x5FFF).contains(&address) => {
+                if self.outer[0] & 0x80 == 0 && address & 0x03 != 0x03 {
+                    self.outer[usize::from(address & 0x03)] = value;
+                }
+            }
             // `MMC3_224.h:35-41`: `$5000` bit 2.
             Mmc3CloneKind::M224 if address == 0x5000 => self.outer[0] = (value >> 2) & 0x01,
             // `MMC3_Bmc411120C.h:27-33`: the **address** is the register, over `$6000-$7FFF`.
@@ -898,6 +941,23 @@ impl Mapper for Mmc3Clone {
         if self.kind == Mmc3CloneKind::M44 && address & 0xE001 == 0xA001 {
             self.outer[0] = (value & 0x07).min(6);
         }
+        // nesdev: the `$8000-$FFFF` latch, CHR in modes 6-7 and the mirroring in modes 4-7, "0
+        // gives … vertical mirroring, and 1 gives … horizontal mirroring"; the MMC3 registers
+        // keep answering.
+        if self.kind == Mmc3CloneKind::M260 {
+            self.outer[3] = value;
+            let (port, chip_value) = self.chip_port(address, value);
+            self.mmc3.write_register(memory, port, chip_value);
+            if self.outer[0] & 0x04 != 0 {
+                memory.set_mirroring(if value & 0x04 != 0 {
+                    crate::NametableMirroring::Horizontal
+                } else {
+                    crate::NametableMirroring::Vertical
+                });
+            }
+            self.refresh();
+            return;
+        }
         // `Sachen9602.h` `WriteRegister`: a write to R0-R5 also sets the block, and the chip
         // takes the value's low five bits.
         let value = if self.kind == Mmc3CloneKind::M513
@@ -934,6 +994,11 @@ impl Mapper for Mmc3Clone {
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
         if let Some(offset) = self.ram_198(memory, address) {
             return Some(memory.prg_ram()[offset]);
+        }
+        // nesdev: `$5000` read, bits 1-0 the DIP switches (none set); the rest the bus, for
+        // which the high address byte stands (FIDELITY-LEADS J33).
+        if self.kind == Mmc3CloneKind::M260 && (0x5000..=0x5FFF).contains(&address) {
+            return Some(address.to_be_bytes()[0] & !0x03);
         }
         if self.kind == Mmc3CloneKind::M238 && (0x4020..=0x7FFF).contains(&address) {
             return Some(self.outer[0]);
