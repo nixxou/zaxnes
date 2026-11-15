@@ -221,24 +221,17 @@ impl Ppu2C02 {
         cart: Cart<'_, '_, K>,
     ) {
         while count > 0 {
-            if self.edge_count == 0 && self.fetch_pending == 0 && !self.tracing() {
-                // Nothing pending: the standard core's stretches (idle dots, visible spans), which
-                // post nothing; a dot that may (256, a register's edge) goes through `step_dot`.
-                count -= self.run_dot_stretch(count, cart);
-                continue;
-            }
-            #[cfg(feature = "ppu-dot-trace")]
-            self.dot_trace_bus.set(0xFFFF);
-            self.step_dot_out_of_line(cart);
+            // Only the edges pending before this dot count it down: one its own work posts (the
+            // coarse-Y wrap of dot 256) or an edge posts counts from the next.
+            let mut pending = usize::from(self.edge_count);
+            self.run_one_dot(cart);
             // The address latch as state (step 3): the read half of a fetch after its ALE half.
             if self.dot & 1 == 0 {
                 self.settle_fetch_read(cart.as_deref());
             } else {
                 self.note_fetch_ale();
             }
-            // Only the edges pending before this dot: one an edge posts counts from the next.
             let mut index = 0;
-            let mut pending = usize::from(self.edge_count);
             while index < pending {
                 self.edges[index].dots -= 1;
                 if self.edges[index].dots <= 0 {
@@ -253,9 +246,24 @@ impl Ppu2C02 {
                 }
             }
             #[cfg(feature = "ppu-dot-trace")]
-            self.record_traced_dot();
+            if self.dot_trace.is_some() {
+                self.record_traced_dot();
+            }
             count -= 1;
         }
+    }
+
+    /// One dot of the standard core (`run_dots_standard`), never anything of the per-dot path
+    /// directly (see there). With the per-dot trace on, the dot is recorded by
+    /// [`Self::run_dots_with_edges`] after its edges, so it is run untraced here.
+    fn run_one_dot<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {
+        #[cfg(feature = "ppu-dot-trace")]
+        if self.dot_trace.is_some() {
+            self.dot_trace_bus.set(0xFFFF);
+            self.step_dot(cart);
+            return;
+        }
+        self.run_dots_standard(1, cart);
     }
 
     /// The address the background fetch `slot` puts on the bus from the current state.
@@ -315,55 +323,6 @@ impl Ppu2C02 {
             3 => self.pattern_low_latch = byte,
             _ => self.pattern_high_latch = byte,
         }
-    }
-
-    /// Whether the per-dot trace is on (feature `ppu-dot-trace`).
-    #[allow(clippy::unused_self)]
-    const fn tracing(&self) -> bool {
-        #[cfg(feature = "ppu-dot-trace")]
-        {
-            self.dot_trace.is_some()
-        }
-        #[cfg(not(feature = "ppu-dot-trace"))]
-        {
-            false
-        }
-    }
-
-    /// [`Ppu2C02::step_dot`] for the Fidélité+ paths: one copy of the dot's work, kept apart from
-    /// the standard loop's inlined one.
-    #[inline(never)]
-    fn step_dot_out_of_line<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {
-        self.step_dot(cart);
-    }
-
-    /// One stretch of `run_dots`'s standard loop (idle dots, a visible span, or one dot), at
-    /// most `count` dots; returns the dots run.
-    #[inline(never)]
-    fn run_dot_stretch<K: BoardKind>(&mut self, count: i64, cart: Cart<'_, '_, K>) -> i64 {
-        let idle = self.idle_dots_ahead().min(count);
-        if idle > 0 {
-            #[allow(clippy::cast_possible_truncation)] // At most a line of dots.
-            let idle_i32 = idle as i32;
-            if self.scanline < super::VISIBLE_SCANLINES && self.dot < super::SCREEN_WIDTH_I32 {
-                self.fill_backdrop(
-                    self.dot + 1,
-                    (self.dot + idle_i32).min(super::SCREEN_WIDTH_I32),
-                );
-            }
-            self.dot += idle_i32;
-            self.ppu_clock += idle;
-            return idle;
-        }
-        let span = self.visible_span_ahead(count);
-        if span > 0 {
-            if !self.run_visible_span::<K>(span, cart.as_deref()) {
-                self.run_visible_span_through_bus(span, cart);
-            }
-            return span;
-        }
-        self.step_dot_out_of_line(cart);
-        1
     }
 
     fn apply_edge<K: BoardKind>(&mut self, kind: EdgeKind, value: u8, cart: Cart<'_, '_, K>) {

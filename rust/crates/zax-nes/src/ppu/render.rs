@@ -105,11 +105,6 @@ impl Ppu2C02 {
     ///
     /// Returns `false`, having run nothing, when the cartridge's fetches have side effects or
     /// another source ([`Cartridge::chr_view`], a nametable the cartridge serves itself).
-    ///
-    /// **Inlined into `run_dots`**: lot FIDPLUS-A gave it a Fidélité+ caller, LLVM outlined it
-    /// from the standard loop (callgrind, `smb3` +0.57 %), so it is pinned as `step_dot` is.
-    #[allow(clippy::inline_always)]
-    #[inline(always)]
     pub(super) fn run_visible_span<K: BoardKind>(
         &mut self,
         count: i64,
@@ -191,11 +186,6 @@ impl Ppu2C02 {
     /// source (MMC2/MMC4 latches, MMC3 and Rambo1 watching A12, MMC5): the same loop, with each
     /// fetch through the full bus path ([`Ppu2C02::background_fetch`]), so the board sees the same
     /// addresses at the same PPU clock as with [`Ppu2C02::step_dot`].
-    ///
-    /// **Inlined into `run_dots`**: lot FIDPLUS-A gave it a Fidélité+ caller, LLVM outlined it
-    /// from the standard loop (callgrind, `smb3` +0.57 %), so it is pinned as `step_dot` is.
-    #[allow(clippy::inline_always)]
-    #[inline(always)]
     pub(super) fn run_visible_span_through_bus<K: BoardKind>(
         &mut self,
         count: i64,

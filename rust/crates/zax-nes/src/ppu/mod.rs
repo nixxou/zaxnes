@@ -2158,12 +2158,21 @@ impl Ppu2C02 {
 
     /// Runs `count` dots, skipping in one go the stretches where a dot does nothing but
     /// move the counters (or, on a visible line with rendering off, draw the backdrop).
-    fn run_dots<K: BoardKind>(&mut self, mut count: i64, cart: Cart<'_, '_, K>) {
+    fn run_dots<K: BoardKind>(&mut self, count: i64, cart: Cart<'_, '_, K>) {
         if self.edge_count != 0 || self.fidelity_plus {
             // Fidélité+ (`edges`): its own loop, which may post an edge from a dot's own work.
             self.run_dots_with_edges(count, cart);
             return;
         }
+        self.run_dots_standard(count, cart);
+    }
+
+    /// The standard core's dots: `run_dots`'s own body. The Fidélité+ loop runs its dots through
+    /// this function too, one at a time, and through nothing else of the per-dot path: lot
+    /// FIDPLUS-A first called `step_dot`, then the spans, from that loop, and every extra caller
+    /// made LLVM outline one of them from this loop (callgrind: +2.3 % on `metroid`, and pinning
+    /// them inline moved the outlining to their own callees, +3.3 % on `duelito`).
+    fn run_dots_standard<K: BoardKind>(&mut self, mut count: i64, cart: Cart<'_, '_, K>) {
         #[cfg(feature = "ppu-dot-trace")]
         if self.dot_trace.is_some() {
             while count > 0 {
@@ -2272,12 +2281,6 @@ impl Ppu2C02 {
         self.vblank_just_started = false;
     }
 
-    /// One dot. **Inlined into `run_dots`**, and it has to stay: lot FIDPLUS-A gave it two more
-    /// callers (the Fidélité+ loop), LLVM outlined it and every dot of the standard path paid the
-    /// call, +2.3 % on `metroid` (callgrind). The Fidélité+ paths call
-    /// [`Self::step_dot_out_of_line`] instead.
-    #[allow(clippy::inline_always)]
-    #[inline(always)]
     fn step_dot<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {
         self.advance_counters();
         self.process_dot(cart);
@@ -2324,10 +2327,6 @@ impl Ppu2C02 {
         self.odd_frame = !self.odd_frame;
     }
 
-    /// **Inlined into `run_dots`**: lot FIDPLUS-A gave it a Fidélité+ caller, LLVM outlined it
-    /// from the standard loop (callgrind, `smb3` +0.57 %), so it is pinned as `step_dot` is.
-    #[allow(clippy::inline_always)]
-    #[inline(always)]
     fn process_dot<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {
         if self.dot == SKIP_DECISION_DOT && self.scanline == self.pre_render_scanline() {
             self.skip_latch = self.rendering_enabled();
