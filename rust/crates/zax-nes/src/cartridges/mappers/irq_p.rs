@@ -6,7 +6,7 @@
 //! [`Mapper::on_cpu_cycle`] and the line on [`Mapper::irq_asserted`], which that enum forwards.
 //! The PRG-ROM these boards show at `$5000`/`$6000` is answered by [`Mapper::try_read_prg`], with
 //! the work RAM disabled ([`Mapper::prg_ram_enabled`]).
-use super::{windows_for, Mapper};
+use super::{windows_for, Eeprom93C66, Mapper};
 use crate::cartridges::{A12Watcher, BankWindows, CartridgeMemory};
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
@@ -36,6 +36,11 @@ pub enum IrqPKind {
     /// registers at `$8000-$800B`, a free-running CPU-cycle counter whose bit 12 asserts the
     /// IRQ, `$800D` restarting it and `$800F` acknowledging.
     M526,
+    /// 558, `mapper_558.c` (Yancheng YC-03-09, the PEC-9588's later version): a 32 KiB bank from
+    /// `$5000`/`$5100` (D0 and D1 swapped while `$5300` D0 is clear) and, when the NES 2.0
+    /// header declares 512 bytes of PRG-NVRAM, a 93C66 EEPROM on `$5200` read back at `$5000`.
+    /// No IRQ: it sits here for the boxed variant, not for a counter.
+    M558,
 }
 
 impl IrqPKind {
@@ -50,6 +55,7 @@ impl IrqPKind {
             417 => Self::M417,
             471 => Self::M471,
             526 => Self::M526,
+            558 => Self::M558,
             _ => return None,
         })
     }
@@ -63,6 +69,7 @@ impl IrqPKind {
             Self::M417 => 417,
             Self::M471 => 471,
             Self::M526 => 526,
+            Self::M558 => 558,
         }
     }
 }
@@ -80,6 +87,9 @@ pub struct IrqP {
     irq_enabled: bool,
     irq_counter: u32,
     irq_pending: bool,
+    /// 558's 93C66, whose 512 bytes follow the 8 KiB of work RAM in PRG-RAM; present only when
+    /// that RAM is `EEPROM_RAM_SIZE` long (`registry::board_memory_sizes`).
+    eeprom: Option<Eeprom93C66>,
     /// 471's A12 edge detector (the MMC3's filter; puNES clocks once per rendered line).
     a12: A12Watcher,
 }
@@ -96,6 +106,8 @@ impl IrqP {
             irq_counter: 0,
             irq_pending: false,
             a12: A12Watcher::new(A12Watcher::MMC3_FILTER_DOTS),
+            eeprom: (kind == IrqPKind::M558 && memory.prg_ram().len() == Self::EEPROM_RAM_SIZE)
+                .then(Eeprom93C66::new),
         };
         // `map_init_526`: PRG `$FC-$FF`, CHR 0-7.
         if kind == IrqPKind::M526 {
@@ -163,6 +175,13 @@ impl IrqP {
                 }
                 b.map_chr_8k((r[1] & 0x06) >> 1);
             }
+            // `prg_fix_558`: `reg[1]` above, `reg[0]` D0-D3 below, D0-D1 forced on while
+            // `reg[3]` D2 is clear.
+            IrqPKind::M558 => {
+                let low = (r[0] & 0x0F) | if r[3] & 0x04 == 0 { 0x03 } else { 0 };
+                b.map_prg_32k((r[1] << 4) | low);
+                b.map_chr_8k(0);
+            }
             // `prg_fix_526`/`chr_fix_526`.
             IrqPKind::M526 => {
                 for (slot, bank) in r.iter().enumerate() {
@@ -185,6 +204,27 @@ impl IrqP {
                 for (slot, bank) in self.chr.iter().enumerate() {
                     b.map_chr_1k(slot, i32::from(*bank));
                 }
+            }
+        }
+    }
+
+    /// 558's PRG-RAM with the EEPROM: 8 KiB of work RAM, then the 93C66's 512 bytes.
+    pub(crate) const EEPROM_RAM_SIZE: usize = 0x2000 + 512;
+
+    /// `extcl_cpu_wr_mem_558`: `$5000`-`$5200` swap D0/D1 while `$5300` D0 is clear; `$5200` also
+    /// drives the EEPROM, CS on bit 2, CLK on bit 0 and DI on bit 1 (`ee93cx6_write`).
+    fn write_558(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        let index = usize::from((address >> 8) & 0x03);
+        let value = if index < 3 && self.regs[3] & 0x01 == 0 {
+            (value & 0xFC) | ((value & 0x01) << 1) | ((value & 0x02) >> 1)
+        } else {
+            value
+        };
+        self.regs[index] = value;
+        if index == 2 {
+            if let Some(eeprom) = &mut self.eeprom {
+                let bytes = memory.prg_ram_mut().get_mut(0x2000..).unwrap_or_default();
+                eeprom.write(bytes, (value >> 2) & 1, value & 1, (value >> 1) & 1);
             }
         }
     }
@@ -309,6 +349,8 @@ impl IrqP {
                     self.irq_pending = false;
                 }
             }
+            // `extcl_cpu_wr_mem_558` decodes `$5000-$53FF` only ([`IrqP::write_558`]).
+            IrqPKind::M558 => {}
         }
     }
 }
@@ -327,6 +369,9 @@ impl Mapper for IrqP {
         writer.write_bool(self.irq_enabled);
         writer.write_i64(i64::from(self.irq_counter));
         writer.write_bool(self.irq_pending);
+        if let Some(eeprom) = &self.eeprom {
+            eeprom.save_state(writer);
+        }
         if self.kind == IrqPKind::M471 {
             self.a12.save_state(writer);
         }
@@ -339,6 +384,9 @@ impl Mapper for IrqP {
         self.irq_enabled = reader.read_bool()?;
         self.irq_counter = u32::try_from(reader.read_i64()? & 0xFFFF_FFFF).unwrap_or(0);
         self.irq_pending = reader.read_bool()?;
+        if let Some(eeprom) = &mut self.eeprom {
+            eeprom.load_state(reader)?;
+        }
         if self.kind == IrqPKind::M471 {
             self.a12.load_state(reader)?;
         }
@@ -413,7 +461,7 @@ impl Mapper for IrqP {
                     self.irq_pending = true;
                 }
             }
-            IrqPKind::M471 => {}
+            IrqPKind::M471 | IrqPKind::M558 => {}
         }
     }
 
@@ -427,10 +475,17 @@ impl Mapper for IrqP {
 
     /// `memmap_prgrom_*(0, MMCPU(0x5000/0x6000), …)`: ROM where the work RAM would be.
     fn prg_ram_enabled(&self) -> bool {
-        self.kind == IrqPKind::M417
+        matches!(self.kind, IrqPKind::M417 | IrqPKind::M558)
     }
 
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
+        // `extcl_cpu_rd_mem_558`: `$5000-$5FFF` the EEPROM's DO in D2, or `reg[2]` D2 without one.
+        if self.kind == IrqPKind::M558 && address & 0xF000 == 0x5000 {
+            return Some(match &self.eeprom {
+                Some(eeprom) => (eeprom.output() & 1) << 2,
+                None => self.regs[2] & 0x04,
+            });
+        }
         // `extcl_cpu_rd_mem_311`: `$4042-$4055` read `$FF`.
         if self.kind == IrqPKind::M311 && (0x4042..=0x4055).contains(&address) {
             return Some(0xFF);
@@ -460,6 +515,13 @@ impl Mapper for IrqP {
         // Every register below `$8000` is in `$4020-$5FFF`.
         if address >= 0x6000 {
             return false;
+        }
+        if self.kind == IrqPKind::M558 {
+            if address & 0xFC00 == 0x5000 {
+                self.write_558(memory, address, value);
+                self.settle(memory);
+            }
+            return true;
         }
         self.latch(address, value);
         self.settle(memory);

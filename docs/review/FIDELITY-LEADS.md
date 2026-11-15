@@ -1006,6 +1006,9 @@ places where puNES itself is incomplete are copied, not invented around:
   from the `$0000` half to the `$1000` half (background vs sprite tables, plus `$2006`); here the
   same edge is the MMC3's filtered A12 rise, which agrees for the one-rise-per-line layouts and
   may differ for a game rendering 8x16 sprites from both halves.
+* 558 (`mapper_558.c`): the EEPROM is mounted only when the NES 2.0 header declares 512 bytes of
+  PRG-NVRAM, as puNES decides; an iNES 1.0 dump of an EEPROM cartridge gets the bare port
+  (`$5200` D2 read back) and cannot save.
 
 ### J36. Mapper 682 (Rainbow): the ESP is modelled from the protocol document
 The ESP (`rainbow_esp.rs`) follows Broke Studio's `rainbow-net.md` and `mapper-doc.md`; no

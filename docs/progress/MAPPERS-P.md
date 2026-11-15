@@ -135,7 +135,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 526 | `mapper_526.c` | 123 | 1 | 0 | done (batch 34, `IrqP`) |
 | 527 | `mapper_527.c` | 61 | 0 | 0 | done (batch 27, `VrcP`) |
 | 528 | `mapper_528.c` | 118 | 0 | 0 | todo |
-| 532 | `mapper_532.c` | 411 | 0 | 0 | todo |
+| 532 | `mapper_532.c` | 411 | 0 | 0 | blocked (needs an external font image, see batch 36) |
 | 534 | `mapper_126.c` | 153 | 10 | 0 | done (batch 21, `Mmc3P`) |
 | 536 | `mapper_195.c` | 148 | 0 | 0 | done (batch 20, alias, `registry::board_number`) |
 | 538 | `mapper_538.c` | 64 | 2 | 0 | done (batch 9, `MultiP`) |
@@ -150,7 +150,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 555 | `mapper_555.c` | 142 | 3 | 0 | done (batch 32, `Mmc3P`) |
 | 556 | `mapper_556.c` | 178 | 1 | 0 | todo |
 | 557 | `mapper_557.c` | 58 | 1 | 0 | done (batch 31, `MultiP`) |
-| 558 | `mapper_558.c` | 135 | 14 | 0 | todo |
+| 558 | `mapper_558.c` | 135 | 14 | 0 | done (batch 36, `IrqP`) |
 | 559 | `mapper_559.c` | 108 | 1 | 0 | done (batch 30, `VrcP`) |
 | 560 | `mapper_560.c` | 83 | 1 | 0 | todo |
 | 561 | `mapper_561.c` | 276 | 203 | 0 | todo |
@@ -274,3 +274,9 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   and 2 leave the ROM cache. Its CHR-RAM power-on pattern is set in
   `Cartridge::clear_volatile_ram` behind `board-539`, since the core clears that RAM after a
   board's power-on. `read_6000`'s 8 KiB ROM reads now share `MultiP::rom_8k`.
+* Batch 36: `IrqP` 558 (Yancheng YC-03-09): 32 KiB banks with the D0/D1 swap, and the
+  existing `Eeprom93C66` (module now also behind `board-irq-p`) when the NES 2.0 header declares
+  512 bytes of PRG-NVRAM, as puNES decides; its bytes follow 8 KiB of work RAM
+  (`board_memory_sizes`, `battery_offset`). Not in `clocks_on_cpu_cycle` (no IRQ).
+  532 (*China Ersan 2*) is blocked: puNES runs mapper 19 plus a text overlay drawn from a font
+  file the user supplies separately (`chinaersan2.font`), which no image carries.

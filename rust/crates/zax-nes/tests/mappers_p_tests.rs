@@ -1198,3 +1198,32 @@ fn mappers_p_539_lays_ram_over_its_rom() {
         core.cartridge().unwrap().mirroring()
     );
 }
+
+/// `mapper_558.c`: `$5000`/`$5100` the 32 KiB bank (D0/D1 swapped while `$5300` D0 is clear,
+/// D0-D1 forced on while `$5300` D2 is clear); `$5000` reads `$5200` D2 back without an EEPROM
+/// and the 93C66's DO (idle high) with one.
+#[cfg(feature = "board-558")]
+#[test]
+fn mappers_p_558_banks_and_reads_its_eeprom_port() {
+    let mut core = MapperRom::new(558).prg(128).chr(0).load();
+    assert_eq!([12, 13, 14, 15], core.prg_windows());
+    core.mapper_write(0x5300, 0x05);
+    core.mapper_write(0x5000, 0x02);
+    core.mapper_write(0x5100, 0x01);
+    assert_eq!([72, 73, 74, 75], core.prg_windows());
+    core.mapper_write(0x5300, 0x04);
+    core.mapper_write(0x5000, 0x01);
+    assert_eq!([72, 73, 74, 75], core.prg_windows());
+    core.mapper_write(0x5200, 0x00);
+    assert_eq!(0, core.read_memory(0x5000));
+    core.mapper_write(0x6000, 0x12);
+    assert_eq!(0x12, core.read_memory(0x6000));
+
+    let mut core = MapperRom::new(558)
+        .prg(128)
+        .chr(0)
+        .prg_ram(0x2000, 512)
+        .load();
+    core.mapper_write(0x5200, 0x00);
+    assert_eq!(0x04, core.read_memory(0x5000));
+}

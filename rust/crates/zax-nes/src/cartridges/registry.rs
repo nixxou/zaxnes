@@ -938,6 +938,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     555,
     #[cfg(feature = "board-557")]
     557,
+    #[cfg(feature = "board-558")]
+    558,
     #[cfg(feature = "board-559")]
     559,
     #[cfg(feature = "board-564")]
@@ -1006,14 +1008,14 @@ fn datach_has_external_eeprom(header: &InesHeader) -> bool {
 /// The MAPPERS-N boards whose iNES 1.0 CHR-RAM is Mesen2's 8 KiB default (see
 /// [`board_memory_sizes`]).
 const MAPPERS_N_CHR_RAM_8K: &[i32] = &[
-    539, 368, 357, 311, 340, 564, 541, 538, 481, 437, 434, 433, 431, 415, 409, 396, 382, 380, 354,
-    375, 350, 337, 381, 237, 39, 40, 42, 43, 44, 45, 46, 49, 50, 51, 52, 54, 56, 57, 58, 59, 60,
-    61, 53, 62, 63, 103, 104, 106, 108, 113, 117, 120, 125, 126, 134, 142, 148, 166, 167, 170, 171,
-    174, 177, 179, 183, 196, 197, 200, 201, 202, 203, 204, 205, 212, 213, 214, 216, 217, 221, 222,
-    224, 226, 227, 229, 230, 231, 233, 235, 236, 238, 240, 241, 242, 244, 245, 249, 250, 254, 255,
-    258, 259, 261, 265, 274, 283, 285, 286, 287, 288, 289, 290, 299, 300, 301, 302, 303, 304, 305,
-    306, 307, 309, 312, 313, 314, 319, 320, 324, 325, 329, 331, 332, 333, 336, 346, 348, 349, 366,
-    518, 521, 522,
+    558, 539, 368, 357, 311, 340, 564, 541, 538, 481, 437, 434, 433, 431, 415, 409, 396, 382, 380,
+    354, 375, 350, 337, 381, 237, 39, 40, 42, 43, 44, 45, 46, 49, 50, 51, 52, 54, 56, 57, 58, 59,
+    60, 61, 53, 62, 63, 103, 104, 106, 108, 113, 117, 120, 125, 126, 134, 142, 148, 166, 167, 170,
+    171, 174, 177, 179, 183, 196, 197, 200, 201, 202, 203, 204, 205, 212, 213, 214, 216, 217, 221,
+    222, 224, 226, 227, 229, 230, 231, 233, 235, 236, 238, 240, 241, 242, 244, 245, 249, 250, 254,
+    255, 258, 259, 261, 265, 274, 283, 285, 286, 287, 288, 289, 290, 299, 300, 301, 302, 303, 304,
+    305, 306, 307, 309, 312, 313, 314, 319, 320, 324, 325, 329, 331, 332, 333, 336, 346, 348, 349,
+    366, 518, 521, 522,
 ];
 
 /// The volatile-memory sizes of `mapper`'s board for `header`.
@@ -1029,6 +1031,14 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // MAPPERS-P: puNES `chr_swap_mmc3_555` maps 1 KiB CHR-RAM windows beside the CHR-ROM
         // (`memmap_vram_1k`); the cartridge carries 8 KiB of it, which an iNES 1.0 header cannot
         // state (the TQROM's case, mapper 119 above).
+        // MAPPERS-P: puNES `map_init_558` mounts the 93C66 when the NES 2.0 header declares
+        // 512 bytes of PRG-NVRAM (byte 10's high nibble 3); its bytes follow 8 KiB of work RAM and
+        // `battery_offset` puts the save there.
+        #[cfg(feature = "board-558")]
+        558 if header.is_nes20 && header.byte10 >> 4 == 3 => BoardMemorySizes {
+            prg_ram: Some(IrqP::EEPROM_RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
         #[cfg(feature = "board-555")]
         555 => BoardMemorySizes {
             chr_ram: Some(0x2000),
@@ -1813,6 +1823,9 @@ pub(crate) const fn battery_offset(mapper: i32, prg_ram_size: usize) -> usize {
         // MAPPERS-N: mapper 198's battery is on the 8 KiB at `$6000`, after the 4 KiB of `$5000`.
         #[cfg(feature = "board-198")]
         198 if prg_ram_size > Mmc3Clone::RAM_198_LOW => Mmc3Clone::RAM_198_LOW,
+        // MAPPERS-P: mapper 558's 93C66 follows its 8 KiB of work RAM.
+        #[cfg(feature = "board-558")]
+        558 if prg_ram_size == IrqP::EEPROM_RAM_SIZE => 0x2000,
         _ => 0,
     }
 }
@@ -3471,6 +3484,11 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
             memory,
             MultiPKind::of(mapper)?,
         ))),
+        #[cfg(feature = "board-558")]
+        558 => Board::IrqBoard(IrqBoard::IrqP(Box::new(IrqP::new(
+            memory,
+            IrqPKind::of(mapper)?,
+        )))),
         #[cfg(feature = "board-299")]
         299 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
             memory,

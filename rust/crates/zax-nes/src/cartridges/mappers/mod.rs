@@ -47,7 +47,7 @@ mod discrete;
 mod drip;
 #[cfg(feature = "board-eeprom")]
 mod eeprom24c0x;
-#[cfg(feature = "board-164")]
+#[cfg(any(feature = "board-164", feature = "board-irq-p"))]
 mod eeprom93c66;
 #[cfg(feature = "board-323")]
 mod farid_slrom;
@@ -232,7 +232,7 @@ pub use discrete::{
 pub use drip::Drip;
 #[cfg(feature = "board-eeprom")]
 pub use eeprom24c0x::{Eeprom24C0X, EepromKind, EepromPort};
-#[cfg(feature = "board-164")]
+#[cfg(any(feature = "board-164", feature = "board-irq-p"))]
 pub use eeprom93c66::Eeprom93C66;
 #[cfg(feature = "board-323")]
 pub use farid_slrom::FaridSlrom;
