@@ -575,6 +575,9 @@ impl Host {
         core.set_bus_conflicts(
             std::env::var("ZAXNES_PPU_BUS_CONFLICTS").map_or(true, |value| value != "0"),
         );
+        // `ZAXNES_OAM_DECAY=1`: the off-by-default decay of OAM with the rendering off, as the
+        // test-ROM campaign applies it (oam_decay measurement ROM, FIDELITY-LEADS D-OAM).
+        core.set_oam_decay(std::env::var("ZAXNES_OAM_DECAY").is_ok_and(|value| value != "0"));
         let load = core.load_rom(&fs::read(startup.rom)?, &file_name(startup.rom));
         if !load.success {
             return Err(HarnessError::Rom(format!(
