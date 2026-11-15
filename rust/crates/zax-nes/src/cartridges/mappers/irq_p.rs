@@ -7,7 +7,7 @@
 //! The PRG-ROM these boards show at `$5000`/`$6000` is answered by [`Mapper::try_read_prg`], with
 //! the work RAM disabled ([`Mapper::prg_ram_enabled`]).
 use super::{windows_for, Mapper};
-use crate::cartridges::{BankWindows, CartridgeMemory};
+use crate::cartridges::{A12Watcher, BankWindows, CartridgeMemory};
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
 
@@ -29,6 +29,9 @@ pub enum IrqPKind {
     /// 417, `mapper_417.c` (*Batman* pirate): 8 KiB PRG and 1 KiB CHR registers, a CIRAM page
     /// per nametable, a CPU-cycle IRQ.
     M417,
+    /// 471, `mapper_471.c` (*Impact Soft* IM1): the written address is a 32 KiB PRG and an 8 KiB
+    /// CHR bank, and every PPU A12 rise asserts the IRQ, which any write acknowledges.
+    M471,
 }
 
 impl IrqPKind {
@@ -41,6 +44,7 @@ impl IrqPKind {
             368 => Self::M368,
             416 => Self::M416,
             417 => Self::M417,
+            471 => Self::M471,
             _ => return None,
         })
     }
@@ -52,6 +56,7 @@ impl IrqPKind {
             Self::M368 => 368,
             Self::M416 => 416,
             Self::M417 => 417,
+            Self::M471 => 471,
         }
     }
 }
@@ -69,6 +74,8 @@ pub struct IrqP {
     irq_enabled: bool,
     irq_counter: u32,
     irq_pending: bool,
+    /// 471's A12 edge detector (the MMC3's filter; puNES clocks once per rendered line).
+    a12: A12Watcher,
 }
 
 impl IrqP {
@@ -82,6 +89,7 @@ impl IrqP {
             irq_enabled: false,
             irq_counter: 0,
             irq_pending: false,
+            a12: A12Watcher::new(A12Watcher::MMC3_FILTER_DOTS),
         };
         board.map();
         board
@@ -143,6 +151,11 @@ impl IrqP {
                     b.map_prg_8k(3, 3);
                 }
                 b.map_chr_8k((r[1] & 0x06) >> 1);
+            }
+            // `prg_fix_471`/`chr_fix_471`: the address's low byte.
+            IrqPKind::M471 => {
+                b.map_prg_32k(r[0]);
+                b.map_chr_8k(r[0]);
             }
             IrqPKind::M417 => {
                 b.map_prg_8k(0, r[0]);
@@ -260,6 +273,13 @@ impl IrqP {
                 a @ 0x8050..=0x8053 => self.nametables[usize::from(a & 0x03)] = value,
                 _ => {}
             },
+            // `extcl_cpu_wr_mem_471`: the address, and the IRQ acknowledged.
+            IrqPKind::M471 => {
+                if address >= 0x8000 {
+                    r[0] = address.to_le_bytes()[0];
+                    self.irq_pending = false;
+                }
+            }
         }
     }
 }
@@ -278,6 +298,9 @@ impl Mapper for IrqP {
         writer.write_bool(self.irq_enabled);
         writer.write_i64(i64::from(self.irq_counter));
         writer.write_bool(self.irq_pending);
+        if self.kind == IrqPKind::M471 {
+            self.a12.save_state(writer);
+        }
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -287,6 +310,9 @@ impl Mapper for IrqP {
         self.irq_enabled = reader.read_bool()?;
         self.irq_counter = u32::try_from(reader.read_i64()? & 0xFFFF_FFFF).unwrap_or(0);
         self.irq_pending = reader.read_bool()?;
+        if self.kind == IrqPKind::M471 {
+            self.a12.load_state(reader)?;
+        }
         self.map();
         Ok(())
     }
@@ -351,6 +377,15 @@ impl Mapper for IrqP {
                     self.irq_pending = true;
                 }
             }
+            IrqPKind::M471 => {}
+        }
+    }
+
+    /// `irq_clock_471`: puNES compares the background and sprite pattern addresses through the
+    /// line and asserts on a rise of A12, which is the filtered rise the MMC3 counts.
+    fn on_ppu_address_bus(&mut self, _memory: &mut CartridgeMemory, address: u16, clock: i64) {
+        if self.kind == IrqPKind::M471 && self.a12.rose(address, clock) {
+            self.irq_pending = true;
         }
     }
 

@@ -1130,3 +1130,20 @@ fn mappers_p_555_has_an_outer_bank_ram_at_5000_and_mixed_chr() {
     let windows = core.chr_windows();
     assert_eq!((0, 5), (windows[4], windows[5]));
 }
+
+/// `mapper_471.c`: the written address is the 32 KiB PRG and 8 KiB CHR bank; a filtered A12
+/// rise asserts the IRQ and any write acknowledges it.
+#[cfg(feature = "board-471")]
+#[test]
+fn mappers_p_471_asserts_on_a12_and_acknowledges_on_write() {
+    let mut core = MapperRom::new(471).prg(32).chr(64).load();
+    core.mapper_write(0x8005, 0);
+    assert_eq!([20, 21, 22, 23], core.prg_windows());
+    assert_eq!(40, core.chr_windows()[0]);
+    let cartridge = core.cartridge_mut().unwrap();
+    cartridge.on_ppu_address_bus(0x0000, 0);
+    cartridge.on_ppu_address_bus(0x1000, 40);
+    assert!(cartridge.irq_asserted());
+    core.mapper_write(0x8005, 0);
+    assert!(!core.cartridge().unwrap().irq_asserted());
+}

@@ -1002,6 +1002,10 @@ places where puNES itself is incomplete are copied, not invented around:
   overlay and is not reproduced. `$5000-$57FF` is the work RAM's 4 KiB bank 2, so an image whose
   header gives 8 KiB or less has it alias `$6000-$6FFF`; nesdev's page gives no RAM size and the
   header's is used as it is. The 8 KiB CHR-RAM beside the CHR-ROM is assumed, as for the TQROM.
+* 471 (`mapper_471.c`): puNES asserts when the pattern address it tracks through the line goes
+  from the `$0000` half to the `$1000` half (background vs sprite tables, plus `$2006`); here the
+  same edge is the MMC3's filtered A12 rise, which agrees for the one-rise-per-line layouts and
+  may differ for a game rendering 8x16 sprites from both halves.
 
 ### J36. Mapper 682 (Rainbow): the ESP is modelled from the protocol document
 The ESP (`rainbow_esp.rs`) follows Broke Studio's `rainbow-net.md` and `mapper-doc.md`; no

@@ -125,7 +125,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 455 | `mapper_455.c` | 97 | 1 | 0 | done (batch 14, `Mmc3P`) |
 | 456 | `mapper_456.c` | 83 | 1 | 0 | done (batch 14, `Mmc3P`) |
 | 457 | `mapper_457.c` | 86 | 1 | 0 | done (batch 14, `Mmc3P`) |
-| 471 | `mapper_471.c` | 109 | 0 | 0 | todo |
+| 471 | `mapper_471.c` | 109 | 0 | 0 | done (batch 33, `IrqP`) |
 | 481 | `mapper_481.c` | 55 | 0 | 0 | done (batch 8, `MultiP`) |
 | 512 | `mapper_512.c` | 94 | 2 | 1 | todo |
 | 516 | `mapper_516.c` | 79 | 2 | 0 | done (batch 14, `Mmc3P`) |
@@ -263,3 +263,6 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
   (in `clocks_on_cpu_cycle`; `timer_555`/`expired_555` saved for that kind only) and the mode
   whose CHR registers with D6 select 1 KiB windows of an 8 KiB CHR-RAM beside the CHR-ROM
   (`ram_windows`, derived; `ppu_peek`/`ppu_write` serve them, `chr_peek_view` is `None`).
+* Batch 33: `IrqP` 471 (the written address is the bank; an IRQ on every A12 rise through the
+  MMC3's `A12Watcher` filter, acknowledged by any write). In both PPU-bus lists and the mf_3b
+  sweep, not in `clocks_on_cpu_cycle`; the watcher's state is saved for that kind only.

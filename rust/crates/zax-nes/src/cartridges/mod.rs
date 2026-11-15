@@ -824,6 +824,8 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 191
             | 117
             | 222
+            // MAPPERS-P: mapper 471's IRQ on every A12 rise (`IrqP`).
+            | 471
             | 176
             | 217
             | 254
@@ -931,6 +933,8 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 191
             | 117
             | 222
+            // MAPPERS-P: mapper 471's IRQ on every A12 rise (`IrqP`).
+            | 471
             | 176
             | 217
             | 254
@@ -2257,6 +2261,8 @@ mod tests {
             457, 516, 393, 412,
             // MAPPERS-P: 248 and 536 run the boards of 115 and 195 (`registry::board_number`).
             248, 536, 422, 534, 370, 344, 432, 356, 269, 353, 100, 555,
+            // MAPPERS-P: 471, an IRQ on every A12 rise (`IrqP`).
+            471,
         ] {
             if Cartridge::is_supported(number) {
                 expected.extend_from_slice(&[number, number]);
