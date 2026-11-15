@@ -908,6 +908,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     481,
     #[cfg(feature = "board-487")]
     487,
+    #[cfg(feature = "board-512")]
+    512,
     #[cfg(feature = "board-513")]
     513,
     #[cfg(feature = "board-516")]
@@ -1063,6 +1065,13 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         #[cfg(feature = "board-558")]
         558 if header.is_nes20 && header.byte10 >> 4 == 3 => BoardMemorySizes {
             prg_ram: Some(IrqP::EEPROM_RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
+        // MAPPERS-P: mapper 512's 8 KiB CHR-RAM beside its CHR-ROM (`vram_size(0)`), which an
+        // iNES 1.0 header cannot state either.
+        #[cfg(feature = "board-512")]
+        512 if header.chr_rom_size != 0 => BoardMemorySizes {
+            chr_ram: Some(0x2000),
             ..BoardMemorySizes::default()
         },
         #[cfg(feature = "board-555")]
@@ -3574,6 +3583,11 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         351 => Board::IrqBoard(IrqBoard::ChipSwitch(Box::new(ChipSwitch::new(
             memory,
             ChipSwitchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-512")]
+        512 => Board::IrqBoard(IrqBoard::Mmc3P(Box::new(Mmc3P::new(
+            memory,
+            Mmc3PKind::of(mapper)?,
         )))),
         #[cfg(feature = "board-299")]
         299 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(

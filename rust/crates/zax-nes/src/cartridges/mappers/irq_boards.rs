@@ -740,7 +740,11 @@ impl Mapper for IrqBoard {
     /// **Behaviour-neutral for the other boards of this variant**: none of them overrides it, and
     /// none answers `SERVED_BY_CARTRIDGE` from `nametable_page`, so this body is never reached for
     /// them.
-    #[cfg(any(feature = "board-68-chr-nametables", feature = "board-jy-asic"))]
+    #[cfg(any(
+        feature = "board-68-chr-nametables",
+        feature = "board-jy-asic",
+        feature = "board-512"
+    ))]
     fn read_nametable(&self, memory: &CartridgeMemory, address: u16) -> u8 {
         inner!(self, b => b.read_nametable(memory, address))
     }
@@ -836,7 +840,7 @@ impl Mapper for IrqBoard {
     }
 
     /// Forwarded for mapper 682 alone: its nametables in CHR-RAM and FPGA RAM take `$2007` writes.
-    #[cfg(feature = "board-682")]
+    #[cfg(any(feature = "board-682", feature = "board-512"))]
     fn write_nametable(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         inner!(self, b => b.write_nametable(memory, address, value));
     }

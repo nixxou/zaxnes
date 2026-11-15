@@ -556,6 +556,8 @@ const fn nametable_pages_vary(mapper: i32) -> bool {
             | 370
             // MAPPERS-P: 527, a CIRAM page from D7 of CHR registers 0 and 1.
             | 527
+            // MAPPERS-P: 512, four-screen tables in CHR-RAM while `$4100` holds 1.
+            | 512
             // MAPPERS-P: 559, a 1 KiB nametable register per table.
             | 559
             // MAPPERS-P: 353, game 0 pages CIRAM from the CHR registers' D7.
@@ -1031,6 +1033,7 @@ const fn mmc3_p_board(mapper: i32) -> bool {
             | 100
             | 555
             | 369
+            | 512
     )
 }
 
@@ -2320,7 +2323,7 @@ mod tests {
             556, 351,
             // MAPPERS-P: 272 is latched too but absent here: its counter only moves once a game
             // enables it, and the sweep enables nothing.
-            369,
+            369, 512,
         ] {
             if Cartridge::is_supported(number) {
                 expected.extend_from_slice(&[number, number]);

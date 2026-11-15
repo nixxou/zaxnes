@@ -127,7 +127,7 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 | 457 | `mapper_457.c` | 86 | 1 | 0 | done (batch 14, `Mmc3P`) |
 | 471 | `mapper_471.c` | 109 | 0 | 0 | done (batch 33, `IrqP`) |
 | 481 | `mapper_481.c` | 55 | 0 | 0 | done (batch 8, `MultiP`) |
-| 512 | `mapper_512.c` | 94 | 2 | 1 | todo |
+| 512 | `mapper_512.c` | 94 | 2 | 1 | done (batch 47, `Mmc3P`) |
 | 516 | `mapper_516.c` | 79 | 2 | 0 | done (batch 14, `Mmc3P`) |
 | 517 | `mapper_517.c` | 107 | 1 | 1 | done (batch 1, `MultiP`) |
 | 524 | `mapper_524.c` | 81 | 0 | 0 | done (batch 16, `VrcP`) |
@@ -333,3 +333,8 @@ Owner's request (2026-11-15): "j'aimerai ne pas avoir à rougir devant puNES".
 * Batch 46: `ChipSwitch` 351 (Techline XB): MMC3, MMC1 (`Mmc1::refresh_banks` now also behind
   `board-chip-switch`) or VRC4e by `$5000` D0-D1, the outer bank through each chip's own units,
   the NROM and 8 KiB CHR-ROM modes of `$5002` over them, and the DIP read at `$5000-$5FFF`.
+* Batch 47: `Mmc3P` 512 (SL-12): `$4100` D1 puts every CHR window on an 8 KiB CHR-RAM beside the
+  CHR-ROM (555's `ram_windows`, `board_memory_sizes`), and `$4100` = 1 four-screen tables in that
+  RAM's second 4 KiB, served by the board (`nametable_page` = `SERVED_BY_CARTRIDGE`,
+  `read_nametable`/`write_nametable`, now forwarded by `IrqBoard` behind `board-512`; in
+  `nametable_pages_vary`). The decision is taken where the chip's mirroring is settled.

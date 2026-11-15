@@ -1493,3 +1493,23 @@ fn mappers_p_351_switches_between_three_chips() {
     assert_eq!([32, 33, 34, 35], core.prg_windows());
     assert_eq!(0x50, core.read_memory(0x5000));
 }
+
+/// `mapper_512.c`: `$4100` D1 puts every CHR window on the CHR-RAM beside the CHR-ROM; `$4100`
+/// = 1 makes the four tables the CHR-RAM's second 4 KiB once the chip's mirroring is written.
+#[cfg(feature = "board-512")]
+#[test]
+fn mappers_p_512_maps_chr_ram_and_four_screen_tables() {
+    let mut core = MapperRom::new(512).prg(32).chr(256).load();
+    mmc3_start(&mut core, 1, 2);
+    core.mmc3_bank(2, 5);
+    assert_eq!(5, core.chr_windows()[4]);
+    core.mapper_write(0x4100, 0x02);
+    assert_eq!(0, core.chr_windows()[4]);
+    core.mapper_write(0x4100, 0x01);
+    core.mapper_write(0xA000, 0x00);
+    let cartridge = core.cartridge_mut().unwrap();
+    assert_eq!(
+        zax_nes::cartridges::Cartridge::SERVED_BY_CARTRIDGE,
+        cartridge.nametable_page(2)
+    );
+}

@@ -116,6 +116,10 @@ pub enum Mmc3PKind {
     /// banks (`$00`/`$01`), the *SMB2J* conversion with a 12-bit CPU-cycle IRQ (`$13`), or the
     /// MMC3 at two outer banks (`$37`, `$FF`).
     M369,
+    /// 512, `mapper_512.c` (*Zhōngguó Dàhēng*, SL-12): `$4100` D0-D1: D1 maps every CHR window to
+    /// the 8 KiB CHR-RAM beside the CHR-ROM (bank D0-D1 of the register), and the value 1 makes
+    /// the nametables four-screen in the CHR-RAM's second 4 KiB.
+    M512,
 }
 
 impl Mmc3PKind {
@@ -157,6 +161,7 @@ impl Mmc3PKind {
             100 => Self::M100,
             555 => Self::M555,
             369 => Self::M369,
+            512 => Self::M512,
             _ => return None,
         })
     }
@@ -197,6 +202,7 @@ impl Mmc3PKind {
             Self::M100 => 100,
             Self::M555 => 555,
             Self::M369 => 369,
+            Self::M512 => 512,
         }
     }
 }
@@ -896,6 +902,17 @@ impl Mmc3P {
         if self.kind == Mmc3PKind::M555 {
             self.settle_ram_555(&raw_chr);
         }
+        // `chr_swap_mmc3_512`: with `$4100` D1 set every window is CHR-RAM bank `value & 3`.
+        if self.kind == Mmc3PKind::M512 {
+            self.ram_windows = if self.outer[0] & 0x02 != 0 && !self.chr_ram {
+                0xFF
+            } else {
+                0
+            };
+            for (slot, value) in raw_chr.iter().enumerate() {
+                self.ram_banks[slot] = u8::try_from(value & 0x03).unwrap_or(0);
+            }
+        }
         let Some(banks) = self.mmc3.banks_mut() else {
             return;
         };
@@ -908,7 +925,12 @@ impl Mmc3P {
     }
 
     /// The mirroring a kind imposes over the chip's (`mirroring_fix_mmc3_345`: D5 single-screen).
-    fn settle_mirroring(&self, memory: &mut CartridgeMemory) {
+    fn settle_mirroring(&mut self, memory: &mut CartridgeMemory) {
+        // `mirroring_fix_mmc3_512`: `$4100` = 1 makes the four tables the CHR-RAM's second
+        // 4 KiB, decided when the chip's mirroring is (`outer[1]` holds the decision).
+        if self.kind == Mmc3PKind::M512 {
+            self.outer[1] = u16::from(self.outer[0] == 1 && memory.chr_ram().len() >= 0x2000);
+        }
         // `mirroring_fix_mmc3_356`: D6 of `reg[2]` is four-screen (the PPU's 4 KiB).
         if self.kind == Mmc3PKind::M356 {
             memory.set_mirroring(if self.outer[2] & 0x40 != 0 {
@@ -1046,6 +1068,8 @@ impl Mmc3P {
             }
             // `extcl_cpu_wr_mem_369`: `$4100` (A8 in `$4000-$4FFF`) the mode.
             Mmc3PKind::M369 if address & 0xF100 == 0x4100 => r[0] = data,
+            // `extcl_cpu_wr_mem_512`: `$4100` (A8 in `$4000-$4FFF`), D0-D1.
+            Mmc3PKind::M512 if address & 0xF100 == 0x4100 => r[0] = data & 0x03,
             // `extcl_cpu_wr_mem_370`: `$5000-$5FFF`, the low address byte.
             Mmc3PKind::M370 if (0x5000..=0x5FFF).contains(&address) => r[0] = address & 0xFF,
             // `extcl_cpu_wr_mem_411`: `$5000-$5FFF`, A0 the register, no RAM there.
@@ -1344,7 +1368,7 @@ impl Mapper for Mmc3P {
     }
 
     fn chr_peek_view<'m>(&self, memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
-        if !self.chr_269.is_empty() || self.kind == Mmc3PKind::M555 {
+        if !self.chr_269.is_empty() || matches!(self.kind, Mmc3PKind::M555 | Mmc3PKind::M512) {
             return None;
         }
         self.mmc3.chr_peek_view(memory)
@@ -1419,7 +1443,27 @@ impl Mapper for Mmc3P {
         self.mmc3.on_ppu_address_bus(memory, address, clock);
     }
 
+    /// `memmap_nmt_vram_4k(…, 1)`: 512's tables in the CHR-RAM from `$1000`.
+    fn read_nametable(&self, memory: &CartridgeMemory, address: u16) -> u8 {
+        let ram = memory.chr_ram();
+        if ram.is_empty() {
+            return 0;
+        }
+        ram[(0x1000 + usize::from(address & 0x0FFF)) % ram.len()]
+    }
+
+    fn write_nametable(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        let ram = memory.chr_ram_mut();
+        if !ram.is_empty() {
+            let len = ram.len();
+            ram[(0x1000 + usize::from(address & 0x0FFF)) % len] = value;
+        }
+    }
+
     fn nametable_page(&self, table: i32) -> i32 {
+        if self.kind == Mmc3PKind::M512 && self.outer[1] != 0 {
+            return super::super::Cartridge::SERVED_BY_CARTRIDGE;
+        }
         if (self.kind == Mmc3PKind::M370 && self.outer[0] & 0x07 == 0x01)
             || (self.kind == Mmc3PKind::M353 && self.outer[0] == 0)
         {
