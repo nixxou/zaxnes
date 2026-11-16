@@ -3316,6 +3316,12 @@ impl Ppu2C02 {
                     self.notify_address_bus_without_read(self.v & 0x3FFF, &mut cartridge);
                 } else {
                     self.t = (self.t & 0x00FF) | (u16::from(value & 0x3F) << 8);
+                    if self.dot == 257
+                        && self.fetching()
+                        && matches!(self.timing.region, NesRegion::Pal)
+                    {
+                        self.first_address_write_on_copy(value);
+                    }
                 }
 
                 self.write_toggle = !self.write_toggle;
@@ -3342,6 +3348,22 @@ impl Ppu2C02 {
     const fn rendering_now(&self) -> bool {
         self.rendering_enabled()
             && (self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline())
+    }
+
+    /// A first `$2006` write on dot 257 of a fetching line, PAL 2C07 (Visual 2C07, `g2006w`, reset
+    /// phases e0/e3/e6/e9, lot FIDPLUS-C C3c): the horizontal copy of that dot already takes the
+    /// nametable-X bit the write puts in `t` (bit 2 of the byte), or the CPU's open bus on the
+    /// cycle [`Self::open_bus_on_copies`] names, as the second write and `$2005` do there. A write
+    /// on dot 258 comes after the copy and leaves `v` alone, which is what this core does anyway.
+    #[cold]
+    #[inline(never)]
+    fn first_address_write_on_copy(&mut self, value: u8) {
+        let source = if self.open_bus_on_copies() {
+            self.cpu_open_bus
+        } else {
+            value
+        };
+        self.v = (self.v & !0x0400) | (u16::from(source & 0x04) << 8);
     }
 
     /// Whether a register write landing on a copy of `t` into `v` (or on a pixel) takes the CPU's
