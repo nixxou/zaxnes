@@ -127,6 +127,10 @@ commands! {
     InsertCoin1 => "emulation.insert_coin_1", Shortcut::None, false;
     InsertCoin2 => "emulation.insert_coin_2", Shortcut::None, false;
     VsService => "emulation.vs_service", Shortcut::None, false;
+    // Lot FDS: the Disk System drive, in the Emulation menu, greyed out without one.
+    SwitchDiskSide => "emulation.switch_disk_side", Shortcut::None, false;
+    InsertNextDisk => "emulation.insert_next_disk", Shortcut::None, false;
+    EjectDisk => "emulation.eject_disk", Shortcut::None, false;
     Stop => "emulation.stop", Shortcut::None, false;
     FastForward => "emulation.fast_forward", Shortcut::Key("shortcut.fast_forward"), true;
     Rollback => "emulation.rollback", Shortcut::Key("shortcut.rollback"), false;

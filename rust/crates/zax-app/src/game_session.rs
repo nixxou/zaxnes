@@ -256,6 +256,17 @@ type CapturedBatch = (Palettes, i32, i32, (i32, zax_core_api::VisibleRows, i32))
 /// A frame's PPU palette and the margin decoder's own background palette, if any.
 type Palettes = ([u8; 32], Option<[u8; 16]>);
 
+/// Lot FDS: a disk change in the Famicom Disk System's drive, as a player makes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiskChange {
+    /// The other side of the disk in the drive.
+    SwitchSide,
+    /// Side A of the next disk, back to the first after the last.
+    NextDisk,
+    /// The disk out.
+    Eject,
+}
+
 /// One game being played.
 #[allow(clippy::struct_excessive_bools)] // Independent states of the session.
 pub struct GameSession {
@@ -1015,6 +1026,17 @@ impl GameSession {
     /// A coin in slot `slot` (1 or 2), or the service button with `None`.
     pub fn drive_vs_cabinet(&mut self, slot: Option<usize>) {
         self.core.drive_vs_cabinet(slot);
+    }
+
+    /// Lot FDS: the disk sides of the game's Disk System drive, 0 without one.
+    #[must_use]
+    pub fn disk_sides(&self) -> usize {
+        self.core.disk_sides()
+    }
+
+    /// Lot FDS: a disk change in the drive.
+    pub fn change_disk(&mut self, change: DiskChange) {
+        self.core.change_disk(change);
     }
 
     pub fn soft_reset(&mut self) {

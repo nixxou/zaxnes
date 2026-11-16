@@ -1027,6 +1027,15 @@ pub(crate) fn is_study_box(rom: &super::RomImage) -> bool {
             .unwrap_or_default();
         return super::mappers::study_box::is_tape(misc);
     }
+    // Lot FDS: mapper 20 is a packaged disk image (`fds::package`); a bare iNES 20 is not.
+    #[cfg(feature = "board-fds")]
+    if rom.mapper() == 20 {
+        let misc = rom
+            .raw()
+            .get(rom.header().announced_size()..)
+            .unwrap_or_default();
+        return super::mappers::fds::is_disk(misc, rom.header().submapper == 1);
+    }
     let _ = rom;
     false
 }
@@ -1155,6 +1164,13 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
             ..BoardMemorySizes::default()
         },
         // MAPPERS-P: the Study Box's 64 KiB of work RAM and 8 KiB of CHR-RAM (Mesen `StudyBox.h`).
+        // Lot FDS: the RAM adapter's 32 KiB of work RAM ($6000-$DFFF) and 8 KiB of CHR-RAM.
+        #[cfg(feature = "board-fds")]
+        20 => BoardMemorySizes {
+            prg_ram: Some(0x8000),
+            chr_ram: Some(0x2000),
+            ..BoardMemorySizes::default()
+        },
         #[cfg(feature = "board-186")]
         186 => BoardMemorySizes {
             prg_ram: Some(super::mappers::study_box::WORK_RAM_SIZE),
@@ -3729,6 +3745,11 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         446 => Board::IrqBoard(IrqBoard::ChipSwitch(Box::new(ChipSwitch::new(
             memory,
             ChipSwitchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-fds")]
+        20 => Board::IrqBoard(IrqBoard::IrqP(Box::new(IrqP::new(
+            memory,
+            IrqPKind::of(mapper)?,
         )))),
         #[cfg(feature = "board-186")]
         186 => Board::IrqBoard(IrqBoard::IrqP(Box::new(IrqP::new(

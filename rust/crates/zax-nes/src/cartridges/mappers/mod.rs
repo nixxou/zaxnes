@@ -55,6 +55,8 @@ mod eeprom24c0x;
 mod eeprom93c66;
 #[cfg(feature = "board-323")]
 mod farid_slrom;
+#[cfg(feature = "board-fds")]
+pub mod fds;
 #[cfg(feature = "board-fine-rom")]
 mod fine_rom;
 #[cfg(feature = "board-176")]
@@ -819,6 +821,34 @@ pub trait Mapper {
     fn boot_program(&self, _memory: &CartridgeMemory) -> Option<BootProgram> {
         None
     }
+
+    /// Lot FDS: the disk sides of a disk drive, 0 for every board without one.
+    fn disk_sides(&self) -> usize {
+        0
+    }
+
+    /// The side in the drive, `None` when it is empty or there is no drive.
+    fn disk_side(&self) -> Option<usize> {
+        None
+    }
+
+    /// Puts `side` in the drive (a disk in it comes out first, the new one a moment later).
+    fn insert_disk(&mut self, _side: usize) {}
+
+    /// Takes the disk out.
+    fn eject_disk(&mut self) {}
+
+    /// Turns the drive's automatic disk changes on or off.
+    fn set_disk_auto_insert(&mut self, _enabled: bool) {}
+
+    /// Whether the BIOS looked for a disk this frame, so that the core reads what it looks for.
+    fn disk_wanted(&self) -> bool {
+        false
+    }
+
+    /// Once per frame: the drive's delayed and automatic disk changes, `header` what the BIOS
+    /// looks for when [`Mapper::disk_wanted`].
+    fn disk_end_frame(&mut self, _header: Option<[u8; 10]>) {}
 
     /// A save medium the board keeps itself, outside [`CartridgeMemory`]'s PRG-RAM and flash
     /// (lot MAPPERS-P: the COOLGIRL's save area), as the file a host keeps; `None` for every

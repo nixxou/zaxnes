@@ -880,6 +880,24 @@ impl EngineHandle {
         }
     }
 
+    /// Lot FDS: the disk sides of the game's Disk System drive, 0 without one; Zaxnes only.
+    #[must_use]
+    pub fn disk_sides(&self) -> usize {
+        self.zaxnes().map_or(0, NesCore::disk_sides)
+    }
+
+    /// Lot FDS: a disk change in the drive.
+    pub fn change_disk(&mut self, change: crate::game_session::DiskChange) {
+        use crate::game_session::DiskChange;
+        if let Some(core) = self.zaxnes_mut() {
+            match change {
+                DiskChange::SwitchSide => core.switch_disk_side(),
+                DiskChange::NextDisk => core.insert_next_disk(),
+                DiskChange::Eject => core.eject_disk(),
+            }
+        }
+    }
+
     /// `emu.vs_dip_1` to `emu.vs_dip_8` as one byte, for the next load; Zaxnes only.
     pub fn set_vs_dip_switches(&mut self, switches: u8) {
         if let Some(core) = self.zaxnes_mut() {
