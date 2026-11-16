@@ -129,7 +129,10 @@ fn the_overscan_crops_and_the_extra_margin_widens() {
 /// How far left, in output pixels, the playfield of `after` lies from `before`'s: the shift that
 /// best matches row 120 (the pipes and the sky), out of 1024.
 fn offset(before: &[u32], after: &[u32]) -> i32 {
-    let row = |picture: &[u32]| picture[120 * 1024..121 * 1024].to_vec();
+    // The hills' line: it scrolls with the playfield and is never one plain colour. The middle
+    // line was, at times: the gap between two pipes is plain sky, every shift ties and the first,
+    // -24, won (the pipes' heights moved with the power-on at the top of the picture).
+    let row = |picture: &[u32]| picture[200 * 1024..201 * 1024].to_vec();
     let (before, after) = (row(before), row(after));
     (-24..=24)
         .min_by_key(|shift: &i32| {

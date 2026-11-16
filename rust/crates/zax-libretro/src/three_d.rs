@@ -499,6 +499,10 @@ impl ThreeD {
                     draw_list: None,
                     nes_picture: &self.picture,
                     nes_picture_height: self.picture_height,
+                    // The palette gives the colours: the per-pixel emphasis and the composite RGB
+                    // picture of the app (lot FIDPLUS-D) are not carried by this core yet.
+                    nes_picture_emphasis: &[],
+                    nes_picture_rgb: &[],
                 },
             );
         }
