@@ -822,11 +822,18 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   only): judge `c3cjudge.py` at e3 (dot phase 2, phase -14), long runs (> 2 dots) on rendered
   lines per aligned frame **55-60 before, 3-6 after**; golden-core 98 games x 1800 frames
   identical; zax-nes tests green.
-- **Two leads left**, seen in those 3-6 runs:
-  * the load lands a dot late on some cycle phases: a write on dot 254 loads on dot 256 in the
-    netlist (collision, then the dot-257 copy completes `v`), on 257 in Zaxnes (copy first,
-    then the load). The PAL load delay (2 dots on accumulator phase 0, 3 otherwise, from
-    `g2006x`) needs refining per phase;
+- **Final state (2026-11-16)**: `c3cphases.py`, every reset phase, the aligned frames: **0 runs
+  longer than 2 dots** on rendered lines at e0 (dot phase 0, phase 9; frames 1-2 not paired,
+  the sliding program's access sequence differs there), e3 (2, -14), e6 (1, -14) and e9 (0, -14).
+  golden-core 98 games x 1800 identical, zax-nes tests and clippy green.
+- **The two leads below**, seen in the 3-6 runs, are both done:
+  * (done 2026-11-16) a write on dot 254 ended at `$2858` in Zaxnes, `$2C58` in the netlist. **Not
+    a delay**: counted from the write's own dot on both sides (`c3cdelay.py`; the netlist's A
+    line comes when /CS rises, after the access's dots), the delays agree write for write (2
+    or 3 dots, the same cycle phases). The load collided on dot 256 and the prepaid run made
+    dot 257's horizontal copy before the `$2006` write set `v = t`, losing it; the 2C02 hides
+    it (`t` = `v` after its collision). Fixed in the `$2006` write: PAL, load on dot 256, the
+    copy is made again after the assignment.
   * (done 2026-11-16, `Ppu2C02::first_address_write_on_copy`, judge 3-6 -> 1-2 long runs a
     frame, golden-core identical) a **first** `$2006` write on dot 257: the netlist's horizontal copy already takes the new
     nametable-X bit from `t`, Zaxnes copies the old one (22 dots, until the next copy).

@@ -3297,6 +3297,14 @@ impl Ppu2C02 {
                     if self.t != written && matches!(self.timing.region, NesRegion::Pal) {
                         // C3c-collision: the 2C07's `t` keeps the written nametable bits.
                         self.t |= written & 0x0C00;
+                        // A load that collided on dot 256: the dot after it, 257, copies `t`'s
+                        // horizontal bits into the `v` it left, which the prepaid run made
+                        // before this assignment (Visual 2C07, `g2006w`: a write on dot 254
+                        // ends at `$2C58`, not `$2858`). On the 2C02 `t` = `v` after the
+                        // collision, so the copy changes nothing there.
+                        if self.dot == 257 && self.fetching() {
+                            self.v = (self.v & !0x041F) | (self.t & 0x041F);
+                        }
                     }
                     if delayed {
                         self.increment_after_delayed_load();
