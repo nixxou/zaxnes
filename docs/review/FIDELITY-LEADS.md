@@ -907,6 +907,18 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
     programs and `g2007v` at the four phases, 0 long runs** on the 19/32 bench; golden-core
     identical. The `$2006` delays (2/3) and every collision rule are unchanged by the duty.
     The 19/32 bench is now the PAL reference; the 15/24 traces in `dot/` are kept for history;
+  * (2026-11-16, review items 5 and 8) **first `$2006` write on the last vertical copy dot,
+    NTSC measured**: `g2006v` (`mk2006v.py`, a `$2006` pair timed on the pre-render line's
+    end, first bytes `$2D`/`$3B`/`$1A`/`$25`) on the 2C02 netlist at e0/e1/e3/e4/e5/e6/e7:
+    at e3 a first write of `$3B` on dot 304 shows `t` = `$2000` for that dot (open bus `$20`)
+    and the copy takes it, `v` `$2D00` -> `$2400`; Zaxnes's `first_address_write_on_vertical_copy`
+    gives the same with alignment 3 (open bus), clean at e0/e3/e4/e6. **A `$2007` read
+    latching on the pre-render line** (310:338 on the 2C07, the latch on 311:2) takes the
+    fetching path, X+Y and the fetched byte (`read_latches_on_pre_render`); `r2007` clean at
+    the four PAL phases, pre-render line included. The judges (`c3cphases*`, `c3cntsc`,
+    `c3csweep*`) now count the pre-render line (but the first judged frame's, which holds
+    the power-on `v`), print how many frames they judged and say NO FRAME JUDGED / CLEAN /
+    DIFFERS (review item 4);
   * (2026-11-16, review point 6) **the benches' CHR memory**: `handleChrBus` latches the low
     address on ALE's rising edge and drives the data on /RD's falling edge, where a 74LS373 is
     transparent while ALE is high and the memory answers the level. A level-sensitive variant
