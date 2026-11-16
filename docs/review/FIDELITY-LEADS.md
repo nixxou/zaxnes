@@ -881,7 +881,10 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   * (2026-11-16) **the NTSC corpus at the four reset phases** (`runcorpus_ntsc.ps1` added e0/e2
     for `g2000`, `g2005`, `g2006x`, `g3e01px`, `oam`, `r2007`; judge `c3cntsc.py`): e4 takes
     alignment 3 and e6 alignment 2, power-on in vblank, and every program is clean there but
-    `r2007` (the pairing artifact above) and `rmw` (unpairable with this bench). At e0/e2
+    `r2007` (the pairing artifact above) and `rmw` (unpairable with this bench: its `v` follows
+    the netlist's power-on `$2001`; what it measures, the bytes read back and copied to
+    `$2005`, is `00 01 02 01 01 05 06 07 00` in the netlist at the four NTSC and four PAL reset
+    phases and in Zaxnes on both regions, `INC $2007` over 03 04 leaving 01 01). At e0/e2
     (alignments 0/1) `g2000`, `g2005`, `g2006x`, `r2007` are clean; `g3e01px` and `oam` hit
     step 33's switch-on race on every switch on (`A 0 86 W2001=0A`: `v` `$0006` -> `$0000`, a
     horizontal copy from `t`, then fetches), present or not with the bench's hold time: not
