@@ -27,8 +27,9 @@ fn the_api_dump_is_identical_to_the_golden() {
             .as_deref()
             // 513 before AMD-063, which adds `Instance.IsSolidTile` (REQ-LUA-121) and
             // `Pattern.HasPlaceholders` (REQ-LUA-120); `RotOverride` and `Info.Version` live on
-            // the `CS` table, which this dump does not cover.
-            .map(|text| text.starts_with("wrote 515 lines")),
+            // the `CS` table, which this dump does not cover. 517 since AMD-067, which adds the two
+            // dummies `Setting.TurboRate` (REQ-LUA-123) and `Gamepad:GetPlayerState` (REQ-LUA-124).
+            .map(|text| text.starts_with("wrote 517 lines")),
         Some(true)
     );
     assert_eq!(

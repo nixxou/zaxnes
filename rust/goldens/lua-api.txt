@@ -215,6 +215,7 @@ member Lumiere.Direction prop LE Vector3
 member Lumiere.Intensity prop LE 
 member ManettesAPI.[i] index L Joueur
 member ManettesAPI.GetInput appel - 
+member ManettesAPI.GetPlayerState appel - 
 member ManettesAPI.Pressed appel - 
 member ManettesAPI.State prop L 
 member Mat4R.[i] index LE 
@@ -422,6 +423,7 @@ member SettingAPI.TVModeId prop L
 member SettingAPI.TargetFramerate prop L 
 member SettingAPI.TargetTimePerFrame prop L 
 member SettingAPI.TopDownCam prop LE 
+member SettingAPI.TurboRate prop LE 
 member SettingAPI.VRScale prop L 
 member SettingAPI.VSync prop LE 
 member SettingAPI.VSyncId prop L 
@@ -512,4 +514,4 @@ member XRState.acc prop LE Vector3
 member XRState.pos prop LE Vector3
 member XRState.rot prop LE Vector3
 member XRState.vel prop LE Vector3
-# 35 globals, 46 types, 448 members
+# 35 globals, 46 types, 450 members

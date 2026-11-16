@@ -20,10 +20,11 @@ use zax_settings::styles;
 use crate::binding::cx::Cx;
 use crate::environment::MAX_CAMERA_DISTANCE;
 
-/// What `CS.Nes3D.Info.Version` reads (REQ-LUA-112, raised to `"2.1"` by AMD-063 REQ-LUA-118):
+/// What `CS.Nes3D.Info.Version` reads (REQ-LUA-112, raised to `"2.1"` by AMD-063 REQ-LUA-118 and
+/// to `"2.2"` by AMD-067 REQ-LUA-122):
 /// a string whose leading decimal integer is at least 2, which is how a 2.0 script knows it may
 /// read `Camera.ResetDistance` — the criterion of AMD-040 still holds.
-pub(crate) const INFO_VERSION: &str = "2.1";
+pub(crate) const INFO_VERSION: &str = "2.2";
 
 /// What `CS.Nes3D.Info.Title` reads (REQ-LUA-112): the product name of AMD-029, which a script
 /// compares against `"3dSenMaker"` — the profile editor — to pick a field of view.
@@ -45,9 +46,17 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
         sealed(lua, &[("Version", INFO_VERSION), ("Title", INFO_TITLE)])?,
     )?;
     nes3d.raw_set("CameraControl", camera_control(lua)?)?;
+    let setting_manager = lua.create_table_with_capacity(0, 2)?;
+    setting_manager.raw_set("DefaultMsaa", DEFAULT_MSAA)?;
+    // Dummy, AMD-067: present for the compatibility of 3dSen 2.2 scripts, no effect; Zaxnes has
+    // no turbo fire (REQ-LUA-123).
+    setting_manager.raw_set("TurboRateId", "TurboRateId")?;
+    nes3d.raw_set("SettingManager", seal(lua, setting_manager)?)?;
+    // Dummy, AMD-067: present for the compatibility of 3dSen 2.2 scripts, no effect; Zaxnes has
+    // no turbo fire (REQ-LUA-124). Every other field of `Gamepads` reads nil.
     nes3d.raw_set(
-        "SettingManager",
-        sealed(lua, &[("DefaultMsaa", DEFAULT_MSAA)])?,
+        "Gamepads",
+        sealed(lua, &[("TurboKeysMigratedKey", "3dSen.TurboKeysMigrated")])?,
     )?;
     nes3d.raw_set(
         "VisualStyle",

@@ -545,3 +545,58 @@ fn a_bundle_padded_without_flag_0x200_imports_nothing_and_writes_nothing() {
         .is_err());
     assert_eq!(before, files.paths().len());
 }
+
+/// An iNES image: the 16-byte header, one 16 KiB PRG bank and one 8 KiB CHR bank.
+fn ines_rom() -> Vec<u8> {
+    let mut rom = vec![0x4E, 0x45, 0x53, 0x1A, 1, 1];
+    rom.resize(16 + 16_384 + 8_192, 0);
+    rom
+}
+
+/// AMD-067 REQ-IMP-090: the ROM 3dSen 2.2 ships beside a profile of the same name is skipped,
+/// the profile imported, and an unreadable asset still fails.
+#[test]
+fn amd067_an_embedded_rom_is_skipped_and_its_profile_imported() {
+    let bytes = profile("ABCDEFGHIJKL", "Chase");
+    let files = FakeProfileFileSystem::new();
+    let log = RecordingProfileLog::new();
+    let importer = ThreeDSenImporter::new(&files, Path::new(DESTINATION), Some(&log));
+
+    let summary = importer
+        .import(
+            Path::new("bundle"),
+            &[
+                asset("A", bytes.clone()),
+                asset("A", ines_rom()),
+                asset("B", vec![1, 2, 3, 4, 5]),
+            ],
+        )
+        .unwrap();
+    assert_eq!((1, 0, 1), (summary.imported, summary.already_present, summary.failed));
+    assert_eq!(bytes, files.read_all_bytes(&destination("A.3dn")).unwrap());
+    assert!(!files.file_exists(&destination("A (2).3dn")));
+    assert!(log.any_contains("Embedded ROM skipped: A"));
+
+    let files = FakeProfileFileSystem::new();
+    let importer = ThreeDSenImporter::new(&files, Path::new(DESTINATION), None);
+    let summary = importer
+        .import(
+            Path::new("bundle"),
+            &[asset("A", bytes), asset("A", ines_rom())],
+        )
+        .unwrap();
+    assert_eq!((1, 0, 0), (summary.imported, summary.already_present, summary.failed));
+    assert!(summary.is_complete());
+    assert_eq!(1, summary.results.len());
+}
+
+/// AMD-067 REQ-IMP-090: three bytes `NES` are not an iNES header and still fail.
+#[test]
+fn amd067_an_incomplete_ines_header_still_fails() {
+    let files = FakeProfileFileSystem::new();
+    let importer = ThreeDSenImporter::new(&files, Path::new(DESTINATION), None);
+    let summary = importer
+        .import(Path::new("bundle"), &[asset("A", vec![0x4E, 0x45, 0x53])])
+        .unwrap();
+    assert_eq!((0, 1), (summary.imported, summary.failed));
+}

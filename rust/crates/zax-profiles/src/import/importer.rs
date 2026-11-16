@@ -189,11 +189,29 @@ impl<'a> ThreeDSenImporter<'a> {
     ) -> io::Result<ThreeDSenImportSummary> {
         self.files.create_directory(&self.destination)?;
 
-        let results = assets.iter().map(|asset| self.import_one(asset)).collect();
+        let results = assets
+            .iter()
+            .filter(|asset| !self.skips_embedded_rom(asset))
+            .map(|asset| self.import_one(asset))
+            .collect();
         let summary = ThreeDSenImportSummary::new(bundle_path, results);
         self.log
             .information(&format!("{}: {}", bundle_path.display(), summary.message()));
         Ok(summary)
+    }
+
+    /// AMD-067 REQ-IMP-090: a `TextAsset` whose content starts with the iNES header is the ROM
+    /// 3dSen 2.2 ships beside a homebrew's profile. It is neither imported, nor failed, nor
+    /// already present, and nothing is written for it; the profile of the same name still is.
+    /// A shorter start (`NES` without its `0x1A`) is not one and fails as before.
+    fn skips_embedded_rom(&self, asset: &UnityTextAsset) -> bool {
+        const INES_MAGIC: &[u8; 4] = b"NES\x1A";
+        let rom = asset.script.starts_with(INES_MAGIC);
+        if rom {
+            self.log
+                .information(&format!("Embedded ROM skipped: {}", asset.name));
+        }
+        rom
     }
 
     fn import_one(&self, asset: &UnityTextAsset) -> ThreeDSenProfileResult {

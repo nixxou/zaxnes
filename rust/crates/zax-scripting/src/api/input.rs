@@ -132,6 +132,29 @@ fn gamepad() -> [TypeDef; 2] {
         },
         None,
     );
+    // Dummy, AMD-067: present for the compatibility of 3dSen 2.2 scripts, no effect; Zaxnes has
+    // no turbo fire (REQ-LUA-124). Player 0 or 1 reads what `Gamepad[i].State` reads; anything
+    // else (another number, nil, not a number) reads 0 without an error.
+    pads.function(
+        "GetPlayerState",
+        |call| {
+            require(call, HostType::GamepadApi, "GetPlayerState")?;
+            if !call.is_number(2) {
+                return Ok(Some(num(0)));
+            }
+            let index = call.number(2, "GetPlayerState")?;
+            if let Some(index) = [0.0, 1.0]
+                .iter()
+                .position(|player| (index - player).abs() < f64::EPSILON)
+            {
+                return Ok(Some(num(call
+                    .cx
+                    .host(move |ctx| ctx.machine.player_state(index))?)));
+            }
+            Ok(Some(num(0)))
+        },
+        None,
+    );
     pads.element = Some(HostType::Player);
     pads.indexer = Some(Arc::new(|cx, _, key| {
         let index = cx.integer(key, "Gamepad")?;
