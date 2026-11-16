@@ -2723,8 +2723,15 @@ impl Ppu2C02 {
         // An odd dot: the bus still holds the byte the fetch of X - 1 read.
         let residue = self.fetch_bus_value(cart.as_deref());
         self.read_buffer = residue;
+        let before_latch = self.v;
         self.run_dots(1, cart);
-        if latch_dot == 257 && (self.netlist_measured_region() || self.timing.region == NesRegion::Pal) {
+        if self.timing.region == NesRegion::Pal
+            && self.scanline == self.pre_render_scanline()
+            && self.vertical_copy_dots().contains(&latch_dot)
+        {
+            self.read_increment_meets_vertical_copy(before_latch);
+            self.notify_address_bus(self.v & 0x3FFF, cart);
+        } else if latch_dot == 257 && (self.netlist_measured_region() || self.timing.region == NesRegion::Pal) {
             // Lot FIDPLUS-2 (A5, netlist): on dot 257 the horizontal copy overrides the read's
             // coarse X increment; only its Y increment is left.
             self.increment_y();
@@ -2748,8 +2755,10 @@ impl Ppu2C02 {
     /// e0: a read latching on dot 278 turns `v` = `$7040`, `t` = `$2000` into `v` = `$0001`,
     /// `t` = `$0000` (the increment of `$7040` is `$0061`); at the other phases the same read
     /// latches on 277, before the copy, and `t` is left alone. A read latching on dot 300
-    /// (every phase) fits too: `$2000` AND `$3002` keeps `t`. Even latch dots only, the measured
-    /// case; `before_latch` is `v` before the copy of that dot.
+    /// (every phase) fits too: `$2000` AND `$3002` keeps `t`. Odd latch dots alike (`g2007v`, a
+    /// program aimed at the window: at e3 a read latching on 289 turns `$7BC2` / `$7BC0` into
+    /// `$0BC3` / `$0BC0`, one on 285 `$5A81` / `$5A80` into `$4A82` / `$4A80`). `before_latch` is
+    /// `v` before the copy of that dot.
     #[cold]
     #[inline(never)]
     fn read_increment_meets_vertical_copy(&mut self, before_latch: u16) {
