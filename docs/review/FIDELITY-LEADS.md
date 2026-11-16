@@ -739,9 +739,10 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 ### D2c. PAL composite and the colour/emphasis leads it found (2026-11-16)
 - Done: the 2C07's signal from its netlist (ANALOG-OUTPUT D2c). Leads left: (1) the DAC voltages of
   the 2C07 are the 2C02's (no measurement); (2) the 2C07's 2-pixel left/right border at the
-  blanking level is not in the core's picture; (3) on the 2C07 emphasis leaves `$xE`/`$xF` alone;
-  the 2C02 generator (`composite::signal`) attenuates them: to check against the 2C02 netlist with
-  the same bench (`benchvid <visualnes-src/Core>`); (4) Dendy's PPU (UA6538) keeps the NTSC model.
+  blanking level is not in the core's picture; (3) done: the same bench on VisualNes's 2C02 netlist
+  (`benchvid <visualnes-src/Core>`, 1 024 records, `vidmodel_ntsc.py`) matches Zaxnes's 2C02
+  generator on every colour, emphasis and phase but `$xE`/`$xF`, which output the blanking level
+  with no emphasis there too; `composite::signal` fixed (128 records before, 0 after); (4) Dendy's PPU (UA6538) keeps the NTSC model.
 - The bench's line parity is the netlist's `vpos` bit 0; the phase origin is the bench's
   half-clock counter. Whether a real 2C07 powers up with another relation between its /5 dot
   divider and its /6 subcarrier divider (which would move the pixel's phase) is not known.

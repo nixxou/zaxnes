@@ -41,11 +41,13 @@ const fn in_colour_phase(hue: usize, phase: usize) -> bool {
 #[must_use]
 pub fn signal(pixel: u8, emphasis: u8, phase: usize) -> f32 {
     let hue = usize::from(pixel & 0x0F);
-    let row = if hue > 13 {
-        1
-    } else {
-        usize::from((pixel >> 4) & 3)
-    };
+    if hue > 13 {
+        // `$xE` / `$xF` select the blanking level, which no emphasis bit attenuates (the 2C02
+        // netlist, `ext-tools/visual2c07-tools/benchvid.cpp` on VisualNes's 2C02: the whole
+        // table matches this generator only so; lot FIDPLUS-D2c).
+        return BLACK;
+    }
+    let row = usize::from((pixel >> 4) & 3);
     let phase = phase % PHASES;
     let high = if hue > 12 { row } else { row + 4 };
     let low = if hue == 0 { row + 4 } else { row };
