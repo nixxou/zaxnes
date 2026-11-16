@@ -1314,6 +1314,22 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 
 ## I. Open questions from tests and comparisons
 
+- I1 update (2026-11-16, replay on the 2C02 netlist, `ext-tools/smb3-netlist/RAPPORT.md`): the
+  game's line-193 sequence (`$A82F`: `$2006` = `$0B`, `$00`, `LDA $2007`, then `$2000`/`$2005`;
+  state dumped with Mesen) rebuilt as a sliding NROM program (`mksmb3.py`, `smb3p0.nes`) and
+  run on three cartridge models (edge, transparent 74LS373, transparent + memory delay, the
+  last one honouring AccuracyCoin's ALE + Read). **C1's timing is confirmed**: latch X = R+5
+  (e0/e2) or R+6 (e4/e6), the shape a function of X alone, `v`/`t` identical on all three
+  benches. Zaxnes equals the delay bench at every X but X = 8k+6 (the netlist re-reads the
+  attribute byte through the open latch -> palette 1, dark blue; Zaxnes black) and X = 8k
+  (invisible here); the video shows no dark blue, so not ported. The video's classes match the
+  alignment-0/1 weights (22/33/34/11 % against 19/33/33/15 %: the console is in that family,
+  which also explains "never empty": X = 239 exists only in 2/3). Still unexplained by every
+  digital model: the dash shape at X = 231/232 and the white at X = 235 (ALE / /RD analog
+  contention). Hardware test proposed: film `smb3p0.nes` on a console. New lead (C2): the
+  netlist loads `v` in the middle of W+3 and W+4's ALE already carries the new address, where
+  Zaxnes fetches W+4 with the old one (`211 netlist bus=2BF0 | zaxnes bus=2BEF`), invisible
+  to `dotcmp.py` (`v`/`t` only); to measure with a dedicated program.
 - I1. SMB3 Japan line 193 shapes (C1): console video shows "2 px + gap + 8 px" 36 %, 8 px 31 %,
   16 px 22 %, holes 12 %, never empty; BeesNES/puNES/NesHawk/Zaxnes default: 8 or 16 px; Mesen: empty
   75 %. Same `$2006`/`$2007` timing in Mesen and Zaxnes (W 212, R 224, v=$0B02). Branch
