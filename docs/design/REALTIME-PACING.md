@@ -131,3 +131,76 @@ poll needs either:
 
 Without one of them B5 would run the machine along real time with the pads still read once per
 display frame, which gains nothing. Parked until the owner chooses; FIDPLUS-C goes on meanwhile.
+
+## B5 step 1: the software latency bench (2026-11-15)
+
+Owner's answers: gilrs is allowed; latency is measured in software (no camera or button rig);
+RawInput will be needed later anyway (light guns), not now.
+
+`ext-tools/padbench` (outside the repository, like the netlist bench: it needs `unsafe` FFI for
+RawInput and XInput, which a measuring tool may use and Zaxnes may not) timestamps, on one monotonic
+clock, the moment each API first sees a button go down after all were up:
+
+| Backend | How |
+|---|---|
+| `rawinput` (reference) | `WM_INPUT` on a message-only window, buttons parsed from the HID report |
+| `xinput-spin` | `XInputGetState` polled as fast as possible |
+| `xinput-1khz` | `XInputGetState` every millisecond (the B5 plan) |
+| `gilrs` | gilrs 0.11's event queue (Windows.Gaming.Input on Windows) |
+| `sdl-event` | SDL's controller events, pumped continuously |
+| `sdl-frame` | SDL's state read once per 60 Hz frame, as Zaxnes reads it today |
+
+Run `padbench.exe 60`, press and release one pad button a few dozen times; it prints each press's
+delays against RawInput, then mean, median, 95th percentile and maximum per backend. The numbers
+decide B5's poll: the backend closest to RawInput, polled from its own thread into the slices of B3.
+Waiting for a run with the owner's pads (Xbox / XInput and a HID pad if possible).
+
+## B5 step 2: measured with the owner's pad (2026-11-15)
+
+Xbox 360 pad (XInput), 41 presses, padbench with a focused window, reference `XInputGetState`
+polled as fast as possible (RawInput sees nothing of an Xbox 360 pad):
+
+| Backend | Median | 95th percentile | Max |
+|---|---|---|---|
+| SDL events pumped continuously | +0.12 ms | 0.44 ms | 0.82 ms |
+| XInput at 1 kHz (connected slot only) | +0.24 ms | 0.96 ms | 0.98 ms |
+| gilrs 0.11 (Windows.Gaming.Input) | +4.5 ms | 8.4 ms | 8.8 ms |
+| SDL read once per 60 Hz frame (Zaxnes today) | +9.3 ms | 15.7 ms | 16.2 ms |
+
+* A first run without a window saw nothing in gilrs or SDL: both deliver pad input to a focused
+  application only. A first XInput run read all four slots and had 55-87 ms outliers: reading an
+  empty slot can block; read the connected ones only.
+* gilrs is the slowest of the fast backends (it appears to poll every ~8 ms). Choice for B5 left to
+  the owner: an XInput thread at 1 kHz (Windows, `unsafe` FFI behind `emu.realtime_input`), or SDL
+  pumped much more often on the main thread.
+## B5 step 3: the pad's own report rate (2026-11-15)
+
+`padbench rate` timestamps every new XInput `dwPacketNumber` while the stick moves (or just drifts):
+the owner's Xbox 360 pad, wired, reports every **8.00 ms (125 Hz)**, 5th-95th percentile 7.93-8.03
+ms, its default USB `bInterval` of 8. Its own latency is therefore 4 ms on average; Zaxnes adds 9.3 ms
+today (one read a frame) and about 0.3 ms with a 1 kHz read. Public figures (Gamepadla's hardware
+tester, community USB descriptors): 100-250 Hz for most pads over Bluetooth, dongles and many USB
+pads, about 200 Hz for an Xbox 360 wireless dongle, 250 Hz for the DualShock 4 / DualSense over USB;
+Bluetooth LE allows at most ~133 reports/s at its 7.5 ms minimum interval. Reading at 1 kHz asks
+nothing of the pad: it only stops adding delay on top of the pad's own.
+## B5 step 4: the real-time pad, on by default (2026-11-16)
+
+Owner decision (2026-11-16): read the pads more often through SDL, behind an option on by default.
+`emu.realtime_input` now defaults to **on** and covers both B3 (slices of real time, the pads read
+at the game's strobe) and this step:
+
+- `Application::run_the_realtime_pad` runs just before `swap`. While the frame would wait for the
+  refresh, it sleeps 1 ms, pumps SDL's events, samples the two players (`sample_players`: buttons
+  only, no command edge, no capture, no pointer) and runs the machine up to the present
+  (`EmulationHost::realtime_slice`, which keeps the displayed frame's hotkey bits). It stops 2.5 ms
+  before the refresh is due (last swap + paced budget) so the swap is not missed.
+- The frames finished during that wait are counted with the next displayed frame (`carried_frames`);
+  a quit seen by the inner pump is acted on at the next frame (`close_requested`).
+- Nothing happens without a refresh to wait for (no vsync and no cap), with run-ahead, during a
+  movie, or when the game is not running. The same code runs on Windows, Linux and Android: all
+  three read the pads through SDL.
+
+The game therefore reads a pad at most about 1 ms old (plus the pad's own report interval) instead
+of one sampled once a refresh: about 9 ms sooner on average, 16 at worst at 60 Hz. The run-ahead
+tests turn the option off: they compare whole frames across N, and the real-time pad changes, by
+design, the instant the input reaches the game at N = 0.

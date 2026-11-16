@@ -2276,6 +2276,25 @@ fn ppu_write_timings(out: &mut Vec<SettingDescriptor>) {
         ]))
         .with_label("CPU/PPU alignment"),
     );
+    // Lot FIDPLUS-E (FIDELITY-LEADS G5): the CPU / APU get-put parity and the DMC output timer a
+    // power-on starts with. 0 the one Zaxnes has always started with; 1 the 2A03 netlist's (the
+    // CPU differential is identical cycle for cycle with it); 2 drawn at each load.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuCpuApuParity,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Zaxnes"),
+            opt(1, "2A03 netlist"),
+            opt(2, "Random"),
+        ]))
+        .with_label("CPU/APU parity"),
+    );
 }
 
 /// The Fidélité+ options (lots FIDPLUS-A and FIDPLUS-B), each its own switch (owner,
@@ -2310,11 +2329,29 @@ fn fidelity_plus(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("Console frame rate"),
     );
-    // Lot FIDPLUS-B step 3: the machine run in slices of real time, the pads read at the game's
-    // own strobe. Off: whole frames on the frame clock. Run-ahead and movies keep whole frames.
+    // Lot FIDPLUS-B steps 3 and 5: the machine run in slices of real time, the pads read about
+    // every millisecond between two displayed frames and at the game's own strobe. On by default
+    // (owner, 2026-11-16). Off: whole frames on the frame clock, the pads read once a refresh.
+    // Run-ahead and movies keep whole frames.
     out.push(
         SettingDescriptor::new(
             SettingId::EmuRealtimeInput,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Real-time pad"),
+    );
+    // Lot FIDPLUS-D step D3a (docs/design/ANALOG-OUTPUT.md): with the real-time pad, the wait
+    // before the refresh is spent before the picture is drawn, not after, so the refresh shows
+    // the machine as it stands just before it rather than a refresh earlier. Off by default: the
+    // draw then has to fit between the end of the wait and the refresh.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuLatePresent,
             SettingKind::Bool,
             SettingValue::Bool(false),
             SettingScope::User,
@@ -2322,7 +2359,7 @@ fn fidelity_plus(out: &mut Vec<SettingDescriptor>) {
             SettingTheme::Emulation,
         )
         .with_domain(Domain::switch())
-        .with_label("Real-time pad"),
+        .with_label("Late present"),
     );
 }
 
@@ -2622,6 +2659,36 @@ fn video_nes_palette(out: &mut Vec<SettingDescriptor>) {
             opt(10, "Wavebeam"),
         ]))
         .with_label("NES colour palette"),
+    );
+    // Lot FIDPLUS-D2b step 2 (Fidélité+, a cost per pixel): the 2D picture decoded from the
+    // 2C02's composite signal as a television does (`zax_nes::composite::RowDecoder`): colour
+    // fringes at the edges and the dot crawl. Off: the palette. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoCompositeSignal,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Composite signal"),
+    );
+    // Lot FIDPLUS-D2b (owner request, 2026-11-15): the 3D scene tinted with the colour emphasis
+    // of the displayed frame (its most common value), the way the console's signal tints the
+    // whole picture. Off: the 3D view as it always was. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoEmphasis3d,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Colour emphasis in 3D"),
     );
 }
 

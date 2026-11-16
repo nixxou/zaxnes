@@ -8,6 +8,7 @@
 //! wall clock (REQ-ARCH-002).
 
 pub mod draw_list;
+mod emphasis_table;
 pub mod engine;
 pub mod error;
 pub mod frame;

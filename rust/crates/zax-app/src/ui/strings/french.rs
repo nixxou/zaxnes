@@ -514,6 +514,8 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.video.overscan_right", "Overscan : droite"),
     ("setting.video.overscan_mode", "Overscan : fit (bords masqués) ou resize (agrandi)"),
     ("setting.video.nes_palette", "Palette de couleurs NES"),
+    ("setting.video.composite_signal", "Signal composite"),
+    ("setting.video.emphasis_3d", "Accentuation des couleurs en 3D"),
     ("setting.emu.builtin_patches", "Patchs de ROM intégrés (au prochain chargement)"),
     ("setting.emu.tv_mode", "Région vidéo"),
     ("setting.emu.core", "Cœur d'émulation"),
@@ -530,9 +532,13 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.palette_corruption", "Corruption de palette"),
     ("setting.emu.ppu_reset_line", "Reset du PPU"),
     ("setting.emu.cpu_ppu_alignment", "Alignement CPU/PPU"),
+    ("setting.emu.cpu_apu_parity", "Parité CPU/APU"),
+    ("option.Zaxnes", "Zaxnes"),
+    ("option.2A03 netlist", "Netlist du 2A03"),
     ("setting.emu.fidelity_plus", "Fidélité+"),
     ("setting.emu.exact_rate", "Cadence de la console"),
     ("setting.emu.realtime_input", "Manette en temps réel"),
+    ("setting.emu.late_present", "Présentation tardive"),
     ("option.Alignment 0", "Alignement 0"),
     ("option.Alignment 1", "Alignement 1"),
     ("option.Alignment 2", "Alignement 2"),
@@ -787,6 +793,14 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ),
 
     // ----------------------------------------------------- onglet Image NES
+    (
+        "detail.video.emphasis_3d",
+        "Certains jeux teintent ou assombrissent tout l'écran grâce à l'accentuation des couleurs de la console (une pause, un fondu, un éclair, un niveau sous l'eau) : la console affaiblit son signal vidéo sur deux des trois couleurs. L'image plate l'affiche toujours ; ceci l'affiche aussi dans la vue 3D, toute la scène prenant la teinte que le jeu demande. Un jeu qui change l'accentuation au milieu de l'écran donne sa teinte la plus fréquente à toute la scène. Par défaut : désactivé.",
+    ),
+    (
+        "detail.video.composite_signal",
+        "Fidélité+ : l'image plate faite comme une télévision la faisait à partir du signal composite de la console, généré pixel par pixel comme la puce vidéo le génère, puis décodé : les couleurs bavent un peu au bord des objets et les franges ondulent d'une image à l'autre, comme sur un téléviseur branché avec le câble jaune. Les couleurs des grandes surfaces sont celles du signal de la console, pas celles de la palette. Coûte un peu de temps processeur par image. La vue 3D n'est pas concernée. Par défaut : désactivé.",
+    ),
     (
         "detail.video.nes_palette",
         "Dans quelle table de couleurs RVB les 64 couleurs de la console sont montrées, aussi bien \
@@ -1209,6 +1223,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
         "À l'allumage, le processeur et la puce vidéo de la console calent leurs horloges de l'une de quatre façons (numérotées de 0 à 3, comme la cartouche de test AccuracyCoin), qui change d'un allumage à l'autre. Quelques défauts en dépendent : le moment où arrive une lecture de la mémoire vidéo faite pendant l'image, le glitch de bus ouvert des écritures $2000 et $2005 (alignement 3), le pixel de bord d'une image coupée en milieu de ligne, et l'altération de la mémoire des sprites, qu'une console en alignement 1 ou 2 ne montre pas quand l'image est rallumée en cours d'écran. Les jeux écrits pour la console fonctionnent dans les quatre. L'alignement 3 est celui que Zaxnes a toujours suivi ; Aléatoire en tire un à chaque chargement, comme une console à chaque allumage. Prend effet au prochain chargement. Par défaut : Alignement 3.",
     ),
     (
+        "detail.emu.cpu_apu_parity",
+        "À l'allumage, le processeur de la console et son unité sonore commencent leur rythme à deux cycles sur l'un ou l'autre cycle, et la minuterie du canal d'échantillons démarre quelque part dans son compte. Cela décide si un transfert de sprites dure 513 ou 514 cycles et où la lecture du canal d'échantillons interrompt une lecture. Zaxnes est le départ qu'il a toujours pris ; Netlist du 2A03 celui du modèle au transistor près de la puce (avec lui le processeur suit ce modèle cycle pour cycle) ; Aléatoire en tire un à chaque chargement, comme une console à chaque allumage. Les jeux écrits pour la console fonctionnent avec tous. Prend effet au prochain chargement. Par défaut : Zaxnes.",
+    ),
+    (
         "detail.emu.ppu_2000_glitch",
         "Un défaut de la puce vidéo : une écriture dans son registre de contrôle qui commence sur un point précis d'une ligne peut faire dessiner la ligne suivante depuis la moitié gauche de l'écran, et une écriture dans son registre de défilement qui tombe sur la recopie du défilement peut décaler une ligne ou une image de ce qui était sur le bus de données. Cela n'arrive que sur certaines consoles, selon l'alignement des puces à l'allumage. Les jeux écrits pour la console l'évitent. Prend effet au prochain chargement. Par défaut : activé.",
     ),
@@ -1217,8 +1235,12 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
         "Fait tourner les jeux à la cadence propre de la console, 60,0988 images par seconde sur une console NTSC et 50,0070 sur une PAL, au lieu de 60 ou 50 tout rond, et le son avec, à sa vraie hauteur. Sur un écran 60 Hz, une image est montrée deux fois environ toutes les dix secondes ; un écran à fréquence variable les montre toutes. Prend effet tout de suite. Par défaut : désactivé.",
     ),
     (
+        "detail.emu.late_present",
+        "Avec la manette en temps réel, le temps qui reste avant le rafraîchissement de l'écran sert d'abord à faire avancer la console, et l'image est dessinée juste avant le rafraîchissement, d'après la console à cet instant. Sans elle, l'image est dessinée d'abord et montrée au rafraîchissement suivant, presque un rafraîchissement plus vieille que la console. Un appui apparaît à l'écran jusqu'à un rafraîchissement plus tôt (environ 10 ms à 60 Hz). Demande un ordinateur qui dessine une image bien en deçà d'un rafraîchissement ; si le dessin est en retard, un rafraîchissement est manqué. Seulement avec la manette en temps réel activée et un rafraîchissement à attendre. Prend effet tout de suite. Par défaut : désactivé.",
+    ),
+    (
         "detail.emu.realtime_input",
-        "Fait avancer la console par tranches de temps réel au lieu d'une image entière d'un coup, pour que le jeu lise la manette au moment où il la demande, comme sur la console : un réglage de fidélité, pour les jeux et programmes de test qui lisent la manette plusieurs fois par image. Il ne réduit pas la latence pour l'instant : la manette est toujours lue une fois par rafraîchissement de l'écran et l'image finie peut être montrée un rafraîchissement plus tard ; pour la latence la plus basse, laissez-le désactivé et utilisez le run-ahead. Pas utilisé avec le run-ahead ni pendant l'enregistrement ou la lecture d'un film : ceux-ci gardent des images entières. Prend effet tout de suite. Par défaut : désactivé.",
+        "Lit la manette environ toutes les millisecondes et fait avancer la console par tranches de temps réel entre deux rafraîchissements de l'écran, au lieu de lire la manette une fois par rafraîchissement et de calculer une image entière d'un coup : le jeu voit un bouton environ 9 ms plus tôt en moyenne (jusqu'à 16 ms), et le lit au moment où il le demande, comme sur la console. Pas utilisé avec le run-ahead ni pendant l'enregistrement ou la lecture d'un film : ceux-ci gardent des images entières. Prend effet tout de suite. Par défaut : activé."
     ),
     (
         "detail.emu.fidelity_plus",

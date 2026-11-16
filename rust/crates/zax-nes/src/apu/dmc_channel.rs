@@ -248,6 +248,13 @@ impl DmcChannel {
         self.timer -= clocks as i32;
     }
 
+    /// Diagnostic (the CPU differential against the 2A03 netlist): the output unit's timer and
+    /// bit counter set by hand, their power-on values being undefined on the console.
+    pub(crate) fn set_output_phase(&mut self, timer: i32, bits_remaining: i32) {
+        self.timer = timer;
+        self.bits_remaining = bits_remaining.clamp(1, 8);
+    }
+
     /// Clocks the output unit's timer; called once per CPU cycle.
     /// Clocks the timer; `true` when a bit was played (the output may have changed).
     pub fn clock_timer(&mut self) -> bool {

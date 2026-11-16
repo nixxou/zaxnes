@@ -555,6 +555,17 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
     }
 
+    /// `emu.cpu_apu_parity` as the core takes it (FIDELITY-LEADS G5): whether the power-on
+    /// takes the 2A03 netlist's get / put parity and DMC timer.
+    fn netlist_get_put(&self) -> bool {
+        match self.settings.get(SettingId::EmuCpuApuParity).as_int() {
+            1 => true,
+            // Random: drawn at each load, as a console draws it at each power-on.
+            2 => power_on_seed() & 0x100 != 0,
+            _ => false,
+        }
+    }
+
     /// The power-on memories and the PPU revision chosen in the emulation tab (lot CARTDB, lot
     /// FIDELITY steps 36 and 37).
     fn console_hardware(&self) -> ConsoleHardware {
@@ -633,6 +644,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let fidelity = self.fidelity_switches();
                 let console_profile = self.console_audio_profile();
                 let alignment = self.cpu_ppu_alignment();
+                let netlist_get_put = self.netlist_get_put();
                 let fidelity_plus = self.settings.get(SettingId::EmuFidelityPlus).as_bool();
                 let console = self.console_hardware();
                 let result = match self.session.as_mut() {
@@ -640,6 +652,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                         session.core_mut().set_cartridge_db(cartridge_db);
                         apply_fidelity_switches(session.core_mut(), fidelity);
                         session.core_mut().set_cpu_ppu_alignment(alignment);
+                        session.core_mut().set_netlist_get_put(netlist_get_put);
                         session.core_mut().set_fidelity_plus(fidelity_plus);
                         session
                             .core_mut()

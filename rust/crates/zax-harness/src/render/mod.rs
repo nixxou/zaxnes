@@ -22,7 +22,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use zax_engine3d::palette::{nes_color, Rgb24};
+use zax_engine3d::palette::{nes_color, nes_color_emphasized, Rgb24};
 use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::space_bend::SpaceBend;
 use zax_nes::ppu::SpriteLimit;
@@ -837,8 +837,20 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
             write_nes_picture(
                 &options.output.join(format!("{}-2d.png", scene.name)),
                 &scene.nes_picture,
+                &scene.nes_picture_emphasis,
                 scene.nes_picture_height,
             )?;
+            // `ZAXNES_COMPOSITE=1`: the picture decoded from the composite signal too, as the
+            // app's `video.composite_signal` shows it (lot FIDPLUS-D2b).
+            if std::env::var_os("ZAXNES_COMPOSITE").is_some_and(|value| value == "1") {
+                write_composite_picture(
+                    &options.output.join(format!("{}-composite.png", scene.name)),
+                    &scene.nes_picture,
+                    &scene.nes_picture_emphasis,
+                    scene.nes_picture_height,
+                    scene.nes_video_phase,
+                )?;
+            }
         }
 
         if options.explain {
@@ -1046,18 +1058,74 @@ fn write_png(file: &Path, options: &Options, pixels: &[u8]) -> Result<(), Harnes
 }
 
 /// Writes the flat NES picture, one colour index per pixel (REQ-CORE-048).
-/// The 2D view: the picture as wide and tall as its widescreen margins make it, `rows` rows.
-fn write_nes_picture(file: &Path, indices: &[u8], rows: usize) -> Result<(), HarnessError> {
+/// The 2D view: the picture as wide and tall as its widescreen margins make it, `rows` rows,
+/// with each pixel's colour emphasis when `emphasis` has one per pixel (lot FIDPLUS-D2b).
+fn write_nes_picture(
+    file: &Path,
+    indices: &[u8],
+    emphasis: &[u8],
+    rows: usize,
+) -> Result<(), HarnessError> {
     // A JSON frame carries no picture height: the NES picture.
     let rows = if rows == 0 { 240 } else { rows };
     let width = indices.len() / rows;
     let pixels: Vec<u8> = indices
         .iter()
         .take(width * rows)
-        .flat_map(|&index| {
-            let color = nes_color(usize::from(index));
+        .enumerate()
+        .flat_map(|(at, &index)| {
+            let color = match emphasis.get(at) {
+                Some(&bits) if emphasis.len() == indices.len() => {
+                    nes_color_emphasized(usize::from(index), bits)
+                }
+                _ => nes_color(usize::from(index)),
+            };
             [color.r, color.g, color.b, 255]
         })
+        .collect();
+    let (Ok(width), Ok(rows)) = (u32::try_from(width), u32::try_from(rows)) else {
+        return Ok(());
+    };
+    fs::write(file, png_image::encode_rgba(width, rows, &pixels)?)?;
+    Ok(())
+}
+
+/// The flat picture decoded from the 2C02's composite signal, row by row, the screen's row `r`
+/// starting its subcarrier 4 half-clocks after row `r - 1` (lot FIDPLUS-D2b).
+fn write_composite_picture(
+    file: &Path,
+    indices: &[u8],
+    emphasis: &[u8],
+    rows: usize,
+    video_phase: usize,
+) -> Result<(), HarnessError> {
+    use zax_nes::composite::{RowDecoder, PHASES};
+    let rows = if rows == 0 { 240 } else { rows };
+    let width = indices.len() / rows;
+    let margin = width.saturating_sub(256) / 2;
+    let margin_y = rows.saturating_sub(240) / 2;
+    let mut decoder = RowDecoder::default();
+    let mut rgb = vec![0u8; width * rows * 3];
+    for row in 0..rows {
+        let line = (row + PHASES * 60 - margin_y % PHASES) % PHASES;
+        let phase = (video_phase + 4 * line + PHASES * 1000 - (margin * 8) % PHASES) % PHASES;
+        let pixels: Vec<u8> = indices[row * width..(row + 1) * width]
+            .iter()
+            .map(|&pixel| pixel & 0x3F)
+            .collect();
+        let bits = emphasis.get(row * width..(row + 1) * width).unwrap_or(&[]);
+        let out = &mut rgb[row * width * 3..(row + 1) * width * 3];
+        if video_phase & zax_nes::composite::PAL_VIDEO != 0 {
+            #[allow(clippy::cast_possible_wrap)] // a picture is far below i64::MAX rows
+            let (line, first_x) = (row as i64 - margin_y as i64, -(margin as i64));
+            decoder.decode_row_pal(&pixels, bits, line, first_x, out);
+        } else {
+            decoder.decode_row(&pixels, bits, phase, out);
+        }
+    }
+    let pixels: Vec<u8> = rgb
+        .chunks_exact(3)
+        .flat_map(|c| [c[0], c[1], c[2], 255])
         .collect();
     let (Ok(width), Ok(rows)) = (u32::try_from(width), u32::try_from(rows)) else {
         return Ok(());

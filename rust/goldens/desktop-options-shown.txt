@@ -41,10 +41,12 @@ emu.ppu_2006_glitch
 emu.ppu_2000_glitch
 emu.palette_corruption
 emu.ppu_reset_line
+emu.cpu_apu_parity
 emu.cpu_ppu_alignment
 emu.fidelity_plus
 emu.exact_rate
 emu.realtime_input
+emu.late_present
 emu.pause_3d_in_2d
 emu.pipeline
 emu.power_on_ram
@@ -96,6 +98,8 @@ video.shader_resolution
 video.frame_rate
 video.max_queued_frames
 video.nes_palette
+video.composite_signal
+video.emphasis_3d
 video.overscan_mode
 video.overscan_ntsc_bottom
 video.overscan_ntsc_left

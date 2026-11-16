@@ -77,10 +77,12 @@ pub(crate) struct BandLimitedResampler {
     /// A console profile's filters, which replace the DC blocker when set
     /// (`console_profile::ProfileFilter`). Not in the state: a load restarts them at rest.
     profile_filter: Option<super::console_profile::ProfileFilter>,
+    /// The profile and rate `profile_filter` was built for.
+    profile_key: Option<(&'static super::console_profile::ConsoleAudioProfile, i32)>,
     /// With a console profile, the cartridge's expansion audio as a band-limited signal of its
     /// own, which the profile's chain adds between its second and third high-pass (owner,
     /// 2026-11-15, an exception to AMD-061 §6.2 inside the profile option; `BeesNES` `PostHpf`).
-    /// Not in the state: a load restarts it at silence, as the expansion level itself.
+    /// In the profile block of a state (lot FIDPLUS-D1e), with the filters.
     expansion_ring: [f64; RING_SIZE],
     expansion_signal: f64,
 }
@@ -101,17 +103,32 @@ impl BandLimitedResampler {
             high_pass_previous: 0.0,
             high_pass_output: 0.0,
             profile_filter: None,
+            profile_key: None,
             expansion_ring: [0.0; RING_SIZE],
             expansion_signal: 0.0,
         }
     }
 
     /// Sets, or clears, the filters of a console profile at `sample_rate` Hz.
+    ///
+    /// The same profile at the same rate keeps the filters as they are (lot FIDPLUS-D1b): the APU
+    /// calls this from every recomputation of its ratio — a speed change, the host's fine pacing
+    /// adjustment, a region applied by a savestate load — and rebuilding the filters at rest there
+    /// cut their memory each time (a click, and a loaded state's filter memory lost).
     pub fn set_profile(
         &mut self,
-        profile: Option<&super::console_profile::ConsoleAudioProfile>,
+        profile: Option<&'static super::console_profile::ConsoleAudioProfile>,
         sample_rate: i32,
     ) {
+        let key = profile.map(|profile| (profile, sample_rate));
+        let same = match (key, self.profile_key) {
+            (Some((a, rate_a)), Some((b, rate_b))) => std::ptr::eq(a, b) && rate_a == rate_b,
+            _ => false,
+        };
+        if same && self.profile_filter.is_some() {
+            return;
+        }
+        self.profile_key = key;
         self.profile_filter =
             profile.map(|profile| super::console_profile::ProfileFilter::new(profile, sample_rate));
     }
@@ -313,6 +330,11 @@ fn build_kernel() -> Box<[f64]> {
     kernel.into_boxed_slice()
 }
 
+/// The windowed sinc of the kernel, for the console profile's band filter fit (lot FIDPLUS-D1d).
+pub(super) fn kernel_impulse(x: f64) -> f64 {
+    impulse(x)
+}
+
 /// The windowed sinc the step response integrates, zero outside the window.
 #[allow(clippy::cast_precision_loss)] // TAPS is 32.
 fn impulse(x: f64) -> f64 {
@@ -375,6 +397,54 @@ impl BandLimitedResampler {
 }
 
 impl BandLimitedResampler {
+    /// Whether a console profile's filters run, so that a savestate carries their memory.
+    pub(crate) const fn has_profile_filter(&self) -> bool {
+        self.profile_filter.is_some()
+    }
+
+    /// Bytes [`Self::save_profile_filter`] writes with a profile.
+    pub(crate) const PROFILE_STATE_SIZE: usize =
+        super::console_profile::ProfileFilter::STATE_SIZE + 8 * (RING_SIZE + 1);
+
+    /// Appends the profile filters' memory and the expansion audio's own band-limited signal
+    /// (lots FIDPLUS-D1b and D1e; nothing without a profile).
+    pub(crate) fn save_profile_filter(&self, writer: &mut StateWriter) {
+        if let Some(filter) = self.profile_filter.as_ref() {
+            filter.save_state(writer);
+            for value in self.expansion_ring {
+                writer.write_f64(value);
+            }
+            writer.write_f64(self.expansion_signal);
+        }
+    }
+
+    /// Reads a block [`Self::save_profile_filter`] wrote into the filters in force, or skips it
+    /// when no profile is set now (the setting is the player's, not the state's).
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated.
+    pub(crate) fn load_profile_filter(
+        &mut self,
+        reader: &mut StateReader,
+    ) -> Result<(), InvalidState> {
+        let keep = self.profile_filter.is_some();
+        match self.profile_filter.as_mut() {
+            Some(filter) => filter.load_state(reader)?,
+            None => super::console_profile::ProfileFilter::at_rest().load_state(reader)?,
+        }
+        for slot in 0..RING_SIZE {
+            let value = reader.read_f64()?;
+            if keep {
+                self.expansion_ring[slot] = value;
+            }
+        }
+        let signal = reader.read_f64()?;
+        if keep {
+            self.expansion_signal = signal;
+        }
+        Ok(())
+    }
+
     /// Bytes a saved resampler state occupies, for the APU's `MAX_STATE_SIZE`.
     pub const STATE_SIZE: usize = RING_SIZE * 8 + 4 + 8 + 8 + 4 * 8;
 }

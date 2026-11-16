@@ -318,7 +318,13 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   pairing artefact of the sliding program).
 - **Regions**: every rule of A5 that depends on dots (dot 257, the read merge) applies to NTSC
   and Multi only (`Ppu2C02::netlist_measured_region`): the netlist is a 2C02; the PAL 2C07 (3.2
-  dots a cycle) and the clones keep the previous model until a measurement of their own. The
+  dots a cycle) and the clones keep the previous model until a measurement of their own. A 2C07
+  netlist exists (owner, 2026-11-15): Visual 2C07, `https://www.qmtpro.com/~nes/chipimages/visual2c07/`
+  (same site as Visual 2C02; its `transdefs.js` differs from the 2C02's, 1.22 MB against 1.13 MB;
+  its `nodenames.js`, dated 2016-09-01, looks partly carried over from the 2C02, e.g.
+  `vpos_eq_261`). Licence not stated on the page (visual6502 lineage). It would unblock C3c and
+  D2c as a measurement tool outside the repository, like VisualNes; the download waits on the
+  owner. The
   `INC $2007` rule (a data latch, dots 1 to 4 apart) applies everywhere.
 - **Bench artefacts to keep in mind**: PPUCTRL/PPUMASK power-on values of the netlist (write
   `$2000` after the warm-up); the PPU ignores writes during the warm-up; the `bus` column also
@@ -368,6 +374,17 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 
 ---
 
+- **Standard core against the 2C02 corpus, 2026-11-16** (`ext-tools/visualnes-bench/ntscjudge.py`,
+  harness `dot-trace --power-on-vblank`, the netlist's first frame left out, two frames paired,
+  alignments 2 and 3 alike): `g2001px`, `g3e01px` 0 differing dots; `oam` 1; `g2000`, `g2005px` 2;
+  `g2006x` one per register access (the recording instant, after A8); `g2006px` 740, the two-dot
+  recording instants of its `$2006` loads (Zaxnes records `v` at the write, the netlist at the
+  load); `r2007` with `--bus-conflicts` ~11 000 a frame on its two first frames (83 000 without),
+  its third netlist frame pairing with none (already so on 2026-11-15). `g2005` at phase 17: 1
+  differing dot on its paired frame (the judge rejected it as `r2007`: the third netlist frame of
+  both pairs with Zaxnes frame 4, not 3, likely an odd-frame dot skip around that frame). Not
+  judged: `rmw` (its traces do not pair with this bench).
+
 ### A6. M2 duty and edge placement outside NTSC — open, Fidélité+ (2026-11-15)
 - Fidélité+ places every access on the M2 and /CS edges (`fidplus::MasterClock`): M2 low for 9/24
   of the CPU cycle, high for 15/24 (2A03G, nesdev "CPU pin out"; BeesNES's phi1/phi2 slots use the
@@ -376,7 +393,7 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 - Earlier 2A03 letters are reported with a different duty (to check against nesdev before use:
   the 2A03E and earlier); part C's console model should carry it per revision.
 
-### A8. A second `$2006` write on a copy dot takes the CPU's open bus in alignment 3 — done in Fidélité+, open for the standard core (2026-11-15)
+### A8. A second `$2006` write on a copy dot takes the CPU's open bus in alignment 3 — done in Fidélité+ (2026-11-15) and the standard core (2026-11-16)
 - Netlist, `g2006x` (`$2006` written alternately `$08` and `$D7` on dots 257 and 304), alignments
   2 and 3: the copy of that dot (horizontal on 257, the last vertical one on the pre-render line's
   304) takes, for the bits the write's low byte drives, the **written byte** in alignment 2 and
@@ -384,8 +401,15 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   alignment 3. The same open bus as the `$2005` write on these dots and the `$2000` glitch (A4).
   (A first reading as "the old `t` AND the written byte" fitted dot 257 only.)
 - Fidélité+: `post_address_load`, under `emu.ppu_2000_glitch`; `g2006x` 0 dots in both
-  alignments. The standard core does not apply it yet: a cold rule on the write, a candidate for
-  the common base.
+  alignments.
+- Standard core, done 2026-11-16 (`Ppu2C02::address_write_on_copy`, cold, called from the second
+  `$2006` write on dots 257 / 304): the same rule, and on the PAL 2C07 its dot-257 form (open bus
+  on dot-accumulator phase 4). Judge: `ext-tools/visualnes-bench/ntscjudge.py` with the harness's
+  new `dot-trace --power-on-vblank` (the 2C02 traces of FIDPLUS-2 were taken against the power-on
+  at vblank, before `emu.power_on_top`; the old `fidjudge.sh` no longer finds a phase without it).
+  The netlist trace holds three frames, two paired: `g2006x` 4 412 differing dots a frame in both
+  alignments, exactly one per register access (the recording instant), against 4 425 before A8:
+  no rendering difference left in the standard core.
 
 ### A7. The coarse-Y wrap takes two phases — open, Fidélité+ step 3 (2026-11-15)
 - Netlist, `r2007`, alignments 2 and 3: when a Y increment wraps coarse Y from 29 (fine Y 7), `v`
@@ -689,6 +713,69 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   8 frames because blargg tests verified on hardware keep OAM for ~123 ms. To settle before coding
   (console-dependent; maybe a setting). nesdev also: the 2C07 (PAL) "forcibly refreshes OAM during
   scanlines 265 through 310", so no decay on PAL while rendering stays enabled.
+- **A hardware measurement (2026-11-15)**: FireSide's `oam_decay_test.nes` (NESdev Discord; A
+  holds rendering off and counts the frames, its release prints OAM): OAM stays intact about **7
+  frames** on their console (model and PPU revision not given), i.e. ~117 ms on NTSC, on the side
+  of blargg's ~123 ms and BeesNES's 8 frames, not of nesdev's "not much longer than a vblank". Read
+  in its source (`main.s`): the counter counts the first frame of a press while rendering is still on
+  (PPUMASK is written with the old value before the mask is cleared), so the true figure may be 6;
+  its readout writes back each byte it reads, so a readout re-seeds OAM. Other consoles' results
+  are asked for on the thread; the `$E3` bytes it shows are the attribute bytes' missing bits 2-4. Asked
+  whether OAM goes all at once or row by row, they answer: **random bits decay, more of them the
+  longer rendering stays off**. Zaxnes's `emu.oam_decay` drops a whole row at once after 8 frames
+  without access: a gradual, per-bit model (a per-bit retention time drawn once per console, bits
+  past it lost) would be closer. Asked what a decayed bit becomes: **each bit has a "resting
+  state", 0 or 1, it ends in** (a DRAM cell's discharged level, true or complement cell), and **the
+  first 8 bytes never decay** in that test. Likely reason, from its source: with rendering off the
+  PPU keeps reading OAM at OAMADDR, which refreshes that row, and OAMADDR is 0 there (after the DMA
+  and after the readout's 256 writes); proposed check: `$40` to `$2003` before turning rendering
+  off should keep bytes `$40-$47` instead. One console, by hand: to confirm. Model it would give:
+  per bit, a resting value and a retention time drawn once per console; past it without an access
+  the bit takes its resting value; the row at OAMADDR exempt while rendering is off.
+- **Speculative per-bit model (lot FIDPLUS-E, 2026-11-16), replaces the whole-row model of step
+  20 under the same option (`emu.oam_decay`, still off).** `Ppu2C02::refresh_oam_row`,
+  `move_oam_address`, `decay_oam_row`, `OAM_RETENTION_US` (`ppu/mod.rs`):
+  - per bit, a retention drawn once from a log-normal law (DRAM retention), a 256-quantile table:
+    none before 125 ms (above blargg's ~123 ms), median 266 ms (16 NTSC frames), all by 566 ms;
+  - per bit, a resting value (0 or 1); both draws are a fixed hash of the bit's index (SplitMix64),
+    so a run replays identically and nothing new goes in the savestate;
+  - the OAMADDR row is held refreshed while rendering is off (hypothesis above): a row is settled
+    when OAMADDR enters it and stamped when OAMADDR leaves it; a `$2004` access to it decays nothing;
+  - no decay at all on the 2C07 (nesdev: the PAL PPU refreshes OAM itself); Dendy at its dot rate.
+  - Measured with our ROM (`ext-tools/oamdecay-rom/oamdecay.nes`, harness `ZAXNES_OAM_DECAY=1`):
+    0 bits lost for 1-7 frames, 6 at 8, 25 at 9, 69 at 10, 257 at 12, 816 at 15, 1 453 at 20,
+    1 798 from 30 frames (878 to 0, 920 to 1; the other bits already sat at their resting value);
+    the OAMADDR row (ROW31 in the ROM) keeps its bytes.
+  - Not measured: the law, its median and spread, the share of 0 and 1 resting values, temperature
+    (one internal scale, no option, owner 2026-11-16). One plausible console, not a measured one.
+- **Reading OAM on old PPUs (NESdev Discord, 2026-11-16)**: a tester ran a decay ROM on a
+  letterless and an E-revision PPU and read all `$00`; reply on the thread: PPU revisions before G
+  do not support reading OAMDATA (`$2004`). Zaxnes already models it (`pre_g_revision`). So any
+  `$2004`-based decay measurement, ours included, needs a G-or-later PPU; FireSide's figures come
+  from such a console.
+
+### D2c. PAL composite and the colour/emphasis leads it found (2026-11-16)
+- Done: the 2C07's signal from its netlist (ANALOG-OUTPUT D2c). Leads left: (1) the DAC voltages of
+  the 2C07 are the 2C02's (no measurement); (2) the 2C07's 2-pixel left/right border at the
+  blanking level is not in the core's picture; (3) done: the same bench on VisualNes's 2C02 netlist
+  (`benchvid <visualnes-src/Core>`, 1 024 records, `vidmodel_ntsc.py`) matches Zaxnes's 2C02
+  generator on every colour, emphasis and phase but `$xE`/`$xF`, which output the blanking level
+  with no emphasis there too; `composite::signal` fixed (128 records before, 0 after); (4) Dendy's PPU (UA6538) keeps the NTSC model.
+- The bench's line parity is the netlist's `vpos` bit 0; the phase origin is the bench's
+  half-clock counter. Whether a real 2C07 powers up with another relation between its /5 dot
+  divider and its /6 subcarrier divider (which would move the pixel's phase) is not known.
+
+### C3c-collision. PAL `$2006` load colliding with dot 256 (2026-11-16, open)
+- Visual 2C07, `g2006x` at reset phases e0/e3/e6, line 54 (and 148, 223): `v` = `$210C`,
+  `t` = `$2A08`; second `$2006` write `$D7` on dot 253. Netlist: the load lands on dot 256 and
+  leaves `v` = `$2005`, `t` = `$2805` (dots 256-281). Zaxnes: the load lands on dot 257 (one dot
+  late), the collision (`address_load_collision`, the 2C02's rule `t &= v`, `v` = `$310D` after
+  the dot-256 increments) gives `t` = `$2005`, then `v` = `t`.
+- So on the 2C07: `v` = written AND incremented (`$2AD7 & $310D`), but `t` keeps the written
+  nametable-Y bit (`$2805` = `$2005 | $0800`), and the load is a dot earlier for this write's
+  cycle phase. One value pattern only: a dedicated program (several written values, nametable
+  bits set and clear, writes on dots 248-256 at every cycle phase) is needed before a rule.
+  Cost today: 14 long runs over five frames at each reset phase, about 4 900 dots a frame.
 
 ### D2b. Performance lead found on the way (lot FIDELITY, not fidelity) — tried and dropped (FIDPLUS-1)
 - Callgrind `f4185fa8` vs `27e2c3e2`: the APU stage costs +0.8 to +0.9 % on every game (+17 to
@@ -820,19 +907,54 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   unchanged). **Approximations left, for Fidelity+**: (1) BeesNES's low-pass runs at the CPU rate
   as a pole-zero filter; ours at the output rate, pole pre-warped, **zero dropped** (it sits at
   144-189 kHz, above any output Nyquist) — to do properly, run it on the band-limited signal
-  before decimation (per-step cost); (2) the overall profile volume (0.34 to 4.5) is not applied,
+  before decimation (per-step cost) — **done 2026-11-15 (FIDPLUS-D1d), differently**: the
+  low-pass, its zero and BeesNES's output pole run at the output rate as a filter fitted to their
+  analog response (`console_profile::BandFilter`: the model's two poles, impulse invariant, behind
+  a 32-tap correction fitted by least squares at setup, weighted by our resampler kernel's
+  response, 14 samples of delay; the expansion audio is delayed as much). Test: within 0.002 dB and
+  0.2 degree of the model up to 0.35 of the output rate, all 14 profiles, 44.1 and 48 kHz
+  (prototype: 0.001 dB); the chain before was 1.6 to 3.9 dB off at the band's top. The output pole
+  and the forced low-pass are BeesNES's at its fitting rate, 44.1 kHz (`output / 2 + 100` =
+  22 150 Hz, default output `LSNAudioOptions.h:96`, recordings at 44 100 Hz `README.txt:63`),
+  fixed whatever our rate. Why not per step: a profile kernel (the sinc through the low-pass)
+  needs a tail of 50+ samples for the 3.7 kHz Twin Famicom (2 samples of time constant at 48 kHz,
+  4 at 96 kHz), more than the 64-sample ring of the standard state holds. Cost: about 40
+  multiply-adds per output sample, inside the profile option only; (2) the overall profile volume (0.34 to 4.5) is not applied,
   only its sign: our output is normalised to full scale, applying it would clip; (3) BeesNES's
   sample box applies HPF0 inside its windowed-sinc resampler, ours after our own resampler (same
-  one-pole formula, a few samples of phase apart); (4) the expansion audio (VRC6, MMC5, N163...)
+  one-pole formula, a few samples of phase apart) — **closed 2026-11-15 (FIDPLUS-D1c), not an
+  approximation**: the sample box runs HPF0 at the output rate right after its sinc
+  (`LSNSampleBox.h:636-645`, `ProcessHpf` `:285-291`), with the same `a (y1 + x - x1)` and
+  `tau = 1 / f` as ours, at the same rate; only its place against the low-pass differs, and both
+  are linear and time-invariant, so the order does not change the signal (test
+  `fidplus_d1c_hpf0_order_against_the_low_pass_is_immaterial`, 20 000 samples, < 1e-12). Both
+  resamplers are linear-phase: a fixed delay, no phase difference; (4) the expansion audio (VRC6, MMC5, N163...)
   is added after the gains and is not weighted per console, while BeesNES lets the mapper
   post-process between HPF1 and HPF2 (`PostHpf`, `LSNApu2A0X.h:1919-1931`) — **done 2026-11-15
   (owner, an exception to AMD-061 §6.2 inside the profile option, FIDPLUS-D1a)**: with a profile,
   the expansion level is a band-limited signal of its own (`expansion_ring`), added between the
   second and the third high-pass; without one, the clip of AMD-061 is unchanged (golden identical,
-  audio included); (5) filter state is
-  not in the savestate (a load restarts it at rest: inaudible click at most); (6) the
+  audio included); (5) filter state not in the savestate — **done 2026-11-15 (FIDPLUS-D1b)**:
+  a savestate taken with a profile carries the filters' memory (format 14 / 15: a flags byte, then
+  the edges and / or the 64-byte filter block; 12 and 13 still read, no profile keeps 10 / 11), and
+  a load gives the same samples as the machine that went on (test, exact). Found on the way: every
+  recomputation of the resampling ratio (speed, the host's fine pacing adjustment, a load's region)
+  rebuilt the filters at rest, a click each time; the same profile at the same rate now keeps them.
+  Run-ahead's in-memory restore and the expansion signal — **done 2026-11-15 (FIDPLUS-D1e)**: the
+  in-memory state carries the profile block too, and the block now holds the expansion audio's own
+  band-limited signal and its level `M`. Before, with a profile and a board with expansion audio
+  (5B, VRC6, MMC5, N163, FDS...), every load reset `M` to 0 but kept the signal, so the board's
+  level was added a second time when pushed back (an offset and a thump, 1.6e-3 in the test), and
+  run-ahead left the filters 4e-5 apart; both now give the same samples as the machine that went
+  on (tests `fidplus_profile_expansion_state_tests`); (6) the
   N20914398 profile was measured with a Sunsoft 5B cartridge and has no low-pass and no
-  inversion — kept as BeesNES lists it.
+  inversion — kept as BeesNES lists it. Found by D1c, for D1d: BeesNES never leaves the CPU-rate
+  low-pass out — a profile with it disabled (N20914398, Twin Famicom 475711 SCART) or above the
+  output's Nyquist (PAL PM608755, 64 kHz) gets one at `output / 2 + 100` Hz
+  (`LSNApu2A0X.h:725-726`), and every profile adds one more pole there (`m_pfOutputPole[1]`,
+  `:733-737`, `:541-546`); ours drops them (about -3 dB each at 24.1 kHz for 48 kHz output, the
+  top of the band). Zeros: only N13721267 (144.4 kHz), N34169630 (145.2 kHz) and PM313006
+  (188.8 kHz) have one; it lifts the band edge by under 0.1 dB.
 
 ### E2. Per-console clock — rejected (no effect while the pacing follows the display; step 38)
 - Each console's crystal differs (E1 table). Option "measured clock of console X" changes speed and
@@ -949,6 +1071,47 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   console-model choice of its own (with the other RP2A03 letter differences, DMA timings) is part
   of C3.
 
+### G5. CPU / APU get-put parity and the DMC timer at power-on — done as a choice (2026-11-16)
+
+- The 2A03 netlist differential (`docs/progress/CPU-NETLIST-DIAG.md`) finds the CPU identical
+  cycle for cycle once two power-on values are set as the netlist's: the get / put parity (Zaxnes
+  starts on the other one: OAM DMA 514 / 513 where the netlist takes 513 / 514, and the DMC load's
+  halt one read apart) and the DMC output unit's timer (431 with 8 bits remaining, against this
+  core's 427).
+- Open: whether a console fixes the parity at reset (the netlist does) or draws it at power-on.
+  The CPU / PPU alignment is already a choice (`emu.cpu_ppu_alignment`, random among four); a
+  "CPU / APU alignment" choice (random, either) would treat the APU the same way. No test ROM in
+  the campaign tells the two apart (all pass either way); a game that depends on it would be one
+  timing an OAM DMA's length or a DMC halt's repeated read without syncing first.
+
+- Done 2026-11-16 as a choice, default unchanged: `emu.cpu_apu_parity` ("CPU/APU parity":
+  Zaxnes, 2A03 netlist, Random drawn at each load), `NesCore::set_netlist_get_put`, applied at
+  power-on only (the reset button keeps the running parity): the other get / put parity and the
+  DMC output timer at 431 with 8 bits left, as the CPU differential aligns them. Test
+  `fidplus_cpu_apu_parity_tests` (an OAM DMA started on the same cycle takes one cycle more or
+  less). Whether a console fixes it or draws it stays open; the choice covers both.
+
+### G6. Open-bus bits of a controller read just after a DMC fetch — open (2026-11-15)
+
+- 2A03 netlist differential, program `dmc4016` (`docs/progress/CPU-NETLIST-DIAG.md`, step 5): when
+  a DMC DMA halts a `$4016` read (`4016R 4016R C000R 4016R`), the netlist's real read returns `$00`
+  (bits 5-7 = the sample byte `$00` the fetch left on the pins), Zaxnes `$40` (bits 5-7 from the
+  internal bus, which the fetch does not update). Seven such reads in 30 000 cycles; every other
+  `$4016` read is identical.
+- Zaxnes takes the controller ports' open bits from the internal bus on purpose (`nes_bus.rs`,
+  `AccuracyCoin` `Implied Dummy Reads`: JSR operands read from `$4016`/`$4017` "leech off" an opcode
+  read from `$4015`, which only the internal bus carries). Both observations fit a rule where the
+  halt and dummy re-reads of `$4016` load the internal bus from the pins; not changed until a model
+  satisfies both, with `AccuracyCoin` 147/147 kept.
+- Step 6 of the diagnostic (2026-11-15): the netlist is no judge here. VisualNes has no controller
+  and floats the external bus on every read of `$2000`-`$7FFF` that is not a chip (`mCpuRead`,
+  `floatBits`), so its `$4016` / `$4017` bits are a floating bus in a switch-level simulation (its
+  `$4017` reads `$10`). Program `g6jmp` (opcode from `$4015`, operand from `$4016`): the netlist
+  takes the pins (`$40`), while `AccuracyCoin`'s hardware-verified `Implied Dummy Reads` expects the
+  internal bus in that same sequence (`$21`, where the pins would give `$E1` for `NOP $EA`). Zaxnes
+  follows the hardware test; the DMC case alone has no hardware reference yet. Lead kept open for a
+  console measurement (a test ROM reading `$4016` right after a DMC fetch, run on hardware).
+
 ## H. Video output (shaders lot, not core)
 
 ### H1. Composite / RF signal, CRT gamma, phosphor decay — open
@@ -956,6 +1119,24 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   decay, signal noise (README "Visual Samples"); palette generator palgen-persune.
 - Zaxnes: librashader slang shaders (branch feat/librashader). These are generic shaders, not a
   signal model. Candidate shaders/palettes to port; not a core item.
+
+### H3. Colour emphasis on screen — done in the 2D picture (FIDPLUS-D2b, 2026-11-15)
+- Found while preparing D2b: the picture carried colour index and opacity only; PPUMASK bits 5-7
+  never reached the screen (REQ-CORE-047 keeps them out of the tile records and the palette, and
+  nothing else carried them). Survey (`fidplus_d2b_emphasis_survey_tests`, 1800 frames each, 348
+  ROMs): `Duelito` (blue emphasis on every frame), `firefly`, `rastesam4`, `RasterDemo`,
+  `Sayoonara!`, `CMC80s`, the palette demos, blargg's `litewall`, `240pee`, `mmc5exram`; *Metroid*
+  one frame at power-on.
+- Now: the PPU logs each write that changes the bits with the first pixel it reaches (delay
+  2/1/1/2 dots by alignment, TriCNES's, not yet measured on the netlist), resets at the frame wrap;
+  the host expands it into a plane only for a frame with emphasis (nothing per pixel otherwise).
+  Colours: the chosen 64-colour palette scaled per channel by TriCNES's ratio (its 512-colour
+  table, MIT, `zax-engine3d/src/emphasis_table.rs`; `palette::nes_color_emphasized`). Our own
+  composite decoder's ratio was tried first and was too far from it (red emphasis on ``: green
+  0.89 and blue 0.31, TriCNES 0.75 and 0.67). Option `video.emphasis_3d` (owner, off): the 3D
+  scene takes the frame's most common emphasis.
+- Open: the delay against the netlist's video pins; 512-entry palettes
+  (Mesen's, FirebrandX's own emphasis rows) as tables instead of the ratio.
 
 ### H2. The 2C02's composite signal — generator and reference decoder done (FIDPLUS-D2a, 2026-11-15)
 - nesdev "NTSC video": per pixel, 8 half-clock samples of a square wave at the colour subcarrier

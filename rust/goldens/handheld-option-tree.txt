@@ -91,6 +91,8 @@ options
     page.nes_picture
       video.remove_sprite_limit
       video.widescreen_strict_edges
+      video.composite_signal
+      video.emphasis_3d
     page.camera
       row.camera
       camera.fov
@@ -114,9 +116,11 @@ options
       emu.palette_corruption
       emu.ppu_reset_line
       emu.cpu_ppu_alignment
+      emu.cpu_apu_parity
       emu.fidelity_plus
       emu.exact_rate
       emu.realtime_input
+      emu.late_present
       emu.run_ahead
       emu.smooth_scroll_ahead
       emu.game_speed

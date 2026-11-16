@@ -1255,6 +1255,42 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         true
     }
 
+    /// Lot FIDPLUS-B step 5 (`docs/design/REALTIME-PACING.md`): a slice of real time run between
+    /// two displayed frames, with the pads as they stand now, so that the machine follows the
+    /// clock about every millisecond and the game reads a pad at most a millisecond old. Only when
+    /// [`Self::slices_on`] holds and the game runs; returns how many frames ended, which the
+    /// caller hands to the next displayed frame.
+    pub fn realtime_slice(
+        &mut self,
+        player_one: crate::input::InputAction,
+        player_two: crate::input::InputAction,
+    ) -> u32 {
+        if self.loading
+            || self.state != EmulationState::Running
+            || !self.session.as_ref().is_some_and(GameSession::has_rom)
+            || !self.slices_on()
+        {
+            return 0;
+        }
+        // The hotkey bits of the displayed frame's sample stay with it.
+        let keep = |fresh: crate::input::InputAction, frame: crate::input::InputAction| {
+            (fresh & crate::input::InputAction::CONTROLLER_BYTE)
+                | crate::input::InputAction::from_bits(
+                    frame.bits() & !crate::input::InputAction::CONTROLLER_BYTE.bits(),
+                )
+        };
+        let player_one = keep(player_one, self.step_input.0);
+        let player_two = keep(player_two, self.step_input.1);
+        self.step_input = (player_one, player_two);
+        self.run_due_slices(player_one, player_two)
+    }
+
+    /// Whether the real-time pad runs between displayed frames now ([`Self::realtime_slice`]).
+    #[must_use]
+    pub fn realtime_slices_active(&self) -> bool {
+        !self.loading && self.state == EmulationState::Running && self.slices_on()
+    }
+
     /// Whether this tick runs the machine in slices of real time (lot FIDPLUS-B step 3,
     /// `emu.realtime_input`): on a Zaxnes core, with run-ahead off and no movie recorded or played,
     /// which keep whole frames.

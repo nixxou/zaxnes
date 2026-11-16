@@ -261,9 +261,6 @@ pub struct Apu2A03 {
     /// The expansion level the cached [`Self::level`] was computed with: the `M` of the cycle
     /// just mixed, which is the test point [`Self::mixer_expansion`] reports.
     level_expansion: i32,
-    /// The `M` the clip takes: the expansion level, or 0 when a console profile filters it
-    /// apart (`profile_expansion_step`). A setting's consequence, not state.
-    mixed_expansion: i32,
     /// `A` of REQ-CORE-073 on the cycle just mixed (the test point of REQ-CORE-076).
     mixer_apu: i32,
     /// `S` of REQ-CORE-073 on the cycle just mixed (the test point of REQ-CORE-076).
@@ -306,7 +303,6 @@ impl Clone for Apu2A03 {
             level_dirty: self.level_dirty,
             expansion_level: self.expansion_level,
             level_expansion: self.level_expansion,
-            mixed_expansion: self.mixed_expansion,
             mixer_apu: self.mixer_apu,
             mixer_output: self.mixer_output,
         }
@@ -368,7 +364,6 @@ impl Apu2A03 {
             level_dirty: true,
             expansion_level: 0,
             level_expansion: 0,
-            mixed_expansion: 0,
             mixer_apu: 0,
             mixer_output: 0,
         };
@@ -422,11 +417,6 @@ impl Apu2A03 {
     /// the comparison is on a per-cycle path (see [`Self::current_level`]).
     pub fn set_expansion_level(&mut self, level: i32) {
         if level != self.expansion_level {
-            if self.console_profile.is_some() {
-                self.profile_expansion_step(level);
-            } else {
-                self.mixed_expansion = level;
-            }
             self.expansion_level = level;
             self.level_dirty = true;
             self.level_key = NO_LEVEL_KEY;
@@ -434,14 +424,15 @@ impl Apu2A03 {
     }
 
     /// With a console profile, the expansion audio takes the profile chain's own path (owner,
-    /// 2026-11-15): a step of its band-limited signal, and nothing in the clip. Out of line: the
-    /// MMC5 pushes its level often, and the standard path only tests the profile.
+    /// 2026-11-15): a step of its band-limited signal from `from` to `to`, and nothing in the
+    /// clip. Called from the mix on the cycle after the level moved, on the mix's cache miss that
+    /// move forces, so the setter the MMC5 calls stays what it was before the profiles; out of
+    /// line, the standard path never reaches it.
     #[cold]
     #[inline(never)]
-    fn profile_expansion_step(&mut self, level: i32) {
+    fn profile_expansion_step(&mut self, from: i32, to: i32) {
         self.resampler
-            .add_expansion_step(mixer::to_float(-level) - mixer::to_float(-self.expansion_level));
-        self.mixed_expansion = 0;
+            .add_expansion_step(mixer::to_float(-to) - mixer::to_float(-from));
     }
 
     /// Whether the DMC's memory reader wants a byte (nesdev, "DMA").
@@ -632,7 +623,6 @@ impl Apu2A03 {
         // bus pushes the real value again before the next cycle runs.
         self.expansion_level = 0;
         self.level_expansion = 0;
-        self.mixed_expansion = 0;
         self.mixer_apu = 0;
         self.mixer_output = 0;
 
@@ -1148,6 +1138,20 @@ impl Apu2A03 {
             .set_profile(self.console_profile, self.sample_rate);
     }
 
+    /// Diagnostic: the DMC output unit's timer and bit counter, whose power-on values the
+    /// console leaves undefined (the CPU differential against the 2A03 netlist aligns them).
+    #[doc(hidden)]
+    pub fn diagnostic_set_dmc_phase(&mut self, timer: i32, bits_remaining: i32) {
+        self.dmc.set_output_phase(timer, bits_remaining);
+        self.level_dirty = true;
+    }
+
+    /// Diagnostic: the APU's get / put parity against the CPU, random at power-on on a console.
+    #[doc(hidden)]
+    pub fn diagnostic_flip_parity(&mut self) {
+        self.apu_cycle = !self.apu_cycle;
+    }
+
     /// The console model's CPU (lot FIDPLUS-C, FIDELITY-LEADS G4): a letterless RP2A03 chosen
     /// by itself, whatever the audio profile. The noise channel takes the letterless chip when
     /// either says so.
@@ -1183,11 +1187,6 @@ impl Apu2A03 {
             .checked_sub(1)
             .and_then(|slot| console_profile::CONSOLE_AUDIO_PROFILES.get(slot));
         self.apply_letterless();
-        self.mixed_expansion = if self.console_profile.is_some() {
-            0
-        } else {
-            self.expansion_level
-        };
         self.resampler
             .set_profile(self.console_profile, self.sample_rate);
         self.level_key = -1;
@@ -1230,13 +1229,22 @@ impl Apu2A03 {
         }
 
         self.level_key = key;
-        self.level_expansion = self.expansion_level;
-        self.mixer_apu = match self.console_profile {
-            None => mixer::mix(pulse1, pulse2, triangle, noise, dmc),
-            Some(profile) => profile_mix(profile, [pulse1, pulse2, triangle, noise, dmc]),
+        let clipped_expansion = match self.console_profile {
+            None => {
+                self.mixer_apu = mixer::mix(pulse1, pulse2, triangle, noise, dmc);
+                self.expansion_level
+            }
+            Some(profile) => {
+                self.mixer_apu = profile_mix(profile, [pulse1, pulse2, triangle, noise, dmc]);
+                // The expansion audio takes its own path (`profile_expansion_step`).
+                if self.expansion_level != self.level_expansion {
+                    self.profile_expansion_step(self.level_expansion, self.expansion_level);
+                }
+                0
+            }
         };
-        // With a console profile the expansion audio takes its own path (`set_expansion_level`).
-        self.mixer_output = mixer::clip(self.mixer_apu, self.mixed_expansion);
+        self.level_expansion = self.expansion_level;
+        self.mixer_output = mixer::clip(self.mixer_apu, clipped_expansion);
         self.level = mixer::to_float(self.mixer_output);
         self.level
     }
@@ -1256,6 +1264,42 @@ impl Apu2A03 {
 impl Apu2A03 {
     /// Bytes the APU's part of a savestate occupies at most (REQ-ARCH-013).
     pub const MAX_STATE_SIZE: usize = 512 + BandLimitedResampler::STATE_SIZE;
+
+    /// Bytes the console profile's filter block occupies (lot FIDPLUS-D1b).
+    pub const PROFILE_FILTER_STATE_SIZE: usize = BandLimitedResampler::PROFILE_STATE_SIZE + 8;
+
+    /// Whether a console audio profile is set, so that a savestate carries its filters' memory.
+    #[must_use]
+    pub const fn has_profile_filter(&self) -> bool {
+        self.resampler.has_profile_filter()
+    }
+
+    /// Appends the console profile's filter memory (nothing without a profile).
+    pub fn save_profile_filter(&self, writer: &mut StateWriter) {
+        if self.resampler.has_profile_filter() {
+            self.resampler.save_profile_filter(writer);
+            // The expansion level the band-limited signal stands at (lot FIDPLUS-D1e): the plain
+            // block leaves `M` out and restarts it at 0, which with a profile would add the
+            // board's level a second time when it pushes it back.
+            writer.write_i32(self.expansion_level);
+            writer.write_i32(self.level_expansion);
+        }
+    }
+
+    /// Reads the console profile's filter memory into the filters in force, or skips it.
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated.
+    pub fn load_profile_filter(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.resampler.load_profile_filter(reader)?;
+        let expansion_level = reader.read_i32()?;
+        let level_expansion = reader.read_i32()?;
+        if self.resampler.has_profile_filter() {
+            self.expansion_level = expansion_level;
+            self.level_expansion = level_expansion;
+        }
+        Ok(())
+    }
 
     /// Appends the APU state to `writer` (REQ-CORE-090).
     pub fn save_state(&self, writer: &mut StateWriter) {
@@ -1345,7 +1389,6 @@ impl Apu2A03 {
         // is unchanged.
         self.expansion_level = 0;
         self.level_expansion = 0;
-        self.mixed_expansion = 0;
         // The three derived fields are rebuilt here and now, from the channel outputs just read
         // back, so that the test point of REQ-CORE-076 agrees with the restored level instead of
         // reading 0 until a channel next moves. `level_key` is left exactly as the block gave

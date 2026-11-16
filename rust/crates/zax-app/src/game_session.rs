@@ -334,6 +334,10 @@ struct FramePipeline {
     picture: Vec<u8>,
     /// Its rows.
     picture_height: usize,
+    /// Its colour emphasis, empty without any (lot FIDPLUS-D2b).
+    picture_emphasis: Vec<u8>,
+    /// Its subcarrier phase ([`NesCore::video_phase`]).
+    video_phase: usize,
     /// Its experimental smooth scrolling shift ([`NesCore::picture_shift`]).
     picture_shift: Option<(f32, i32, i32)>,
     /// Its camera motion to the next frame ([`NesCore::picture_motion`]).
@@ -877,6 +881,9 @@ impl GameSession {
         self.pipeline.pending = Some(captured);
         self.core.work_ram_into(&mut self.pipeline.memory.ram);
         self.pipeline.picture_height = self.core.wide_picture_into(&mut self.pipeline.picture);
+        self.core
+            .wide_emphasis_into(&mut self.pipeline.picture_emphasis);
+        self.pipeline.video_phase = self.core.video_phase();
         self.pipeline.picture_shift = self.core.picture_shift();
         self.pipeline.picture_motion = self.core.picture_motion();
         self.core
@@ -918,6 +925,9 @@ impl GameSession {
                 self.pipeline.pending = Some(captured);
                 self.pipeline.picture_height =
                     self.core.wide_picture_into(&mut self.pipeline.picture);
+                self.core
+                    .wide_emphasis_into(&mut self.pipeline.picture_emphasis);
+                self.pipeline.video_phase = self.core.video_phase();
                 self.pipeline.picture_shift = self.core.picture_shift();
                 self.pipeline.picture_motion = self.core.picture_motion();
                 self.core
@@ -1404,6 +1414,9 @@ impl GameSession {
         // kept the picture of the frame it captured).
         if self.pipeline.pending.is_none() {
             self.pipeline.picture_height = self.core.wide_picture_into(&mut self.pipeline.picture);
+            self.core
+                .wide_emphasis_into(&mut self.pipeline.picture_emphasis);
+            self.pipeline.video_phase = self.core.video_phase();
             self.pipeline.picture_shift = self.core.picture_shift();
             self.pipeline.picture_motion = self.core.picture_motion();
             self.core
@@ -1763,6 +1776,27 @@ impl GameSession {
         let height = self.copy_nes_picture(destination);
         self.core.split_steady_sprites(destination, overlay);
         height
+    }
+
+    /// The colour emphasis of the picture [`GameSession::copy_nes_picture`] copies, into
+    /// `destination`; empty for a frame without any (lot FIDPLUS-D2b).
+    pub fn copy_nes_emphasis(&self, destination: &mut Vec<u8>) {
+        if self.pipeline.in_flight || self.pipeline.pending.is_some() {
+            destination.clear();
+            destination.extend_from_slice(&self.pipeline.picture_emphasis);
+        } else {
+            self.core.wide_emphasis_into(destination);
+        }
+    }
+
+    /// The subcarrier phase of the picture [`GameSession::copy_nes_picture`] copies.
+    #[must_use]
+    pub fn nes_video_phase(&self) -> usize {
+        if self.pipeline.in_flight || self.pipeline.pending.is_some() {
+            self.pipeline.video_phase
+        } else {
+            self.core.video_phase()
+        }
     }
 
     /// The experimental smooth scrolling's shift of the picture [`GameSession::copy_nes_picture`]

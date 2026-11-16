@@ -79,6 +79,10 @@ pub type AppHost = EmulationHost<LibraryGameCatalog, SceneView>;
 /// The folder of the user data where the linked shader programs are kept.
 const SHADER_CACHE_FOLDER: &str = "shader-cache";
 
+/// How long before the refresh the real-time pad stops running the machine, so the swap is not
+/// missed (lot FIDPLUS-B step 5).
+const REALTIME_MARGIN: Duration = Duration::from_micros(2500);
+
 /// The window of AMD-051 REQ-E3D-646, as the diagnostic line states it: a late object has not
 /// been drawable for this many emulated frames.
 #[allow(clippy::cast_sign_loss)] // A positive constant of the specification.
@@ -503,7 +507,7 @@ impl Running {
         let frame_begin = self.clock.start();
         let busy_begin = Instant::now();
         let mark = self.clock.start();
-        if self.pump_events() {
+        if self.pump_events() || self.state.close_requested {
             return Ok(false);
         }
         self.state.frame_time = self.host.pacer.elapsed_seconds();
@@ -532,7 +536,9 @@ impl Running {
         let pipelined = self.next_frame_pipelined();
         self.host.defer_conversion = pipelined;
         let mark = self.clock.start();
-        let emulated = self.host.tick(real, &snapshot);
+        // The frames the real-time pad finished during the last wait are this frame's too.
+        let mut emulated =
+            self.host.tick(real, &snapshot) + std::mem::take(&mut self.state.carried_frames);
         self.log_rates(emulated);
         self.state.emulated_now = emulated;
         self.source.end_sample();
@@ -545,6 +551,16 @@ impl Running {
             );
             self.clock.merge(&inner);
         }
+        // Lot FIDPLUS-D3a (`emu.late_present`): the wait before the refresh comes first, so the
+        // picture drawn below is the machine as it stands just before the refresh.
+        let late = self.late_present();
+        if late {
+            let margin = self.late_margin();
+            self.run_the_realtime_pad(margin);
+            emulated += std::mem::take(&mut self.state.carried_frames);
+            self.state.emulated_now = emulated;
+        }
+        let render_begin = Instant::now();
         let mark = self.clock.start();
         update_scene(&mut self.host, &mut self.state);
         {
@@ -567,6 +583,7 @@ impl Running {
             Duration::ZERO
         };
         self.close_the_gpu_queue(bounded);
+        self.state.last_render = render_begin.elapsed();
         self.serve_the_editor();
         self.carry_out_ui_effects();
         let mark = self.clock.start();
@@ -591,9 +608,13 @@ impl Running {
             }
             return Ok(false);
         }
+        if !late {
+            self.run_the_realtime_pad(REALTIME_MARGIN);
+        }
         let mark = self.clock.start();
         self.window.swap();
         self.clock.stop(Stage::Swap, mark);
+        self.state.last_swap = Some(Instant::now());
         let mark = self.clock.start();
         self.window.pace();
         self.clock.stop(Stage::Pacer, mark);
@@ -641,6 +662,61 @@ impl Running {
         if let Some(line) = self.host.audio_report() {
             log(&format!("audio  {line}"));
         }
+    }
+
+    /// Lot FIDPLUS-B step 5 (`emu.realtime_input`, `docs/design/REALTIME-PACING.md`): the time
+    /// the frame would spend waiting for its swap is spent instead reading the pads about every
+    /// millisecond and running the machine up to the present, so that it follows the clock and
+    /// the game reads a pad at most a millisecond old instead of one sampled once a refresh
+    /// (9.3 ms on average, 16 at worst, measured with `padbench`). Stops 2.5 ms before the
+    /// refresh is due, so the swap is not missed; nothing to do without a refresh to wait for
+    /// (no vsync and no frame cap), when the setting is off or the game is not running.
+    fn run_the_realtime_pad(&mut self, margin: Duration) {
+        const STEP: Duration = Duration::from_millis(1);
+        if !self.host.realtime_slices_active() {
+            return;
+        }
+        let (Some(period), Some(last_swap)) = (self.paced_budget(), self.state.last_swap) else {
+            return;
+        };
+        let Some(deadline) = (last_swap + period).checked_sub(margin) else {
+            return;
+        };
+        while Instant::now() + STEP < deadline {
+            std::thread::sleep(STEP);
+            if self.pump_events() {
+                self.state.close_requested = true;
+                return;
+            }
+            let keyboard = (!self.ui.wants_keyboard())
+                .then_some(&self.input.keyboard as &dyn zax_platform::input::KeyboardDevice);
+            let (player_one, player_two) = self
+                .source
+                .sample_players(keyboard, &mut self.input.gamepads);
+            self.state.carried_frames += self.host.realtime_slice(player_one, player_two);
+        }
+    }
+
+    /// Whether `emu.late_present` applies to this frame: on, with the real-time pad running and a
+    /// refresh to wait for (lot FIDPLUS-D3a).
+    fn late_present(&self) -> bool {
+        self.host
+            .settings()
+            .get(SettingId::EmuLatePresent)
+            .as_bool()
+            && self.host.realtime_slices_active()
+            && self.paced_budget().is_some()
+    }
+
+    /// How long before the refresh the late wait ends: the last frame's scene and draw time plus
+    /// 2 ms, at least the real-time pad's own margin, at most three quarters of the refresh (a
+    /// draw that slow gains nothing from waiting).
+    fn late_margin(&self) -> Duration {
+        let ceiling = self
+            .paced_budget()
+            .map_or(Duration::from_millis(12), |period| period.mul_f32(0.75));
+        (self.state.last_render + Duration::from_millis(2))
+            .clamp(REALTIME_MARGIN, ceiling.max(REALTIME_MARGIN))
     }
 
     /// Feeds the window's events to the interface and the input layer. Returns whether the
@@ -1529,6 +1605,8 @@ impl Running {
                     draw_list: Some(displayed),
                     nes_picture: &[],
                     nes_picture_height: 0,
+                    nes_picture_emphasis: &[],
+                    nes_picture_rgb: &[],
                 };
                 draw_scene(graphics, view, &scene, &frame, shadow_reported, clock)
             };
@@ -2102,6 +2180,7 @@ struct ViewPlan {
     skip: bool,
 }
 
+#[allow(clippy::struct_excessive_bools)] // independent loop flags, not a state machine
 struct RunState {
     rendered_frames: u64,
     scene_frames: u64,
@@ -2122,6 +2201,12 @@ struct RunState {
     picture: Vec<u8>,
     /// Its rows.
     picture_height: usize,
+    /// Its colour emphasis, empty without any (lot FIDPLUS-D2b).
+    picture_emphasis: Vec<u8>,
+    /// It decoded from the composite signal (`video.composite_signal`), three bytes a pixel;
+    /// empty with the option off.
+    picture_rgb: Vec<u8>,
+    composite: zax_nes::composite::RowDecoder,
     /// Whether its playfield is drawn between two frames (the experimental 120 Hz scrolling):
     /// every display frame is then drawn, a new emulated frame or not.
     picture_between: bool,
@@ -2131,6 +2216,16 @@ struct RunState {
     /// When this display frame began, on the frame pacer's clock.
     frame_time: f64,
     scroll_log: Option<std::fs::File>,
+    /// Lot FIDPLUS-B step 5: the frames the real-time pad finished while the last displayed frame
+    /// waited for its swap, which the next one shows.
+    carried_frames: u32,
+    /// A quit the real-time pad's event pump saw, acted on at the next frame.
+    close_requested: bool,
+    /// When the last swap returned: the display's refresh, the start of the wait the real-time
+    /// pad fills.
+    last_swap: Option<Instant>,
+    /// How long the last frame's scene and draw took (`emu.late_present`'s margin).
+    last_render: Duration,
 }
 
 impl RunState {
@@ -2149,11 +2244,18 @@ impl RunState {
             was_two_dimensional: false,
             picture: Vec::new(),
             picture_height: 0,
+            picture_emphasis: Vec::new(),
+            picture_rgb: Vec::new(),
+            composite: zax_nes::composite::RowDecoder::default(),
             picture_between: false,
             emulated_now: 0,
             frame_time: 0.0,
             scroll_log: std::env::var_os("ZAXNES_SCROLL_LOG")
                 .and_then(|path| std::fs::File::create(path).ok()),
+            carried_frames: 0,
+            close_requested: false,
+            last_swap: None,
+            last_render: Duration::ZERO,
         }
     }
 }
@@ -2650,9 +2752,88 @@ fn widescreen_margin(choice: i32, extra: i32, size: (i32, i32)) -> (i32, i32) {
     )
 }
 
+/// `video.emphasis_3d` (lot FIDPLUS-D2b): the 3D scene's colours take the displayed frame's most
+/// common colour emphasis; off, or in 2D (whose picture carries its own), none.
+fn tint_scene(host: &AppHost, state: &mut RunState, two_dimensional: bool) {
+    let wanted = !two_dimensional && host.settings().get(SettingId::VideoEmphasis3d).as_bool();
+    let mut emphasis = 0;
+    if let (true, Some(session)) = (wanted, host.session()) {
+        session.copy_nes_emphasis(&mut state.picture_emphasis);
+        let mut counts = [0usize; 8];
+        for &bits in &state.picture_emphasis {
+            counts[usize::from(bits & 7)] += 1;
+        }
+        // An empty plane is a frame without emphasis; ties go to the lower value.
+        emphasis = (0..8u8)
+            .rev()
+            .max_by_key(|&bits| counts[usize::from(bits)])
+            .filter(|_| !state.picture_emphasis.is_empty())
+            .unwrap_or(0);
+    }
+    zax_engine3d::palette::set_scene_emphasis(emphasis);
+}
+
+/// Whether `video.composite_signal` is on.
+fn composite_on(host: &AppHost) -> bool {
+    host.settings()
+        .get(SettingId::VideoCompositeSignal)
+        .as_bool()
+}
+
+/// The 2D picture's colours beside its indices (lot FIDPLUS-D2b): its emphasis, and with
+/// `composite` the whole picture decoded from the composite signal.
+fn colour_picture(state: &mut RunState, session: &GameSession, width: usize, composite: bool) {
+    session.copy_nes_emphasis(&mut state.picture_emphasis);
+    decode_composite(state, width, composite.then(|| session.nes_video_phase()));
+}
+
+/// `video.composite_signal` (lot FIDPLUS-D2b step 2): the 2D picture decoded from the 2C02's
+/// composite signal, row by row, into `state.picture_rgb`. Row `r` of the screen starts its
+/// subcarrier 4 half-clocks after row `r - 1`; a widescreen margin column `c` before the screen is
+/// `8 c` half-clocks earlier. A pixel the overscan leaves out decodes as black and stays hidden.
+fn decode_composite(state: &mut RunState, width: usize, video_phase: Option<usize>) {
+    use zax_nes::composite::PHASES;
+    state.picture_rgb.clear();
+    let Some(video_phase) = video_phase else {
+        return;
+    };
+    let rows = state.picture_height;
+    if width == 0 || rows == 0 || state.picture.len() < width * rows {
+        return;
+    }
+    let margin = width.saturating_sub(256) / 2;
+    let margin_y = rows.saturating_sub(240) / 2;
+    state.picture_rgb.resize(width * rows * 3, 0);
+    let emphasis_ok = state.picture_emphasis.len() == state.picture.len();
+    for row in 0..rows {
+        // Phases mod 12, the margins counted backwards from the screen's first row and column.
+        let line = (row + PHASES * 60 - margin_y % PHASES) % PHASES;
+        let phase = (video_phase + 4 * line + PHASES * 1000 - (margin * 8) % PHASES) % PHASES;
+        let pixels = &state.picture[row * width..(row + 1) * width];
+        let emphasis = if emphasis_ok {
+            &state.picture_emphasis[row * width..(row + 1) * width]
+        } else {
+            &[]
+        };
+        let out = &mut state.picture_rgb[row * width * 3..(row + 1) * width * 3];
+        if video_phase & zax_nes::composite::PAL_VIDEO != 0 {
+            // The 2C07 (lot FIDPLUS-D2c): the phase follows the picture line and column.
+            #[allow(clippy::cast_possible_wrap)] // a picture is far below i64::MAX rows
+            let (line, first_x) = (row as i64 - margin_y as i64, -(margin as i64));
+            state
+                .composite
+                .decode_row_pal(pixels, emphasis, line, first_x, out);
+        } else {
+            state.composite.decode_row(pixels, emphasis, phase, out);
+        }
+    }
+}
+
 #[allow(clippy::too_many_lines)] // The scene of a frame, each source of motion in its order.
 fn update_scene(host: &mut AppHost, state: &mut RunState) {
     let two_dimensional = host.showing_two_dimensional();
+    let composite = composite_on(host);
+    tint_scene(host, state, two_dimensional);
     // How far into the emulated frame the display is, for the experimental 120 Hz scrolling.
     let phase = host.pacer.phase_at(state.frame_time);
     let show_band = host
@@ -2791,6 +2972,7 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         }
         let in_force = overscan.in_force(i32::try_from(width).map_or(0, |width| (width - 256) / 2));
         in_force.leave_out(&mut state.picture, state.picture_height);
+        colour_picture(state, session, width, composite);
         scene.picture_crop = zax_profiles::values::Vec4F::new(
             in_force.crop()[0],
             in_force.crop()[1],
@@ -2845,6 +3027,16 @@ fn render_scene(
         draw_list: list,
         nes_picture: picture,
         nes_picture_height: state.picture_height,
+        nes_picture_emphasis: if picture.is_empty() {
+            &[]
+        } else {
+            &state.picture_emphasis
+        },
+        nes_picture_rgb: if picture.is_empty() {
+            &[]
+        } else {
+            &state.picture_rgb
+        },
     };
     draw_scene(
         graphics,

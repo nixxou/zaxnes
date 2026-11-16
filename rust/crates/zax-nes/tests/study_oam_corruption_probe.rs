@@ -30,7 +30,12 @@ fn study_oam_corruption_probe() {
     let mut core = NesCore::new();
     core.set_cpu_ppu_alignment(alignment);
     // `ZAXNES_PHASE`: move the power-on dot (e.g. -11 to start on dot 0 as TriCNES does).
-    core.set_phase_offset(std::env::var("ZAXNES_PHASE").ok().and_then(|value| value.parse().ok()).unwrap_or(0));
+    core.set_phase_offset(
+        std::env::var("ZAXNES_PHASE")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0),
+    );
     assert!(core.load_rom(&std::fs::read(rom).unwrap(), "probe").success);
     let pattern: [u8; 256] = std::array::from_fn(|index| index.to_le_bytes()[0]);
     *core.bus_mut().ppu_mut().oam_mut() = pattern;
@@ -38,8 +43,8 @@ fn study_oam_corruption_probe() {
     let mut log = String::new();
     let mut rendering = false;
     let mut pending: Option<(i32, i32)> = None; // (line to check on, lines left)
-    // `ZAXNES_OAM_PROBE_LINE6=1`: check OAM on line 6 after the rendering comes back (programs
-    // that switch it back on in vblank, where the corruption lands at the pre-render line).
+                                                // `ZAXNES_OAM_PROBE_LINE6=1`: check OAM on line 6 after the rendering comes back (programs
+                                                // that switch it back on in vblank, where the corruption lands at the pre-render line).
     let line6 = std::env::var("ZAXNES_OAM_PROBE_LINE6").is_ok_and(|value| value == "1");
     let steps: usize = std::env::var("ZAXNES_OAM_PROBE_STEPS")
         .ok()

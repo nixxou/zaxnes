@@ -111,6 +111,10 @@ pub struct NesBus {
     dma_pins: u8,
     oam_dma_count: i64,
     dmc_dma_count: i64,
+    /// Every access a DMA unit made on the bus, `(cycle, address, read, byte)`, the cycle
+    /// numbered as `CpuBus::cycle_count` minus one (the recorder's numbering).
+    #[cfg(feature = "bus-trace")]
+    dma_trace: Vec<(i64, u16, bool, u8)>,
     /// CPU cycles the PPU still owes: while `deferred_ppu` is on, the PPU runs in batches,
     /// caught up before anything that could see or change it (see [`NesBus::sync_ppu`]).
     ppu_lag: u32,
@@ -201,6 +205,8 @@ impl NesBus {
             dma_pins: 0,
             oam_dma_count: 0,
             dmc_dma_count: 0,
+            #[cfg(feature = "bus-trace")]
+            dma_trace: Vec::new(),
             ppu_lag: 0,
             ppu_deadline: 0,
             deferred_ppu: false,
@@ -304,6 +310,15 @@ impl NesBus {
     #[must_use]
     pub const fn apu(&self) -> &Apu2A03 {
         &self.apu
+    }
+
+    /// Diagnostic (the CPU differential against the 2A03 netlist): the other CPU / APU get-put
+    /// parity, which a console takes at power-on: the bus's cycle parity (the DMA's get and put
+    /// cycles) and the APU's together, as one clock.
+    #[doc(hidden)]
+    pub fn diagnostic_flip_get_put(&mut self) {
+        self.cycles += 1;
+        self.apu.diagnostic_flip_parity();
     }
 
     /// The APU, mutably, caught up first.
@@ -797,12 +812,14 @@ impl NesBus {
                 self.dma_cycle_as::<K>();
                 let address = (u16::from(self.dma_oam_page) << 8) | u16::from(oam_index);
                 oam_byte = self.dma_read_as::<K>(address, internal, &mut decoded_before);
+                self.trace_dma(address, true, oam_byte);
                 oam_index = oam_index.wrapping_add(1);
                 oam_steps += 1;
             } else if !get_cycle && (self.dma & DMA_OAM) != 0 && (oam_steps & 1) != 0 {
                 self.dma_cycle_as::<K>();
                 self.sync_ppu_as::<K>();
                 self.ppu.write_oam_dma(oam_byte);
+                self.trace_dma(0x2004, false, oam_byte);
                 oam_steps += 1;
                 if oam_steps == 0x200 {
                     self.dma &= !DMA_OAM;
@@ -878,7 +895,23 @@ impl NesBus {
         if !ZONE {
             let value = self.read_internal_as::<K>(read_address);
             self.data_bus = value;
+            self.trace_dma(read_address, true, value);
         }
+    }
+
+    /// Records one DMA bus access with feature `bus-trace`; nothing at all without it.
+    #[allow(clippy::inline_always, clippy::unused_self, unused_variables)]
+    #[inline(always)]
+    fn trace_dma(&mut self, address: u16, read: bool, value: u8) {
+        #[cfg(feature = "bus-trace")]
+        self.dma_trace.push((self.cycles - 1, address, read, value));
+    }
+
+    /// The DMA accesses recorded since the last call (feature `bus-trace`).
+    #[cfg(feature = "bus-trace")]
+    #[doc(hidden)]
+    pub fn take_dma_trace(&mut self) -> Vec<(i64, u16, bool, u8)> {
+        std::mem::take(&mut self.dma_trace)
     }
 
     /// The cycles of a DMC sample fetch with no OAM transfer beside it: the dummy cycle, an
@@ -996,12 +1029,14 @@ impl NesBus {
             self.tick_as::<K>();
             let byte = self.read_internal_as::<K>(page | u16::from(oam_index));
             self.data_bus = byte;
+            self.trace_dma(page | u16::from(oam_index), true, byte);
             oam_index = oam_index.wrapping_add(1);
 
             // The put cycle: it writes it into OAM.
             self.tick_as::<K>();
             self.sync_ppu_as::<K>();
             self.ppu.write_oam_dma(byte);
+            self.trace_dma(0x2004, false, byte);
         }
         oam_index
     }
@@ -1112,6 +1147,7 @@ impl NesBus {
             value
         };
         self.drive_external_bus(pins);
+        self.trace_dma(address, true, pins);
         self.data_bus = internal_bus;
         value
     }

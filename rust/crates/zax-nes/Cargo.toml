@@ -22,6 +22,9 @@ workspace = true
 # Lot FIDPLUS-2: per-dot trace of the PPU (`Ppu2C02::start_dot_trace`) for the differential
 # against the transistor netlist. Diagnostics only; never in `default`.
 ppu-dot-trace = []
+# Lot CPU-NETLIST-DIAG: every bus access the DMA units make (`NesBus::take_dma_trace`), for the
+# differential of the DMA cycles against the 2A03 netlist. Diagnostics only; never in `default`.
+bus-trace = []
 default = [
     # Q-139 closed 2026-11-12: the owner validated SMB3 and Zelda II by eye (lot ACCURACY-1).
     "ppu-2007-render-read",

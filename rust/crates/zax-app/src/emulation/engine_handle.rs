@@ -496,6 +496,24 @@ impl EngineHandle {
         STANDARD_ROWS
     }
 
+    /// The colour emphasis of [`Self::wide_picture_into`]'s picture, into `out` (empty when the
+    /// frame has none, or on an engine that does not report it).
+    pub fn wide_emphasis_into(&self, out: &mut Vec<u8>) {
+        match self.zaxnes() {
+            Some(core) => {
+                core.wide_emphasis_into(out);
+            }
+            None => out.clear(),
+        }
+    }
+
+    /// The colour subcarrier's phase at the start of the frame just drawn (0 to 11; 0 on an
+    /// engine that does not report it), for the composite decoder (lot FIDPLUS-D2b).
+    #[must_use]
+    pub fn video_phase(&self) -> usize {
+        self.zaxnes().map_or(0, NesCore::video_phase)
+    }
+
     /// The frame's experimental smooth-scrolling shift; `None` on an engine that has none.
     #[must_use]
     pub fn picture_shift(&self) -> Option<(f32, i32, i32)> {
@@ -892,6 +910,13 @@ impl EngineHandle {
     pub fn set_cpu_ppu_alignment(&mut self, alignment: u8) {
         if let Some(core) = self.zaxnes_mut() {
             core.set_cpu_ppu_alignment(alignment);
+        }
+    }
+
+    /// `emu.cpu_apu_parity` (FIDELITY-LEADS G5); Zaxnes only.
+    pub fn set_netlist_get_put(&mut self, netlist: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_netlist_get_put(netlist);
         }
     }
 

@@ -220,6 +220,8 @@ const DISPLAY: &[LayoutEntry] = &[
 /// The rows of the **NES picture** tab: what the console puts out, before any 3D.
 const NES_PICTURE: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::VideoNesPalette),
+    LayoutEntry::Row(SettingId::VideoCompositeSignal),
+    LayoutEntry::Row(SettingId::VideoEmphasis3d),
     LayoutEntry::Row(SettingId::VideoRemoveSpriteLimit),
     LayoutEntry::Group(OptionsGroup::Overscan),
     LayoutEntry::Row(SettingId::VideoOverscanMode),
@@ -321,9 +323,11 @@ const EMULATION: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::EmuPaletteCorruption),
     LayoutEntry::Row(SettingId::EmuPpuResetLine),
     LayoutEntry::Row(SettingId::EmuCpuPpuAlignment),
+    LayoutEntry::Row(SettingId::EmuCpuApuParity),
     LayoutEntry::Row(SettingId::EmuFidelityPlus),
     LayoutEntry::Row(SettingId::EmuExactRate),
     LayoutEntry::Row(SettingId::EmuRealtimeInput),
+    LayoutEntry::Row(SettingId::EmuLatePresent),
 ];
 
 /// The rows of the **Interface** tab, from the most common to the most advanced.

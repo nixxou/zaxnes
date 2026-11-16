@@ -146,6 +146,15 @@ fn smooth_scrolling(core: &NesCore, picture: &mut [u8], scene: &mut SceneState) 
 /// [`HarnessError::Io`] when a file cannot be read or written.
 #[allow(clippy::too_many_lines)] // One run of the ROM, step by step.
 pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError> {
+    // A forced scene emphasis is in force from the first frame, as the app's setting is: the
+    // profile's scripts read palette colours while the frames run.
+    if let Some(forced) = std::env::var("ZAXNES_EMPHASIS_3D").ok().and_then(|value| {
+        value
+            .strip_prefix("force:")
+            .and_then(|n| n.parse::<u8>().ok())
+    }) {
+        zax_engine3d::palette::set_scene_emphasis(forced);
+    }
     let profile = request.profile;
     let file_name = file_name(request.rom);
     let (mut host, mut scene) = Host::start(&Startup {
@@ -226,6 +235,9 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
 
     let mut picture = Vec::new();
     let picture_height = host.core.wide_picture_into(&mut picture);
+    let mut emphasis = Vec::new();
+    host.core.wide_emphasis_into(&mut emphasis);
+    let nes_video_phase = host.core.video_phase();
     smooth_scrolling(&host.core, &mut picture, &mut scene);
     let mut engine = host.engine;
     scene.camera.snap_to_setpoints();
@@ -248,6 +260,40 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
 
     // AMD-009 (Q-022): without a profile the scene shows the core's pixel frame.
     scene.two_dimensional_mode = engine.two_dimensional_mode;
+    // `ZAXNES_EMPHASIS_3D=1`: the app's `video.emphasis_3d`, the scene tinted with the frame's
+    // most common colour emphasis (lot FIDPLUS-D2b).
+    // `ZAXNES_EMPHASIS_3D=force:<0-7>` forces a value instead, to show the tint on a game that
+    // never asks for one.
+    let mut scene_emphasis = 0u8;
+    let setting = std::env::var("ZAXNES_EMPHASIS_3D").unwrap_or_default();
+    if let Some(forced) = setting.strip_prefix("force:") {
+        scene_emphasis = forced.parse::<u8>().unwrap_or(0) & 7;
+        println!("render: scene emphasis forced to {scene_emphasis}");
+    } else if setting == "1" {
+        let mut counts = [0usize; 8];
+        for &bits in &emphasis {
+            counts[usize::from(bits & 7)] += 1;
+        }
+        if !emphasis.is_empty() {
+            scene_emphasis = (0..8u8)
+                .rev()
+                .max_by_key(|&bits| counts[usize::from(bits)])
+                .unwrap_or(0);
+        }
+        println!("render: scene emphasis {scene_emphasis}");
+    }
+    zax_engine3d::palette::set_scene_emphasis(scene_emphasis);
+    // The backdrop read again: it is a palette colour too.
+    scene.nes_background_color = engine.frame_color(0);
+    if !setting.is_empty() {
+        println!(
+            "render: backdrop {:?}, nes background used {}, skybox {:?}, chosen {:?}",
+            scene.nes_background_color,
+            scene.use_nes_background_color,
+            scene.settings.skybox,
+            scene.background_color()
+        );
+    }
     let draw_list = engine.build_draw_list().clone();
 
     Ok(SyntheticScene {
@@ -263,6 +309,8 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
         draw_list,
         nes_picture: picture,
         nes_picture_height: picture_height,
+        nes_picture_emphasis: emphasis,
+        nes_video_phase,
     })
 }
 
@@ -527,6 +575,9 @@ impl Host {
         core.set_bus_conflicts(
             std::env::var("ZAXNES_PPU_BUS_CONFLICTS").map_or(true, |value| value != "0"),
         );
+        // `ZAXNES_OAM_DECAY=1`: the off-by-default decay of OAM with the rendering off, as the
+        // test-ROM campaign applies it (oam_decay measurement ROM, FIDELITY-LEADS D-OAM).
+        core.set_oam_decay(std::env::var("ZAXNES_OAM_DECAY").is_ok_and(|value| value != "0"));
         let load = core.load_rom(&fs::read(startup.rom)?, &file_name(startup.rom));
         if !load.success {
             return Err(HarnessError::Rom(format!(
@@ -535,7 +586,14 @@ impl Host {
             )));
         }
 
-        core.set_region(load.region);
+        // `ZAXNES_REGION=pal` / `ntsc`: the region forced over the header's (the 2C07's composite
+        // picture of a dump whose iNES header says NTSC, lot FIDPLUS-D2c).
+        let region = match std::env::var("ZAXNES_REGION").as_deref() {
+            Ok("pal") => zax_nes::NesRegion::Pal,
+            Ok("ntsc") => zax_nes::NesRegion::Ntsc,
+            _ => load.region,
+        };
+        core.set_region(region);
         if let Some(battery) = startup.battery {
             // REQ-CORE-095: the battery RAM is imported before the reset, as the application
             // does, so the run starts from the player's saved game.

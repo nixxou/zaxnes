@@ -379,9 +379,12 @@ pub const LIGHT_SHADOWS_ROWS: [OptionRow; 9] = [
 
 /// *Advanced options › NES picture*. The palette is the main page's row and the overscan its own
 /// screen, so what is left is what the console puts out beyond them.
-pub const NES_PICTURE_ROWS: [OptionRow; 2] = [
+pub const NES_PICTURE_ROWS: [OptionRow; 4] = [
     OptionRow::Setting(SettingId::VideoRemoveSpriteLimit),
     OptionRow::Setting(SettingId::VideoWidescreenStrictEdges),
+    // Lot FIDPLUS-D2b: the composite signal (Fidélité+) and the emphasis in 3D.
+    OptionRow::Setting(SettingId::VideoCompositeSignal),
+    OptionRow::Setting(SettingId::VideoEmphasis3d),
 ];
 
 /// *Advanced options › Camera*: the preset row that left the main page, and the field of view.
@@ -395,7 +398,7 @@ pub const CAMERA_ROWS: [OptionRow; 2] =
 /// run-ahead's frames and does nothing without it. The debugging view that goes with it
 /// (`emu.smooth_scroll_view`) is **not** here: like `audio.latency_ms` it stays a desktop row,
 /// this screen being a short curated list.
-pub const EMULATION_ROWS: [OptionRow; 28] = [
+pub const EMULATION_ROWS: [OptionRow; 30] = [
     OptionRow::Setting(SettingId::EmuEngine),
     // Lot CARTDB: the cartridge database and the power-on RAM, as in the window.
     OptionRow::Setting(SettingId::EmuCartridgeDb),
@@ -416,9 +419,11 @@ pub const EMULATION_ROWS: [OptionRow; 28] = [
     OptionRow::Setting(SettingId::EmuPaletteCorruption),
     OptionRow::Setting(SettingId::EmuPpuResetLine),
     OptionRow::Setting(SettingId::EmuCpuPpuAlignment),
+    OptionRow::Setting(SettingId::EmuCpuApuParity),
     OptionRow::Setting(SettingId::EmuFidelityPlus),
     OptionRow::Setting(SettingId::EmuExactRate),
     OptionRow::Setting(SettingId::EmuRealtimeInput),
+    OptionRow::Setting(SettingId::EmuLatePresent),
     OptionRow::Setting(SettingId::EmuRunAhead),
     OptionRow::Setting(SettingId::EmuSmoothScrollAhead),
     OptionRow::Setting(SettingId::EmuGameSpeed),

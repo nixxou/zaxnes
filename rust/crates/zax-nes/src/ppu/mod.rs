@@ -19,6 +19,7 @@
 //! as an `Option<&mut Cartridge>` instead of holding a reference.
 
 mod edges;
+mod emphasis;
 mod palette_corruption;
 mod ppu_bus_access;
 mod render;
@@ -615,6 +616,15 @@ pub struct Ppu2C02 {
     /// the VS. System remap of one written byte.
     frame_palette: [u8; PALETTE_SIZE],
     frame_mask: u8,
+    /// The emphasis bits (PPUMASK 5-7) the frame being drawn started with, and the writes that
+    /// changed them since, by first pixel reached (`emphasis.rs`, lot FIDPLUS-D2b). Not saved,
+    /// like the picture they go with. Here at the cold end for the reason `frame_palette` gives.
+    emphasis_start: u8,
+    emphasis_log: Vec<(u32, u8)>,
+    /// The colour subcarrier's phase (0-11, in half master clocks) at the start of the frame
+    /// being drawn, for the composite decoder (`crate::composite`, lot FIDPLUS-D2b). Not saved:
+    /// a picture property, and the phase a console starts at is arbitrary.
+    video_phase: u8,
 }
 
 impl Default for Ppu2C02 {
@@ -774,6 +784,9 @@ impl Ppu2C02 {
             margin_palette: None,
             frame_palette: [0; PALETTE_SIZE],
             frame_mask: 0,
+            emphasis_start: 0,
+            emphasis_log: Vec::new(),
+            video_phase: 0,
         }
     }
 
@@ -824,52 +837,89 @@ impl Ppu2C02 {
         self.oam_render_off = self.ppu_clock;
     }
 
-    /// The dots an OAM row holds its bytes without a refresh: 8 NTSC frames (~133 ms), `BeesNES`'s
-    /// figure (`CPpu2C0X::OamDecayRate`, `LSNPpu2C0X.h:1774-1790`, MIT). blargg's `oam_stress`
-    /// and `sprdma_and_dmc_dma`, verified on hardware, leave OAM untouched with the rendering off
-    /// for ~123 ms and ~37 ms, so it lasts at least that long; nesdev ("PPU OAM") only says it
-    /// lasts "at least as long as an NTSC vertical blank interval (~1.3ms), but not much longer",
-    /// which those tests contradict. Retention varies by console and temperature.
-    const fn oam_decay_dots(&self) -> i64 {
+    /// The PPU dots in a second, or `None` on the 2C07, which refreshes OAM itself while the
+    /// rendering is off (nesdev, "PPU OAM": the PAL PPU "refreshes OAM" in its long vertical
+    /// blank, and "OAM decay does not occur" on it).
+    const fn oam_dot_rate(&self) -> Option<i64> {
         match self.timing.region {
-            // 8 frames of 341 x 262 dots.
-            NesRegion::Ntsc | NesRegion::Multi => 714_736,
-            // The same 133 ms at the PAL and Dendy dot rate (341 x 312 dots at 50.007 Hz).
-            _ => 708_214,
+            NesRegion::Pal => None,
+            NesRegion::Dendy => Some(5_320_342),
+            _ => Some(5_369_318),
         }
+    }
+
+    /// The microseconds since `last` (a PPU clock stamp), or `None` where OAM does not decay.
+    fn oam_elapsed_us(&self, last: i64) -> Option<i64> {
+        let rate = self.oam_dot_rate()?;
+        Some((self.ppu_clock - last) * 1_000_000 / rate)
     }
 
     /// OAM is dynamic memory that the sprite evaluation refreshes, eight bytes a row, on every line
-    /// the rendering is on; with the rendering off, a row that nothing accessed for
-    /// [`Self::oam_decay_dots`] loses its bytes (nesdev, "PPU OAM": "OAM is a dynamic memory ...
-    /// if rendering is off, it will decay"). Called on every CPU access to a row and, for all rows,
-    /// when the rendering comes back; the dots themselves do nothing. A decayed row reads each byte
-    /// as its own OAM address, attribute bytes masked, as `BeesNES` does (`CPpu2C0X::RefreshOamRow`,
-    /// `LSNPpu2C0X.h:1801-1817`, MIT): real decay is console-dependent, and this spreads the
-    /// sprites down the screen rather than piling them on one line.
+    /// the rendering is on; with the rendering off a row decays unless something refreshes it
+    /// (nesdev, "PPU OAM": "OAM is a dynamic memory ... if rendering is off, it will decay").
+    ///
+    /// Lot FIDPLUS-E, speculative model (`docs/review/FIDELITY-LEADS.md`, "OAM decay"). What a
+    /// console shows (`FireSide`, 2026-11-15, an original NES): OAM intact for about seven frames,
+    /// then single bits lost at random, more the longer the rendering stays off; each bit falls to
+    /// its own resting value, 0 or 1; the first eight bytes never decay. Modelled as:
+    ///
+    /// - every bit has its own retention, drawn once from a log-normal law (DRAM cell retention;
+    ///   [`OAM_RETENTION_US`]): none before 125 ms (blargg's `oam_stress`, verified on hardware,
+    ///   keeps OAM ~123 ms), half by 266 ms (16 frames), all by 566 ms;
+    /// - every bit has its own resting value;
+    /// - both are fixed for the console, drawn from the bit's index, so a run replays identically;
+    /// - the row `OAMADDR` points at is held refreshed (assumed from the first eight bytes, with
+    ///   `OAMADDR` at 0 after a frame): it is settled when the address enters it and stamped when
+    ///   the address leaves it;
+    /// - no decay on the 2C07 ([`Self::oam_dot_rate`]).
+    ///
+    /// The probabilities and times are not measured: retention varies by console and temperature,
+    /// and this is one plausible console. Called on every CPU access to a row and, for all rows,
+    /// when the rendering comes back; the dots themselves do nothing.
     #[cold]
     #[inline(never)]
     fn refresh_oam_row(&mut self, row: usize) {
-        let now = self.ppu_clock;
-        if !self.rendering_enabled() {
+        if !self.rendering_enabled() && row != usize::from(self.oam_address >> 3) {
             let last = self.oam_row_refresh[row].max(self.oam_render_off);
-            if now - last > self.oam_decay_dots() {
-                self.decay_oam_row(row);
+            if let Some(elapsed) = self.oam_elapsed_us(last) {
+                self.decay_oam_row(row, elapsed);
             }
         }
-        self.oam_row_refresh[row] = now;
+        self.oam_row_refresh[row] = self.ppu_clock;
     }
 
-    /// A decayed row, as `BeesNES` leaves it: each byte its own OAM address, attribute bytes masked.
-    fn decay_oam_row(&mut self, row: usize) {
+    /// `OAMADDR` moves to `value` with the decay on: the row it leaves was refreshed until now,
+    /// and the row it enters settles what it lost while nothing refreshed it.
+    #[cold]
+    #[inline(never)]
+    fn move_oam_address(&mut self, value: u8) {
+        let (from, to) = (usize::from(self.oam_address >> 3), usize::from(value >> 3));
+        if from != to && !self.rendering_enabled() {
+            self.oam_row_refresh[from] = self.ppu_clock;
+            let last = self.oam_row_refresh[to].max(self.oam_render_off);
+            if let Some(elapsed) = self.oam_elapsed_us(last) {
+                self.decay_oam_row(to, elapsed);
+            }
+            self.oam_row_refresh[to] = self.ppu_clock;
+        }
+        self.oam_address = value;
+    }
+
+    /// The bits of `row` whose retention is shorter than `elapsed_us` fall to their resting value.
+    fn decay_oam_row(&mut self, row: usize, elapsed_us: i64) {
+        if elapsed_us <= i64::from(OAM_RETENTION_US[0]) {
+            return;
+        }
         for index in row * 8..row * 8 + 8 {
-            #[allow(clippy::cast_possible_truncation)] // 0..256.
-            let byte = index as u8;
-            self.oam[index] = if (index & 0x03) == 0x02 {
-                byte & 0xE3
-            } else {
-                byte
-            };
+            let mut byte = self.oam[index];
+            for bit in 0..8 {
+                let draw = oam_bit_draw(index * 8 + bit);
+                if elapsed_us > i64::from(OAM_RETENTION_US[(draw & 0xFF) as usize]) {
+                    let mask = 1u8 << bit;
+                    byte = if draw & 0x100 == 0 { byte & !mask } else { byte | mask };
+                }
+            }
+            self.oam[index] = if (index & 0x03) == 0x02 { byte & 0xE3 } else { byte };
         }
     }
 
@@ -878,14 +928,15 @@ impl Ppu2C02 {
     #[cold]
     #[inline(never)]
     fn refresh_oam_rows_on(&mut self) {
-        let now = self.ppu_clock;
-        let limit = self.oam_decay_dots();
+        let held = usize::from(self.oam_address >> 3);
         for row in 0..32 {
             let last = self.oam_row_refresh[row].max(self.oam_render_off);
-            if now - last > limit {
-                self.decay_oam_row(row);
+            if row != held {
+                if let Some(elapsed) = self.oam_elapsed_us(last) {
+                    self.decay_oam_row(row, elapsed);
+                }
             }
-            self.oam_row_refresh[row] = now;
+            self.oam_row_refresh[row] = self.ppu_clock;
         }
     }
 
@@ -915,8 +966,24 @@ impl Ppu2C02 {
             self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline();
         // Two dots in every alignment: the netlist with the CPU's hold time (step 33) stops and
         // starts the fetches and `v`'s increments on the third dot after the write in all four;
-        // TriCNES's third dot in alignment 2 does not appear there.
-        let delay = 2;
+        // TriCNES's third dot in alignment 2 does not appear there. The PAL 2C07 takes four
+        // (Visual 2C07 netlist, lot FIDPLUS-C C3c, `g2001px`: a switch on written on dot 12 leaves
+        // dot 16's increment undone and fetches again from dot 17; 8 170 differing dots a frame
+        // with four, 54 000 to 97 000 with two, three or five).
+        // On PAL three on the cycle whose dot accumulator is 0, as the `$2006` load comes a dot
+        // early there (`oam`, `g2001px`, `g3e01px`: 24 321 differing dots against 107 089 with
+        // four everywhere). Phase 2 three as well: at reset phase e3 the five programs `r2007`,
+        // `g2000`, `g2001px`, `oam` and `g2006x` all fit dot phase 2 only, and `g2001px` / `oam`
+        // then match the netlist with three dots there, not four; phase 1 four (`g2001px` at e6).
+        let delay = if self.timing.region == NesRegion::Pal {
+            if self.dot_accumulator == 0 || self.dot_accumulator == 2 {
+                3
+            } else {
+                4
+            }
+        } else {
+            2
+        };
         let corrupts = (value & 0x18) == 0 && self.switch_off_corrupts_palettes();
         if renders && self.prepaid_dots == 0 {
             if corrupts {
@@ -937,8 +1004,11 @@ impl Ppu2C02 {
         // old state — the netlist copies after a switch off and does not after a switch on, in
         // alignments 2 and 3 (A5; alignments 0 and 1 hit the switch-on race of step 33). Both are
         // settled here, on the write, so that nothing is tested per dot.
-        let late_switch =
-            ran_ahead && self.dot == 256 && self.alignment >= 2 && self.netlist_measured_region();
+        // The 2C07 does the same with its four dots (a write on dot 252 switches on dot 257).
+        let late_switch = ran_ahead
+            && self.dot == 256
+            && self.alignment >= 2
+            && (self.netlist_measured_region() || self.timing.region == NesRegion::Pal);
         let was_rendering = self.rendering_enabled();
         self.mask = value;
         if late_switch {
@@ -1820,7 +1890,14 @@ impl Ppu2C02 {
     fn write_control<K: BoardKind>(&mut self, value: u8, cartridge: Option<&mut Cartridge>) {
         // Alignment 3 only, on dot 257: the netlist with the CPU's hold time shows it there and
         // nowhere else (step 33); TriCNES's second case, alignment 0 on dot 258, does not appear.
-        if self.alignment == 3 && self.dot == 257 && self.glitch_2000 && self.fetching() {
+        // The PAL 2C07 has none, at any of its five CPU/PPU phases (Visual 2C07 netlist, lot
+        // FIDPLUS-C C3c, `g2000`: 23 322 differing dots without it, 31 212 to 37 140 with it).
+        if self.alignment == 3
+            && self.dot == 257
+            && self.glitch_2000
+            && self.timing.region != NesRegion::Pal
+            && self.fetching()
+        {
             self.control_write_glitch();
         }
         self.control = value;
@@ -1903,6 +1980,8 @@ impl Ppu2C02 {
         self.refresh_palette_views();
         self.decay_stamp.fill(0);
         self.pixels.fill(0);
+        self.emphasis_start = 0;
+        self.emphasis_log.clear();
 
         self.dot = 0;
         self.dot_accumulator = 0;
@@ -1955,6 +2034,13 @@ impl Ppu2C02 {
         // so the reset lands there (REQ-CORE-020, notes).
         self.scanline = self.timing.vblank_scanline;
         self.dot = 1 + self.phase_offset;
+    }
+
+    /// Diagnostic (lot FIDPLUS-C, C3c): starts the dot accumulator at `phase`, so that on PAL
+    /// (16 dots for 5 CPU cycles, the cycle of 4 dots every fifth) the 4-dot cycle falls where the
+    /// netlist's does. Taken modulo the region's denominator; 0 on NTSC changes nothing.
+    pub const fn set_dot_accumulator_phase(&mut self, phase: i32) {
+        self.dot_accumulator = phase.rem_euclid(self.timing.dots_per_cycle_denominator);
     }
 
     /// Study `study/access-phase`: see `phase_offset`.
@@ -2273,6 +2359,11 @@ impl Ppu2C02 {
         self.process_dot(cart);
     }
 
+    /// Once a dot, on the hottest path: inlined by hand since the module's growth in lot FIDPLUS-C
+    /// made the compiler call it out of line (callgrind 2026-11-16: +60 M instructions over
+    /// 300 frames of Super Mario Bros. 3, the whole of the core's +0.4 %).
+    #[allow(clippy::inline_always)] // measured: out of line it costs the core 0.4 %
+    #[inline(always)]
     fn advance_counters(&mut self) {
         self.ppu_clock += 1;
         self.dot += 1;
@@ -2296,6 +2387,9 @@ impl Ppu2C02 {
         }
 
         self.scanline = 0;
+        if self.emphasis_start != (self.mask & 0xE0) || !self.emphasis_log.is_empty() {
+            self.restart_emphasis();
+        }
 
         if self.odd_frame && self.timing.skips_dot_on_odd_frames && self.skip_latch {
             // With rendering on, the idle dot (0, 0) is skipped on odd frames, which makes
@@ -2312,6 +2406,10 @@ impl Ppu2C02 {
         }
 
         self.odd_frame = !self.odd_frame;
+        // The frame just begun starts on dot 1 when the odd frame skipped dot 0.
+        let phase =
+            crate::composite::next_frame_phase(usize::from(self.video_phase), self.dot == 1);
+        self.video_phase = u8::try_from(phase).unwrap_or(0);
     }
 
     fn process_dot<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {
@@ -2606,7 +2704,22 @@ impl Ppu2C02 {
     #[inline(never)]
     fn read_buffer_from_fetch<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) -> bool {
         // X - D: 6 in alignments 2 and 3, 5 in 0 and 1.
-        let latch_dots: i32 = if self.alignment >= 2 { 6 } else { 5 };
+        // On the PAL 2C07 (16 dots for 5 CPU cycles) the read lands at a different point of its
+        // dot from one cycle to the next: X - D is 6 on the two cycles whose dot accumulator is
+        // 3 or 4, 5 on the three others (Visual 2C07 netlist, lot FIDPLUS-C C3c, `r2007`: 5 in
+        // 60 % of the reads and 6 in 40 %, whatever the dot; every other split of the five
+        // phases leaves 49 000 to 102 000 differing dots a frame, this one 8 400).
+        let latch_dots: i32 = if self.timing.region == NesRegion::Pal {
+            if self.dot_accumulator >= 3 {
+                6
+            } else {
+                5
+            }
+        } else if self.alignment >= 2 {
+            6
+        } else {
+            5
+        };
         if self.prepaid_dots != 0 {
             return false;
         }
@@ -2629,7 +2742,7 @@ impl Ppu2C02 {
             // Checked on Zelda II's title split, replayed on the netlist (A5).
             if matches!(latch_dot, 8..=256 | 328 | 336)
                 && latch_dot % 8 == 0
-                && self.netlist_measured_region()
+                && (self.netlist_measured_region() || self.timing.region == NesRegion::Pal)
             {
                 if latch_dot != 256 {
                     self.increment_y();
@@ -2645,7 +2758,7 @@ impl Ppu2C02 {
         let residue = self.fetch_bus_value(cart.as_deref());
         self.read_buffer = residue;
         self.run_dots(1, cart);
-        if latch_dot == 257 && self.netlist_measured_region() {
+        if latch_dot == 257 && (self.netlist_measured_region() || self.timing.region == NesRegion::Pal) {
             // Lot FIDPLUS-2 (A5, netlist): on dot 257 the horizontal copy overrides the read's
             // coarse X increment; only its Y increment is left.
             self.increment_y();
@@ -2755,8 +2868,14 @@ impl Ppu2C02 {
             return;
         }
         // Three dots in every alignment (transistor netlist with the CPU's hold time, step 33;
-        // TriCNES's fourth dot in alignment 2 does not appear there).
-        let delay = 3;
+        // TriCNES's fourth dot in alignment 2 does not appear there). The PAL 2C07 loads two
+        // dots after the write on the cycle whose dot accumulator is 0, three on the others
+        // (Visual 2C07 netlist, lot FIDPLUS-C C3c, `g2006x`: 2 in 20 % of the loads, 3 in 80 %).
+        let delay = if matches!(self.timing.region, NesRegion::Pal) && self.dot_accumulator == 0 {
+            2
+        } else {
+            3
+        };
         self.run_dots(i64::from(delay), cart);
         self.prepaid_dots = delay;
         if self.glitch_2006 {
@@ -2786,6 +2905,42 @@ impl Ppu2C02 {
         self.prepaid_dots = delay + 1;
     }
 
+    /// A second `$2006` write on a copy dot: the copy reads `t` while the write's low byte reaches
+    /// it, and `v` keeps what the copy took until the delayed load (FIDELITY-LEADS A8, C3c).
+    ///
+    /// * 2C02 (netlist, `g2006x`, `$08` and `$D7` written on dots 257 and 304): the horizontal copy
+    ///   of dot 257 and the pre-render line's last vertical copy (304) take, for the bits the low
+    ///   byte drives, the written byte in alignment 2 and the CPU data bus as it stood before the
+    ///   write in alignment 3 (`$20`, the address's high byte), the open bus of the `$2005` write
+    ///   on these dots and of the `$2000` glitch, under the same switch. Alignments 0 and 1 take
+    ///   the written byte. Fidelite+ has had it since FIDPLUS-A (`post_address_load`); the
+    ///   standard core since 2026-11-16, a rule on a cold write path.
+    /// * 2C07 (Visual 2C07, `g2006x` at reset phases e0, e3, e6): dot 257 the same, the open bus on
+    ///   the cycle whose dot accumulator is 4 ([`Self::open_bus_on_copies`]); its vertical copy
+    ///   ends on dot 302, where no program wrote: left alone.
+    #[cold]
+    #[inline(never)]
+    fn address_write_on_copy(&mut self) {
+        let pal = matches!(self.timing.region, NesRegion::Pal);
+        if !(pal || self.netlist_measured_region()) {
+            return;
+        }
+        let vertical = self.dot != 257;
+        if vertical && (pal || self.scanline != self.pre_render_scanline()) {
+            return;
+        }
+        let source = if self.open_bus_on_copies() {
+            self.cpu_open_bus
+        } else {
+            self.t.to_le_bytes()[0]
+        };
+        self.v = if vertical {
+            (self.v & !0x00E0) | u16::from(source & 0xE0)
+        } else {
+            (self.v & !0x041F) | (self.t & 0x0400) | u16::from(source & 0x1F)
+        };
+    }
+
     /// The netlist loads `v` in the middle of dot D+3 (`delay_address_load`), so the increment of
     /// dot D+4, which this core has already run with the old `v`, belongs to the new one (lot
     /// FIDPLUS-2, A5, `g2006x`): on a coarse-X increment dot the loaded address is incremented,
@@ -2795,7 +2950,10 @@ impl Ppu2C02 {
     fn increment_after_delayed_load(&mut self) {
         let dot = self.dot;
         let increments = (dot % 8 == 0 && (8..=256).contains(&dot)) || dot == 328 || dot == 336;
-        if !increments || !self.fetching() || !self.netlist_measured_region() {
+        if !increments
+            || !self.fetching()
+            || !(self.netlist_measured_region() || matches!(self.timing.region, NesRegion::Pal))
+        {
             return;
         }
         self.increment_coarse_x();
@@ -2939,8 +3097,7 @@ impl Ppu2C02 {
     #[cold]
     #[inline(never)]
     fn fine_x_write_mid_line<K: BoardKind>(&mut self, value: u8, cart: Cart<'_, '_, K>) {
-        if self.alignment == 3
-            && self.glitch_2000
+        if self.open_bus_on_copies()
             && self.prepaid_dots == 0
             && (0..SCREEN_WIDTH_I32).contains(&self.dot)
         {
@@ -2969,7 +3126,7 @@ impl Ppu2C02 {
     #[cold]
     #[inline(never)]
     fn scroll_write_on_copy(&mut self, value: u8) {
-        let source = if self.alignment == 3 && self.glitch_2000 {
+        let source = if self.open_bus_on_copies() {
             self.cpu_open_bus
         } else {
             value
@@ -2978,7 +3135,7 @@ impl Ppu2C02 {
             self.v = (self.v & !0x001F) | u16::from(source >> 3);
             self.v_row_next = self.v;
         } else if self.write_toggle
-            && self.dot == 304
+            && self.dot == *self.vertical_copy_dots().end()
             && self.scanline == self.pre_render_scanline()
         {
             self.v = (self.v & !0x73E0)
@@ -3067,6 +3224,9 @@ impl Ppu2C02 {
                     return;
                 }
                 if self.swaps_control_and_mask() {
+                    if ((value ^ self.mask) & 0xE0) != 0 {
+                        self.note_emphasis(value);
+                    }
                     self.mask = value;
                 } else {
                     self.write_control::<K>(value, cartridge.as_deref_mut());
@@ -3081,6 +3241,9 @@ impl Ppu2C02 {
                 if self.swaps_control_and_mask() {
                     self.write_control::<K>(value, cartridge.as_deref_mut());
                 } else {
+                    if ((value ^ self.mask) & 0xE0) != 0 {
+                        self.note_emphasis(value);
+                    }
                     let was_rendering = self.rendering_enabled();
                     if was_rendering == ((value & 0x18) != 0) {
                         self.mask = value;
@@ -3096,7 +3259,11 @@ impl Ppu2C02 {
                 if self.oamaddr_write_corruption && !self.pre_g_revision {
                     self.oamaddr_write_corruption(value);
                 }
-                self.oam_address = value;
+                if self.oam_decay {
+                    self.move_oam_address(value);
+                } else {
+                    self.oam_address = value;
+                }
             }
 
             4 => {
@@ -3129,7 +3296,9 @@ impl Ppu2C02 {
                     self.t = (self.t & 0xFFE0) | u16::from(value >> 3);
                     self.fine_x = value & 0x07;
                 }
-                if matches!(self.dot, 257 | 304) && self.fetching() {
+                if (self.dot == 257 || self.dot == *self.vertical_copy_dots().end())
+                    && self.fetching()
+                {
                     self.scroll_write_on_copy(value);
                 }
                 if !self.write_toggle
@@ -3153,6 +3322,11 @@ impl Ppu2C02 {
                     self.post_address_load();
                 } else if self.write_toggle {
                     self.t = (self.t & 0xFF00) | u16::from(value);
+                    if (self.dot == 257 || self.dot == *self.vertical_copy_dots().end())
+                        && self.fetching()
+                    {
+                        self.address_write_on_copy();
+                    }
                     if (self.address_load_delay || self.bus_conflicts) && self.fetching() {
                         self.delay_address_load(&mut cartridge);
                     } else if self.address_load_delay
@@ -3162,7 +3336,9 @@ impl Ppu2C02 {
                         self.delay_backdrop_address(&mut cartridge);
                     }
                     let previous = self.v;
-                    let delayed = self.prepaid_dots == 4;
+                    // Three dots and the one run after them, or two on a PAL phase-0 cycle.
+                    let delayed = self.prepaid_dots == 4
+                        || (self.prepaid_dots == 3 && matches!(self.timing.region, NesRegion::Pal));
                     self.v = self.t;
                     if delayed {
                         self.increment_after_delayed_load();
@@ -3208,6 +3384,30 @@ impl Ppu2C02 {
     const fn rendering_now(&self) -> bool {
         self.rendering_enabled()
             && (self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline())
+    }
+
+    /// Whether a register write landing on a copy of `t` into `v` (or on a pixel) takes the CPU's
+    /// open bus instead of the written value: alignment 3 on the 2C02 (A4), under the `$2000`
+    /// glitch's switch. On the PAL 2C07 (16 dots for 5 CPU cycles) only on the cycle whose dot
+    /// accumulator is 4, one in five (Visual 2C07 netlist, lot FIDPLUS-C C3c, `g2005` /
+    /// `g2005px`: a first `$2005` write on dot 257 gives the written coarse X on the other cycles;
+    /// of the 32 sets of phases, {4} alone leaves the fewest differing dots).
+    const fn open_bus_on_copies(&self) -> bool {
+        self.alignment == 3
+            && self.glitch_2000
+            && (!matches!(self.timing.region, NesRegion::Pal) || self.dot_accumulator == 4)
+    }
+
+    /// The dots of the pre-render line that copy `t`'s vertical bits into `v`: 280 to 304 on the
+    /// 2C02, two dots earlier on the PAL 2C07 (Visual 2C07 netlist, lot FIDPLUS-C C3c: the copy is
+    /// in `v` at the end of dot 278 in every frame of `g2000` and `g2001px`). The end of the PAL
+    /// window is taken as shifted too; no corpus write has landed there yet.
+    pub(super) const fn vertical_copy_dots(&self) -> std::ops::RangeInclusive<i32> {
+        if matches!(self.timing.region, NesRegion::Pal) {
+            278..=302
+        } else {
+            280..=304
+        }
     }
 
     /// Whether the rules measured on the NTSC 2C02 netlist apply (lot FIDPLUS-2, A5): the PAL
@@ -3354,7 +3554,12 @@ impl Ppu2C02 {
         } else {
             value
         };
-        self.oam_address = self.oam_address.wrapping_add(1);
+        let next = self.oam_address.wrapping_add(1);
+        if self.oam_decay {
+            self.move_oam_address(next);
+        } else {
+            self.oam_address = next;
+        }
     }
 
     /// The address increment a `$2007` access owes, which is **not the same increment** while the
@@ -3969,4 +4174,51 @@ const fn marked_palette(palette: &[u8; PALETTE_SIZE]) -> [u8; PALETTE_SIZE] {
         index += 1;
     }
     marked
+}
+
+/// Lot FIDPLUS-E: an OAM bit's retention without a refresh, in microseconds, at the quantiles
+/// `(k + 0.5) / 256` of a log-normal law with its median at 266 ms (16 NTSC frames) and its lowest
+/// quantile at 125 ms (sigma 0.262). Speculative: see [`Ppu2C02::refresh_oam_row`].
+const OAM_RETENTION_US: [u32; 256] = [
+    125_000, 137_534, 144_367, 149_310, 153_270, 156_617, 159_541, 162_155,
+    164_530, 166_715, 168_745, 170_645, 172_437, 174_134, 175_749, 177_293,
+    178_773, 180_197, 181_569, 182_896, 184_181, 185_428, 186_641, 187_821,
+    188_972, 190_095, 191_193, 192_268, 193_320, 194_352, 195_365, 196_360,
+    197_337, 198_299, 199_245, 200_178, 201_096, 202_002, 202_896, 203_779,
+    204_650, 205_511, 206_363, 207_205, 208_037, 208_862, 209_678, 210_486,
+    211_287, 212_081, 212_868, 213_649, 214_423, 215_192, 215_954, 216_712,
+    217_464, 218_210, 218_953, 219_690, 220_423, 221_152, 221_877, 222_598,
+    223_315, 224_029, 224_739, 225_446, 226_150, 226_851, 227_549, 228_244,
+    228_937, 229_627, 230_315, 231_001, 231_684, 232_366, 233_045, 233_723,
+    234_399, 235_073, 235_746, 236_417, 237_087, 237_755, 238_423, 239_089,
+    239_754, 240_418, 241_082, 241_744, 242_406, 243_067, 243_728, 244_388,
+    245_048, 245_707, 246_366, 247_025, 247_684, 248_343, 249_001, 249_660,
+    250_319, 250_978, 251_638, 252_297, 252_957, 253_618, 254_279, 254_940,
+    255_603, 256_266, 256_929, 257_594, 258_260, 258_926, 259_594, 260_262,
+    260_932, 261_603, 262_276, 262_949, 263_625, 264_301, 264_979, 265_659,
+    266_341, 267_024, 267_710, 268_397, 269_086, 269_777, 270_471, 271_166,
+    271_864, 272_564, 273_267, 273_972, 274_680, 275_391, 276_104, 276_820,
+    277_539, 278_262, 278_987, 279_715, 280_447, 281_182, 281_921, 282_663,
+    283_409, 284_159, 284_913, 285_670, 286_432, 287_198, 287_969, 288_743,
+    289_523, 290_307, 291_096, 291_890, 292_689, 293_494, 294_304, 295_119,
+    295_940, 296_767, 297_600, 298_439, 299_285, 300_137, 300_996, 301_862,
+    302_735, 303_615, 304_503, 305_398, 306_302, 307_214, 308_134, 309_063,
+    310_001, 310_948, 311_905, 312_872, 313_849, 314_836, 315_834, 316_843,
+    317_864, 318_897, 319_943, 321_001, 322_072, 323_157, 324_256, 325_370,
+    326_499, 327_643, 328_805, 329_983, 331_179, 332_393, 333_627, 334_880,
+    336_155, 337_451, 338_769, 340_112, 341_479, 342_872, 344_292, 345_741,
+    347_220, 348_730, 350_273, 351_851, 353_466, 355_120, 356_815, 358_553,
+    360_339, 362_173, 364_060, 366_004, 368_007, 370_075, 372_213, 374_426,
+    376_720, 379_103, 381_581, 384_165, 386_864, 389_691, 392_660, 395_787,
+    399_091, 402_597, 406_331, 410_331, 414_638, 419_308, 424_413, 430_049,
+    436_347, 443_496, 451_777, 461_642, 473_886, 490_113, 514_462, 566_048,
+];
+
+/// A fixed draw for OAM bit `bit`: its retention quantile in the low byte, its resting value in
+/// bit 8 (`SplitMix64`).
+const fn oam_bit_draw(bit: usize) -> u64 {
+    let mut z = (bit as u64).wrapping_add(0x9E37_79B9_7F4A_7C15).wrapping_mul(0x2C07);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }

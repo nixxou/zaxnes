@@ -826,11 +826,12 @@ fn fidelity_oamaddr_at_8_or_more_copies_its_row_over_oam_0_when_rendering_starts
     );
 }
 
-/// Lot FIDELITY step 20: with the rendering off for more than 8 NTSC frames, an OAM row nothing
-/// accessed decays (each byte reads as its own address, as `BeesNES` leaves it); a row the CPU
-/// touched in the meantime, or the rendering on all along, keeps its bytes.
+/// Lot FIDPLUS-E (speculative model): with the rendering off, OAM keeps every bit for 7 NTSC
+/// frames; past ~34 frames every bit has fallen to its own resting value, the same on every run.
+/// The row `OAMADDR` points at is held refreshed; a row the address visited in the meantime keeps
+/// its bytes; with the rendering on all along, or the setting off, nothing changes.
 #[test]
-fn fidelity_oam_decays_after_8_frames_with_the_rendering_off() {
+fn fidplus_oam_decays_bit_by_bit_with_the_rendering_off() {
     fn oam_after_blank(frames: usize, decay: bool, touch_row_1: bool) -> Vec<u8> {
         let mut fixture = TileFixture::new();
         for sprite in 0..4u8 {
@@ -860,21 +861,17 @@ fn fidelity_oam_decays_after_8_frames_with_the_rendering_off() {
         0x40, 0x11, 0x01, 0x22, 0x40, 0x11, 0x01, 0x22, 0x40, 0x11, 0x01, 0x22, 0x40, 0x11, 0x01,
         0x22,
     ];
-    let row_0_decayed = [0, 1, 2, 3, 4, 5, 0x02, 7];
-    assert_eq!(kept, oam_after_blank(12, false, false), "setting off");
-    assert_eq!(kept, oam_after_blank(6, true, false), "6 frames: kept");
-    let both = oam_after_blank(12, true, false);
-    assert_eq!(row_0_decayed, both[0..8], "12 frames: row 0 decayed");
-    assert_eq!(
-        [8, 9, 0x02, 11, 12, 13, 0x02, 15],
-        both[8..16],
-        "12 frames: row 1 decayed"
-    );
-    let touched = oam_after_blank(12, true, true);
-    assert_eq!(row_0_decayed, touched[0..8], "row 0 untouched");
-    assert_eq!(kept[8..16], touched[8..16], "row 1 read every 4 frames");
+    assert_eq!(kept, oam_after_blank(40, false, false), "setting off");
+    assert_eq!(kept, oam_after_blank(7, true, false), "7 frames: kept");
+    let long = oam_after_blank(40, true, false);
+    assert_eq!(kept[0..8], long[0..8], "row 0, OAMADDR's, held refreshed");
+    assert_ne!(kept[8..16], long[8..16], "40 frames: row 1 decayed");
+    assert_eq!(long, oam_after_blank(40, true, false), "the same bits every run");
+    assert_eq!(long[8..16], oam_after_blank(80, true, false)[8..16], "settled at rest");
+    let touched = oam_after_blank(40, true, true);
+    assert_ne!(kept[0..8], touched[0..8], "row 0 left by OAMADDR at frame 0");
+    assert_eq!(kept[8..16], touched[8..16], "row 1 held by OAMADDR");
 }
-
 /// Plan step 2: with `set_power_on_top`, a power-on puts the PPU at the top of the picture (nesdev,
 /// "PPU power up state"; dot 11 as `BeesNES`), and without it at the start of vblank as before.
 #[test]
@@ -961,7 +958,13 @@ fn fidelity_2000_write_on_dot_257_takes_nametable_x_from_open_bus() {
         nametable_x_in(3, dot, glitch)
     }
     fn nametable_x_in(alignment: u8, dot: i32, glitch: bool) -> u16 {
+        nametable_x_on(alignment, dot, glitch, false)
+    }
+    fn nametable_x_on(alignment: u8, dot: i32, glitch: bool, pal: bool) -> u16 {
         let mut fixture = TileFixture::new();
+        if pal {
+            fixture.core.set_region(zax_nes::NesRegion::Pal);
+        }
         fixture.core.set_cpu_ppu_alignment(alignment);
         fixture.core.set_glitch_2000(glitch);
         fixture.set_mask(0x0A);
@@ -987,6 +990,8 @@ fn fidelity_2000_write_on_dot_257_takes_nametable_x_from_open_bus() {
             );
         }
     }
+    // Lot FIDPLUS-C C3c: the PAL 2C07 has no such glitch, at any CPU/PPU phase (Visual 2C07).
+    assert_eq!(1, nametable_x_on(3, 257, true, true), "PAL: no glitch");
 }
 
 /// Lot FIDELITY steps 30 and 32 (transistor netlist, `VisualNes`): a `$2005` write that lands on a
@@ -1338,6 +1343,142 @@ fn fidelity_switch_on_fetch_reads_the_stale_low_byte_in_alignments_2_and_3() {
         let expected = if alignment >= 2 { 0x0F } else { 0x2A };
         assert_eq!(row, vec![expected; 7], "alignment {alignment}");
     }
+}
+
+/// Lot FIDPLUS-C C3c (Visual 2C07 netlist, `g2001px`): the PAL 2C07 switches the rendering four
+/// dots after a `$2001` write, the 2C02 two. Switched off on dot 12, the coarse-X increment of
+/// dot 16 still happens on PAL and not on NTSC.
+#[test]
+fn fidplus_c3c_pal_rendering_switch_takes_four_dots() {
+    fn increments(pal: bool, phase: i32) -> bool {
+        let mut fixture = TileFixture::new();
+        if pal {
+            fixture.core.set_region(zax_nes::NesRegion::Pal);
+        }
+        fixture.set_mask(0x0A);
+        fixture.core.run_frame(0);
+        park_on_dot(&mut fixture, 12);
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        if pal {
+            ppu.set_dot_accumulator_phase(phase);
+        }
+        let before = ppu.vram_v();
+        ppu.write(1, 0x00, None);
+        ppu.vram_v() == increment_x(before)
+    }
+    for phase in [1, 3, 4] {
+        assert!(increments(true, phase), "PAL phase {phase}: dot 16 still renders");
+    }
+    // Three dots on the phase-0 and phase-2 cycles (`oam`, `g2001px` at reset phase e3, whose
+    // five programs all fit dot phase 2): the switch is in force by dot 16.
+    assert!(!increments(true, 0), "PAL phase 0");
+    assert!(!increments(true, 2), "PAL phase 2");
+    assert!(!increments(false, 0), "NTSC: the switch is in force by dot 16");
+}
+
+/// Lot FIDPLUS-C C3c (Visual 2C07 netlist, `g2006x`): the second `$2006` write's delayed load
+/// lands two dots after the write on the PAL 2C07's phase-0 cycle, three on the others (and always
+/// three on the 2C02): the write runs that many dots, plus the one after, before returning.
+#[test]
+fn fidplus_c3c_pal_2006_load_delay_follows_the_cycle_phase() {
+    fn dots_run(pal: bool, phase: i32) -> i32 {
+        let mut fixture = TileFixture::new();
+        if pal {
+            fixture.core.set_region(zax_nes::NesRegion::Pal);
+        }
+        fixture.set_mask(0x0A);
+        fixture.core.run_frame(0);
+        park_on_dot(&mut fixture, 100);
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        ppu.set_dot_accumulator_phase(phase);
+        ppu.write(6, 0x21, None);
+        ppu.write(6, 0x08, None);
+        ppu.dot() - 100
+    }
+    assert_eq!(3, dots_run(true, 0), "PAL, phase 0");
+    for phase in 1..5 {
+        assert_eq!(4, dots_run(true, phase), "PAL, phase {phase}");
+    }
+    assert_eq!(4, dots_run(false, 0), "NTSC");
+}
+
+/// Lot FIDPLUS-C C3c (Visual 2C07 netlist, `g2005`, `g2005px`): a first `$2005` write landing on
+/// the dot-257 copy takes the written coarse X on the PAL 2C07, the CPU's open bus only on the
+/// cycle whose dot accumulator is 4 (alignment 3, the default).
+#[test]
+fn fidplus_c3c_pal_2005_on_dot_257_takes_the_open_bus_one_cycle_in_five() {
+    fn coarse_x(phase: i32) -> u16 {
+        let mut fixture = TileFixture::new();
+        fixture.core.set_region(zax_nes::NesRegion::Pal);
+        fixture.set_mask(0x0A);
+        fixture.core.run_frame(0);
+        park_on_dot(&mut fixture, 257);
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        ppu.set_dot_accumulator_phase(phase);
+        ppu.note_cpu_open_bus(0x20);
+        ppu.write(5, 0xF8, None);
+        ppu.vram_v() & 0x1F
+    }
+    for phase in 0..5 {
+        let expected = if phase == 4 { 0x04 } else { 0x1F };
+        assert_eq!(expected, coarse_x(phase), "accumulator {phase}");
+    }
+}
+
+/// Lot FIDPLUS-C C3c (Visual 2C07 netlist, `r2007`): on the PAL 2C07 a `$2007` read during
+/// rendering latches 6 dots after its access dot on the cycles whose dot accumulator is 3 or 4,
+/// 5 on the others. Read on dot 98: with 6 the latch is dot 104, which increments coarse X anyway,
+/// so the two merge (one X step by the end of dot 104); with 5 it is dot 103 (two steps).
+#[test]
+fn fidplus_c3c_pal_2007_read_latch_follows_the_cycle_phase() {
+    fn coarse_x_steps(phase: i32) -> u16 {
+        let mut fixture = TileFixture::new();
+        fixture.core.set_region(zax_nes::NesRegion::Pal);
+        fixture.core.set_bus_conflicts(true);
+        fixture.set_mask(0x0A);
+        fixture.core.run_frame(0);
+        park_on_dot(&mut fixture, 98);
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        ppu.set_dot_accumulator_phase(phase);
+        let before = ppu.vram_v() & 0x1F;
+        ppu.read(7, None);
+        assert_eq!(104, ppu.dot(), "the read runs to its latch");
+        (ppu.vram_v() & 0x1F).wrapping_sub(before) & 0x1F
+    }
+    for phase in 0..5 {
+        let expected = if phase >= 3 { 1 } else { 2 };
+        assert_eq!(expected, coarse_x_steps(phase), "accumulator {phase}");
+    }
+}
+
+/// Lot FIDPLUS-C C3c (Visual 2C07 netlist, `g2000`, `g2001px`): the PAL 2C07 copies `t`'s
+/// vertical bits into `v` from dot 278 of the pre-render line, the 2C02 from dot 280. By dot 279
+/// the copy is in `v` on PAL and not yet on NTSC.
+#[test]
+fn fidplus_c3c_pal_vertical_copy_starts_on_dot_278() {
+    fn copied_by_279(pal: bool) -> bool {
+        let mut fixture = TileFixture::new();
+        if pal {
+            fixture.core.set_region(zax_nes::NesRegion::Pal);
+        }
+        fixture.set_control(0x00);
+        fixture.set_scroll(0, 80);
+        fixture.set_mask(0x0A);
+        let bus = fixture.core.bus_mut();
+        let mut guard = 0;
+        loop {
+            bus.tick();
+            bus.sync_ppu();
+            let ppu = bus.ppu();
+            if ppu.scanline() == ppu.pre_render_scanline() && ppu.dot() == 279 {
+                return (ppu.vram_v() & 0x7BE0) == (ppu.vram_t() & 0x7BE0);
+            }
+            guard += 1;
+            assert!(guard < 5_000_000, "never reached dot 279 of the pre-render line");
+        }
+    }
+    assert!(copied_by_279(true), "PAL: copied from dot 278");
+    assert!(!copied_by_279(false), "NTSC: not before dot 280");
 }
 
 /// Lot FIDPLUS-2 (A5, transistor netlist): a `$2001` write landing on dot 254 switches the

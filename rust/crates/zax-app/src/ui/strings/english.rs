@@ -518,9 +518,13 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.palette_corruption", "Palette corruption"),
     ("setting.emu.ppu_reset_line", "PPU reset line"),
     ("setting.emu.cpu_ppu_alignment", "CPU/PPU alignment"),
+    ("setting.emu.cpu_apu_parity", "CPU/APU parity"),
+    ("option.Zaxnes", "Zaxnes"),
+    ("option.2A03 netlist", "2A03 netlist"),
     ("setting.emu.fidelity_plus", "Fidelity+"),
     ("setting.emu.exact_rate", "Console frame rate"),
     ("setting.emu.realtime_input", "Real-time pad"),
+    ("setting.emu.late_present", "Late present"),
     ("option.Alignment 0", "Alignment 0"),
     ("option.Alignment 1", "Alignment 1"),
     ("option.Alignment 2", "Alignment 2"),
@@ -605,6 +609,8 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.video.overscan_right", "Overscan: right"),
     ("setting.video.overscan_mode", "Overscan: fit (edges hidden) or resize (enlarged)"),
     ("setting.video.nes_palette", "NES colour palette"),
+    ("setting.video.composite_signal", "Composite signal"),
+    ("setting.video.emphasis_3d", "Colour emphasis in 3D"),
     ("setting.emu.builtin_patches", "Built-in ROM patches (at the next ROM load)"),
     ("setting.audio.volume", "Master volume"),
     ("setting.audio.bg_music", "Menu music"),
@@ -836,6 +842,14 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ),
 
     // --------------------------------------------------------- NES picture tab
+    (
+        "detail.video.emphasis_3d",
+        "Some games tint or darken the whole screen through the console's colour emphasis (a pause, a fade, a flash, an underwater level): the console weakens its video signal on two of the three colours. The flat picture always shows it; this shows it in the 3D view too, the whole scene taking the tint the game asks for. A game that changes the emphasis in the middle of the screen gets its most common tint for the whole scene. Default: off.",
+    ),
+    (
+        "detail.video.composite_signal",
+        "Fidelity+: the flat picture made the way a television made it from the console's composite signal, generated pixel by pixel as the video chip generates it, then decoded: the colours bleed a little at the edges of objects and the fringes crawl from frame to frame, as on a set plugged in with the yellow cable. The colours of large areas are the console's own signal, not the palette's. Costs some processor time per frame. The 3D view is not affected. Default: off.",
+    ),
     (
         "detail.video.nes_palette",
         "Which table of RGB colours the console's 64 colours are shown in, in the flat picture and \
@@ -1235,6 +1249,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
         "When it is switched on, the console's processor and video chip settle into one of four ways their clocks line up (numbered 0 to 3, as the AccuracyCoin test cartridge numbers them), a different one from one power-on to the next. A few defects depend on it: when a read of video memory made during the picture lands, the open-bus glitch of the $2000 and $2005 writes (alignment 3), the edge pixel of a picture switched off mid-line, and the sprite-memory damage, which a console in alignment 1 or 2 does not show when the picture is switched back on mid-screen. Games written for the console work in all four. Alignment 3 is the one Zaxnes has always followed; Random draws one at each load, as a console does at each power-on. Takes effect at the next load. Default: Alignment 3.",
     ),
     (
+        "detail.emu.cpu_apu_parity",
+        "At power-on the console's processor and its sound unit start their two-cycle rhythm on one cycle or the other, and the sample channel's timer starts somewhere in its count. It decides whether a sprite transfer takes 513 or 514 cycles and where the sample channel's fetch pauses a read. Zaxnes is the start it has always used; 2A03 netlist the one the transistor-level model of the chip starts with (with it the processor matches that model cycle for cycle); Random draws one at each load, as a console does at each power-on. Games written for the console work with any. Takes effect at the next load. Default: Zaxnes.",
+    ),
+    (
         "detail.emu.ppu_2000_glitch",
         "A defect of the video chip: a write to its control register that starts on one precise dot of a line can make the next line drawn from the left screen half, and a write to its scroll register that lands on the copy of the scroll can scroll a line or a frame by what was last on the data bus instead. It happens only on some consoles, depending on how the chips lined up when switched on. Games written for the console avoid it. Takes effect at the next load. Default: on.",
     ),
@@ -1243,8 +1261,12 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
         "Runs the games at the console's own frame rate, 60.0988 images a second on an NTSC console and 50.0070 on a PAL one, instead of a round 60 or 50, and the sound with it, at its true pitch. On a 60 Hz screen an image is shown twice about every ten seconds; a variable refresh rate screen shows every one. Takes effect at once. Default: off.",
     ),
     (
+        "detail.emu.late_present",
+        "With the real-time pad, the time left before the screen's refresh is spent running the console first, and the picture is drawn just before the refresh, from the console as it stands then. Without it the picture is drawn first and shown at the next refresh, nearly one refresh older than the console. A press shows on screen up to one refresh sooner (about 10 ms at 60 Hz). Needs a computer that draws a frame well within a refresh; if the drawing is late a refresh is missed. Only with the real-time pad on and a refresh to wait for. Takes effect at once. Default: off.",
+    ),
+    (
         "detail.emu.realtime_input",
-        "Runs the console in slices of real time instead of a whole image at once, so the game reads the pad at the moment it asks for it, as on the console: a fidelity setting, for games and test programs that read the pad several times an image. It does not lower the input lag for now: the pad is still read once per screen refresh and the finished image can be shown a refresh later; for the lowest lag keep it off and use run-ahead. Not used with run-ahead or while a movie is recorded or played: those keep whole images. Takes effect at once. Default: off.",
+        "Reads the pad about every millisecond and runs the console in slices of real time between two screen refreshes, instead of reading the pad once a refresh and running a whole image at once: the game sees a button about 9 ms sooner on average (up to 16 ms), and reads it at the moment it asks for it, as on the console. Not used with run-ahead or while a movie is recorded or played: those keep whole images. Takes effect at once. Default: on."
     ),
     (
         "detail.emu.fidelity_plus",
