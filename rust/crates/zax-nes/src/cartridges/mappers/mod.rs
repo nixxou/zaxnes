@@ -20,15 +20,21 @@ macro_rules! banked {
     };
 }
 
+#[cfg(feature = "board-530")]
+mod ax5705;
 #[cfg(feature = "board-small-boards")]
 mod bandai74161;
 mod bandai_fcg;
+#[cfg(feature = "board-188")]
+mod bandai_karaoke;
 #[cfg(feature = "board-small-boards")]
 mod bf9096;
 #[cfg(feature = "board-111")]
 mod cheapocabra;
 #[cfg(any(feature = "board-162", feature = "board-163"))]
 mod chr_window;
+#[cfg(feature = "board-266")]
+mod city_fighter;
 #[cfg(feature = "board-small-boards")]
 mod cnrom_protect;
 #[cfg(feature = "board-cony")]
@@ -37,10 +43,18 @@ mod daou306;
 #[cfg(feature = "board-decode-boards")]
 mod decode_boards;
 mod discrete;
+#[cfg(feature = "board-284")]
+mod drip;
 #[cfg(feature = "board-eeprom")]
 mod eeprom24c0x;
 #[cfg(feature = "board-164")]
 mod eeprom93c66;
+#[cfg(feature = "board-323")]
+mod farid_slrom;
+#[cfg(feature = "board-fine-rom")]
+mod fine_rom;
+#[cfg(feature = "board-176")]
+mod fk23c;
 mod fme7;
 #[cfg(feature = "board-246")]
 mod g0151;
@@ -53,6 +67,8 @@ mod irem_lrog017;
 mod irem_tam_s1;
 mod iremg101;
 mod irq_boards;
+#[cfg(feature = "board-irq-latch")]
+mod irq_latch;
 #[cfg(feature = "board-small-boards")]
 mod jaleco_jf11;
 #[cfg(feature = "board-jaleco-72-92-86")]
@@ -64,17 +80,29 @@ mod jaleco_ss88006;
 mod jv001;
 #[cfg(feature = "board-jy-asic")]
 mod jy_company;
+#[cfg(feature = "board-303")]
+mod kaiser7017;
+#[cfg(feature = "board-latch-multi")]
+mod latch_multi;
 #[cfg(feature = "board-218")]
 mod magic_floor;
 #[cfg(feature = "board-91")]
 mod mapper091;
+#[cfg(feature = "board-234")]
+mod maxi15;
+#[cfg(feature = "board-misc-n")]
+mod misc_n;
 mod mmc1;
+#[cfg(feature = "board-111")]
+mod mmc1_parallel;
 mod mmc2;
 mod mmc3;
 #[cfg(feature = "board-219")]
 mod mmc3_a9461;
 #[cfg(feature = "board-mmc3-chrram")]
 mod mmc3_chrram;
+#[cfg(feature = "board-mmc3-clones")]
+mod mmc3_clones;
 #[cfg(feature = "board-292")]
 mod mmc3_dragonfighter;
 #[cfg(feature = "board-208")]
@@ -105,6 +133,12 @@ mod nrom;
 mod oeka_kids;
 #[cfg(feature = "board-164")]
 mod pec9588;
+#[cfg(feature = "board-168")]
+mod racermate;
+#[cfg(feature = "board-682")]
+mod rainbow;
+#[cfg(feature = "board-682")]
+mod rainbow_esp;
 mod rambo1;
 #[cfg(feature = "board-133")]
 mod sachen_72008;
@@ -134,6 +168,8 @@ mod sunsoft2;
 mod sunsoft3;
 #[cfg(feature = "board-68")]
 mod sunsoft4;
+#[cfg(feature = "board-529")]
+mod t230;
 #[cfg(feature = "board-small-boards")]
 mod taito_tc0190;
 mod taito_tc0690;
@@ -150,18 +186,28 @@ mod vrc7;
 mod vrc_irq;
 #[cfg(feature = "board-vs-system")]
 mod vs_system;
+#[cfg(feature = "board-252")]
+mod waixing252;
+#[cfg(feature = "board-253")]
+mod waixing253;
 #[cfg(feature = "board-178")]
 mod waixing_fs305;
 
+#[cfg(feature = "board-530")]
+pub use ax5705::Ax5705;
 #[cfg(feature = "board-small-boards")]
 pub use bandai74161::Bandai74161;
 pub use bandai_fcg::BandaiFcg;
+#[cfg(feature = "board-188")]
+pub use bandai_karaoke::BandaiKaraoke;
 #[cfg(feature = "board-small-boards")]
 pub use bf9096::Bf9096;
 #[cfg(feature = "board-111")]
 pub use cheapocabra::Cheapocabra;
 #[cfg(any(feature = "board-162", feature = "board-163"))]
 pub use chr_window::{ChrWindowBoard, ChrWindowKind};
+#[cfg(feature = "board-266")]
+pub use city_fighter::CityFighter;
 #[cfg(feature = "board-small-boards")]
 pub use cnrom_protect::CnRomProtect;
 #[cfg(feature = "board-cony")]
@@ -172,10 +218,18 @@ pub use decode_boards::DecodeBoard;
 pub use discrete::{
     AxRom, CnRom, Codemasters, ColorDreams, CpRom, GxRom, Mapper078, UnRom512, UxRom,
 };
+#[cfg(feature = "board-284")]
+pub use drip::Drip;
 #[cfg(feature = "board-eeprom")]
 pub use eeprom24c0x::{Eeprom24C0X, EepromKind, EepromPort};
 #[cfg(feature = "board-164")]
 pub use eeprom93c66::Eeprom93C66;
+#[cfg(feature = "board-323")]
+pub use farid_slrom::FaridSlrom;
+#[cfg(feature = "board-fine-rom")]
+pub use fine_rom::{FineRom, FineRomKind};
+#[cfg(feature = "board-176")]
+pub use fk23c::Fk23c;
 pub use fme7::Fme7;
 #[cfg(feature = "board-246")]
 pub use g0151::G0151;
@@ -188,6 +242,8 @@ pub use irem_lrog017::IremLrog017;
 pub use irem_tam_s1::IremTamS1;
 pub use iremg101::IremG101;
 pub use irq_boards::IrqBoard;
+#[cfg(feature = "board-irq-latch")]
+pub use irq_latch::{IrqLatch, IrqLatchKind};
 #[cfg(feature = "board-small-boards")]
 pub use jaleco_jf11::JalecoJf11;
 #[cfg(feature = "board-jaleco-72-92-86")]
@@ -199,12 +255,24 @@ pub use jaleco_ss88006::JalecoSs88006;
 pub use jv001::Jv001;
 #[cfg(feature = "board-jy-asic")]
 pub use jy_company::JyCompany;
+#[cfg(feature = "board-303")]
+pub use kaiser7017::Kaiser7017;
+#[cfg(feature = "board-latch-multi")]
+pub use latch_multi::{LatchKind, LatchMulti};
 #[cfg(feature = "board-218")]
 pub use magic_floor::MagicFloor;
 #[cfg(feature = "board-91")]
 pub use mapper091::Mapper091;
+#[cfg(feature = "board-234")]
+pub use maxi15::Maxi15;
+#[cfg(feature = "board-misc-n")]
+pub use misc_n::{MiscKind, MiscN};
 pub use mmc1::Mmc1;
+#[cfg(feature = "board-111")]
+pub use mmc1_parallel::Mmc1Parallel;
 pub use mmc2::Mmc2;
+#[cfg(feature = "board-191")]
+pub use mmc3::Mmc3ChrRam191;
 #[cfg(feature = "board-mmc3-multicart")]
 pub use mmc3::Mmc3Multicart;
 #[cfg(feature = "board-119")]
@@ -216,6 +284,8 @@ pub use mmc3::{Mmc3ChrRam, Mmc3ChrRam192, Mmc3ChrRam194, Mmc3ChrRam74, WaixingFs
 pub use mmc3_a9461::Mmc3A9461;
 #[cfg(feature = "board-mmc3-chrram")]
 pub use mmc3_chrram::Mmc3ChrRamBoard;
+#[cfg(feature = "board-mmc3-clones")]
+pub use mmc3_clones::{Mmc3Clone, Mmc3CloneKind};
 #[cfg(feature = "board-292")]
 pub use mmc3_dragonfighter::Mmc3Dragonfighter;
 #[cfg(feature = "board-208")]
@@ -250,6 +320,10 @@ pub use nrom::Nrom;
 pub use oeka_kids::OekaKids;
 #[cfg(feature = "board-164")]
 pub use pec9588::Pec9588;
+#[cfg(feature = "board-168")]
+pub use racermate::Racermate;
+#[cfg(feature = "board-682")]
+pub use rainbow::Rainbow;
 #[cfg(feature = "board-158")]
 pub use rambo1::Tengen800037;
 pub use rambo1::{Rambo1, Rambo1Board};
@@ -281,6 +355,8 @@ pub use sunsoft2::Sunsoft2;
 pub use sunsoft3::Sunsoft3;
 #[cfg(feature = "board-68")]
 pub use sunsoft4::Sunsoft4;
+#[cfg(feature = "board-529")]
+pub use t230::T230;
 #[cfg(feature = "board-small-boards")]
 pub use taito_tc0190::TaitoTc0190;
 pub use taito_tc0690::TaitoTc0690;
@@ -296,6 +372,10 @@ pub use vrc6::Vrc6;
 pub use vrc7::Vrc7;
 #[cfg(feature = "board-vs-system")]
 pub use vs_system::VsBoard;
+#[cfg(feature = "board-252")]
+pub use waixing252::Waixing252;
+#[cfg(feature = "board-253")]
+pub use waixing253::Waixing253;
 #[cfg(feature = "board-178")]
 pub use waixing_fs305::WaixingFs305;
 
@@ -582,6 +662,23 @@ pub trait Mapper {
     /// A write to PPUCTRL.
     fn on_ppu_control(&mut self, _control: u8) {}
 
+    /// A CPU write of `$2000-$3FFF` (mirrors folded to `$2000-$2007`) that the board snoops, for
+    /// mapper 682 alone: the bus asks only when [`Cartridge::snoops_cpu_bus`] said so at attach.
+    ///
+    /// [`Cartridge::snoops_cpu_bus`]: crate::cartridges::Cartridge::snoops_cpu_bus
+    #[cfg(feature = "board-682")]
+    fn snoop_cpu_bus_write(&mut self, _address: u16, _value: u8) {}
+
+    /// A CPU read of the 2A03's `$4011` the board answers, `None` for the open bus (mapper 682).
+    #[cfg(feature = "board-682")]
+    fn snoop_cpu_bus_read(&mut self, _address: u16) -> Option<u8> {
+        None
+    }
+
+    /// The emulation option `emu.rainbow_network` (mapper 682's ESP), off by default.
+    #[cfg(feature = "board-682")]
+    fn set_network_enabled(&mut self, _enabled: bool) {}
+
     /// The start of a scanline.
     fn on_ppu_scanline(&mut self, _memory: &mut CartridgeMemory, _scanline: i32, _rendering: bool) {
     }
@@ -666,6 +763,10 @@ pub trait Mapper {
 
     /// One CPU cycle elapsed (`memory.cpu_cycle()` already incremented).
     fn on_cpu_cycle(&mut self, _memory: &mut CartridgeMemory) {}
+
+    /// The frame's input word (`NesCore::run_frame`), once at the start of each frame, for a
+    /// board with an input device of its own: mapper 188's microphone buttons (lot MAPPERS-N).
+    fn set_input_word(&mut self, _word: u16) {}
 
     /// `M` of REQ-CORE-073: the board's expansion audio in the mixer's integer units
     /// (REQ-CORE-075, AMD-054), or `None` for a board without any — which is every board but

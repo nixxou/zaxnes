@@ -398,7 +398,7 @@ pub const CAMERA_ROWS: [OptionRow; 2] =
 /// run-ahead's frames and does nothing without it. The debugging view that goes with it
 /// (`emu.smooth_scroll_view`) is **not** here: like `audio.latency_ms` it stays a desktop row,
 /// this screen being a short curated list.
-pub const EMULATION_ROWS: [OptionRow; 30] = [
+pub const EMULATION_ROWS: [OptionRow; 34] = [
     OptionRow::Setting(SettingId::EmuEngine),
     // Lot CARTDB: the cartridge database and the power-on RAM, as in the window.
     OptionRow::Setting(SettingId::EmuCartridgeDb),
@@ -412,6 +412,15 @@ pub const EMULATION_ROWS: [OptionRow; 30] = [
     OptionRow::Setting(SettingId::EmuPpuBusConflicts),
     OptionRow::Setting(SettingId::EmuOamaddrBug),
     OptionRow::Setting(SettingId::EmuOamDecay),
+    OptionRow::Setting(SettingId::EmuRainbowNetwork),
+    OptionRow::Setting(SettingId::EmuVsDip1),
+    OptionRow::Setting(SettingId::EmuVsDip2),
+    OptionRow::Setting(SettingId::EmuVsDip3),
+    OptionRow::Setting(SettingId::EmuVsDip4),
+    OptionRow::Setting(SettingId::EmuVsDip5),
+    OptionRow::Setting(SettingId::EmuVsDip6),
+    OptionRow::Setting(SettingId::EmuVsDip7),
+    OptionRow::Setting(SettingId::EmuVsDip8),
     OptionRow::Setting(SettingId::EmuPowerOnTop),
     OptionRow::Setting(SettingId::EmuPpu2006Delay),
     OptionRow::Setting(SettingId::EmuPpu2006Glitch),

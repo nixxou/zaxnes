@@ -198,7 +198,9 @@ impl BankWindows {
     #[cfg(any(
         feature = "board-mmc3-scramble",
         feature = "board-215",
-        feature = "board-219"
+        feature = "board-219",
+        feature = "board-323",
+        feature = "board-266"
     ))]
     pub fn remap_prg_banks(&mut self, mask: i32, bits: i32) {
         for slot in 0..Self::PRG_WINDOWS {
@@ -249,7 +251,7 @@ impl BankWindows {
     /// `remap_prg_banks` states.
     ///
     /// Additive: behind the three features of MF-UNL-11, its only callers.
-    #[cfg(any(feature = "board-215", feature = "board-219"))]
+    #[cfg(any(feature = "board-215", feature = "board-219", feature = "board-323"))]
     pub fn remap_chr_banks(&mut self, mask: i32, bits: i32) {
         for slot in 0..Self::CHR_WINDOWS {
             let bank = i32::try_from(self.chr_offset[slot] / Self::CHR_WINDOW_SIZE).unwrap_or(0);

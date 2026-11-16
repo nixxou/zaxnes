@@ -38,6 +38,10 @@ pub struct CartEntry {
     pub work_ram_kib: usize,
     /// Battery-backed PRG-RAM in KiB.
     pub save_ram_kib: usize,
+    /// A serial EEPROM's size in **bytes**, which the database writes `b128`, `b256`, … in the
+    /// save-RAM column (MAPPERS-N: Datach's external 24C01 on *Battle Rush*); 0 otherwise. NES
+    /// 2.0 declares it as non-volatile memory in byte 10, not as PRG-RAM.
+    pub save_eeprom_bytes: usize,
     /// Whether the save RAM is battery backed.
     pub battery: bool,
     /// `h`, `v` or `4` (four-screen), as the database writes it.
@@ -72,6 +76,11 @@ fn parse(line: &'static str) -> Option<CartEntry> {
         chr_ram_kib: number(6),
         work_ram_kib: number(7),
         save_ram_kib: number(8),
+        save_eeprom_bytes: f
+            .get(8)
+            .and_then(|v| v.strip_prefix('b'))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
         battery: f.get(9).is_some_and(|v| *v == "1"),
         mirroring: f.get(10).and_then(|v| v.chars().next()).unwrap_or('h'),
         chip: f.get(11).copied().unwrap_or(""),
@@ -131,12 +140,17 @@ pub fn corrected_header(header: &InesHeader, crc: u32) -> Option<Correction> {
     let mut fixed = header.clone();
     let mut changes = Vec::new();
 
-    // The mapper number itself is never changed: a dump whose header names another board than the
+    // The mapper number itself is changed only for a confusion nesdev documents
+    // ([`documented_confusion`]): otherwise a dump whose header names another board than the
     // database's plays as the header says (the iam8bit Mega Man 2, mapper 2 in its header and 30
-    // in the database, loses its background on 30). Only what the header could not say for the
-    // same board is taken.
+    // in the database, loses its background on 30), and only what the header could not say for
+    // the same board is taken.
     if entry.mapper != header.mapper {
-        return None;
+        if !documented_confusion(header.mapper, entry.mapper) {
+            return None;
+        }
+        changes.push(format!("mapper {} -> {}", header.mapper, entry.mapper));
+        fixed.mapper = entry.mapper;
     }
     let submapper = entry.submapper();
     if submapper != header.submapper {
@@ -162,7 +176,20 @@ pub fn corrected_header(header: &InesHeader, crc: u32) -> Option<Correction> {
         ));
         fixed.prg_ram_size = prg_ram;
     }
-    fixed.byte10 = shift_of(entry.work_ram_kib * 1024) | (shift_of(entry.save_ram_kib * 1024) << 4);
+    // nesdev ("NES 2.0", byte 10): the high nibble is the non-volatile memory, EEPROM included —
+    // "INES Mapper 157" reads $10 there as the external 128-byte 24C01.
+    let non_volatile = if entry.save_eeprom_bytes != 0 {
+        entry.save_eeprom_bytes
+    } else {
+        entry.save_ram_kib * 1024
+    };
+    fixed.byte10 = shift_of(entry.work_ram_kib * 1024) | (shift_of(non_volatile) << 4);
+    // An EEPROM is the one thing only byte 10 can say (mapper 157's external 24C01 has no other
+    // trace in a header), so it counts as a change on its own; plain RAM sizes are already the
+    // PRG-RAM change above.
+    if entry.save_eeprom_bytes != 0 && fixed.byte10 != header.byte10 {
+        changes.push(format!("EEPROM {} bytes", entry.save_eeprom_bytes));
+    }
 
     // CHR-RAM larger than the 32 KiB an iNES 1.0 image gets is taken; a smaller one is not. The
     // real 8 KiB of an UNROM or SxROM changes nothing a game can see, and a different size would
@@ -204,6 +231,26 @@ pub fn corrected_header(header: &InesHeader, crc: u32) -> Option<Correction> {
         header: fixed,
         changes,
     })
+}
+
+/// Whether a header naming `header_mapper` for a dump the database gives `database_mapper` is a
+/// mislabelling nesdev documents, so that the database's number is the board (lot MAPPERS-N):
+///
+/// * 199 for 176: "Some Chinese emulators furthermore treat mapper 199 as a duplicate of INES
+///   Mapper 176" ("INES Mapper 199") — the Hackset's *Dragon Ball Z Gaiden*, *Dragon Ball Z II*
+///   and *Sangokushi II* (`ED481B7C`, `D871D3E6`, `44C20420`) are FK23C games under 199;
+/// * 74 for 176, 191, 192, 194 or 195: "SMYNES and older versions of `VirtuaNES EX/Plus` use
+///   mapper 74 to denote *any* MMC3-based mixed CHR-ROM/CHR-RAM game", "even if those games
+///   actually use 191, 192, 194, or 195" ("INES Mapper 074"); the FK23C's CHR-RAM mode is the
+///   same mixture (`BFF7C60C`, a 176 game with 74 in its header).
+///
+/// Only on a database match, which is an exact CRC-32 of the PRG and CHR data with the same
+/// sizes: nothing is guessed from the header alone.
+const fn documented_confusion(header_mapper: i32, database_mapper: i32) -> bool {
+    matches!(
+        (header_mapper, database_mapper),
+        (199, 176) | (74, 176 | 191 | 192 | 194 | 195)
+    )
 }
 
 /// The NES 2.0 size shift of `bytes` (64 << shift), 0 for none.
@@ -280,9 +327,26 @@ mod tests {
     }
 
     #[test]
-    fn the_mapper_number_is_never_changed() {
+    fn an_undocumented_mapper_mismatch_is_left_alone() {
         // The iam8bit Mega Man 2: mapper 2 in its header, 30 in the database.
         assert!(corrected_header(&ines1(16, 0, 2), 0x891C_14BC).is_none());
+    }
+
+    /// MAPPERS-N: the two mislabellings nesdev documents are corrected on an exact match.
+    #[test]
+    fn a_documented_mislabelling_takes_the_database_mapper() {
+        // Dragon Ball Z Gaiden: 199 in its header, an FK23C (176.2) in the database.
+        let correction = corrected_header(&ines1(32, 32, 199), 0xED48_1B7C).unwrap();
+        assert_eq!(
+            (176, 2),
+            (correction.header.mapper, correction.header.submapper)
+        );
+        assert!(correction.changes[0].starts_with("mapper 199 -> 176"));
+        // A 74 header on an FK23C game with CHR-RAM, and on a 195 game.
+        let correction = corrected_header(&ines1(32, 0, 74), 0xBFF7_C60C).unwrap();
+        assert_eq!(176, correction.header.mapper);
+        let correction = corrected_header(&ines1(32, 32, 74), 0xD945_5D72).unwrap();
+        assert_eq!(195, correction.header.mapper);
     }
 
     #[test]
@@ -290,5 +354,20 @@ mod tests {
         let mut header = ines1(16, 16, 4);
         header.is_nes20 = true;
         assert!(corrected_header(&header, 0xE7DD_FEE3).is_none());
+    }
+
+    /// MAPPERS-N: the database writes *Battle Rush*'s external 24C01 as `b128`; the correction
+    /// carries it into NES 2.0 byte 10 as `$10` (nesdev, "INES Mapper 157"), even when nothing
+    /// else of the header changes, so the Datach gets its second EEPROM.
+    #[test]
+    fn the_datach_external_eeprom_reaches_byte_10() {
+        let mut header = ines1(16, 0, 157);
+        header.has_battery = true;
+        let correction = corrected_header(&header, 0x983D_8175).unwrap();
+        assert_eq!(
+            (true, 0x10),
+            (correction.header.is_nes20, correction.header.byte10)
+        );
+        assert_eq!(128, lookup(0x983D_8175).unwrap().save_eeprom_bytes);
     }
 }

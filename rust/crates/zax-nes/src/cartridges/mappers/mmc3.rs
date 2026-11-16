@@ -191,6 +191,11 @@ pub type Mmc3ChrRam192 = Mmc3ChrRam<0x08, 0x0B, 4>;
 #[cfg(feature = "board-mmc3-chrram")]
 pub type Mmc3ChrRam194 = Mmc3ChrRam<0x00, 0x01, 2>;
 
+/// Mapper 191, the Waixing MMC3 with 2 KiB of CHR-RAM on every bank with bit 7 set (lot
+/// MAPPERS-N): Mesen2 `MapperFactory.cpp` builds it as `MMC3_ChrRam(0x80, 0xFF, 2)`.
+#[cfg(feature = "board-191")]
+pub type Mmc3ChrRam191 = Mmc3ChrRam<0x80, 0xFF, 2>;
+
 /// Mapper 195, the Waixing **FS303**: an MMC3 clone "with a GAL that can dynamically change
 /// which CHR banks are mapped to RAM" (nesdev, "INES Mapper 195").
 ///
@@ -712,7 +717,7 @@ impl<
     /// Behind `board-268`, its only caller. [`Mmc3Outer`](super::Mmc3Outer) recomputes all twelve
     /// windows itself rather than laying an overlay over the chip's, because mapper 268's outer
     /// register replaces *address lines* of both bank numbers — see that type's `refresh`.
-    #[cfg(feature = "board-268")]
+    #[cfg(any(feature = "board-268", feature = "board-mmc3-clones"))]
     pub(crate) const fn select(&self) -> u8 {
         self.select
     }
@@ -722,7 +727,11 @@ impl<
     ///
     /// **The second caller is mapper 208's submapper 1** (MF-UNL-11 step 2), whose page makes its
     /// one 32 KiB PRG page "the bank register value SHR 2" of the chip's own `R6`.
-    #[cfg(any(feature = "board-268", feature = "board-208"))]
+    #[cfg(any(
+        feature = "board-268",
+        feature = "board-208",
+        feature = "board-mmc3-clones"
+    ))]
     pub(crate) const fn bank_register(&self, index: usize) -> u8 {
         self.bank[index & 0x07]
     }

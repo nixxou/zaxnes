@@ -1,15 +1,29 @@
+#[cfg(feature = "board-530")]
+use super::Ax5705;
+#[cfg(feature = "board-266")]
+use super::CityFighter;
 #[cfg(feature = "board-cony")]
 use super::Cony;
+#[cfg(feature = "board-284")]
+use super::Drip;
+#[cfg(feature = "board-176")]
+use super::Fk23c;
 #[cfg(feature = "board-huang1")]
 use super::Huang1;
+#[cfg(feature = "board-irq-latch")]
+use super::IrqLatch;
 #[cfg(feature = "board-jy-asic")]
 use super::JyCompany;
+#[cfg(feature = "board-303")]
+use super::Kaiser7017;
 #[cfg(feature = "board-91")]
 use super::Mapper091;
 #[cfg(feature = "board-219")]
 use super::Mmc3A9461;
 #[cfg(feature = "board-mmc3-chrram")]
 use super::Mmc3ChrRamBoard;
+#[cfg(feature = "board-mmc3-clones")]
+use super::Mmc3Clone;
 #[cfg(feature = "board-292")]
 use super::Mmc3Dragonfighter;
 #[cfg(feature = "board-208")]
@@ -30,6 +44,10 @@ use super::Mmc3Txc189;
 use super::Mmc3Unl8237;
 #[cfg(feature = "board-105")]
 use super::NesEvent;
+#[cfg(feature = "board-168")]
+use super::Racermate;
+#[cfg(feature = "board-682")]
+use super::Rainbow;
 #[cfg(feature = "board-116")]
 use super::Somari;
 #[cfg(feature = "board-68")]
@@ -38,6 +56,12 @@ use super::Sunsoft4;
 use super::Tengen800037;
 #[cfg(feature = "board-119")]
 use super::Tqrom;
+#[cfg(feature = "board-252")]
+use super::Waixing252;
+#[cfg(feature = "board-253")]
+use super::Waixing253;
+#[cfg(feature = "board-529")]
+use super::T230;
 use super::{IremH3001, Mapper, Sunsoft3, TaitoTc0690, Vrc3};
 use crate::cartridges::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
@@ -329,6 +353,45 @@ pub enum IrqBoard {
     /// no new high-water mark.
     #[cfg(feature = "board-91")]
     Mapper091(Mapper091),
+    // Appended by MAPPERS-N: the MMC3 clones that only mask, offset or re-decode the chip.
+    /// Mappers 44, 45, 49, 52, 134, 196, 197, 205, 238, 245, 249 and 250 (lot MAPPERS-N), boxed
+    /// for [`IrqBoard::Mmc3Outer`]'s reason: it holds a whole [`super::Mmc3`].
+    #[cfg(feature = "board-mmc3-clones")]
+    Mmc3Clone(Box<Mmc3Clone>),
+    /// Mapper 253, the Waixing VRC4-like board with 2 KiB of CHR-RAM (lot MAPPERS-N).
+    /// Mapper 252, the Waixing VRC4 clone with CHR-RAM chosen by mask/compare (lot MAPPERS-N).
+    /// Mapper 168, RacerMate Challenge II (lot MAPPERS-N).
+    #[cfg(feature = "board-168")]
+    Racermate(Box<Racermate>),
+    /// Mapper 303, Kaiser KS7017 (lot MAPPERS-N).
+    #[cfg(feature = "board-303")]
+    Kaiser7017(Box<Kaiser7017>),
+    /// Mapper 530, the AX5705 VRC4 board (lot MAPPERS-N).
+    #[cfg(feature = "board-530")]
+    Ax5705(Box<Ax5705>),
+    /// Mapper 529, the T-230 VRC4e board (lot MAPPERS-N).
+    #[cfg(feature = "board-529")]
+    T230(Box<T230>),
+    /// Mapper 266, the City Fighter IV VRC4 board (lot MAPPERS-N).
+    #[cfg(feature = "board-266")]
+    CityFighter(Box<CityFighter>),
+    /// Mapper 284, the Drip homebrew board (lot MAPPERS-N).
+    #[cfg(feature = "board-284")]
+    Drip(Box<Drip>),
+    /// Mapper 682, Broke Studio's Rainbow board (lot MAPPERS-N).
+    #[cfg(feature = "board-682")]
+    Rainbow(Box<Rainbow>),
+    #[cfg(feature = "board-252")]
+    Waixing252(Box<Waixing252>),
+    #[cfg(feature = "board-253")]
+    Waixing253(Box<Waixing253>),
+    /// Mappers 40, 42, 43, 50, 106, 117, 183 and 222, the small boards with an IRQ counter (lot
+    /// MAPPERS-N).
+    #[cfg(feature = "board-irq-latch")]
+    IrqLatch(Box<IrqLatch>),
+    /// Mapper 176, the FK23C (lot MAPPERS-N).
+    #[cfg(feature = "board-176")]
+    Fk23c(Box<Fk23c>),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as `Board`'s own `dispatch!` does.
@@ -379,8 +442,54 @@ macro_rules! inner {
             IrqBoard::Cony($b) => $body,
             #[cfg(feature = "board-91")]
             IrqBoard::Mapper091($b) => $body,
+            #[cfg(feature = "board-mmc3-clones")]
+            IrqBoard::Mmc3Clone($b) => $body,
+            #[cfg(feature = "board-168")]
+            IrqBoard::Racermate($b) => $body,
+            #[cfg(feature = "board-303")]
+            IrqBoard::Kaiser7017($b) => $body,
+            #[cfg(feature = "board-530")]
+            IrqBoard::Ax5705($b) => $body,
+            #[cfg(feature = "board-529")]
+            IrqBoard::T230($b) => $body,
+            #[cfg(feature = "board-266")]
+            IrqBoard::CityFighter($b) => $body,
+            #[cfg(feature = "board-284")]
+            IrqBoard::Drip($b) => $body,
+            #[cfg(feature = "board-682")]
+            IrqBoard::Rainbow($b) => $body,
+            #[cfg(feature = "board-252")]
+            IrqBoard::Waixing252($b) => $body,
+            #[cfg(feature = "board-253")]
+            IrqBoard::Waixing253($b) => $body,
+            #[cfg(feature = "board-irq-latch")]
+            IrqBoard::IrqLatch($b) => $body,
+            #[cfg(feature = "board-176")]
+            IrqBoard::Fk23c($b) => $body,
         }
     };
+}
+
+impl IrqBoard {
+    /// The nametable byte for [`Board::read_nametable_from_vram`]: the board's own answer for the
+    /// two boards that serve their tables (284, 682), `read_nametable`'s for the others. **Out of
+    /// line** so that the PPU's fetch path holds one call for them all (lot MAPPERS-N, callgrind).
+    #[cfg(any(feature = "board-284", feature = "board-682"))]
+    #[inline(never)]
+    pub(crate) fn served_nametable(
+        &self,
+        memory: &CartridgeMemory,
+        address: u16,
+        vram: &[u8],
+    ) -> u8 {
+        match self {
+            #[cfg(feature = "board-284")]
+            Self::Drip(board) => board.read_nametable_from_vram(memory, address, vram),
+            #[cfg(feature = "board-682")]
+            Self::Rainbow(board) => board.read_nametable_from_vram(memory, address, vram),
+            _ => self.read_nametable(memory, address),
+        }
+    }
 }
 
 impl Mapper for IrqBoard {
@@ -449,11 +558,15 @@ impl Mapper for IrqBoard {
         feature = "board-116",
         feature = "board-119",
         feature = "board-268",
+        feature = "board-mmc3-clones",
         feature = "board-68",
         feature = "board-91",
         feature = "board-cony",
         feature = "board-huang1",
-        feature = "board-jy-asic"
+        feature = "board-jy-asic",
+        feature = "board-irq-latch",
+        feature = "board-176",
+        feature = "board-682",
     ))]
     fn prg_ram_enabled(&self) -> bool {
         inner!(self, b => b.prg_ram_enabled())
@@ -476,7 +589,7 @@ impl Mapper for IrqBoard {
     /// **Behaviour-neutral for the other boards of this enum**: no other variant overrides
     /// `prg_ram_window`, and `Mmc3ChrRamBoard`'s own body answers the trait default for 74, 192
     /// and 194, so every one of them gets the answer the un-forwarded dispatch gave it.
-    #[cfg(feature = "board-195-prg-ram-5000")]
+    #[cfg(any(feature = "board-195-prg-ram-5000", feature = "board-176"))]
     fn prg_ram_window(&self, memory: &CartridgeMemory) -> (usize, usize) {
         inner!(self, b => b.prg_ram_window(memory))
     }
@@ -495,7 +608,10 @@ impl Mapper for IrqBoard {
         feature = "board-116",
         feature = "board-119",
         feature = "board-268",
-        feature = "board-huang1"
+        feature = "board-huang1",
+        feature = "board-mmc3-clones",
+        feature = "board-176",
+        feature = "board-284",
     ))]
     fn prg_ram_writable(&self) -> bool {
         inner!(self, b => b.prg_ram_writable())
@@ -507,7 +623,14 @@ impl Mapper for IrqBoard {
     /// is the WRAM's as well (MF-UNL-6 step 1). No other board of this enum overrides it, so the
     /// arm this adds to `Board::intercept_cpu_write` answers `false` for all of them exactly as
     /// the un-forwarded dispatch did.
-    #[cfg(any(feature = "board-mmc3-multicart", feature = "board-268"))]
+    #[cfg(any(
+        feature = "board-mmc3-multicart",
+        feature = "board-268",
+        feature = "board-mmc3-clones",
+        feature = "board-irq-latch",
+        feature = "board-176",
+        feature = "board-682",
+    ))]
     fn intercept_cpu_write(
         &mut self,
         memory: &mut CartridgeMemory,
@@ -529,7 +652,13 @@ impl Mapper for IrqBoard {
     /// about 1.2 M on the two MMC1 ROMs, on a dispatch no MMC1 reaches. Out of line it is one
     /// `callq` per *register write* of a mapper-158 cartridge, four times, and nothing for
     /// anybody else.
-    #[cfg(any(feature = "board-158", feature = "board-68", feature = "board-jy-asic"))]
+    #[cfg(any(
+        feature = "board-158",
+        feature = "board-68",
+        feature = "board-jy-asic",
+        feature = "board-284",
+        feature = "board-682"
+    ))]
     #[inline(never)]
     fn nametable_page(&self, table: i32) -> i32 {
         inner!(self, b => b.nametable_page(table))
@@ -594,7 +723,10 @@ impl Mapper for IrqBoard {
         feature = "board-268",
         feature = "board-cony",
         feature = "board-huang1",
-        feature = "board-jy-asic"
+        feature = "board-jy-asic",
+        feature = "board-mmc3-clones",
+        feature = "board-irq-latch",
+        feature = "board-176",
     ))]
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
         inner!(self, b => b.try_read_prg(memory, address))
@@ -613,7 +745,13 @@ impl Mapper for IrqBoard {
     /// **Behaviour-neutral for the other boards of this enum**: none of the fourteen overrides
     /// either method, so each one's own default is `Mapper::cpu_peek_override`'s `None` -- the
     /// same answer the un-forwarded dispatch gave them.
-    #[cfg(feature = "board-292")]
+    #[cfg(any(
+        feature = "board-292",
+        feature = "board-303",
+        feature = "board-529",
+        feature = "board-284",
+        feature = "board-682"
+    ))]
     #[inline(never)]
     fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
         inner!(self, b => b.cpu_read_override(memory, address))
@@ -621,7 +759,13 @@ impl Mapper for IrqBoard {
 
     /// The side-effect-free counterpart, for the same board and the same reason: without it
     /// `Mapper::cpu_read_override`'s own default would route a host peek through the fill.
-    #[cfg(feature = "board-292")]
+    #[cfg(any(
+        feature = "board-292",
+        feature = "board-303",
+        feature = "board-529",
+        feature = "board-284",
+        feature = "board-682"
+    ))]
     #[inline(never)]
     fn cpu_peek_override(&self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
         inner!(self, b => b.cpu_peek_override(memory, address))
@@ -629,6 +773,19 @@ impl Mapper for IrqBoard {
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         inner!(self, b => b.write_register(memory, address, value));
+    }
+
+    /// Forwarded for mapper 682 alone (lot MAPPERS-N): the Rainbow's sprite extended mode reads
+    /// the sprite size from `$2000`.
+    #[cfg(feature = "board-682")]
+    fn on_ppu_control(&mut self, control: u8) {
+        inner!(self, b => b.on_ppu_control(control));
+    }
+
+    /// Forwarded for mapper 682 alone: its nametables in CHR-RAM and FPGA RAM take `$2007` writes.
+    #[cfg(feature = "board-682")]
+    fn write_nametable(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        inner!(self, b => b.write_nametable(memory, address, value));
     }
 
     /// **`#[inline(never)]`, and §4.3 of `docs/review/MF-6-inventory.md` is why**: this dispatch
@@ -640,6 +797,14 @@ impl Mapper for IrqBoard {
     #[inline(never)]
     fn on_ppu_address_bus(&mut self, memory: &mut CartridgeMemory, address: u16, clock: i64) {
         inner!(self, b => b.on_ppu_address_bus(memory, address, clock));
+    }
+
+    /// Forwarded for mapper 284 alone (lot MAPPERS-N), the one board of this enum with expansion
+    /// audio: every other one keeps `Mapper`'s `None`, which `Cartridge::has_expansion_audio`
+    /// reads once at attach, so their bus never asks again.
+    #[cfg(any(feature = "board-284", feature = "board-682"))]
+    fn expansion_audio_output(&self) -> Option<i32> {
+        inner!(self, b => b.expansion_audio_output())
     }
 
     /// **`None` for the whole variant, which is the body the MMC5 already gives**, and MF-6b

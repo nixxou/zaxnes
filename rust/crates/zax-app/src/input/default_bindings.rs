@@ -8,7 +8,7 @@ use super::input_action::InputAction;
 
 /// Player one's default keys. `QuickSave` and `QuickLoad` have no default key: the combinations of
 /// REQ-INP-104 are the only default route to the quick slot (SPEC-08 §4.2, §4.3).
-pub const PLAYER_ONE_KEYBOARD: [(InputAction, Key); 17] = [
+pub const PLAYER_ONE_KEYBOARD: [(InputAction, Key); 20] = [
     (InputAction::LEFT, Key::Left),
     (InputAction::RIGHT, Key::Right),
     (InputAction::UP, Key::Up),
@@ -26,6 +26,10 @@ pub const PLAYER_ONE_KEYBOARD: [(InputAction, Key); 17] = [
     (InputAction::MENU, Key::Escape),
     (InputAction::ROLL_BACK, Key::Comma),
     (InputAction::FAST_FORWARD, Key::Period),
+    // Lot MAPPERS-N: the VS. System cabinet on 5, 6 and 9, the arcade emulators' keys.
+    (InputAction::COIN_1, Key::Number5),
+    (InputAction::COIN_2, Key::Number6),
+    (InputAction::SERVICE, Key::Number9),
 ];
 
 /// The defaults of a gamepad that answers to the standard numbering (SPEC-08 §4.3).

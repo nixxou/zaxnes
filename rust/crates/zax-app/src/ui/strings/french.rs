@@ -255,6 +255,9 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     // AMD-044 §3 : les deux resets voisinent, le dur reçoit donc son nom.
     ("cmd.emulation.reset", "Reset complet"),
     ("cmd.emulation.soft_reset", "Reset doux"),
+    ("cmd.emulation.insert_coin_1", "Insérer une pièce (fente 1)"),
+    ("cmd.emulation.insert_coin_2", "Insérer une pièce (fente 2)"),
+    ("cmd.emulation.vs_service", "Bouton service (VS. System)"),
     ("cmd.emulation.stop", "Arrêter"),
     ("cmd.emulation.fast_forward", "Avance rapide"),
     ("cmd.emulation.rollback", "Rollback"),
@@ -525,6 +528,15 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.ppu_bus_conflicts", "Conflits de bus PPU"),
     ("setting.emu.oamaddr_bug", "Défaut OAMADDR (2C02G)"),
     ("setting.emu.oam_decay", "Effacement de l'OAM"),
+    ("setting.emu.rainbow_network", "Réseau de la carte Rainbow"),
+    ("setting.emu.vs_dip_1", "DIP switch 1 du VS. System"),
+    ("setting.emu.vs_dip_2", "DIP switch 2 du VS. System"),
+    ("setting.emu.vs_dip_3", "DIP switch 3 du VS. System"),
+    ("setting.emu.vs_dip_4", "DIP switch 4 du VS. System"),
+    ("setting.emu.vs_dip_5", "DIP switch 5 du VS. System"),
+    ("setting.emu.vs_dip_6", "DIP switch 6 du VS. System"),
+    ("setting.emu.vs_dip_7", "DIP switch 7 du VS. System"),
+    ("setting.emu.vs_dip_8", "DIP switch 8 du VS. System"),
     ("setting.emu.power_on_top", "Allumage en haut de l'image"),
     ("setting.emu.ppu_2006_delay", "Délai de chargement $2006"),
     ("setting.emu.ppu_2006_glitch", "Glitch de défilement $2006"),
@@ -1201,6 +1213,42 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (
         "detail.emu.oamaddr_bug",
         "Un défaut de la puce vidéo de la NES et de la Famicom (2C02G et suivantes) : si un jeu laisse l'adresse de la mémoire des sprites à 8 ou plus quand l'image commence, huit octets de cette mémoire sont recopiés sur les huit premiers, et un ou deux sprites peuvent en remplacer d'autres pendant une image. Les jeux écrits pour la console remettent cette adresse à zéro et ne le montrent jamais. Une console PAL n'a pas ce défaut : il ne s'y applique jamais. Prend effet au prochain chargement. Par défaut : activé.",
+    ),
+    (
+        "detail.emu.vs_dip_1",
+        "Interrupteur 1 des huit DIP switches d'une borne d'arcade VS. System. Chaque jeu leur donne son propre sens : difficulté, nombre de vies, pièces par crédit, parfois la langue ou un mode de test ; le manuel du jeu ou la fiche de l'exploitant les liste. Seulement pour les jeux VS. System. Prend effet au prochain chargement, comme sur une borne, qui les lit à l'allumage. Par défaut : désactivé.",
+    ),
+    (
+        "detail.emu.vs_dip_2",
+        "Interrupteur 2 des huit DIP switches d'une borne d'arcade VS. System. Chaque jeu leur donne son propre sens : difficulté, nombre de vies, pièces par crédit, parfois la langue ou un mode de test ; le manuel du jeu ou la fiche de l'exploitant les liste. Seulement pour les jeux VS. System. Prend effet au prochain chargement, comme sur une borne, qui les lit à l'allumage. Par défaut : désactivé.",
+    ),
+    (
+        "detail.emu.vs_dip_3",
+        "Interrupteur 3 des huit DIP switches d'une borne d'arcade VS. System. Chaque jeu leur donne son propre sens : difficulté, nombre de vies, pièces par crédit, parfois la langue ou un mode de test ; le manuel du jeu ou la fiche de l'exploitant les liste. Seulement pour les jeux VS. System. Prend effet au prochain chargement, comme sur une borne, qui les lit à l'allumage. Par défaut : désactivé.",
+    ),
+    (
+        "detail.emu.vs_dip_4",
+        "Interrupteur 4 des huit DIP switches d'une borne d'arcade VS. System. Chaque jeu leur donne son propre sens : difficulté, nombre de vies, pièces par crédit, parfois la langue ou un mode de test ; le manuel du jeu ou la fiche de l'exploitant les liste. Seulement pour les jeux VS. System. Prend effet au prochain chargement, comme sur une borne, qui les lit à l'allumage. Par défaut : désactivé.",
+    ),
+    (
+        "detail.emu.vs_dip_5",
+        "Interrupteur 5 des huit DIP switches d'une borne d'arcade VS. System. Chaque jeu leur donne son propre sens : difficulté, nombre de vies, pièces par crédit, parfois la langue ou un mode de test ; le manuel du jeu ou la fiche de l'exploitant les liste. Seulement pour les jeux VS. System. Prend effet au prochain chargement, comme sur une borne, qui les lit à l'allumage. Par défaut : désactivé.",
+    ),
+    (
+        "detail.emu.vs_dip_6",
+        "Interrupteur 6 des huit DIP switches d'une borne d'arcade VS. System. Chaque jeu leur donne son propre sens : difficulté, nombre de vies, pièces par crédit, parfois la langue ou un mode de test ; le manuel du jeu ou la fiche de l'exploitant les liste. Seulement pour les jeux VS. System. Prend effet au prochain chargement, comme sur une borne, qui les lit à l'allumage. Par défaut : désactivé.",
+    ),
+    (
+        "detail.emu.vs_dip_7",
+        "Interrupteur 7 des huit DIP switches d'une borne d'arcade VS. System. Chaque jeu leur donne son propre sens : difficulté, nombre de vies, pièces par crédit, parfois la langue ou un mode de test ; le manuel du jeu ou la fiche de l'exploitant les liste. Seulement pour les jeux VS. System. Prend effet au prochain chargement, comme sur une borne, qui les lit à l'allumage. Par défaut : désactivé.",
+    ),
+    (
+        "detail.emu.vs_dip_8",
+        "Interrupteur 8 des huit DIP switches d'une borne d'arcade VS. System. Chaque jeu leur donne son propre sens : difficulté, nombre de vies, pièces par crédit, parfois la langue ou un mode de test ; le manuel du jeu ou la fiche de l'exploitant les liste. Seulement pour les jeux VS. System. Prend effet au prochain chargement, comme sur une borne, qui les lit à l'allumage. Par défaut : désactivé.",
+    ),
+    (
+        "detail.emu.rainbow_network",
+        "Permet aux jeux de la carte Rainbow (mapper 682, Broke Studio) d'utiliser votre réseau par la puce Wi-Fi de la carte : connexion à leur serveur de jeu et téléchargement de fichiers. Désactivé, la puce fonctionne toujours (fichiers, nombres aléatoires) mais n'annonce aucun Wi-Fi, et rien ne sort de l'émulateur. Les sauvegardes d'état, le retour en arrière et les replays ne peuvent pas rétablir une connexion. Prend effet au prochain chargement. Par défaut : désactivé.",
     ),
     (
         "detail.emu.oam_decay",

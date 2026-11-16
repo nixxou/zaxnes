@@ -1054,6 +1054,8 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
     video_nes_palette(out);
     emulation_engine(out);
     emulation_cartridge(out);
+    emulation_rainbow(out);
+    emulation_vs(out);
     emulation_power_on_ppu(out);
     out.push(
         SettingDescriptor::new(
@@ -1196,6 +1198,125 @@ fn emulation_power_on_ppu(out: &mut Vec<SettingDescriptor>) {
             opt(1, "Letterless RP2A03"),
         ]))
         .with_label("CPU revision"),
+    );
+}
+
+/// Lot MAPPERS-N: the eight DIP switches of a VS. System cabinet, read by most games at
+/// power-on, so they take effect at the next load. All off by default: the per-ROM table
+/// records no factory setting (`zax_nes::vs`).
+fn emulation_vs(out: &mut Vec<SettingDescriptor>) {
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuVsDip1,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("VS. System DIP switch 1"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuVsDip2,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("VS. System DIP switch 2"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuVsDip3,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("VS. System DIP switch 3"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuVsDip4,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("VS. System DIP switch 4"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuVsDip5,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("VS. System DIP switch 5"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuVsDip6,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("VS. System DIP switch 6"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuVsDip7,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("VS. System DIP switch 7"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuVsDip8,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("VS. System DIP switch 8"),
+    );
+}
+
+fn emulation_rainbow(out: &mut Vec<SettingDescriptor>) {
+    // Lot MAPPERS-N: the Rainbow board's (mapper 682) ESP reaches the host's network only when
+    // the player asks; off, Wi-Fi reports "not connected" (the owner's request).
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuRainbowNetwork,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Rainbow board network"),
     );
 }
 

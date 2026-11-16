@@ -194,6 +194,12 @@ impl CartridgeMemory {
         self.rom.prg_rom_mut()
     }
 
+    /// CHR-ROM, mutably: mapper 682's CHR is an S29 flash its game may program (MAPPERS-N).
+    #[cfg(feature = "board-682")]
+    pub(crate) fn chr_rom_mut(&mut self) -> &mut [u8] {
+        self.rom.chr_rom_mut()
+    }
+
     /// PRG-RAM at $6000-$7FFF, 8 KiB unless the board or the header asks for more.
     #[must_use]
     pub fn prg_ram(&self) -> &[u8] {
@@ -299,7 +305,7 @@ impl CartridgeMemory {
     ///
     /// A board with no flash row in [`registry::board_memory_sizes`] still gets the write, so the
     /// behaviour of a board that had one before this module existed is unchanged.
-    #[cfg(feature = "board-111")]
+    #[cfg(any(feature = "board-111", feature = "board-682"))]
     pub(crate) fn flash_program(&mut self, offset: usize, value: u8) {
         let rom = self.rom.prg_rom_mut();
         if let Some(flash) = &mut self.flash {
@@ -311,7 +317,7 @@ impl CartridgeMemory {
 
     /// Erases the flash sector `offset` falls in to `$FF`, the `$80`/`$30` command, and marks it
     /// changed.
-    #[cfg(feature = "board-111")]
+    #[cfg(any(feature = "board-111", feature = "board-682"))]
     pub(crate) fn flash_erase_sector(&mut self, offset: usize) {
         let rom = self.rom.prg_rom_mut();
         if let Some(flash) = &mut self.flash {
@@ -504,6 +510,119 @@ pub struct Cartridge {
     clocks_on_cpu_cycle: bool,
 }
 
+/// Whether `mapper`'s board may answer a CIRAM page per nametable; the numbers and the lot that
+/// added each are in the comment on the field in `Cartridge::create`.
+///
+/// **Extracted from `Cartridge::create` by MAPPERS-N** (mapper 307), as [`clocks_on_cpu_cycle`]
+/// was, to keep that function under `clippy::too_many_lines`.
+const fn nametable_pages_vary(mapper: i32) -> bool {
+    matches!(
+        mapper,
+        5 | 19
+            | 24
+            | 26
+            | 35
+            | 68
+            | 90
+            | 95
+            | 111
+            | 118
+            | 137
+            | 138
+            | 139
+            | 141
+            | 150
+            | 158
+            | 207
+            | 209
+            | 211
+            | 218
+            | 243
+            // MAPPERS-N: 307, the KS7037, a CIRAM page per table from four registers
+            // (`Kaiser7037.h`, `SetNametables`).
+            | 307
+            // MAPPERS-N: 284 serves every table while its extended attributes are on.
+            | 284
+            // MAPPERS-N: 682 serves every table.
+            | 682
+    )
+}
+
+/// Whether `mapper`'s board moves on every CPU cycle; the numbers and the lot that added each are
+/// in the comment on the field in `Cartridge::create`.
+///
+/// **Extracted from `Cartridge::create` by MAPPERS-N** (mapper 168), which took that function past
+/// `clippy::too_many_lines`, as MF-UNL-2 step 3 did for [`watches_ppu_reads`].
+const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
+    matches!(
+        mapper,
+        5 | 16
+            | 18
+            | 19
+            | 21
+            | 22
+            | 23
+            | 24
+            | 25
+            | 26
+            | 27
+            | 35
+            | 48
+            | 64
+            | 65
+            | 67
+            | 69
+            | 73
+            | 83
+            | 85
+            | 90
+            // MF-UNL-8 step 4: mapper 91's submapper 1 counts M2, "counting down by five
+            // every fourth M2 cycle" (nesdev, "INES Mapper 091").
+            | 91
+            // MAPPERS-N: mapper 253's IRQ counts CPU cycles (Mesen2 `Mapper253.h:71`).
+            | 253
+            // MAPPERS-N: mapper 252's VRC IRQ (Mesen2 `Waixing252.h`, `ProcessCpuClock`).
+            | 252
+            // MAPPERS-N: mapper 168's counter runs from power-on (nesdev "INES Mapper 168").
+            | 168
+            // MAPPERS-N: mapper 303's counter, `Kaiser7017.h` `ProcessCpuClock`.
+            | 303
+            // MAPPERS-N: mapper 530's VRC4 IRQ (puNES `mapper_530.c`, `EXTCL_CPU_EVERY_CYCLE`).
+            | 530
+            // MAPPERS-N: mapper 529's VRC4 IRQ (puNES `mapper_529.c`, `EXTCL_CPU_EVERY_CYCLE`).
+            | 529
+            // MAPPERS-N: mapper 266's VRC4 IRQ (nesdev "NES 2.0 Mapper 266").
+            | 266
+            // MAPPERS-N: mapper 284's IRQ counter and PCM channels (`UnlDripGame.h`).
+            | 284
+            // MAPPERS-N: 682's CPU IRQ, VRC6 audio and PPU-idle detection (`Rainbow.cpp`).
+            | 682
+            // MAPPERS-N: the CPU-clocked counters of `IrqLatch`.
+            | 56
+            | 142
+            | 304
+            | 6
+            | 8
+            | 17
+            // MAPPERS-N: the FK23C raises its IRQ two CPU cycles late (Mesen2 `Fk23C.h`).
+            | 176
+            | 40
+            | 42
+            | 43
+            | 50
+            | 106
+            | 183
+            | 105
+            | 153
+            | 157
+            | 159
+            | 209
+            | 211
+            | 264
+            | 298
+    )
+}
+
 /// Whether `mapper`'s board moves when the PPU puts an address on its bus during a read
 /// ([`Cartridge::watches_ppu_reads`]).
 ///
@@ -587,6 +706,8 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             | 158
             | 162
             | 163
+            // MAPPERS-N: 518 switches CHR with the nametable the PPU addresses (`Dance2000.h`).
+            | 518
             // MF-UNL-10 step 2: mapper 164 latches CHR A12 from "PPU A9 … on last rise of PPU
             // A13" exactly as 162 and 163 do, and CHR A3 from PPU A0 on the same rise -- its
             // 1 bpp video mode. In both lists for those two numbers' reason, and it has no IRQ
@@ -619,6 +740,43 @@ const fn watches_ppu_reads(mapper: i32) -> bool {
             // MF-UNL-12 step 2: the BMW8544 holds an `Mmc3` whose "scanline IRQ work[s] as on a
             // normal MMC3".
             | 292
+            | 44
+            | 45
+            | 49
+            | 52
+            | 134
+            | 196
+            | 197
+            | 205
+            | 238
+            | 245
+            | 249
+            | 250
+            | 126
+            | 224
+            | 259
+            | 287
+            | 313
+            | 325
+            | 191
+            | 117
+            | 222
+            | 176
+            | 217
+            | 254
+            | 165
+            | 198
+            | 199
+            | 513
+            | 260
+            | 258
+            | 333
+            | 348
+            | 366
+            // MAPPERS-N: 284 remembers the last nametable fetch for its extended attributes.
+            | 284
+            // MAPPERS-N: 682 counts every fetch for its scanline IRQ and extended modes.
+            | 682
     )
 }
 
@@ -653,6 +811,8 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 158
             | 162
             | 163
+            // MAPPERS-N: 518 switches CHR with the nametable the PPU addresses (`Dance2000.h`).
+            | 518
             // MF-UNL-10 step 2: mapper 164's two CHR latches; see the list above.
             | 164
             | 182
@@ -677,6 +837,39 @@ const fn watches_ppu_bus_without_read(mapper: i32) -> bool {
             | 268
             // MF-UNL-12 step 2: the BMW8544's MMC3 counter; see the list above.
             | 292
+            | 44
+            | 45
+            | 49
+            | 52
+            | 134
+            | 196
+            | 197
+            | 205
+            | 238
+            | 245
+            | 249
+            | 250
+            | 126
+            | 224
+            | 259
+            | 287
+            | 313
+            | 325
+            | 191
+            | 117
+            | 222
+            | 176
+            | 217
+            | 254
+            | 165
+            | 198
+            | 199
+            | 513
+            | 260
+            | 258
+            | 333
+            | 348
+            | 366
     )
 }
 
@@ -789,29 +982,7 @@ impl Cartridge {
             // nametable RAM and the board maps the same 2 KiB into the pattern tables, so one
             // memory has to answer both windows (nesdev, "INES Mapper 218"). The number is in the
             // latch whatever `board-218` says, for mapper 68's reason above.
-            nametable_pages_vary: matches!(
-                mapper,
-                5 | 19
-                    | 24
-                    | 26
-                    | 35
-                    | 68
-                    | 90
-                    | 95
-                    | 111
-                    | 118
-                    | 137
-                    | 138
-                    | 139
-                    | 141
-                    | 150
-                    | 158
-                    | 207
-                    | 209
-                    | 211
-                    | 218
-                    | 243
-            ),
+            nametable_pages_vary: nametable_pages_vary(mapper),
             bus_conflicts,
             // The two lists are `watches_ppu_reads` and `watches_ppu_bus_without_read` below,
             // which carry the numbers and the lot that added each.
@@ -849,40 +1020,7 @@ impl Cartridge {
             // MF-UNL-8 step 3 adds 83 and 264, the Cony / Yoko ASIC, whose $8318 default value
             // "$00 selects CPU M2 cycles as the source of the IRQ counter" -- this clock, and the
             // board's power-on setting (nesdev, "INES Mapper 083").
-            clocks_on_cpu_cycle: matches!(
-                mapper,
-                5 | 16
-                    | 18
-                    | 19
-                    | 21
-                    | 22
-                    | 23
-                    | 24
-                    | 25
-                    | 26
-                    | 27
-                    | 35
-                    | 48
-                    | 64
-                    | 65
-                    | 67
-                    | 69
-                    | 73
-                    | 83
-                    | 85
-                    | 90
-                    // MF-UNL-8 step 4: mapper 91's submapper 1 counts M2, "counting down by five
-                    // every fourth M2 cycle" (nesdev, "INES Mapper 091").
-                    | 91
-                    | 105
-                    | 153
-                    | 157
-                    | 159
-                    | 209
-                    | 211
-                    | 264
-                    | 298
-            ),
+            clocks_on_cpu_cycle: clocks_on_cpu_cycle(mapper),
         };
         cartridge.reset();
         Ok(cartridge)
@@ -967,6 +1105,13 @@ impl Cartridge {
     /// `#[inline(always)]` for the reason `<NesBus as CpuBus>::irq_asserted` carries: this is the
     /// middle link of the per-CPU-cycle /IRQ sample, and pinning only the outer one moved the
     /// boundary here instead (6.6 M instructions on `m1`, 12.9 M on `mmc5`, MF-5b step 1).
+    /// Hands the board the frame's input word, once at the start of the frame (lot MAPPERS-N:
+    /// mapper 188's microphone buttons are controller 1's A and B; see `BandaiKaraoke`).
+    #[cfg(feature = "board-188")]
+    pub fn set_input_word(&mut self, word: u16) {
+        self.board.set_input_word(word);
+    }
+
     #[must_use]
     #[allow(clippy::inline_always)] // Measured: MF-5b step 1.
     #[inline(always)]
@@ -1469,6 +1614,37 @@ impl Cartridge {
             .read_nametable_from_vram(&self.memory, address, vram)
     }
 
+    /// [`Cartridge::read_nametable_from_vram`] on the board kind `K` (lot MAPPERS-N): a
+    /// specialised kind reaches its own board's method and **never the `Board` dispatch**, whose
+    /// arms for the boards that serve their own tables (the MMC5's extended modes, 284, 682) are
+    /// then only on the generic path. `AnyBoard` is the dispatch, unchanged.
+    ///
+    /// A kind that [`BoardKind::SWITCHES`] (the light MMC5) goes through the dispatch too: between
+    /// the write that arms the MMC5's split or extended attributes and the check that hands the
+    /// frame back to `AnyBoard`, the board is already `Board::Mmc5Ext` and only the dispatch
+    /// answers its tables.
+    #[cfg(feature = "board-mmc5-exattr-split")]
+    ///
+    /// **`#[inline(never)]`, measured** (callgrind, Mega Man 2 and Zelda II, MMC1): inlined into
+    /// `Ppu2C02::read_nametable_inner::<Mmc1Kind>`, the `unreachable!` of
+    /// [`BoardKind::board`] put a panic call in that function and with it a stack frame
+    /// (`push`/`pop`) on **every** nametable fetch, +3.1 M instructions over 300 frames
+    /// (+0.046 % `core`), although an MMC1 never takes this branch. Out of line, the branch is
+    /// a tail `jmp` and `read_nametable_inner` has no frame, as at the base. The Drip's arm in the
+    /// `Board` dispatch cost exactly the same frame before this function existed.
+    #[must_use]
+    #[inline(never)]
+    // Superseded for the specialised kinds by `BoardKind::SERVES_NAMETABLES`, which removes the
+    // call altogether; kept out of line for the dispatch and the MMC5 kinds.
+    pub fn read_nametable_from_vram_as<K: BoardKind>(&self, address: u16, vram: &[u8]) -> u8 {
+        if K::SWITCHES {
+            self.board
+                .read_nametable_from_vram(&self.memory, address, vram)
+        } else {
+            K::board(&self.board).read_nametable_from_vram(&self.memory, address, vram)
+        }
+    }
+
     /// Where a write to a nametable the cartridge answers lands in console VRAM, or `None` when
     /// the board keeps or drops the byte (see [`Mapper::nametable_write_offset`]).
     #[cfg(feature = "board-mmc5-exattr-split")]
@@ -1545,6 +1721,32 @@ impl Cartridge {
     /// Writes a nametable byte the cartridge serves itself.
     pub fn write_nametable(&mut self, address: u16, value: u8) {
         self.write_nametable_as::<AnyBoard>(address, value);
+    }
+
+    /// Whether the board snoops the console's own bus (`$2003`/`$2004` writes, the `$4011` read):
+    /// mapper 682 alone, asked once by `NesBus::attach`.
+    #[cfg(feature = "board-682")]
+    #[must_use]
+    pub fn snoops_cpu_bus(&self) -> bool {
+        self.mapper_number() == 682
+    }
+
+    /// See [`Mapper::snoop_cpu_bus_write`].
+    #[cfg(feature = "board-682")]
+    pub fn snoop_cpu_bus_write(&mut self, address: u16, value: u8) {
+        self.board.snoop_cpu_bus_write(address, value);
+    }
+
+    /// See [`Mapper::set_network_enabled`]: mapper 682's ESP network, off by default.
+    #[cfg(feature = "board-682")]
+    pub fn set_network_enabled(&mut self, enabled: bool) {
+        self.board.set_network_enabled(enabled);
+    }
+
+    /// See [`Mapper::snoop_cpu_bus_read`].
+    #[cfg(feature = "board-682")]
+    pub fn snoop_cpu_bus_read(&mut self, address: u16) -> Option<u8> {
+        self.board.snoop_cpu_bus_read(address)
     }
 
     pub fn write_nametable_as<K: BoardKind>(&mut self, address: u16, value: u8) {
@@ -1921,6 +2123,25 @@ mod tests {
         // the page gives the number no submapper and the board refuses neither half of the pair.
         #[cfg(feature = "board-292")]
         expected.extend_from_slice(&[292, 292]);
+        // MAPPERS-N: the MMC3 clones hold an `Mmc3`, so each moves for 114's reason, twice. They
+        // are appended here and the list is sorted below, since the sweep runs in number order.
+        for number in [
+            44, 45, 49, 52, 117, 165, 176, 198, 199, 217, 254, 258, 333, 348, 366, 126, 134, 191,
+            196, 197, 205, 222, 224, 238, 245, 249, 250, 259, 287, 313, 325, 513, 260,
+        ] {
+            if Cartridge::is_supported(number) {
+                expected.extend_from_slice(&[number, number]);
+            }
+        }
+        // MAPPERS-N: mapper 284 remembers the last nametable byte fetched (`UnlDripGame.h`).
+        if Cartridge::is_supported(284) {
+            expected.extend_from_slice(&[284, 284]);
+        }
+        // MAPPERS-N: mapper 682 counts every fetch for its scanline IRQ (`Rainbow.cpp`).
+        if Cartridge::is_supported(682) {
+            expected.extend_from_slice(&[682, 682]);
+        }
+        expected.sort_unstable();
         assert_eq!(
             moved, expected,
             "expected exactly the MMC3, the MC-ACC, the MMC5, the two MMC3 multicarts, the \
@@ -1979,9 +2200,23 @@ mod tests {
         // **Mapper 210 is absent and that is the point of its own guard**: the Namcot 175 and
         // 340 are the 163 with the IRQ counter and the sound cut out, so `Namco163::on_cpu_cycle`
         // returns at once for them and they are rightly not latched.
+        // MAPPERS-N: mapper 183's 114-cycle prescaler runs from power-on whether or not its
+        // counter is enabled (Mesen2 `Mapper183.h`, `ProcessCpuClock`), so it moves here too.
+        let mut expected = vec![5, 5, 19, 19, 69, 69, 85, 85];
+        // MAPPERS-N: mapper 168's IRQ counter counts from power-on until a game freezes it.
+        if Cartridge::is_supported(168) {
+            expected.extend_from_slice(&[168, 168]);
+        }
+        if Cartridge::is_supported(183) {
+            expected.extend_from_slice(&[183, 183]);
+        }
+        // MAPPERS-N: mapper 682's jitter counter runs on every CPU cycle (`Rainbow.cpp`).
+        if Cartridge::is_supported(682) {
+            expected.extend_from_slice(&[682, 682]);
+        }
         assert_eq!(
             moved,
-            [5, 5, 19, 19, 69, 69, 85, 85],
+            expected,
             "expected the MMC5's idle counter, the Namco 163's sound multiplexer, the FME-7's              5B prescaler and the VRC7's sample divider to move on a bare CPU cycle, and the              sweep to reach them"
         );
     }

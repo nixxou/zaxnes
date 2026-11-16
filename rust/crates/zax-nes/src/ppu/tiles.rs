@@ -366,10 +366,10 @@ impl Ppu2C02 {
                 }
             }
 
-            let tile = self.read_nametable_inner(nametable_address, cart.as_deref());
+            let tile = self.read_nametable_inner::<K>(nametable_address, cart.as_deref());
             let attribute_address =
                 0x23C0 | (table << 10) | ((coarse_y & 0x1C) << 1) | (column >> 2);
-            let attribute = self.read_nametable_inner(attribute_address, cart.as_deref());
+            let attribute = self.read_nametable_inner::<K>(attribute_address, cart.as_deref());
             let shift = ((coarse_y & 0x02) << 1) | (column & 0x02);
             let palette = (attribute >> shift) & 0x03;
 
@@ -463,7 +463,8 @@ impl Ppu2C02 {
             // frame's last (Mega Man 2 one row of a transition's frame; none in Super Mario Bros.
             // 3, Mega Man 6, Metal Force, Metroid; the NROM, UxROM and CNROM games cannot).
             let layout = captured.layout;
-            let nametable = |address: u16| self.read_nametable_as(address, cart, layout);
+            let nametable =
+                |address: u16| self.read_nametable_as::<AnyBoard>(address, cart, layout);
             let written =
                 |address: u16| self.nametable_written_as::<AnyBoard>(address, cart, layout);
             let memory = &DecoderMemory {
@@ -590,7 +591,8 @@ impl Ppu2C02 {
                 continue;
             }
             let layout = captured.layout;
-            let nametable = |address: u16| self.read_nametable_as(address, cart, layout);
+            let nametable =
+                |address: u16| self.read_nametable_as::<AnyBoard>(address, cart, layout);
             let written =
                 |address: u16| self.nametable_written_as::<AnyBoard>(address, cart, layout);
             let memory = &DecoderMemory {

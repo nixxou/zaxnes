@@ -17,6 +17,9 @@ flag_set! {
         const QUICK_LOAD = 1 << 5;
         /// AMD-044 REQ-INP-125: the soft reset, bindable but bound to nothing by default.
         const SOFT_RESET = 1 << 6;
+        const COIN_1 = 1 << 7;
+        const COIN_2 = 1 << 8;
+        const SERVICE = 1 << 9;
     }
 }
 
@@ -33,6 +36,8 @@ pub struct HotkeyTracker {
     quick_save: EdgeDetector,
     quick_load: EdgeDetector,
     soft_reset: EdgeDetector,
+    /// Lot MAPPERS-N: the VS. System's two coin slots and service button, on the press.
+    cabinet: [EdgeDetector; 3],
     fast_forward: EdgeDetector,
     /// Presses of fast forward in a row, 1 to [`MAX_FAST_FORWARD_PRESSES`] (0 before the first).
     fast_forward_presses: u8,
@@ -130,6 +135,15 @@ impl HotkeyTracker {
             .rising(mask.contains(InputAction::SOFT_RESET))
         {
             events |= HotkeyEvents::SOFT_RESET;
+        }
+        for (detector, (action, event)) in self.cabinet.iter_mut().zip([
+            (InputAction::COIN_1, HotkeyEvents::COIN_1),
+            (InputAction::COIN_2, HotkeyEvents::COIN_2),
+            (InputAction::SERVICE, HotkeyEvents::SERVICE),
+        ]) {
+            if detector.rising(mask.contains(action)) {
+                events |= event;
+            }
         }
         events |= self.combinations[0].update(player_one, real_seconds);
         events |= self.combinations[1].update(player_two, real_seconds);

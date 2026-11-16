@@ -60,6 +60,17 @@ const DMA_DMC_WAIT: u8 = 0x10;
 /// `dma` byte [`NesBus::read_cycle`] already tests against zero.
 const DMA_DMC_GHOST: u8 = 0x20;
 
+/// `NesBus::vs_port` bits (lot MAPPERS-N): the mapper-99 port, a VS image, an RC2C05 PPU, a
+/// remapping PPU.
+#[cfg(feature = "board-vs-system")]
+const VS_PORT: u8 = 0x01;
+#[cfg(feature = "board-vs-system")]
+const VS_IMAGE: u8 = 0x02;
+#[cfg(feature = "board-vs-system")]
+const VS_RC2C05: u8 = 0x04;
+#[cfg(feature = "board-vs-system")]
+const VS_REMAP: u8 = 0x08;
+
 /// The CPU bus: memory map, open bus, OAM DMA and the master cycle clock (REQ-CORE-080 to
 /// REQ-CORE-082).
 ///
@@ -135,8 +146,13 @@ pub struct NesBus {
     /// Whether the cartridge is a mapper-99 board, the one board whose register is a `$4016`
     /// write, asked once in [`NesBus::attach`] beside `expansion_audio`. See
     /// [`NesBus::write_vs_port`]; `false` for every other image, including every other VS one.
+    ///
+    /// **A byte of flags since lot MAPPERS-N, and still one byte**: bit 0 the mapper-99 port
+    /// above, bit 1 a VS image, bit 2 its PPU is an RC2C05, bit 3 its PPU remaps the palette.
+    /// The PPU's own VS fields moved here and into `InputPorts::vs` so that `Ppu2C02` keeps the
+    /// layout of a build without the VS. System (see `Ppu2C02::remap_palette`).
     #[cfg(feature = "board-vs-system")]
-    vs_port: bool,
+    vs_port: u8,
     /// Whether the cartridge is a board that reads something of the **console** when it answers a
     /// CPU read below `$8000`: mapper 143's protection read, whose two top bits the page calls open
     /// bus (Q-145), and mapper 292's data registers, which the page fills from "the desired values"
@@ -153,6 +169,12 @@ pub struct NesBus {
     /// test for everybody else.
     #[cfg(any(feature = "board-143-open-bus", feature = "board-292"))]
     samples_console: bool,
+    /// Mapper 682 (lot MAPPERS-N): the Rainbow copies OAM's Y bytes from `$2003`/`$2004` writes
+    /// and answers a `$4011` read (Mesen2 `Rainbow.cpp`, `RegisterWriteHandler(0x2003, 0x2004)`
+    /// and `RegisterReadHandler(0x4011)`). Settled at attach like `samples_console`; every other
+    /// game pays this flag's test on a PPU register write.
+    #[cfg(feature = "board-682")]
+    snoops_cpu_bus: bool,
     /// `deferred_ppu && !expansion_audio`: whether the APU may lag at all, kept as one flag so
     /// that the per-cycle catch-up tests it **instead of** `deferred_ppu` rather than on top of
     /// it. Everything the MMC5's audio needs sits on the other side of that single test, out of
@@ -213,9 +235,11 @@ impl NesBus {
             apu_lag: 0,
             expansion_audio: false,
             #[cfg(feature = "board-vs-system")]
-            vs_port: false,
+            vs_port: 0,
             #[cfg(any(feature = "board-143-open-bus", feature = "board-292"))]
             samples_console: false,
+            #[cfg(feature = "board-682")]
+            snoops_cpu_bus: false,
             apu_batching: false,
             apu_quiet: 0,
             zone_instruction: false,
@@ -349,7 +373,65 @@ impl NesBus {
     #[cfg(feature = "board-vs-system")]
     pub fn set_vs_system(&mut self, vs: Option<crate::vs::VsSystem>) {
         self.input.set_vs_system(vs);
-        self.ppu.set_vs_ppu(self.input.vs());
+        let port = self.vs_port & VS_PORT;
+        self.vs_port = port
+            | match self.input.vs() {
+                None => 0,
+                Some(vs) => {
+                    VS_IMAGE
+                        | if vs.is_rc2c05() { VS_RC2C05 } else { 0 }
+                        | if vs.palette_lut().is_some() {
+                            VS_REMAP
+                        } else {
+                            0
+                        }
+                }
+            };
+        self.reapply_vs_palette();
+    }
+
+    /// Whether the image loaded is a VS. System: `NesCore` then runs it on the generic path
+    /// (`BoardKind::RUNS_VS`, lot MAPPERS-N).
+    #[cfg(feature = "board-vs-system")]
+    #[must_use]
+    pub const fn is_vs_image(&self) -> bool {
+        self.vs_port & VS_IMAGE != 0
+    }
+
+    /// Without the VS. System no image is one.
+    #[cfg(not(feature = "board-vs-system"))]
+    #[must_use]
+    pub const fn is_vs_image(&self) -> bool {
+        false
+    }
+
+    /// Re-shows palette RAM through the VS PPU's remap after the PPU rewrote it (a palette
+    /// write, the power-on fill, a state load); nothing for any other image.
+    #[cfg(feature = "board-vs-system")]
+    pub fn reapply_vs_palette(&mut self) {
+        if self.vs_port & VS_REMAP != 0 {
+            if let Some(lut) = self.input.vs().and_then(crate::vs::VsSystem::palette_lut) {
+                self.ppu.remap_palette(lut);
+            }
+        }
+    }
+
+    /// Without the VS. System there is nothing to re-show.
+    #[cfg(not(feature = "board-vs-system"))]
+    #[allow(clippy::unused_self)]
+    pub const fn reapply_vs_palette(&mut self) {}
+
+    /// An RC2C05's `$2002`: its identifier in bits 0-4 instead of the PPU's open bus (nesdev,
+    /// "PPU registers"). Out of line and cold: a VS image with that chip is the only caller.
+    #[cfg(feature = "board-vs-system")]
+    #[cold]
+    #[inline(never)]
+    fn vs_status(&self, value: u8) -> u8 {
+        let (latch_mask, id) = self
+            .input
+            .vs()
+            .map_or((0x1F, 0), |vs| vs.ppu().status_identifier());
+        (value & 0xE0) | (value & latch_mask & 0x1F) | id
     }
 
     /// Hands a `$4016` write to the cartridge, for the **one** board whose register is a CPU
@@ -365,7 +447,7 @@ impl NesBus {
     #[cfg(feature = "board-vs-system")]
     #[inline]
     fn write_vs_port(&mut self, value: u8) {
-        if self.vs_port {
+        if self.vs_port & VS_PORT != 0 {
             if let Some(cartridge) = self.cartridge.as_mut() {
                 cartridge.cpu_write(VsBoard::PORT, value);
             }
@@ -409,9 +491,10 @@ impl NesBus {
         // `bool` and never the `Board` enum.
         #[cfg(feature = "board-vs-system")]
         {
-            self.vs_port = cartridge
+            let port = cartridge
                 .as_ref()
                 .is_some_and(|cartridge| cartridge.mapper_number() == VsBoard::MAPPER);
+            self.vs_port = (self.vs_port & !VS_PORT) | if port { VS_PORT } else { 0 };
         }
         // Q-145 and Q-172 section 2 / MF-FIX: the two boards that read something of the console
         // when they answer a read below $8000 -- mapper 143 the cartridge-edge data bus, mapper 292
@@ -422,6 +505,10 @@ impl NesBus {
             self.samples_console = cartridge
                 .as_ref()
                 .is_some_and(|cartridge| matches!(cartridge.mapper_number(), 143 | 292));
+        }
+        #[cfg(feature = "board-682")]
+        {
+            self.snoops_cpu_bus = cartridge.as_ref().is_some_and(Cartridge::snoops_cpu_bus);
         }
         self.cartridge = cartridge;
     }
@@ -1223,9 +1310,15 @@ impl NesBus {
             self.sync_ppu_as::<K>();
             // The PPU drives its own data-bus latch for the undefined bits, separate from
             // the CPU's open bus (nesdev, "PPU registers"; ppu_open_bus).
-            return self
+            let value = self
                 .ppu
                 .read_as::<K>(address & 0x07, self.cartridge.as_mut());
+            // Lot MAPPERS-N: an RC2C05's `$2002` identifier, applied here and not in the PPU.
+            #[cfg(feature = "board-vs-system")]
+            if K::RUNS_VS && self.vs_port & VS_RC2C05 != 0 && address & 0x07 == 2 {
+                return self.vs_status(value);
+            }
+            return value;
         }
 
         if address < 0x4020 {
@@ -1287,6 +1380,15 @@ impl NesBus {
             0x4016 => self.read_input_port_as::<K>(0, self.data_bus),
             0x4017 => self.read_input_port_as::<K>(1, self.data_bus),
 
+            #[cfg(feature = "board-682")]
+            0x4011 if self.snoops_cpu_bus => match self
+                .cartridge
+                .as_mut()
+                .and_then(|cartridge| cartridge.snoop_cpu_bus_read(address))
+            {
+                Some(value) => value,
+                None => self.external_bus(),
+            },
             // $4000-$4014 are write-only and $4018-$401F are disabled: open bus.
             _ => self.external_bus(),
         }
@@ -1379,8 +1481,27 @@ impl NesBus {
                 self.ppu.wide_mut().write(register, value);
                 return;
             }
+            #[cfg(feature = "board-682")]
+            if self.snoops_cpu_bus {
+                if let Some(cartridge) = self.cartridge.as_mut() {
+                    cartridge.snoop_cpu_bus_write(0x2000 | (address & 0x07), value);
+                }
+            }
+            let register = address & 0x07;
+            // Lot MAPPERS-N: "The RC2C05 swaps the meanings of $2000 and $2001" (nesdev,
+            // "Vs. System"), done on the register number as the chip's pins do.
+            #[cfg(feature = "board-vs-system")]
+            let register = if K::RUNS_VS && self.vs_port & VS_RC2C05 != 0 && register < 2 {
+                register ^ 1
+            } else {
+                register
+            };
             self.ppu
-                .write_as::<K>(address & 0x07, value, self.cartridge.as_mut());
+                .write_as::<K>(register, value, self.cartridge.as_mut());
+            #[cfg(feature = "board-vs-system")]
+            if K::RUNS_VS && self.vs_port & VS_REMAP != 0 && register == 7 {
+                self.reapply_vs_palette();
+            }
             return;
         }
 

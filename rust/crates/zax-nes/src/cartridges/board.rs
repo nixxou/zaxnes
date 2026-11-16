@@ -600,6 +600,10 @@ impl Mapper for Board {
     fn read_nametable_from_vram(&self, memory: &CartridgeMemory, address: u16, vram: &[u8]) -> u8 {
         match self {
             Board::Mmc5Ext(board) => board.read_nametable_from_vram(memory, address, vram),
+            // MAPPERS-N: one arm, out of line, for every `IrqBoard` that serves its own tables
+            // (284, 682), so that this dispatch keeps a single extra body whatever their number.
+            #[cfg(any(feature = "board-284", feature = "board-682"))]
+            Board::IrqBoard(board) => board.served_nametable(memory, address, vram),
             _ => self.read_nametable(memory, address),
         }
     }
@@ -611,6 +615,10 @@ impl Mapper for Board {
     fn nametable_write_offset(&self, address: u16) -> Option<usize> {
         match self {
             Board::Mmc5Ext(board) => board.nametable_write_offset(address),
+            #[cfg(feature = "board-284")]
+            Board::IrqBoard(IrqBoard::Drip(board)) => board.nametable_write_offset(address),
+            #[cfg(feature = "board-682")]
+            Board::IrqBoard(IrqBoard::Rainbow(board)) => board.nametable_write_offset(address),
             _ => None,
         }
     }
@@ -623,6 +631,10 @@ impl Mapper for Board {
     fn substitutes_background_tiles(&self) -> bool {
         match self {
             Board::Mmc5Ext(board) => board.substitutes_background_tiles(),
+            #[cfg(feature = "board-284")]
+            Board::IrqBoard(IrqBoard::Drip(board)) => board.substitutes_background_tiles(),
+            #[cfg(feature = "board-682")]
+            Board::IrqBoard(IrqBoard::Rainbow(board)) => board.substitutes_background_tiles(),
             _ => false,
         }
     }
@@ -631,21 +643,39 @@ impl Mapper for Board {
     fn background_capture_state(&self) -> u64 {
         match self {
             Board::Mmc5Ext(board) => board.background_capture_state(),
+            #[cfg(feature = "board-284")]
+            Board::IrqBoard(IrqBoard::Drip(board)) => board.background_capture_state(),
+            #[cfg(feature = "board-682")]
+            Board::IrqBoard(IrqBoard::Rainbow(board)) => board.background_capture_state(),
             _ => 0,
         }
     }
 
     #[cfg(feature = "board-mmc5-exattr-split")]
     fn set_background_capture_state(&mut self, state: u64) {
-        if let Board::Mmc5Ext(board) = self {
-            board.set_background_capture_state(state);
+        match self {
+            Board::Mmc5Ext(board) => board.set_background_capture_state(state),
+            #[cfg(feature = "board-284")]
+            Board::IrqBoard(IrqBoard::Drip(board)) => board.set_background_capture_state(state),
+            #[cfg(feature = "board-682")]
+            Board::IrqBoard(IrqBoard::Rainbow(board)) => board.set_background_capture_state(state),
+            _ => {}
         }
     }
 
     #[cfg(feature = "board-mmc5-exattr-split")]
     fn position_captured_background_tile(&mut self, address: u16, column: i32, line: i32) {
-        if let Board::Mmc5Ext(board) = self {
-            board.position_captured_background_tile(address, column, line);
+        match self {
+            Board::Mmc5Ext(board) => board.position_captured_background_tile(address, column, line),
+            #[cfg(feature = "board-284")]
+            Board::IrqBoard(IrqBoard::Drip(board)) => {
+                board.position_captured_background_tile(address, column, line);
+            }
+            #[cfg(feature = "board-682")]
+            Board::IrqBoard(IrqBoard::Rainbow(board)) => {
+                board.position_captured_background_tile(address, column, line);
+            }
+            _ => {}
         }
     }
 
@@ -653,8 +683,35 @@ impl Mapper for Board {
         dispatch!(self, b => b.write_nametable(memory, address, value));
     }
 
+    /// One arm, the Rainbow's: no other board snoops the console's bus.
+    #[cfg(feature = "board-682")]
+    fn snoop_cpu_bus_write(&mut self, address: u16, value: u8) {
+        if let Board::IrqBoard(IrqBoard::Rainbow(board)) = self {
+            board.snoop_cpu_bus_write(address, value);
+        }
+    }
+
+    #[cfg(feature = "board-682")]
+    fn set_network_enabled(&mut self, enabled: bool) {
+        if let Board::IrqBoard(IrqBoard::Rainbow(board)) = self {
+            board.set_network_enabled(enabled);
+        }
+    }
+
+    #[cfg(feature = "board-682")]
+    fn snoop_cpu_bus_read(&mut self, address: u16) -> Option<u8> {
+        match self {
+            Board::IrqBoard(IrqBoard::Rainbow(board)) => board.snoop_cpu_bus_read(address),
+            _ => None,
+        }
+    }
+
     fn on_cpu_cycle(&mut self, memory: &mut CartridgeMemory) {
         dispatch!(self, b => b.on_cpu_cycle(memory));
+    }
+
+    fn set_input_word(&mut self, word: u16) {
+        dispatch!(self, b => b.set_input_word(word));
     }
 }
 
@@ -684,6 +741,25 @@ pub trait BoardKind {
     /// Whether this is the Fidélité+ copy of the path ([`Fid`], lot FIDPLUS-A): a constant, so
     /// the standard copies carry no test and no call of the Fidélité+ code.
     const FIDELITY_PLUS: bool = false;
+
+    /// Whether this kind's board may answer [`Cartridge::SERVED_BY_CARTRIDGE`] for a nametable
+    /// (lot MAPPERS-N). `false` for the six one-board kinds of `board_kind!` (NROM, MMC1, `UxROM`,
+    /// `CNROM`, MMC3, `AxROM`): none of those boards serves its own tables, so
+    /// `Ppu2C02::read_nametable_inner::<K>` holds **no code at all** for that branch on their
+    /// paths. Callgrind of Mega Man 2 and Zelda II showed why it matters: even a cold call there
+    /// gave the function a stack frame on every nametable fetch, +0.046 % `core`. A kind whose
+    /// board may serve (the dispatch, the MMC5s) keeps the default `true`.
+    ///
+    /// [`Cartridge::SERVED_BY_CARTRIDGE`]: super::Cartridge::SERVED_BY_CARTRIDGE
+    const SERVES_NAMETABLES: bool = true;
+
+    /// Whether a VS. System image may run on this kind (lot MAPPERS-N): `true` for [`AnyBoard`]
+    /// alone, because `NesCore` sends every VS image to the generic path whatever its board
+    /// (`NesBus::is_vs_image`). The bus's VS quirks (`$2002` identifier, `$2000`/`$2001` swap,
+    /// palette remap) are then compiled out of every specialised path: callgrind of Zelda II
+    /// (MMC1) measured the one test left on `NesBus::read_cycle_as::<Mmc1Kind>` at +3.0 M
+    /// instructions over 300 frames (+0.045 % `core`).
+    const RUNS_VS: bool = false;
 
     /// Whether `board` is this kind's variant.
     fn matches(board: &Board) -> bool;
@@ -733,6 +809,8 @@ pub enum AnyBoard {}
 impl BoardKind for AnyBoard {
     type B = Board;
 
+    const RUNS_VS: bool = true;
+
     #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
     #[inline(always)]
     fn matches(_: &Board) -> bool {
@@ -757,11 +835,18 @@ impl BoardKind for AnyBoard {
 /// the rule of [`BoardKind`] holds, and it panics rather than read the wrong board if it ever is.
 macro_rules! board_kind {
     ($(#[$doc:meta])* $kind:ident, $board:ident) => {
+        board_kind!($(#[$doc])* $kind, $board, false);
+    };
+    ($(#[$doc:meta])* $kind:ident, $board:ident, $serves:literal) => {
         $(#[$doc])*
         pub enum $kind {}
 
         impl BoardKind for $kind {
             type B = $board;
+
+            // See `BoardKind::SERVES_NAMETABLES`: `false` unless the invocation says otherwise
+            // (the full MMC5, `Mmc5ExtKind`, serves all four tables).
+            const SERVES_NAMETABLES: bool = $serves;
 
             #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
             #[inline(always)]
@@ -930,5 +1015,6 @@ impl BoardKind for Mmc5Kind {
 board_kind!(
     /// Mapper 5 with extended attributes or the split armed; it stays so until a reset or a state.
     Mmc5ExtKind,
-    Mmc5Ext
+    Mmc5Ext,
+    true
 );

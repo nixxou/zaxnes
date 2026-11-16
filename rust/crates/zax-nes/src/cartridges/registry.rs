@@ -6,14 +6,26 @@
 //! share a board when they are the same silicon differently wired (9 and 10, 21/22/23/25/27,
 //! 87 and 101). 156 is outside that table: it runs Metal Force (Korea), a widescreen target.
 
+#[cfg(feature = "board-530")]
+use super::mappers::Ax5705;
+#[cfg(feature = "board-188")]
+use super::mappers::BandaiKaraoke;
 #[cfg(feature = "board-111")]
 use super::mappers::Cheapocabra;
+#[cfg(feature = "board-266")]
+use super::mappers::CityFighter;
 #[cfg(feature = "board-cony")]
 use super::mappers::Cony;
 #[cfg(feature = "board-decode-boards")]
 use super::mappers::DecodeBoard;
+#[cfg(feature = "board-284")]
+use super::mappers::Drip;
 #[cfg(feature = "board-eeprom")]
 use super::mappers::EepromPort;
+#[cfg(feature = "board-323")]
+use super::mappers::FaridSlrom;
+#[cfg(feature = "board-176")]
+use super::mappers::Fk23c;
 #[cfg(feature = "board-huang1")]
 use super::mappers::Huang1;
 #[cfg(feature = "board-77")]
@@ -22,10 +34,16 @@ use super::mappers::IremLrog017;
 use super::mappers::Jv001;
 #[cfg(feature = "board-jy-asic")]
 use super::mappers::JyCompany;
+#[cfg(feature = "board-303")]
+use super::mappers::Kaiser7017;
 #[cfg(feature = "board-218")]
 use super::mappers::MagicFloor;
 #[cfg(feature = "board-91")]
 use super::mappers::Mapper091;
+#[cfg(feature = "board-234")]
+use super::mappers::Maxi15;
+#[cfg(feature = "board-111")]
+use super::mappers::Mmc1Parallel;
 #[cfg(feature = "board-219")]
 use super::mappers::Mmc3A9461;
 #[cfg(feature = "board-mmc3-chrram")]
@@ -59,6 +77,10 @@ use super::mappers::Nrom;
 use super::mappers::OekaKids;
 #[cfg(feature = "board-164")]
 use super::mappers::Pec9588;
+#[cfg(feature = "board-168")]
+use super::mappers::Racermate;
+#[cfg(feature = "board-682")]
+use super::mappers::Rainbow;
 #[cfg(feature = "board-133")]
 use super::mappers::Sachen72008;
 #[cfg(feature = "board-sachen8259")]
@@ -75,10 +97,16 @@ use super::mappers::Tengen800037;
 use super::mappers::Tqrom;
 #[cfg(feature = "board-vs-system")]
 use super::mappers::VsBoard;
+#[cfg(feature = "board-252")]
+use super::mappers::Waixing252;
+#[cfg(feature = "board-253")]
+use super::mappers::Waixing253;
 #[cfg(feature = "board-178")]
 use super::mappers::WaixingFs305;
 #[cfg(feature = "board-246")]
 use super::mappers::G0151;
+#[cfg(feature = "board-529")]
+use super::mappers::T230;
 use super::mappers::{
     Action52, Action53, AxRom, BandaiFcg, Caltron6In1, CnRom, Codemasters, ColorDreams, CpRom,
     Daou306, Fme7, GxRom, IremG101, IremH3001, IrqBoard, JalecoJ87, JalecoSs88006, Mapper015,
@@ -92,6 +120,10 @@ use super::mappers::{
 };
 #[cfg(any(feature = "board-162", feature = "board-163"))]
 use super::mappers::{ChrWindowBoard, ChrWindowKind};
+#[cfg(feature = "board-fine-rom")]
+use super::mappers::{FineRom, FineRomKind};
+#[cfg(feature = "board-irq-latch")]
+use super::mappers::{IrqLatch, IrqLatchKind};
 #[cfg(feature = "board-jaleco-72-92-86")]
 use super::mappers::{JalecoJf13, JalecoJf17};
 #[cfg(any(
@@ -105,6 +137,12 @@ use super::mappers::{JalecoJf13, JalecoJf17};
     feature = "board-190"
 ))]
 use super::mappers::{LatchBoard, SingleLatch};
+#[cfg(feature = "board-latch-multi")]
+use super::mappers::{LatchKind, LatchMulti};
+#[cfg(feature = "board-misc-n")]
+use super::mappers::{MiscKind, MiscN};
+#[cfg(feature = "board-mmc3-clones")]
+use super::mappers::{Mmc3Clone, Mmc3CloneKind};
 #[cfg(feature = "board-taito-x1")]
 use super::mappers::{TaitoX1005, TaitoX1017};
 #[cfg(feature = "board-111")]
@@ -126,7 +164,11 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     3,
     4,
     5,
+    #[cfg(feature = "board-6")]
+    6,
     7,
+    #[cfg(feature = "board-8")]
+    8,
     9,
     10,
     11,
@@ -141,6 +183,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     14,
     15,
     16,
+    #[cfg(feature = "board-17")]
+    17,
     18,
     19,
     21,
@@ -154,6 +198,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     #[cfg(feature = "board-29")]
     29,
     30,
+    #[cfg(feature = "board-31")]
+    31,
     32,
     #[cfg(feature = "board-small-boards")]
     33,
@@ -166,10 +212,52 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     37,
     #[cfg(feature = "board-38")]
     38,
+    #[cfg(feature = "board-39")]
+    39,
+    #[cfg(feature = "board-40")]
+    40,
     41,
+    #[cfg(feature = "board-42")]
+    42,
+    #[cfg(feature = "board-43")]
+    43,
+    #[cfg(feature = "board-44")]
+    44,
+    #[cfg(feature = "board-45")]
+    45,
+    #[cfg(feature = "board-46")]
+    46,
     #[cfg(feature = "board-mmc3-multicart")]
     47,
     48,
+    #[cfg(feature = "board-49")]
+    49,
+    #[cfg(feature = "board-50")]
+    50,
+    #[cfg(feature = "board-51")]
+    51,
+    #[cfg(feature = "board-52")]
+    52,
+    #[cfg(feature = "board-53")]
+    53,
+    #[cfg(feature = "board-54")]
+    54,
+    #[cfg(feature = "board-56")]
+    56,
+    #[cfg(feature = "board-57")]
+    57,
+    #[cfg(feature = "board-58")]
+    58,
+    #[cfg(feature = "board-59")]
+    59,
+    #[cfg(feature = "board-60")]
+    60,
+    #[cfg(feature = "board-61")]
+    61,
+    #[cfg(feature = "board-62")]
+    62,
+    #[cfg(feature = "board-63")]
+    63,
     64,
     65,
     66,
@@ -229,31 +317,51 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     #[cfg(feature = "board-vs-system")]
     99,
     101,
+    #[cfg(feature = "board-103")]
+    103,
+    #[cfg(feature = "board-104")]
+    104,
     #[cfg(feature = "board-105")]
     105,
+    #[cfg(feature = "board-106")]
+    106,
     #[cfg(feature = "board-107")]
     107,
+    #[cfg(feature = "board-108")]
+    108,
     #[cfg(feature = "board-111")]
     111,
     #[cfg(feature = "board-112")]
     112,
+    #[cfg(feature = "board-113")]
+    113,
     #[cfg(feature = "board-mmc3-scramble")]
     114,
     #[cfg(feature = "board-mmc3-scramble")]
     115,
     #[cfg(feature = "board-116")]
     116,
+    #[cfg(feature = "board-117")]
+    117,
     118,
     #[cfg(feature = "board-119")]
     119,
+    #[cfg(feature = "board-120")]
+    120,
     #[cfg(feature = "board-mmc3-scramble")]
     121,
     #[cfg(feature = "board-mmc3-scramble")]
     123,
+    #[cfg(feature = "board-125")]
+    125,
+    #[cfg(feature = "board-126")]
+    126,
     #[cfg(feature = "board-jv001")]
     132,
     #[cfg(feature = "board-133")]
     133,
+    #[cfg(feature = "board-134")]
+    134,
     #[cfg(feature = "board-jv001")]
     136,
     // The four wirings of the Sachen 8259, which are **not** in letter order: 137 is the 8259D,
@@ -268,6 +376,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     140,
     #[cfg(feature = "board-sachen8259")]
     141,
+    #[cfg(feature = "board-142")]
+    142,
     #[cfg(feature = "board-143")]
     143,
     #[cfg(feature = "board-144")]
@@ -278,6 +388,8 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     146,
     #[cfg(feature = "board-jv001")]
     147,
+    #[cfg(feature = "board-148")]
+    148,
     #[cfg(feature = "board-149")]
     149,
     #[cfg(feature = "board-sachen-8reg")]
@@ -308,25 +420,53 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     163,
     #[cfg(feature = "board-164")]
     164,
+    #[cfg(feature = "board-165")]
+    165,
+    #[cfg(feature = "board-166")]
+    166,
+    #[cfg(feature = "board-167")]
+    167,
+    #[cfg(feature = "board-168")]
+    168,
+    #[cfg(feature = "board-170")]
+    170,
+    #[cfg(feature = "board-171")]
+    171,
     #[cfg(feature = "board-jv001")]
     172,
     #[cfg(feature = "board-jv001")]
     173,
+    #[cfg(feature = "board-174")]
+    174,
+    #[cfg(feature = "board-175")]
+    175,
+    #[cfg(feature = "board-176")]
+    176,
+    #[cfg(feature = "board-177")]
+    177,
     #[cfg(feature = "board-178")]
     178,
+    #[cfg(feature = "board-179")]
+    179,
     180,
     #[cfg(feature = "board-mmc3-scramble")]
     182,
+    #[cfg(feature = "board-183")]
+    183,
     #[cfg(feature = "board-small-boards")]
     184,
     #[cfg(feature = "board-small-boards")]
     185,
     #[cfg(feature = "board-mmc3-scramble")]
     187,
+    #[cfg(feature = "board-188")]
+    188,
     #[cfg(feature = "board-189")]
     189,
     #[cfg(feature = "board-190")]
     190,
+    #[cfg(feature = "board-191")]
+    191,
     #[cfg(feature = "board-mmc3-chrram")]
     192,
     #[cfg(feature = "board-193")]
@@ -335,6 +475,26 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     194,
     #[cfg(feature = "board-mmc3-chrram")]
     195,
+    #[cfg(feature = "board-196")]
+    196,
+    #[cfg(feature = "board-197")]
+    197,
+    #[cfg(feature = "board-198")]
+    198,
+    #[cfg(feature = "board-199")]
+    199,
+    #[cfg(feature = "board-200")]
+    200,
+    #[cfg(feature = "board-201")]
+    201,
+    #[cfg(feature = "board-202")]
+    202,
+    #[cfg(feature = "board-203")]
+    203,
+    #[cfg(feature = "board-204")]
+    204,
+    #[cfg(feature = "board-205")]
+    205,
     #[cfg(feature = "board-namcot108")]
     206,
     #[cfg(feature = "board-taito-x1")]
@@ -348,25 +508,91 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     210,
     #[cfg(feature = "board-jy-asic")]
     211,
+    #[cfg(feature = "board-212")]
+    212,
+    #[cfg(feature = "board-213")]
+    213,
+    #[cfg(feature = "board-214")]
+    214,
     // The Sugar Softec UNL-8237 and UNL-8237A, an MMC3 clone with one of eight run-time
     // selectable register scrambles (MF-UNL-11 step 1).
     #[cfg(feature = "board-215")]
     215,
+    #[cfg(feature = "board-216")]
+    216,
+    #[cfg(feature = "board-217")]
+    217,
     #[cfg(feature = "board-218")]
     218,
     // The Kasheng A9461, an MMC3 clone with an extended banking mode (MF-UNL-11 step 3).
     #[cfg(feature = "board-219")]
     219,
+    #[cfg(feature = "board-221")]
+    221,
+    #[cfg(feature = "board-222")]
+    222,
+    #[cfg(feature = "board-224")]
+    224,
     225,
+    #[cfg(feature = "board-226")]
+    226,
+    #[cfg(feature = "board-227")]
+    227,
     228,
+    #[cfg(feature = "board-229")]
+    229,
+    #[cfg(feature = "board-230")]
+    230,
+    #[cfg(feature = "board-231")]
+    231,
     #[cfg(feature = "board-small-boards")]
     232,
+    #[cfg(feature = "board-233")]
+    233,
+    #[cfg(feature = "board-234")]
+    234,
+    #[cfg(feature = "board-235")]
+    235,
+    #[cfg(feature = "board-236")]
+    236,
+    #[cfg(feature = "board-238")]
+    238,
+    #[cfg(feature = "board-240")]
+    240,
+    #[cfg(feature = "board-241")]
+    241,
+    #[cfg(feature = "board-242")]
+    242,
     #[cfg(feature = "board-sachen-8reg")]
     243,
+    #[cfg(feature = "board-244")]
+    244,
+    #[cfg(feature = "board-245")]
+    245,
     // The G0151-1 of 封神榜: eight bank registers, battery PRG-RAM at $6800-$6FFF and a forced
     // PRG A17 on four read ranges (MF-UNL-12 step 3).
     #[cfg(feature = "board-246")]
     246,
+    #[cfg(feature = "board-249")]
+    249,
+    #[cfg(feature = "board-250")]
+    250,
+    #[cfg(feature = "board-252")]
+    252,
+    #[cfg(feature = "board-253")]
+    253,
+    #[cfg(feature = "board-254")]
+    254,
+    #[cfg(feature = "board-255")]
+    255,
+    #[cfg(feature = "board-258")]
+    258,
+    #[cfg(feature = "board-259")]
+    259,
+    #[cfg(feature = "board-260")]
+    260,
+    #[cfg(feature = "board-261")]
+    261,
     // The Sachen UNL-SHERO, an MMC3 clone with 8 KiB of CHR-RAM, four CHR A18 lines at $4100 and
     // four-screen mirroring (MF-UNL-12 step 1).
     #[cfg(feature = "board-262")]
@@ -375,16 +601,112 @@ pub const SUPPORTED_MAPPERS: &[i32] = &[
     263,
     #[cfg(feature = "board-cony")]
     264,
+    #[cfg(feature = "board-265")]
+    265,
+    #[cfg(feature = "board-266")]
+    266,
     #[cfg(feature = "board-268")]
     268,
+    #[cfg(feature = "board-274")]
+    274,
+    #[cfg(feature = "board-283")]
+    283,
+    #[cfg(feature = "board-284")]
+    284,
+    #[cfg(feature = "board-285")]
+    285,
+    #[cfg(feature = "board-286")]
+    286,
+    #[cfg(feature = "board-287")]
+    287,
+    #[cfg(feature = "board-288")]
+    288,
+    #[cfg(feature = "board-289")]
+    289,
+    #[cfg(feature = "board-290")]
+    290,
     // The BMW8544 / UNL-DRAGONFIGHTER, an MMC3 clone whose CHR banking is XORed with two
     // registers a read of $6000-$7FFF fills (MF-UNL-12 step 2).
     #[cfg(feature = "board-292")]
     292,
     #[cfg(feature = "board-298")]
     298,
+    #[cfg(feature = "board-299")]
+    299,
+    #[cfg(feature = "board-300")]
+    300,
+    #[cfg(feature = "board-301")]
+    301,
+    #[cfg(feature = "board-302")]
+    302,
+    #[cfg(feature = "board-303")]
+    303,
+    #[cfg(feature = "board-304")]
+    304,
+    #[cfg(feature = "board-305")]
+    305,
+    #[cfg(feature = "board-306")]
+    306,
+    #[cfg(feature = "board-307")]
+    307,
+    #[cfg(feature = "board-309")]
+    309,
+    #[cfg(feature = "board-312")]
+    312,
+    #[cfg(feature = "board-313")]
+    313,
+    #[cfg(feature = "board-314")]
+    314,
+    #[cfg(feature = "board-319")]
+    319,
+    #[cfg(feature = "board-320")]
+    320,
+    #[cfg(feature = "board-323")]
+    323,
+    #[cfg(feature = "board-324")]
+    324,
+    #[cfg(feature = "board-325")]
+    325,
+    #[cfg(feature = "board-328")]
+    328,
+    #[cfg(feature = "board-329")]
+    329,
+    #[cfg(feature = "board-331")]
+    331,
+    #[cfg(feature = "board-332")]
+    332,
+    #[cfg(feature = "board-333")]
+    333,
+    #[cfg(feature = "board-336")]
+    336,
+    #[cfg(feature = "board-346")]
+    346,
+    #[cfg(feature = "board-348")]
+    348,
+    #[cfg(feature = "board-349")]
+    349,
+    #[cfg(feature = "board-366")]
+    366,
+    #[cfg(feature = "board-487")]
+    487,
+    #[cfg(feature = "board-513")]
+    513,
+    #[cfg(feature = "board-518")]
+    518,
+    #[cfg(feature = "board-519")]
+    519,
+    #[cfg(feature = "board-521")]
+    521,
+    #[cfg(feature = "board-522")]
+    522,
+    #[cfg(feature = "board-529")]
+    529,
+    #[cfg(feature = "board-530")]
+    530,
     #[cfg(feature = "board-taito-x1")]
     552,
+    #[cfg(feature = "board-682")]
+    682,
 ];
 
 /// Whether `mapper` is implemented.
@@ -443,6 +765,17 @@ pub(crate) fn mapper_34_is_nina(header: &InesHeader) -> bool {
 fn datach_has_external_eeprom(header: &InesHeader) -> bool {
     header.is_nes20 && header.byte10 == 0x10
 }
+
+/// The MAPPERS-N boards whose iNES 1.0 CHR-RAM is Mesen2's 8 KiB default (see
+/// [`board_memory_sizes`]).
+const MAPPERS_N_CHR_RAM_8K: &[i32] = &[
+    39, 40, 42, 43, 44, 45, 46, 49, 50, 51, 52, 54, 56, 57, 58, 59, 60, 61, 53, 62, 63, 103, 104,
+    106, 108, 113, 117, 120, 125, 126, 134, 142, 148, 166, 167, 170, 171, 174, 177, 179, 183, 196,
+    197, 200, 201, 202, 203, 204, 205, 212, 213, 214, 216, 217, 221, 222, 224, 226, 227, 229, 230,
+    231, 233, 235, 236, 238, 240, 241, 242, 244, 245, 249, 250, 254, 255, 258, 259, 261, 265, 274,
+    283, 285, 286, 287, 288, 289, 290, 299, 300, 301, 302, 303, 304, 305, 306, 307, 309, 312, 313,
+    314, 319, 320, 324, 325, 329, 331, 332, 333, 336, 346, 348, 349, 366, 518, 521, 522,
+];
 
 /// The volatile-memory sizes of `mapper`'s board for `header`.
 #[must_use]
@@ -540,6 +873,11 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
             ..BoardMemorySizes::default()
         },
         #[cfg(feature = "board-mmc3-chrram")]
+        #[cfg(feature = "board-191")]
+        191 => BoardMemorySizes {
+            chr_ram: Mmc3ChrRamBoard::chr_ram_size(mapper),
+            ..BoardMemorySizes::default()
+        },
         74 | 192 | 194 => BoardMemorySizes {
             chr_ram: Mmc3ChrRamBoard::chr_ram_size(mapper),
             ..BoardMemorySizes::default()
@@ -641,6 +979,125 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // The 4 KiB of "additional VRAM for four-screen mirroring" the same sentence gives the
         // board is **not** here: it is the console's own nametable RAM, `ppu::VRAM_SIZE` being
         // 4 KiB, which is mapper 77's arm's reading of the same shape.
+        // MAPPERS-N: the Front Fareast formats give a CHR-RAM image 32 KiB (Mesen2
+        // `FrontFareast.h:12`, `GetChrRamSize() { return 0x8000; }`).
+        #[cfg(feature = "board-irq-latch")]
+        6 | 8 | 17 if header.chr_rom_size == 0 => BoardMemorySizes {
+            chr_ram: Some(0x8000),
+            ..BoardMemorySizes::default()
+        },
+        // MAPPERS-N: the FK23C's iNES 1.0 defaults, "only used for iNES 1.0 files w/ no DB entry"
+        // (Mesen2 `Fk23C.h`, `GetChrRamSize` 256 KiB and `GetWorkRamSize` 32 KiB).
+        #[cfg(feature = "board-176")]
+        176 if !header.is_nes20 => BoardMemorySizes {
+            prg_ram: Some(Fk23c::INES1_WORK_RAM),
+            chr_ram: Some(Fk23c::INES1_CHR_RAM),
+            ..BoardMemorySizes::default()
+        },
+        // MAPPERS-N: "GetWorkRamSize() { return 0x8000; }" (Mesen2 `Edu2000.h:9`).
+        #[cfg(feature = "board-329")]
+        329 => BoardMemorySizes {
+            prg_ram: Some(0x8000),
+            ..BoardMemorySizes::default()
+        },
+        // MAPPERS-N: the LH10's 8 KiB of work RAM at `$C000-$DFFF` (Mesen2 `Lh10.h:25`).
+        #[cfg(feature = "board-522")]
+        522 => BoardMemorySizes {
+            prg_ram: Some(0x2000),
+            ..BoardMemorySizes::default()
+        },
+        // MAPPERS-N: mapper 125's LH32 has 8 KiB of work RAM at `$C000-$DFFF` (Mesen2 `Lh32.h:18`).
+        #[cfg(feature = "board-125")]
+        125 => BoardMemorySizes {
+            prg_ram: Some(0x2000),
+            ..BoardMemorySizes::default()
+        },
+        // MAPPERS-N: "GetChrRamSize() { return 0x800; }" (Mesen2 `Mapper253.h:21`).
+        // A CHR-RAM-only image keeps the header's size: the 2 KiB is the chip beside the CHR-ROM.
+        // MAPPERS-N: the 2 KiB beside the CHR-ROM (cartridge database `8B7EE49B`, puNES
+        // `mapper_252.c` mapping it through `vram`).
+        // MAPPERS-N: nesdev ("INES Mapper 198"): 8 KiB of battery WRAM at `$6000`, "an
+        // additional non-backed 4 KiB of WRAM at $5000-$5FFF" (the head, as on 195) and 8 KiB of
+        // CHR-RAM.
+        // MAPPERS-N: nesdev ("INES Mapper 199"): "32 KiB of battery-backed PRG RAM, of which 12
+        // KiB are mapped", and 8 KiB of unbanked CHR-RAM.
+        // MAPPERS-N: `Sachen9602.h`, "GetChrRamSize() … 0x8000", battery-backed there.
+        #[cfg(feature = "board-513")]
+        513 => BoardMemorySizes {
+            chr_ram: Some(0x8000),
+            ..BoardMemorySizes::default()
+        },
+        #[cfg(feature = "board-199")]
+        199 => BoardMemorySizes {
+            prg_ram: Some(0x8000),
+            chr_ram: Some(0x2000),
+            ..BoardMemorySizes::default()
+        },
+        #[cfg(feature = "board-198")]
+        198 => BoardMemorySizes {
+            prg_ram: Some(Mmc3Clone::RAM_198_LOW + 0x2000),
+            chr_ram: Some(0x2000),
+            ..BoardMemorySizes::default()
+        },
+        // MAPPERS-N: "GetChrRamSize() { return 0x1000; }" (Mesen2 `MMC3_165.h:13`).
+        #[cfg(feature = "board-165")]
+        165 => BoardMemorySizes {
+            chr_ram: Some(0x1000),
+            ..BoardMemorySizes::default()
+        },
+        // MAPPERS-N: nesdev ("INES Mapper 168"): 64 KiB of CHR-RAM, "There is no PRG RAM".
+        #[cfg(feature = "board-168")]
+        168 => BoardMemorySizes {
+            prg_ram: Some(0),
+            chr_ram: Some(Racermate::CHR_RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
+        // MAPPERS-N: the `FineRom` boards decode `$6000-$7FFF` themselves; 103 and 307 have
+        // work RAM behind it (`Mapper103.h`, `Kaiser7037.h`), 31 none (nesdev "PRG RAM capacity:
+        // None"), 175 none, and 31's CHR is "recommended" 8 KiB of RAM.
+        #[cfg(feature = "board-103")]
+        103 => BoardMemorySizes {
+            prg_ram: Some(FineRom::RAM_103),
+            ..BoardMemorySizes::default()
+        },
+        #[cfg(feature = "board-307")]
+        307 => BoardMemorySizes {
+            prg_ram: Some(FineRom::RAM_307),
+            ..BoardMemorySizes::default()
+        },
+        #[cfg(feature = "board-31")]
+        31 => BoardMemorySizes {
+            prg_ram: Some(0),
+            chr_ram: (header.chr_rom_size == 0).then_some(0x2000),
+            ..BoardMemorySizes::default()
+        },
+        // MAPPERS-N: `$6000-$7FFF` is 53's outer register and ROM (`Supervision.h`).
+        #[cfg(feature = "board-53")]
+        53 => BoardMemorySizes {
+            prg_ram: Some(0),
+            ..BoardMemorySizes::default()
+        },
+        #[cfg(feature = "board-175")]
+        175 => BoardMemorySizes {
+            prg_ram: Some(0),
+            ..BoardMemorySizes::default()
+        },
+        // MAPPERS-N: no PRG-RAM, `$6000-$7FFF` is the microphone (nesdev "INES Mapper 188").
+        #[cfg(feature = "board-188")]
+        188 => BoardMemorySizes {
+            prg_ram: Some(0),
+            ..BoardMemorySizes::default()
+        },
+        #[cfg(feature = "board-252")]
+        252 if header.chr_rom_size != 0 => BoardMemorySizes {
+            chr_ram: Some(Waixing252::CHR_RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
+        #[cfg(feature = "board-253")]
+        253 if header.chr_rom_size != 0 => BoardMemorySizes {
+            chr_ram: Some(Waixing253::CHR_RAM_SIZE),
+            ..BoardMemorySizes::default()
+        },
         #[cfg(feature = "board-262")]
         262 => BoardMemorySizes {
             chr_ram: Some(Mmc3Shero::CHR_RAM_SIZE),
@@ -724,7 +1181,7 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // PRG-RAM: the register is at $5000-$5FFF and $7000-$7FFF, so that window is the
         // register and Mesen 2 gives the board neither work nor save RAM (MF-6c step 9).
         #[cfg(feature = "board-111")]
-        111 => BoardMemorySizes {
+        111 if header.chr_rom_size == 0 => BoardMemorySizes {
             prg_ram: Some(0),
             chr_ram: Some(Cheapocabra::CHR_RAM_SIZE),
             // nesdev ("GTROM"): "a Microchip SST39SF040 flash chip as the PRG ROM storage
@@ -733,6 +1190,13 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
             // chip using NES software". This board's PRG-ROM **is** the save medium, so it is
             // the one row of this table with a flash sector (MF-UNL-9 step 1).
             flash_sector: Some(FlashRom::SST39SF040_SECTOR),
+            ..BoardMemorySizes::default()
+        },
+        // MAPPERS-N: the Rainbow's PRG-ROM is an S29 flash the game programs (Mesen2
+        // `Rainbow.cpp`, `FlashS29`); its smallest erase unit, 8 KiB, is the tracking sector.
+        #[cfg(feature = "board-682")]
+        682 => BoardMemorySizes {
+            flash_sector: Some(super::mappers::Rainbow::FLASH_TRACK_SECTOR),
             ..BoardMemorySizes::default()
         },
         // nesdev ("INES Mapper 096"): "PRG RAM capacity: No", and "CHR capacity: 32 KiB RAM" --
@@ -1041,6 +1505,18 @@ pub(crate) fn board_memory_sizes(mapper: i32, header: &InesHeader) -> BoardMemor
         // PRG-RAM and not one says the board has none. Nothing forces the question — 143's and
         // 145's ports are at $4100 under mask $E100 and 107's, 144's and 149's are above $8000 —
         // so the header decides. Mapper 144 is mapper 11's board, which has no arm here either.
+        // MAPPERS-N: an iNES 1.0 image without CHR-ROM gets 8 KiB of CHR-RAM on these boards, as
+        // Mesen2 gives it (`BaseMapper::GetChrRamSize`, 0x2000 unless the board overrides it,
+        // which none of these does), not REQ-CORE-012's 32 KiB: their CHR bank registers wrap
+        // inside 8 KiB there, and a game writing a stray bank number would show an empty page
+        // here (mapper 108's Bubble Bobble conversion, which FCEUX `108.cpp` and BizHawk
+        // `Mapper108.cs`, "Cart.VramSize = 8", also give 8 KiB).
+        n if !header.is_nes20 && header.chr_rom_size == 0 && MAPPERS_N_CHR_RAM_8K.contains(&n) => {
+            BoardMemorySizes {
+                chr_ram: Some(0x2000),
+                ..BoardMemorySizes::default()
+            }
+        }
         _ => BoardMemorySizes::default(),
     }
 }
@@ -1080,6 +1556,9 @@ pub(crate) const fn battery_offset(mapper: i32, prg_ram_size: usize) -> usize {
         // arrangement with the sizes swapped.
         #[cfg(feature = "board-195-prg-ram-5000")]
         195 if prg_ram_size > Mmc3ChrRamBoard::EXTRA_RAM_SIZE => Mmc3ChrRamBoard::EXTRA_RAM_SIZE,
+        // MAPPERS-N: mapper 198's battery is on the 8 KiB at `$6000`, after the 4 KiB of `$5000`.
+        #[cfg(feature = "board-198")]
+        198 if prg_ram_size > Mmc3Clone::RAM_198_LOW => Mmc3Clone::RAM_198_LOW,
         _ => 0,
     }
 }
@@ -1172,6 +1651,19 @@ pub(crate) fn has_bus_conflicts(mapper: i32, header: &InesHeader) -> bool {
         // **bit 0** win whatever the CPU drove, and the generic path below would AND that bit
         // away before the board saw it, so `SingleLatch` reads the ROM byte and does the
         // arithmetic itself (`LatchBoard::Agci144`, MF-UNL-3 step 3).
+        // MAPPERS-N: Mesen2 gives the Sachen SA-008-A conflicts (`Sachen_148.h:10`,
+        // `HasBusConflicts` true), its register sitting over the PRG-ROM.
+        #[cfg(feature = "board-148")]
+        148 => true,
+        // MAPPERS-N: `FaridUnrom.h:9`, `HasBusConflicts` true.
+        #[cfg(feature = "board-324")]
+        324 => true,
+        // MAPPERS-N: Mesen2 gives the Maxi 15 conflicts (`Mapper234.h`, `HasBusConflicts`).
+        #[cfg(feature = "board-234")]
+        234 => true,
+        // MAPPERS-N: nesdev "INES Mapper 188", "Subject to bus conflicts: Yes".
+        #[cfg(feature = "board-188")]
+        188 => true,
         #[cfg(feature = "board-149")]
         149 => true, // Q-147 for the two numbers of this lot that are absent by a choice
         11 | 13 | 66 | 70 | 78 | 89 | 93 | 152 | 180 | 185 => true,
@@ -1361,6 +1853,12 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         // MF-6c step 9: the GTROM / Cheapocabra, whose two 8 KiB nametable banks are the
         // fourth distinct body of the `Mapper::read_nametable` dispatch (4.5, Q-123) and
         // whose PRG-ROM is an SST39SF040 the game writes into (Q-117, MR-30-4).
+        // nesdev ("INES Mapper 111"): an image with CHR-ROM is the Chinese Ninja Ryukenden's
+        // non-serialized MMC1 (MAPPERS-N), one without is GTROM.
+        #[cfg(feature = "board-111")]
+        111 if !memory.rom().chr_rom().is_empty() => {
+            Board::DecodeBoard(DecodeBoard::Mmc1Parallel(Mmc1Parallel::new(memory)))
+        }
         #[cfg(feature = "board-111")]
         111 => Board::DecodeBoard(DecodeBoard::Cheapocabra(Cheapocabra::new(memory))),
         // MF-UNL-1 step 1: the TXC 05-00002-010 / Sachen JV001 protection ASIC, one chip on six
@@ -1640,6 +2138,676 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         #[cfg(feature = "board-jy-asic")]
         35 | 90 | 209 | 211 => Board::IrqBoard(IrqBoard::JyCompany(Box::new(JyCompany::new(
             memory, mapper,
+        )))),
+        #[cfg(feature = "board-44")]
+        44 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-45")]
+        45 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-49")]
+        49 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-52")]
+        52 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-134")]
+        134 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-196")]
+        196 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-197")]
+        197 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-205")]
+        205 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-238")]
+        238 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-245")]
+        245 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-249")]
+        249 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-250")]
+        250 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-168")]
+        168 => Board::IrqBoard(IrqBoard::Racermate(Box::new(Racermate::new(memory)))),
+        #[cfg(feature = "board-303")]
+        303 => Board::IrqBoard(IrqBoard::Kaiser7017(Box::new(Kaiser7017::new(memory)))),
+        #[cfg(feature = "board-530")]
+        530 => Board::IrqBoard(IrqBoard::Ax5705(Box::new(Ax5705::new(memory)))),
+        #[cfg(feature = "board-529")]
+        529 => Board::IrqBoard(IrqBoard::T230(Box::new(T230::new(memory)))),
+        #[cfg(feature = "board-266")]
+        266 => Board::IrqBoard(IrqBoard::CityFighter(Box::new(CityFighter::new(memory)))),
+        #[cfg(feature = "board-284")]
+        284 => Board::IrqBoard(IrqBoard::Drip(Box::new(Drip::new(memory)))),
+        #[cfg(feature = "board-682")]
+        682 => Board::IrqBoard(IrqBoard::Rainbow(Box::new(Rainbow::new(memory)))),
+        #[cfg(feature = "board-252")]
+        252 => Board::IrqBoard(IrqBoard::Waixing252(Box::new(Waixing252::new(memory)))),
+        #[cfg(feature = "board-253")]
+        253 => Board::IrqBoard(IrqBoard::Waixing253(Box::new(Waixing253::new(memory)))),
+        #[cfg(feature = "board-57")]
+        57 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-58")]
+        58 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-59")]
+        59 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-63")]
+        63 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-200")]
+        200 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-201")]
+        201 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-202")]
+        202 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-203")]
+        203 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-204")]
+        204 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-212")]
+        212 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-213")]
+        213 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-214")]
+        214 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-221")]
+        221 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-226")]
+        226 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-227")]
+        227 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-229")]
+        229 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-230")]
+        230 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-231")]
+        231 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-234")]
+        234 => Board::DecodeBoard(DecodeBoard::Maxi15(Maxi15::new(memory))),
+        #[cfg(feature = "board-53")]
+        53 => Board::DecodeBoard(DecodeBoard::MiscN(MiscN::new(
+            memory,
+            MiscKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-487")]
+        487 => Board::DecodeBoard(DecodeBoard::MiscN(MiscN::new(
+            memory,
+            MiscKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-518")]
+        518 => Board::DecodeBoard(DecodeBoard::MiscN(MiscN::new(
+            memory,
+            MiscKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-328")]
+        328 => Board::DecodeBoard(DecodeBoard::MiscN(MiscN::new(
+            memory,
+            MiscKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-519")]
+        519 => Board::DecodeBoard(DecodeBoard::MiscN(MiscN::new(
+            memory,
+            MiscKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-323")]
+        323 => Board::DecodeBoard(DecodeBoard::FaridSlrom(Box::new(FaridSlrom::new(memory)))),
+        #[cfg(feature = "board-188")]
+        188 => Board::DecodeBoard(DecodeBoard::BandaiKaraoke(BandaiKaraoke::new(memory))),
+        #[cfg(feature = "board-233")]
+        233 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-235")]
+        235 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-236")]
+        236 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-240")]
+        240 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-241")]
+        241 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-242")]
+        242 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-244")]
+        244 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-255")]
+        255 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-46")]
+        46 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-51")]
+        51 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-60")]
+        60 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-61")]
+        61 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-62")]
+        62 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-104")]
+        104 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-108")]
+        108 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-113")]
+        113 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-120")]
+        120 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-125")]
+        125 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-170")]
+        170 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-174")]
+        174 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-177")]
+        177 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-179")]
+        179 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-216")]
+        216 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-261")]
+        261 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-274")]
+        274 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-286")]
+        286 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-126")]
+        126 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-224")]
+        224 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-259")]
+        259 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-287")]
+        287 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-313")]
+        313 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-325")]
+        325 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-191")]
+        191 => Board::IrqBoard(IrqBoard::Mmc3ChrRam(Box::new(Mmc3ChrRamBoard::new(
+            memory, mapper,
+        )?))),
+        #[cfg(feature = "board-40")]
+        40 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-42")]
+        42 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-43")]
+        43 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-50")]
+        50 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-106")]
+        106 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-183")]
+        183 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-117")]
+        117 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-222")]
+        222 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-6")]
+        6 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-8")]
+        8 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-17")]
+        17 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-176")]
+        176 => Board::IrqBoard(IrqBoard::Fk23c(Box::new(Fk23c::new(memory)))),
+        #[cfg(feature = "board-39")]
+        39 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-54")]
+        54 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-148")]
+        148 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-171")]
+        171 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-312")]
+        312 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-56")]
+        56 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-142")]
+        142 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-31")]
+        31 => Board::DecodeBoard(DecodeBoard::FineRom(FineRom::new(
+            memory,
+            FineRomKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-103")]
+        103 => Board::DecodeBoard(DecodeBoard::FineRom(FineRom::new(
+            memory,
+            FineRomKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-175")]
+        175 => Board::DecodeBoard(DecodeBoard::FineRom(FineRom::new(
+            memory,
+            FineRomKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-307")]
+        307 => Board::DecodeBoard(DecodeBoard::FineRom(FineRom::new(
+            memory,
+            FineRomKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-302")]
+        302 => Board::DecodeBoard(DecodeBoard::FineRom(FineRom::new(
+            memory,
+            FineRomKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-305")]
+        305 => Board::DecodeBoard(DecodeBoard::FineRom(FineRom::new(
+            memory,
+            FineRomKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-306")]
+        306 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-217")]
+        217 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-254")]
+        254 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-165")]
+        165 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-198")]
+        198 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-199")]
+        199 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-260")]
+        260 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-513")]
+        513 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-265")]
+        265 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-283")]
+        283 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-285")]
+        285 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-288")]
+        288 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-290")]
+        290 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-299")]
+        299 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-300")]
+        300 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-336")]
+        336 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-349")]
+        349 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-289")]
+        289 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-301")]
+        301 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-314")]
+        314 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-319")]
+        319 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-258")]
+        258 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-333")]
+        333 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-348")]
+        348 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-366")]
+        366 => Board::IrqBoard(IrqBoard::Mmc3Clone(Box::new(Mmc3Clone::new(
+            memory,
+            Mmc3CloneKind::of(mapper)?,
+        )))),
+        #[cfg(feature = "board-309")]
+        309 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-320")]
+        320 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-329")]
+        329 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-331")]
+        331 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-332")]
+        332 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-346")]
+        346 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-521")]
+        521 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-166")]
+        166 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-167")]
+        167 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-324")]
+        324 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-522")]
+        522 => Board::DecodeBoard(DecodeBoard::LatchMulti(LatchMulti::new(
+            memory,
+            LatchKind::of(mapper)?,
+        ))),
+        #[cfg(feature = "board-304")]
+        304 => Board::IrqBoard(IrqBoard::IrqLatch(Box::new(IrqLatch::new(
+            memory,
+            IrqLatchKind::of(mapper)?,
         )))),
         _ => return None,
     })

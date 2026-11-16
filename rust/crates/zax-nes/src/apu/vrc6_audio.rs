@@ -332,6 +332,13 @@ impl Vrc6Audio {
         }
     }
 
+    /// The 6-bit DAC sum the level is looked up from, for mapper 682's `$4011` read (Mesen2
+    /// `RainbowAudio::GetLastOutput`).
+    #[cfg(feature = "board-682")]
+    pub fn dac(&self) -> usize {
+        self.pulse1.output() + self.pulse2.output() + self.saw.output()
+    }
+
     /// Recomputes `M` from the 6-bit DAC.
     fn refresh_level(&mut self) {
         // 15 + 15 + 31 = 61 by construction, so the clamp is unreachable; it is there because

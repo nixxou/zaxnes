@@ -305,6 +305,9 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     // AMD-044 §3: the two resets now sit side by side, so the hard one is named as such.
     ("cmd.emulation.reset", "Hard Reset"),
     ("cmd.emulation.soft_reset", "Soft Reset"),
+    ("cmd.emulation.insert_coin_1", "Insert Coin (Slot 1)"),
+    ("cmd.emulation.insert_coin_2", "Insert Coin (Slot 2)"),
+    ("cmd.emulation.vs_service", "Service Button (VS. System)"),
     ("cmd.emulation.stop", "Stop"),
     ("cmd.emulation.fast_forward", "Fast forward"),
     ("cmd.emulation.rollback", "Rollback"),
@@ -511,6 +514,15 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.ppu_bus_conflicts", "PPU bus conflicts"),
     ("setting.emu.oamaddr_bug", "OAMADDR defect (2C02G)"),
     ("setting.emu.oam_decay", "OAM decay"),
+    ("setting.emu.rainbow_network", "Rainbow board network"),
+    ("setting.emu.vs_dip_1", "VS. System DIP switch 1"),
+    ("setting.emu.vs_dip_2", "VS. System DIP switch 2"),
+    ("setting.emu.vs_dip_3", "VS. System DIP switch 3"),
+    ("setting.emu.vs_dip_4", "VS. System DIP switch 4"),
+    ("setting.emu.vs_dip_5", "VS. System DIP switch 5"),
+    ("setting.emu.vs_dip_6", "VS. System DIP switch 6"),
+    ("setting.emu.vs_dip_7", "VS. System DIP switch 7"),
+    ("setting.emu.vs_dip_8", "VS. System DIP switch 8"),
     ("setting.emu.power_on_top", "Power on at the top of the picture"),
     ("setting.emu.ppu_2006_delay", "$2006 load delay"),
     ("setting.emu.ppu_2006_glitch", "$2006 scroll glitch"),
@@ -1227,6 +1239,42 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         "detail.emu.oamaddr_bug",
         "A defect of the NES and Famicom video chip (2C02G and later): if a game leaves the sprite memory address at 8 or more when the picture starts, eight bytes of sprite memory are copied over the first eight, so a couple of sprites can take the place of others for a frame. Games written for the console reset that address and never show it. A PAL console does not have this defect, so it never applies there. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.vs_dip_1",
+        "Switch 1 of the eight DIP switches of a VS. System arcade cabinet. Each game gives them its own meaning: difficulty, lives, coins per credit, sometimes the language or a test mode; the game's manual or the operator's card lists them. Only for VS. System games. Takes effect at the next load, as on a cabinet, which reads them when it is switched on. Default: off.",
+    ),
+    (
+        "detail.emu.vs_dip_2",
+        "Switch 2 of the eight DIP switches of a VS. System arcade cabinet. Each game gives them its own meaning: difficulty, lives, coins per credit, sometimes the language or a test mode; the game's manual or the operator's card lists them. Only for VS. System games. Takes effect at the next load, as on a cabinet, which reads them when it is switched on. Default: off.",
+    ),
+    (
+        "detail.emu.vs_dip_3",
+        "Switch 3 of the eight DIP switches of a VS. System arcade cabinet. Each game gives them its own meaning: difficulty, lives, coins per credit, sometimes the language or a test mode; the game's manual or the operator's card lists them. Only for VS. System games. Takes effect at the next load, as on a cabinet, which reads them when it is switched on. Default: off.",
+    ),
+    (
+        "detail.emu.vs_dip_4",
+        "Switch 4 of the eight DIP switches of a VS. System arcade cabinet. Each game gives them its own meaning: difficulty, lives, coins per credit, sometimes the language or a test mode; the game's manual or the operator's card lists them. Only for VS. System games. Takes effect at the next load, as on a cabinet, which reads them when it is switched on. Default: off.",
+    ),
+    (
+        "detail.emu.vs_dip_5",
+        "Switch 5 of the eight DIP switches of a VS. System arcade cabinet. Each game gives them its own meaning: difficulty, lives, coins per credit, sometimes the language or a test mode; the game's manual or the operator's card lists them. Only for VS. System games. Takes effect at the next load, as on a cabinet, which reads them when it is switched on. Default: off.",
+    ),
+    (
+        "detail.emu.vs_dip_6",
+        "Switch 6 of the eight DIP switches of a VS. System arcade cabinet. Each game gives them its own meaning: difficulty, lives, coins per credit, sometimes the language or a test mode; the game's manual or the operator's card lists them. Only for VS. System games. Takes effect at the next load, as on a cabinet, which reads them when it is switched on. Default: off.",
+    ),
+    (
+        "detail.emu.vs_dip_7",
+        "Switch 7 of the eight DIP switches of a VS. System arcade cabinet. Each game gives them its own meaning: difficulty, lives, coins per credit, sometimes the language or a test mode; the game's manual or the operator's card lists them. Only for VS. System games. Takes effect at the next load, as on a cabinet, which reads them when it is switched on. Default: off.",
+    ),
+    (
+        "detail.emu.vs_dip_8",
+        "Switch 8 of the eight DIP switches of a VS. System arcade cabinet. Each game gives them its own meaning: difficulty, lives, coins per credit, sometimes the language or a test mode; the game's manual or the operator's card lists them. Only for VS. System games. Takes effect at the next load, as on a cabinet, which reads them when it is switched on. Default: off.",
+    ),
+    (
+        "detail.emu.rainbow_network",
+        "Lets games on the Rainbow board (mapper 682, Broke Studio) use your network through the board's Wi-Fi chip: connecting to their game server and downloading files. Off, the chip still works (files, random numbers) but reports no Wi-Fi, and nothing leaves the emulator. Savestates, rewind and replays cannot restore a connection. Takes effect at the next load. Default: off.",
     ),
     (
         "detail.emu.oam_decay",

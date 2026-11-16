@@ -1006,6 +1006,17 @@ impl GameSession {
     /// on a relaunch and on a savestate restore (REQ-E3D-281); the learned conversion state is
     /// kept, which is what distinguishes this from a relaunch. Called with the core home, like
     /// every other command of the tick.
+    /// Whether the game loaded is a VS. System (lot MAPPERS-N).
+    #[must_use]
+    pub fn is_vs_system(&self) -> bool {
+        self.core.is_vs_system()
+    }
+
+    /// A coin in slot `slot` (1 or 2), or the service button with `None`.
+    pub fn drive_vs_cabinet(&mut self, slot: Option<usize>) {
+        self.core.drive_vs_cabinet(slot);
+    }
+
     pub fn soft_reset(&mut self) {
         self.core.soft_reset();
         self.frame_counter = 0;

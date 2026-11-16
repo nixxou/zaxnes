@@ -1185,3 +1185,347 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 - I2. *The Legend of Zelda* sprite-overflow bit (C4).
 - I3. `$2002` open-bus bits and `$2007` reads during rendering vs Mesen (C5).
 - I4. Mega Man 2 widescreen not eyeballed; PAL/Dendy fidelity work unverified.
+
+## J. Cartridge boards (lot MAPPERS-N, 2026-11-15)
+
+Boards read from Mesen2 (`cleanroom/third_party/mesen2/Core/NES/Mappers`). Only **mapper 250** is
+checked on a real game (*Queen Bee V*); every other board of the lot has unit tests from its source
+and no local ROM, so each item below is a lead to verify the day a dump is at hand.
+
+### J1. Outer registers and the RESET button — documented divergence
+Mesen2 clears the outer registers of several multicarts on a soft reset (`MMC3_134.h` `Reset`,
+`Mapper226.h:24-33`, `ColorDreams46.h` `Reset`, `MMC3_217.h`, `Bmc80013B.h`, `Bmc810544CA1.h`).
+This build keeps its rule that a board cannot see RESET (`Mapper::soft_reset`), so those registers
+survive a reset and only a power cycle clears them. The exceptions are the boards whose page makes
+the reset reaction their function: 60 (`Mapper60.h:18-27`), 230 (`Mapper230.h:19-34`), 233
+(`Mapper233.h:14-24`) and 313 (`ResetTxrom.h:9-14`, nesdev "NES 2.0 Mapper 313"). A multicart menu
+reached by RESET on a real cartridge may therefore not come back here without a power cycle.
+
+### J2. Open bus answered by a board — approximation
+Mapper 212's protection read (`Mapper212.h:19-25`) ORs `$80` into whatever the bus holds; a board
+here cannot see the bus, so the high address byte stands in for it (what an absolute read leaves).
+Mappers 63 and 235 answer `None` for their unmapped chip, which is the bus's own open-bus value.
+
+### J3. Mapper 224 PRG mode 1 — Mesen2 swaps R6 and R7
+`MMC3_224.h:26-31` puts R6 at `$A000` and R7 at `$C000` in PRG mode 1, the reverse of every MMC3.
+This build keeps the MMC3 order and only adds the outer bit; one of the two is wrong for a game that
+uses mode 1. A dump of a KT-008 cartridge decides it.
+
+### J4. DIP switches — fixed at 0
+Mappers 59, 236, 286 and 287 read DIP switches (Mesen2 `GetDipSwitches()`, default 0). This build has
+no DIP setting for boards, so the menus a switch would select are unreachable.
+
+### J5. FK23C (176) — subtypes inferred from sizes, soft reset not taken
+`Fk23C.h` boots the second 512 KiB when PRG and CHR are both 1 MiB (subtype 1) and swaps `$46`/`$47`
+on 16 MiB CHR-RAM images (subtype 2); both are taken. Its soft-reset clear of the PRG base (with the
+WRAM config, CHR-RAM selected and a battery) is not, per J1. iNES 1.0 images get Mesen2's 256 KiB of
+CHR-RAM and 32 KiB of WRAM.
+
+### J6. A12-clocked counters of 117, 222 and 176 — filter value
+They use this build's MMC3 filter (`A12Watcher::MMC3_FILTER_DOTS`), as Mesen2 uses its own single
+`A12Watcher` for all boards. Not compared on a game.
+
+### J7. Mapper 253's only local dump is a bad dump
+`roms-owner/Excitebike_1_/… vs._excitebike_fds_conversion_b1.nes`: 144 KiB of PRG whose last 16 KiB
+are zeros and whose vectors point there; no emulator can run it. The board is tested by unit tests.
+
+### J8. Mapper 198 and 199 left out — superseded by J20 and J21
+Mesen2's own comment on `MMC3_198.h` is "Most likely incorrect/incomplete"; 199 needs per-window
+CHR-RAM selection by page number. Neither was taken at first; both were later implemented from
+nesdev and puNES instead of Mesen2 (J20, J21).
+
+### J9. Mapper 217's NROM mode is held
+`MMC3_217.h:46-55` maps the `$5000` bit-7 page pair once, so Mesen2 drops it at the chip's next PRG
+update; this build holds it until `$5000` is written again. Which one the BMC-SPC009 does is open.
+
+### J10. Mapper 303 left out — superseded by J25
+`Kaiser7017.h` acknowledges its IRQ on a **read** of `$4030`. That needs `Mapper::cpu_read_override`
+in `IrqBoard`, the hook whose body cost `mmc5exram` +1.098 % in MF-UNL-12 (`board-292` parked), so the
+board was not taken at first. It was later taken (J25): the `IrqBoard` forward is `#[inline(never)]`
+and reached only for reads the cached ROM windows do not serve, so `mmc5exram` (an MMC5, not an
+`IrqBoard`) does not cross it; the final callgrind run of the lot measures it.
+
+### J11. Mapper 108 follows nesdev's submappers, not Mesen2
+Mesen2 `Bb.h` takes one register at every `$8000-$FFFF` address of `(addr & $9000) == $8000` plus
+`$F000+`, powering on at `$FF`. nesdev ("INES Mapper 108") and puNES `mapper_108.c:37-87` split the
+FDS conversions into four submappers: the register from `$F000` (1), `$E000` (2) or `$8000` (3, 4),
+power-on 0, `$6000` fixed to the last bank on 4, CHR banked only from CHR-ROM. Mesen2's reading hangs
+the Hackset's Bubble Bobble conversion (`AF799590`, submapper 1 in the cartridge DB) on a black
+screen; FCEUX `108.cpp` (writes at `$8000-$8FFF` and `$F000-$FFFF`) runs it, and so does this build
+since. Falsion (submapper 2) has no local dump.
+
+### J12. iNES 1.0 CHR-RAM of the MAPPERS-N boards is 8 KiB
+REQ-CORE-012 gives an iNES 1.0 image without CHR-ROM 32 KiB of CHR-RAM. On the 111 boards of
+`MAPPERS_N_CHR_RAM_8K` (`registry.rs`) this build gives 8 KiB, as Mesen2 (`BaseMapper`,
+`GetChrRamSize` 0x2000 unless overridden), FCEUX (`108.cpp`, one 8 KiB `setchr8(0)` page) and
+BizHawk (`Cart.VramSize = 8`, `Mapper108.cs`) do: their CHR registers wrap inside it, and a stray
+bank number otherwise shows an empty page. Boards that override the size keep their own (6/8/17,
+176, 191, 253). NES 2.0 images keep their declared size.
+
+### J13. FK23C CHR-RAM bit without CHR-RAM
+Mesen2 `Fk23C.h:160` selects CHR-RAM for the `$5xx0` bit 5 only when the cartridge has CHR-RAM
+("_selectChrRam && _chrRamSize > 0"). The first port missed that condition, so the NES 2.0 dump of
+Zhi Li Xiao Zhuang Yuan (CHR-ROM only, `$5FF0 = $60`) read zeros; it now matches Mesen2 and FCEUX.
+
+### J14. Battery PRG-RAM powers on as zeros (open, owner's call)
+Without a save file, a cartridge's PRG-RAM starts all zero here (`cartridges/mod.rs`,
+`prg_ram: vec![0; …]`), as in FCEUX. Mesen2 initialises it like every NES memory from
+`RamPowerOnState`, whose default is `Random` (`SettingTypes.h:659`, `NesConfig`). Real SRAM powers on
+undefined. *Famicom Jump II - Saikyou no 7 Nin* (`3F15D20D`, mapper 153) takes all-zero save RAM
+for valid saved data and jumps into it (`JMP $7E6A` from a bank-2 table): it crashes to a grey
+screen here and in FCEUX, and boots to its title with an all-`$FF` or random save RAM
+(`zax-harness render --sav`). The mapper itself is right. Changing the power-on state touches
+every battery game, the golden and determinism, so it is left to the owner: a seeded pattern
+for battery RAM without a save file is the likely fix.
+**Applied (owner: "fais ce qui te semble le mieux", 2026-11-15):** `NesCore::power_on_battery_ram`
+fills the battery slice with `PowerOnRam::Random(BATTERY_RAM_SEED)` when no save was imported;
+movie replay (`movie_sync`) sets it back to zero, FCEUX's convention. Mappers 16, 157, 159 and 164
+(serial EEPROM arrays) and 19 (Namco 163 internal RAM) keep zero: a non-zero 163 RAM exposed a
+three-byte save/restore mismatch in `req_core_090_the_mapper_state_survives_a_save_and_restore`,
+left for a later lot. The 2 KiB work RAM keeps FCEUX's pattern (owner, 2026-11-13); *Dancing
+Blocks* (mapper 143) reads its VRAM ring head from uninitialised work RAM and boots only with zero
+or random work RAM — mapper 143 itself is right.
+
+### J16. Cartridge database EEPROM sizes (`bNNN`)
+The database writes a serial EEPROM's size in bytes in the save column (`b128`, `b256`, `b512`, 53
+entries). The parser read them as 0 KiB, so *Battle Rush* (Datach, `983D8175`) never got the
+external 24C01 that nesdev ("INES Mapper 157") signals with byte 10 `$10`, and waited forever for
+its acknowledge. The size now reaches byte 10's non-volatile nibble and counts as a correction on
+its own. Only mapper 157 reads it (`EepromPort::new`); the other 52 entries (16, 80, 159, 164, 529,
+558) now get NES 2.0 headers from the database too, which the final golden comparison checks.
+
+### J17. Mapper 111 with CHR-ROM is the parallel MMC1 (puNES only)
+nesdev ("INES Mapper 111") gives the number to the Chinese *Ninja Ryukenden* translation, a
+"non-serialized version of MMC1" with 256 KiB of CHR-ROM, coexisting with GTROM when the image has
+CHR-ROM. Mesen2 and FCEUX implement only GTROM under 111; the behaviour (`Mmc1Parallel`) is
+puNES's (`mapper_111.c`), the only source, and the Hackset dump (`15E688C0`) now plays its intro.
+The page also mentions a later MMC3 version of the translation, not handled.
+
+### J18. Mapper 234 (Maxi 15): register 1's range, mirroring on a read
+Register 1 is decoded at `$FFE8-$FFF7` as puNES does (`mapper_234.c`, `$FFE8`/`$FFF0` under
+`$FFF8`); Mesen2 adds `$FFF8` (`Mapper234.h`, `AddRegisterRange(0xFFE8, 0xFFF8)`). The read path
+gives a board no mutable access to the cartridge memory, so a mirroring change latched by a
+**read** reaches the nametables at the board's next write. The three Hackset dumps (Maxi 15 Rev 1,
+Maxi 15, Maxi 1P) go from the menu into a game correctly. Every PRG read of the board goes
+through `cpu_read_override` (no cached window), its cost bounded to this board.
+
+### J19. Mapper 252: Mesen2's decode, puNES's CHR-RAM
+Mesen2 (`Waixing252.h`) has no CHR-RAM for 252 and lets the game write into CHR-ROM ("CHR needs to
+be writeable (according to Nestopia's source)"), and decodes no mirroring register. puNES
+(`mapper_252.c`) maps 2 KiB of CHR-RAM for register values matching `mask`/`compare` (`$FE`/`$06`,
+switched by CHR writes through windows holding `$88`, `$C2` or `$C8`) and decodes the VRC4's `$9000`
+mirroring. This board takes Mesen2's register and IRQ decode and puNES's CHR-RAM and mirroring; the
+cartridge database gives the dump 2 KiB of CHR-RAM. The two good Hackset dumps (`san_guo_zhi_ch`,
+`_b2`) show the Waixing logo and the Chinese menu, whose text is drawn in that RAM; `_b1` is a bad
+dump.
+
+### J20. Mapper 198: nesdev/puNES, not Mesen2; two translation patches glitch
+Mesen2's own header calls its `MMC3_198.h` "Most likely incorrect/incomplete" (4 KiB of WRAM
+mirrored at `$5000-$7FFF`, CHR-RAM only while every CHR register is 0). This board follows nesdev
+("INES Mapper 198": 640 KiB PRG, 8 KiB battery WRAM at `$6000`, 4 KiB more at `$5000-$5FFF`, 8 KiB
+CHR-RAM) and puNES (`mapper_198.c`, banks from `$50` folding onto `$40-$4F`). The Hackset's
+*Tenchi o Kurau II* `[T-ChS]` (`7DE81BC5`, the cartridge database's dump) shows its title and
+password screen cleanly; the later `[T+ChSFIX2]` and `[T+ChTFIX2]` patches show stray glyphs on
+the password screen, not investigated (translation hacks; their CHR use may differ).
+
+### J36. Mapper 682 (Rainbow): the ESP is modelled from the protocol document
+The ESP (`rainbow_esp.rs`) follows Broke Studio's `rainbow-net.md` and `mapper-doc.md`; no
+emulator's ESP was read (the Broke Studio Mesen fork that has one is not local, and fetching it
+needs the owner's consent). What is a reading or a choice here:
+* a message goes out at once (`$4192` bit 7 always reads 1) and its answer is ready on the same
+  write, where the real ESP takes milliseconds over its serial link; a game that waits for the
+  answer sees it sooner, a game that does not wait is unaffected;
+* `$4191` bit 6 ("data ready") is "an answer is queued"; the queue keeps the 64 newest answers;
+  the Wi-Fi IRQ (`$4161` bit 0) is "a message is in FPGA RAM, not acknowledged" with `$4190` bit 1;
+  messages are processed and delivered only with `$4190` bit 0 set;
+* `MESSAGE_FROM_SERVER` carries the server's payload after the identifier; TCP is framed
+  `[length][payload]` in both directions, UDP is one datagram per message;
+* the file system is in memory and in the savestate, **not on the host's disk** (the host does not
+  persist the flash save file either yet); auto paths are `drive/path/index`, manual names are
+  folded to upper case; `FILE_GET_FS_INFO` reports 4 MiB per drive;
+* random numbers are a seeded xorshift (repeatable), not the ESP's hardware generator;
+* the access point, IP (127.0.0.1 with the network on), MAC and scan result are fixed values; Wi-Fi
+  "connected" follows the option, `WIFI_CONNECT` does nothing;
+* not done: TCP_S (TLS) and HTTPS downloads (no TLS in the core: answered "unsupported"), ICMP
+  pings (answered "start failed"), the SD card (reported absent, drive 1 is a second in-memory
+  drive), the debug log output;
+* the network is behind `emu.rainbow_network`, **off by default** (owner, 2026-11-15); with it on
+  a connection is not part of a savestate (loading one disconnects), so rewind, run-ahead and
+  replays cannot restore it.
+
+### J35. Mapper 682 (Rainbow): what phase 1 leaves out, and two readings
+Mesen2 mainline (`Homebrew/Rainbow.cpp`) and Broke Studio's `mapper-doc.md` are the sources.
+Phase 1 (`board-682`) has the CPU map, the five PRG modes and the two low-bank modes, the FPGA RAM
+and its port, the CHR banks and sources, the four nametable sources with fill, attribute and
+background extended modes, the window, both IRQs, the vectors, the three generated OAM routines and
+the VRC6-style audio (this core's own `Vrc6Audio`, its `$9000-$B002` ports at `$41A0-$41A8`'s
+offsets, scaled by `$41AA` / 15 and silenced when neither of `$41A9`'s two pins is set — the
+mixing level relative to the APU is the VRC6's, not measured on the board). Phase 2 added the
+bus snoop (`NesBus`, one flag set at attach): `$2003`/`$2004` writes feed the OAM Y copy the
+sprite extended mode evaluates, as Mesen2 does, so an OAM **DMA** does not reach it either; a
+`$4011` read with `$415A` bit 2 acknowledges the CPU IRQ and answers the 6-bit DAC sum doubled
+(Mesen2 `GetLastOutput() << 1`; here the VRC6 generators' sum, Mesen2's own audio differs in its
+mixing). The 3D capture replays both nametable fetches of each column (previous line's fetches 41
+and 42 for tiles 0 and 1) and puts the per-fetch state back afterwards. Phase 4 added the S29 flash
+(Mesen2 `FlashS29.h`): program, unlock bypass, sector and chip erase, software ID, on PRG-ROM and
+CHR-ROM. The chip model is taken from the ROM size as Mesen2 does (1 MiB S29AL008 and any other
+size, 2 MiB AL016, 4 MiB JL032, 8 MiB GL064S); the last 64 KiB's smaller sectors follow it. A
+command byte that is not one of the known ones at the third unlock cycle resets the sequence here
+(Mesen2 leaves the state until the next write). PRG writes go through this core's `FlashRom`, so
+they reach the flash save file (8 KiB tracking sectors) and the savestate; **CHR flash writes change
+CHR-ROM in place and are neither in the save file nor in a savestate** (Mesen2 keeps both through
+its ROM patch). Phase 3 added the ESP (J36). Two readings: `$4151` returns the scanline
+IRQ flag as it was **before** the read acknowledges it (Mesen2 clears first, so its bit 0 always
+reads 0, which contradicts the doc's "IRQ pending" bit); the PPU-idle reset after three CPU cycles
+without a fetch sets the scanline to -1 as Mesen2 does. `cpu_peek_override` clones the board to
+read without side effects (debugger path only). No dump at hand: the test is synthetic.
+
+### J34. Mapper 284 (Drip): rendering fetches only, and the audio level
+Mesen2 (`UnlDripGame.h`, `MapperReadVram`) substitutes the attribute byte only on a
+`PpuRenderingRead`. This core's nametable path (`read_nametable_from_vram`, the MMC5's) is the
+same for a rendering fetch and a `$2007` read, so with extended attributes on a CPU read of an
+attribute byte returns the substituted palette too; the "last tile" is whatever nametable address
+the board last saw on the PPU bus. A game reads attributes back rarely, and never while it
+streams them. The PCM channels' level is a guess: Mesen2 adds `(sample - $80) * volume * 3` to
+its VRC7 channel; here each channel's `(sample - $80) * volume` is multiplied by 4, so the two at
+full swing span about the DMC's own range. The attribute memory powers on at 0 (Mesen2: the
+console's power-on RAM pattern). No dump at hand; the board widens the MMC5's six `Board` arms
+by one each, behind `board-284`.
+
+### J33. Mapper 260: nesdev and puNES over Mesen2
+nesdev ("NES 2.0 Mapper 260") and puNES (`mapper_260.c`) agree: a six-bit 16 KiB PRG base and
+a seven-bit 8 KiB CHR base, "opposite-masked" with the MMC3's banks, the lock in `$5000` bit 7
+for every `$5xxx` write, and a `$8000-$FFFF` latch whose bit 2 gives "0 … vertical mirroring,
+and 1 … horizontal mirroring" in modes 4-7. Mesen2 (`BmcHpxx.h`) takes narrower bases
+(`$5001 & $18`, `& $10`), locks on bit 7 of any `$5xxx` write, and maps bit 2 the other way
+(vertical when set); puNES stores the latch as `value & 3`, so its bit 2 never sets. This board
+follows the page on all four. The `$5000` read's bits 7-2 are the bus, for which the high
+address byte stands; `$5003` is undocumented and dropped. No dump at hand.
+
+### J32. Mapper 328: deterministic "random" bits
+Mesen2 (`Rt01.h`) and puNES (`mapper_328.c`) both answer `$CE80-$CEFF` and `$FE80-$FEFF` with
+`0xF2 | (rand() & 0x0D)`. The C library's `rand()` would make two runs differ; here the three
+bits are a hash of the CPU cycle count, the same on a replay, a rewind and a savestate load. The
+test cartridge's check reads bits that vary, which this keeps; what the hardware returns there
+(an unconnected bus, a counter?) is unknown. No dump at hand.
+
+### J31. Mapper 266: the page's inner banks, and the DAC not emulated
+nesdev ("NES 2.0 Mapper 266") keeps the VRC4's own 8 KiB inner banks under `$900C`'s PRG
+A16-A15 ("PRG A13 and A14 stay connected to VRC4"); puNES (`mapper_266.c`) takes the inner bank
+from the window number instead (a fixed 32 KiB), and Mesen2 (`CityFighter.h`) has its own
+register file and a 9-bit CPU counter. This board follows the page, the IRQ being the VRC4's
+(the page: the game uses its "pseudo-scanline mode during speech output").
+**Open:** the 4-bit DAC at `$980C` is not emulated, so the speech is silent; puNES low-pass
+filters `(pcm - 7) * 4096` into its mix, Mesen2 writes `(value & $0F) << 3` to `$4011`, and the
+page calls its purpose unclear. No dump at hand.
+
+### J30. Mapper 529: Mesen2's T230 is another board, and the 93C56 is not emulated
+nesdev ("NES 2.0 Mapper 529") and puNES (`mapper_529.c`) agree: a VRC4e whose `$A00x` register
+is one 16 KiB bank at `$8000`, the last bank at `$C000`, `$800x` without effect, and a 93C56
+EEPROM (`$8800` mask writes: D0 data, D1 clock, D2 chip select; `$5000` read on D0) when the
+NES 2.0 header declares 256 bytes of PRG-NVRAM. Mesen2's `T230.h` reads a different board (an
+`$A000` pair of 8 KiB banks, a PRG mode, an outer bank on CHR-RAM carts) and is not followed.
+**Open:** the 93C56 (x16 organisation, nesdev: "ORG pin is unconnected") is not emulated; the
+existing `Eeprom93C66` is the x8 part of mapper 164 and its nine address bits would desync an
+x16 stream. With no EEPROM, `$5000` answers 1, as puNES does for an image without one, and a
+game that saves there cannot. No dump at hand.
+
+### J29. Mapper 530: puNES's whole VRC4 against Mesen2's subset
+puNES (`mapper_530.c`) runs the AX5705 as a full VRC4 (VRC4f wiring after `A |= (A & 8) << 9`,
+IRQ and the `$9000` mirroring included) with the two data-line crossings; Mesen2 (`Ax5705.h`)
+decodes the same banks and crossings but has no IRQ and only `$8008` bit 0 for the mirroring.
+This board takes puNES's reading, through `Vrc2Vrc4` itself (a new `new_vrc4f` constructor
+behind `board-530`). No dump at hand.
+
+### J28. Mapper 513: the 32 KiB of CHR-RAM are not saved
+Mesen2 (`Sachen9602.h`) marks the 32 KiB of CHR-RAM battery-backed (`ForceChrBattery`); this
+core saves PRG-RAM only, so the CHR-RAM starts fresh at every power-on. Mesen2 passes the chip
+`value & 0x1F` for R0-R5 and puNES `value & 0x3F`: the same pages with 32 KiB. No dump at hand.
+
+### J27. Mapper 323: the outer bank's fourth bit, and the RAM under the register
+Mesen2 (`FaridSlrom.h`) takes the outer bank from bits 4-6 (`(value & 0x70) >> 1`) and makes
+`$6000-$7FFF` a register range, so the RAM does not take the byte; puNES (`mapper_323.c`) takes
+bits 4-7 (`(reg & 0xF0) >> 1`) and lets the RAM take every write. This board follows puNES on
+both: the extra bit only reaches past 1 MiB, where Mesen2 would wrap, and a register sharing the
+bus with an enabled RAM chip leaves the chip written. No dump at hand.
+
+### J26. Mappers 53, 487, 518 and 519 (`MiscN`): Mesen2's readings, sources compared
+* 53 (`Supervision.h`): the 32 KiB EPROM is recognised by Mesen2's CRC of the first 32 KiB; an
+  image without it powers on at 16 KiB banks `$80`/`$81` wrapped by the ROM, as Mesen2 does.
+* 487 (`Mapper487.h`): Mesen2's comments are the only description at hand (no nesdev page
+  read for it); the NINA-03 register is ignored in the second half, as there.
+* 518 (`Dance2000.h`): Mesen2 switches CHR page 0 on every VRAM address change; here on the
+  addresses the board hears (`on_ppu_address_bus`: fetches and `$2006`), which a scroll write
+  alone does not drive. `$5200` without bit 2 changes the mode but rebuilds nothing until the
+  next `$5000` write, as in Mesen2.
+* 519 (`Eh8813A.h`): the DIP switches are all off, so the DIP mode reads the address with its low
+  nibble cleared.
+None of the four has a dump at hand.
+
+### J25. Mapper 303 (KS7017): the `$4030` status read
+Mesen2 (`Kaiser7017.h` `ReadRegister`) answers `$4030` with 1 while the IRQ is pending, 0 else,
+and acknowledges it; puNES (`mapper_303.c`) acknowledges and computes the same value but returns
+the work-RAM read at `$4030` instead, which looks like an oversight. This board answers the full
+byte as Mesen2 does (bits 7-1 zero, where the hardware's open bus is unknown). No dump at hand.
+
+### J24. Mappers 31, 103, 175 and 307 (`FineRom`): where the sources part
+* 31: nesdev ("INES Mapper 031") sets only `$5FFF` to `$FF` at power-on and says it does not
+  change on reset; Mesen2 (`NsfCart31.h`) leaves the seven others at 0, puNES (`mapper_031.c`)
+  powers them on at `$F8-$FE` (the last 32 KiB). This board takes Mesen2's zeros and keeps all
+  eight across a reset. No dump at hand.
+* 103: Mesen2 (`Mapper103.h`) and puNES (`mapper_103.c`) agree (RAM at `$6000` and over
+  `$B800-$D7FF`, always writable); Mesen2 keeps `$8000`'s low four bits, puNES the byte, which
+  only matters past 128 KiB. *Doki Doki Panic* (FDS conversion, Hackset) plays world 1-1.
+* 175: nesdev has no register description. Mesen2 (`Kaiser7022.h`) and FCEUX (`175.cpp`) apply
+  `$A000`'s bank on a read of `$FFFC`, puNES (`mapper_175.c`) on any read of `$F000-$FFFF`; this
+  board follows the two. FCEUX also moves CHR and `$E000` at once; Mesen2 waits for the read,
+  as here. Registers at exactly `$8000`/`$A000` (Mesen2, FCEUX) where puNES masks `$F000`.
+* 307: Mesen2 (`Kaiser7037.h`) and puNES (`mapper_307.c`) agree on the 4 KiB layout and the
+  CIRAM page per table. A write to `$7000-$7FFF` (ROM) or `$A000-$AFFF` is dropped. No dump.
+
+### J23. Mapper 188: the microphone is controller 1's A and B, its level 0
+nesdev ("INES Mapper 188"): `$6000-$7FFF` reads bit 0 "0: A button is pressed", bit 1 "0: B
+button is pressed", bit 2 "1-bit ADC microphone input", bits 7-3 open bus. Mesen2
+(`BandaiMicrophone.h:37-46`) reads the two buttons and the level from key bindings of their own;
+puNES (`mapper_188.c:49-53`) returns a constant 3. Here the buttons are controller 1's A and B,
+handed to the board once per frame (`Mapper::set_input_word`), the level stays 0 (there is no
+microphone input), and bits 7-3 are the high byte of the address, which an absolute read leaves
+on the bus but an indexed read across a page or a DMA would not. The external ROM selected in a
+128 KiB image (no expansion cartridge) reads open bus, as nesdev recommends and Mesen2 does,
+where puNES and "several emulators" map a bank. Karaoke Studio and its two expansion cartridges
+(Hackset `[!]` dumps) reach their song lists.
+
+### J22. Mapper 168: nesdev/puNES board, two of three versions stuck in the core
+The board follows nesdev ("INES Mapper 168") and puNES (`mapper_168.c`): CHR banks
+`(reg & $0F) ^ 8` (the page allows either convention), the control bit taken from A7 or D2,
+the free-running M2 counter whose bit 10 drives the IRQ, and the protection of U2 (banks 8-15)
+cleared on a 1-to-0 edge of the control bit. A protected CHR read returns 0, where the hardware
+leaves the PPU's open bus. Mesen2 (`Racermate.h`) and FCEUX (`boards/168.cpp`) are simpler: no
+XOR, no IRQ, no protection, and FCEUX decodes `$B000` alone.
+RacerMate Challenge II v3.12 (`041553C3`) reaches the race screen. v3.11 (`74920C13`) and v5.01
+(`AAEF2264`) run in FCEUX but not here: the screen stays on the backdrop, and the decompressor at
+`$FCA1-$FCF4` keeps rebuilding the same list from `$FB29`, eventually reading code at `$DFxx`.
+This is **not the board**: replacing it with FCEUX's model (no XOR, no IRQ, no protection) gives
+the same result. The two cores start one frame apart (`$00CE` 8F/80 at frame 5, power-on
+phase), so `movie-sync` reports that first divergence and not the real one. The cause is in the
+core (CPU, PPU or timing during long writes to `$2007` with rendering off) and remains to be found.
+
+### J21. Mapper 199: implemented from nesdev and puNES, **not verified**
+nesdev ("INES Mapper 199", Waixing FS309): 8 KiB of unbanked CHR-RAM and 32 KiB of battery PRG-RAM
+of which 12 KiB are mapped at `$5000-$7FFF`; puNES (`mapper_199.c`) places `$5000-$5FFF` on 4 KiB
+page 2. Mesen2's `MMC3_199.h` is a different board (CHR-RAM per page below 8, extra PRG
+registers); the page says some Chinese emulators confuse 199 with 176. The Hackset's three "199"
+dumps (`ED481B7C`, `D871D3E6`, `44C20420`) are exactly that: the cartridge database gives them 176
+submapper 2, and run as 176 they boot (Dragon Ball Z Gaiden, Dragon Ball Z II, Sangokushi II), which
+also verifies `Fk23c` on three more games. No genuine FS309 dump (Chéngjísīhán, Tāngmǔ Lìxiǎn jì,
+Tūnshí Tiāndì: Sānguó Wàizhuàn) was at hand.
+
+### J15. Mapper 15: CHR-RAM write protection only on the K-1029
+MR-15-1 (from nesdev: "CHR-RAM is write-protected in PRG banking modes 0 and 3") write-protected
+every mapper-15 image. The same nesdev page says the K-1029 multicarts are the only genuine
+cartridges, that other images "claiming mapper 15" are mapper hacks, and that emulators "must not
+enforce CHR-RAM write-protection" for them and must give them 8 KiB of PRG-RAM. Mesen2
+(`Mapper15.h:29`) protects every image; puNES (`mapper_015.c`) and FCEUX never protect. This
+build keeps MR-15-1 for the K-1029 and lifts it for an image declaring battery RAM or NES 2.0
+PRG-RAM (cartridge database included), which is not a K-1029. Bao Xiao San Guo (`CE102393`,
+8 KiB battery RAM in the database) writes its CHR in mode 0 and now shows its logo.

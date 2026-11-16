@@ -43,6 +43,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::ToggleTwoDimensional => !loading && self.current_game.is_some(),
             // AMD-044 REQ-LOOP-072: next to the hard reset, but it needs a running session.
             Command::SoftReset => self.can_soft_reset(),
+            Command::InsertCoin1 | Command::InsertCoin2 | Command::VsService => {
+                self.can_drive_vs_cabinet()
+            }
             // AMD-053 REQ-LOOP-076: offered only while the resume point stands.
             Command::ResumeLast => !loading && self.resume_available(),
             // REQ-UI-210: the entry named, or the one being played.
@@ -195,6 +198,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::Resume
             | Command::Reset
             | Command::SoftReset
+            | Command::InsertCoin1
+            | Command::InsertCoin2
+            | Command::VsService
             | Command::Stop
             | Command::FastForward
             | Command::Rollback
@@ -318,6 +324,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Command::Resume => self.resume(),
             Command::Reset => self.reset_game(),
             Command::SoftReset => self.soft_reset_game(),
+            Command::InsertCoin1 => self.drive_vs_cabinet(Some(1)),
+            Command::InsertCoin2 => self.drive_vs_cabinet(Some(2)),
+            Command::VsService => self.drive_vs_cabinet(None),
             Command::Stop => self.stop_current_game(true, true),
             Command::FastForward => self.request_fast_forward(args.number),
             Command::Rollback => self.perform_rollback(),
@@ -514,6 +523,26 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
 
     /// Whether the soft reset of AMD-044 REQ-LOOP-072 can run: it needs a running session, not
     /// just a current game — there is nothing to reset in a core that holds no ROM.
+    /// Lot MAPPERS-N: a VS. System is loaded and running.
+    pub(super) fn can_drive_vs_cabinet(&self) -> bool {
+        self.can_soft_reset()
+            && self
+                .session
+                .as_ref()
+                .is_some_and(crate::game_session::GameSession::is_vs_system)
+    }
+
+    /// A coin in slot `slot` (1 or 2), or the service button with `None`: the core holds the
+    /// line a few frames, as the coin mechanism does.
+    fn drive_vs_cabinet(&mut self, slot: Option<usize>) {
+        if !self.can_drive_vs_cabinet() {
+            return;
+        }
+        if let Some(session) = self.session.as_mut() {
+            session.drive_vs_cabinet(slot);
+        }
+    }
+
     pub(super) fn can_soft_reset(&self) -> bool {
         !self.loading
             && self.state != EmulationState::Stopped

@@ -54,7 +54,17 @@ pub struct NesCore {
     power_on_ppu_ram: crate::PowerOnPpuRam,
     /// The console model's MMC3 revision (lot FIDPLUS-C), applied when a ROM is loaded.
     mmc3_revision: crate::Mmc3Revision,
+    /// What a cartridge's battery-backed PRG-RAM holds at power-on when no save was imported
+    /// (MAPPERS-N, owner 2026-11-15): seeded pseudo-random bytes by default, as a real SRAM's
+    /// contents are undefined and Mesen2's `RamPowerOnState` defaults to `Random`
+    /// (`SettingTypes.h:659`). All zero made *Famicom Jump II* take the empty RAM for a valid
+    /// save and jump into it (FIDELITY-LEADS J14). The seed is fixed, so runs stay reproducible.
+    power_on_battery_ram: crate::PowerOnRam,
     advanced_patches_enabled: bool,
+    /// `emu.rainbow_network`: mapper 682's ESP may use the host's network (off by default).
+    rainbow_network: bool,
+    /// `emu.vs_dip_*`: the VS. System's DIP switches for the next load.
+    vs_dip_switches: u8,
     /// The built-in patch applied to a ROM none is made for (Rust-only, owner request: forced).
     forced_patch: Option<&'static crate::builtin_patches::BuiltinPatch>,
     /// CRC-32 of the data (iNES header excluded) of the ROM loaded as the host gave it, which
@@ -177,7 +187,10 @@ impl NesCore {
             power_on_ram: crate::PowerOnRam::Pattern,
             power_on_ppu_ram: crate::PowerOnPpuRam::Zero,
             mmc3_revision: crate::Mmc3Revision::Cartridge,
+            power_on_battery_ram: crate::PowerOnRam::Random(Self::BATTERY_RAM_SEED),
             advanced_patches_enabled: false,
+            rainbow_network: false,
+            vs_dip_switches: 0,
             forced_patch: None,
             rom_crc: None,
             pack: None,
@@ -229,6 +242,15 @@ impl NesCore {
     /// default (owner, 2026-11-13); REQ-CORE-004's zeros are one choice among four.
     pub fn set_power_on_ram(&mut self, pattern: crate::PowerOnRam) {
         self.power_on_ram = pattern;
+    }
+
+    /// The fixed seed of the default battery-RAM power-on pattern.
+    pub const BATTERY_RAM_SEED: u64 = 0x5A41_584E_4553_5241;
+
+    /// Chooses what a battery-backed PRG-RAM without an imported save holds at power-on; takes
+    /// effect at the next one. Movie tools set [`crate::PowerOnRam::Zero`], FCEUX's convention.
+    pub fn set_power_on_battery_ram(&mut self, pattern: crate::PowerOnRam) {
+        self.power_on_battery_ram = pattern;
     }
 
     /// Chooses what the PPU's palette RAM, OAM and nametable RAM hold at power-on; takes effect
@@ -366,6 +388,39 @@ impl NesCore {
     pub fn set_bus_conflicts(&mut self, enabled: bool) {
         self.bus.ppu_mut().set_bus_conflicts(enabled);
     }
+
+    /// Whether the Rainbow board's ESP (mapper 682) reaches the host's network: off by default,
+    /// so that nothing leaves the emulator unless the player asks (lot MAPPERS-N). Applies to the
+    /// cartridge loaded now and to the next ones.
+    pub fn set_rainbow_network(&mut self, enabled: bool) {
+        self.rainbow_network = enabled;
+        self.apply_rainbow_network();
+    }
+
+    /// The end of a state load: [`Self::forget_real_frame`], and the VS PPU's palette remap put
+    /// back over the palette RAM the state restored (lot MAPPERS-N; `Ppu2C02::remap_palette`).
+    fn forget_real_frame_and_reshow_palette(&mut self) {
+        self.forget_real_frame();
+        self.bus.reapply_vs_palette();
+    }
+
+    /// Attaches a freshly built cartridge with the settings that live on the core.
+    fn attach_cartridge(&mut self, cartridge: Cartridge) {
+        self.bus.attach(Some(cartridge));
+        self.apply_rainbow_network();
+    }
+
+    #[cfg(feature = "board-682")]
+    fn apply_rainbow_network(&mut self) {
+        let enabled = self.rainbow_network;
+        if let Some(cartridge) = self.bus.cartridge_mut() {
+            cartridge.set_network_enabled(enabled);
+        }
+    }
+
+    #[cfg(not(feature = "board-682"))]
+    #[allow(clippy::unused_self)]
+    const fn apply_rainbow_network(&mut self) {}
 
     /// Whether the built-in patches and the advanced ones are on for the next load, as
     /// [`NesCore::set_builtin_patches`] and [`NesCore::set_advanced_patches`] left them.
@@ -657,7 +712,11 @@ impl NesCore {
         // the whole point — the board is chosen from the corrected header.
         #[cfg(feature = "board-vs-system")]
         let note = {
-            let vs = crate::vs::VsSystem::detect(rom.header(), crc);
+            let mut vs = crate::vs::VsSystem::detect(rom.header(), crc);
+            // Lot MAPPERS-N: the host's DIP switches (`emu.vs_dip_*`), set before the power-on.
+            if let Some(vs) = vs.as_mut() {
+                vs.set_dip_switches(self.vs_dip_switches);
+            }
             let note = vs.as_ref().map(crate::vs::VsSystem::load_note).map(|note| {
                 match rom.correct_vs_board(crc) {
                     Some(correction) => format!("{note}; {correction}"),
@@ -718,7 +777,7 @@ impl NesCore {
         self.set_hack_options(options);
         self.original_image = patched.map(|_| image.to_vec());
 
-        self.bus.attach(Some(cartridge));
+        self.attach_cartridge(cartridge);
         self.install_pack(Some(image));
         self.power_on();
         match note {
@@ -765,6 +824,44 @@ impl NesCore {
     #[cfg(feature = "board-vs-system")]
     pub fn vs_system_mut(&mut self) -> Option<&mut crate::vs::VsSystem> {
         self.bus.input_mut().vs_mut()
+    }
+
+    /// Whether the image loaded is a VS. System; always `false` in a build without
+    /// `board-vs-system`, so that a host needs no `cfg` (lot MAPPERS-N).
+    #[must_use]
+    pub fn is_vs_system(&self) -> bool {
+        #[cfg(feature = "board-vs-system")]
+        return self.vs_system().is_some();
+        #[cfg(not(feature = "board-vs-system"))]
+        false
+    }
+
+    /// Drops a coin into slot `slot` (1 or 2) of the VS. System loaded; nothing on a NES image.
+    #[allow(unused_variables)]
+    pub fn vs_insert_coin(&mut self, slot: usize) {
+        #[cfg(feature = "board-vs-system")]
+        if let Some(vs) = self.vs_system_mut() {
+            vs.insert_coin(slot);
+        }
+    }
+
+    /// Presses the VS. System's service button for a few frames (a free credit).
+    pub fn vs_press_service(&mut self) {
+        #[cfg(feature = "board-vs-system")]
+        if let Some(vs) = self.vs_system_mut() {
+            vs.press_service();
+        }
+    }
+
+    /// The eight DIP switches of the next VS. System loaded (and of the one loaded now), bit `n`
+    /// being switch `n + 1`; a cabinet reads most of them at power-on.
+    #[allow(unused_variables)]
+    pub fn set_vs_dip_switches(&mut self, switches: u8) {
+        self.vs_dip_switches = switches;
+        #[cfg(feature = "board-vs-system")]
+        if let Some(vs) = self.vs_system_mut() {
+            vs.set_dip_switches(switches);
+        }
     }
 
     /// Name the ROM was loaded under (REQ-CORE-014).
@@ -924,6 +1021,8 @@ impl NesCore {
                 .ppu_mut()
                 .fill_power_on_memories(&palette, &oam, &vram);
         }
+        // Lot MAPPERS-N: the VS PPU's palette remap lives on the bus now (`Ppu2C02::remap_palette`).
+        self.bus.reapply_vs_palette();
         self.boot_patch_window(self.builtin_patch);
         self.boot_pack_zone();
         self.bus.apu_mut().reset();
@@ -931,6 +1030,15 @@ impl NesCore {
         if let Some(cartridge) = self.bus.cartridge_mut() {
             cartridge.reset();
             cartridge.clear_volatile_ram(clear_prg_ram);
+            // Plain SRAM only: on 16, 157, 159 and 164 the battery slice is a serial EEPROM's
+            // array and on 19 it carries the Namco 163's internal RAM, which keep their
+            // all-zero power-on (FIDELITY-LEADS J14).
+            if clear_prg_ram
+                && self.power_on_battery_ram != crate::PowerOnRam::Zero
+                && !matches!(cartridge.mapper_number(), 16 | 19 | 157 | 159 | 164)
+            {
+                self.power_on_battery_ram.fill(cartridge.battery_ram_mut());
+            }
         }
 
         self.cpu.reset(&mut self.bus);
@@ -1071,6 +1179,11 @@ impl NesCore {
         }
 
         self.bus.input_mut().begin_frame(input_word);
+        // Mapper 188's microphone has two buttons of its own (lot MAPPERS-N, `BandaiKaraoke`).
+        #[cfg(feature = "board-188")]
+        if let Some(cartridge) = self.bus.cartridge_mut() {
+            cartridge.set_input_word(input_word);
+        }
 
         // The aimed position is sampled once, at the start of the frame, and stays fixed
         // for its whole duration (REQ-CORE-060).
@@ -1265,7 +1378,10 @@ impl NesCore {
         // here, and the frame runs through the code compiled for it, or for every board when it
         // is not in the table. `run_frame` checked that a cartridge is loaded.
         loop {
-            let done = match self.bus.cartridge().filter(|_| !self.generic_path) {
+            // Lot MAPPERS-N: a VS. System image always takes the generic path, the one kind that
+            // carries the bus's VS quirks (`BoardKind::RUNS_VS`).
+            let generic = self.generic_path || self.bus.is_vs_image();
+            let done = match self.bus.cartridge().filter(|_| !generic) {
                 Some(cartridge) => {
                     with_board_kind!(cartridge.board(), K => self.run_frame_steps::<K>(idle_loop))
                 }
@@ -2662,7 +2778,7 @@ impl NesCore {
         self.battery_ram_imported = false;
         self.rom_crc = has_rom_image.then_some(rom_crc).or(self.rom_crc);
         (self.original_image, self.builtin_patch) = patch;
-        self.bus.attach(Some(cartridge));
+        self.attach_cartridge(cartridge);
         self.install_pack(pack_image.as_deref());
         self.region = region;
         self.apply_region();
@@ -2670,7 +2786,7 @@ impl NesCore {
         self.bus.apu_mut().drop_pending_samples(); // REQ-CORE-074, Q-006.
                                                    // REQ-LOOP-066: loading a state resumes at the next real frame with the same N. The
                                                    // state of a real frame of the machine that was replaced is dropped, not put back.
-        self.forget_real_frame();
+        self.forget_real_frame_and_reshow_palette();
 
         Ok(StateLoaded {
             consumed: reader.consumed(),

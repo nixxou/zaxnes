@@ -153,6 +153,12 @@ impl RomImage {
         &mut self.prg_rom
     }
 
+    /// CHR-ROM bytes to write: mapper 682's flash (lot MAPPERS-N).
+    #[cfg(feature = "board-682")]
+    pub(crate) fn chr_rom_mut(&mut self) -> &mut [u8] {
+        &mut self.chr_rom
+    }
+
     /// CHR-ROM bytes. Empty when the cartridge uses CHR-RAM.
     #[must_use]
     pub fn chr_rom(&self) -> &[u8] {

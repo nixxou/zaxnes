@@ -39,20 +39,21 @@ fn q001_a_truncated_image_reports_the_typed_cause() {
 
 #[test]
 fn q001_an_unsupported_mapper_reports_the_typed_cause_and_still_names_the_number() {
-    // Mapper 200: high nibble of byte 6 is 8, high nibble of byte 7 is 12 -> 0xC8 = 200.
+    // Mapper 84 (AMD-MAPPERS-N-200; it was 200 until that board was implemented): high nibble
+    // of byte 6 is 4, high nibble of byte 7 is 5 -> 0x54 = 84.
     let mut image = minimal();
-    image[6] = (image[6] & 0x0F) | 0x80;
-    image[7] = (image[7] & 0x0F) | 0xC0;
+    image[6] = (image[6] & 0x0F) | 0x40;
+    image[7] = (image[7] & 0x0F) | 0x50;
 
     let mut core = NesCore::new();
-    let result = core.load_rom(&image, "Mapper200.nes");
+    let result = core.load_rom(&image, "Mapper84.nes");
 
     assert!(!result.success);
     assert_eq!(RomLoadFailure::UnsupportedMapper, result.failure);
 
     // REQ-CORE-011 only requires the number to appear in the message; the typed cause above
     // is what AMD-002 makes normative.
-    assert!(result.error.unwrap().contains("200"));
+    assert!(result.error.unwrap().contains("84"));
 }
 
 #[test]

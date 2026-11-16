@@ -790,6 +790,10 @@ impl Machine for ZaxnesMachine {
 
     fn power(&mut self, ram: RamPattern) -> Result<(), String> {
         self.core.set_region(self.region);
+        // FCEUX and BizHawk power a battery RAM on as zeros; a movie made on them is replayed
+        // from the same contents (`--prg-ram` still overrides it below).
+        self.core
+            .set_power_on_battery_ram(zax_nes::PowerOnRam::Zero);
         self.core.reset();
         // The power-on zeroed the work RAM (REQ-CORE-004); the movie's pattern goes over it.
         // This writes memory, not emulation: no core behaviour changes, and with the movie asking

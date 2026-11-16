@@ -98,8 +98,17 @@ impl Mapper for Mapper034 {
             _ => return false,
         }
 
+        // The write-through is done here and the write reported as handled, so the cartridge
+        // refreshes its cached CPU read windows: answering `false` sent the write to the plain
+        // PRG-RAM path, which returns without that refresh, and the CPU went on fetching the
+        // old 32 KiB bank. Impossible Mission II, the NINA-001's one game, switches banks from
+        // code it runs in that RAM ($7465 `STA $7FFD` then `JSR $800F`) and crashed on it.
+        let len = memory.prg_ram().len();
+        if len != 0 {
+            memory.prg_ram_mut()[usize::from(address & 0x1FFF) % len] = value;
+        }
         self.update_banks(memory);
-        false
+        true
     }
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
@@ -117,6 +126,9 @@ pub struct Mapper015 {
     banks: BankWindows,
     mode: i32,
     value: u8,
+    /// Whether modes 0 and 3 write-protect CHR-RAM (MR-15-1): only on an image that is the
+    /// K-1029 multicart, see [`Mapper015::is_k1029`].
+    chr_write_protect: bool,
 }
 
 impl Mapper015 {
@@ -125,7 +137,20 @@ impl Mapper015 {
             banks: windows_for(memory),
             mode: 0,
             value: 0,
+            chr_write_protect: Self::is_k1029(memory),
         }
+    }
+
+    /// nesdev ("INES Mapper 015"): the K-1029 multicarts are the board's only genuine
+    /// cartridges and have no PRG-RAM; the other images "claiming mapper 15" are mapper hacks,
+    /// for which emulators "must not enforce CHR-RAM write-protection" and must provide 8 KiB of
+    /// PRG-RAM. An image declaring battery-backed RAM, or PRG-RAM in a NES 2.0 header (the
+    /// cartridge database's correction included), is therefore not a K-1029, and MR-15-1's
+    /// protection is kept for the others. Bao Xiao San Guo (`CE102393`, 8 KiB battery RAM)
+    /// writes its CHR in mode 0 and showed nothing (FIDELITY-LEADS J15).
+    fn is_k1029(memory: &CartridgeMemory) -> bool {
+        let header = memory.rom().header();
+        !(header.has_battery || (header.is_nes20 && header.byte10 != 0))
     }
 
     fn update_banks(&mut self, memory: &mut CartridgeMemory) {
@@ -197,7 +222,7 @@ impl Mapper for Mapper015 {
     // REQ-CORE-100's documented nesdev behaviour applies directly. How `mode` itself is
     // decoded, and the rest of the board's banking, are Q-110's business and untouched here.
     fn ppu_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
-        if self.mode == 0 || self.mode == 3 {
+        if self.chr_write_protect && (self.mode == 0 || self.mode == 3) {
             return;
         }
 
