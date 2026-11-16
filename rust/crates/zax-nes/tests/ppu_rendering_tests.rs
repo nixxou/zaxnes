@@ -826,8 +826,9 @@ fn fidelity_oamaddr_at_8_or_more_copies_its_row_over_oam_0_when_rendering_starts
     );
 }
 
-/// Lot FIDPLUS-E (speculative model): with the rendering off, OAM keeps every bit for 7 NTSC
-/// frames; past ~34 frames every bit has fallen to its own resting value, the same on every run.
+/// Lot FIDPLUS-E (model measured on one console): with the rendering off, OAM keeps every bit for
+/// 7 NTSC frames; past 90 frames every bit has fallen to its own resting value, the same on every
+/// run.
 /// The row `OAMADDR` points at is held refreshed; a row the address visited in the meantime keeps
 /// its bytes; with the rendering on all along, or the setting off, nothing changes.
 #[test]
@@ -861,14 +862,14 @@ fn fidplus_oam_decays_bit_by_bit_with_the_rendering_off() {
         0x40, 0x11, 0x01, 0x22, 0x40, 0x11, 0x01, 0x22, 0x40, 0x11, 0x01, 0x22, 0x40, 0x11, 0x01,
         0x22,
     ];
-    assert_eq!(kept, oam_after_blank(40, false, false), "setting off");
+    assert_eq!(kept, oam_after_blank(100, false, false), "setting off");
     assert_eq!(kept, oam_after_blank(7, true, false), "7 frames: kept");
-    let long = oam_after_blank(40, true, false);
+    let long = oam_after_blank(100, true, false);
     assert_eq!(kept[0..8], long[0..8], "row 0, OAMADDR's, held refreshed");
-    assert_ne!(kept[8..16], long[8..16], "40 frames: row 1 decayed");
-    assert_eq!(long, oam_after_blank(40, true, false), "the same bits every run");
-    assert_eq!(long[8..16], oam_after_blank(80, true, false)[8..16], "settled at rest");
-    let touched = oam_after_blank(40, true, true);
+    assert_ne!(kept[8..16], long[8..16], "100 frames: row 1 decayed");
+    assert_eq!(long, oam_after_blank(100, true, false), "the same bits every run");
+    assert_eq!(long[8..16], oam_after_blank(140, true, false)[8..16], "settled at rest");
+    let touched = oam_after_blank(100, true, true);
     assert_ne!(kept[0..8], touched[0..8], "row 0 left by OAMADDR at frame 0");
     assert_eq!(kept[8..16], touched[8..16], "row 1 held by OAMADDR");
 }

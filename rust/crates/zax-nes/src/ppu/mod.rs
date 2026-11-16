@@ -863,18 +863,22 @@ impl Ppu2C02 {
     /// then single bits lost at random, more the longer the rendering stays off; each bit falls to
     /// its own resting value, 0 or 1; the first eight bytes never decay. Modelled as:
     ///
-    /// - every bit has its own retention, drawn once from a log-normal law (DRAM cell retention;
-    ///   [`OAM_RETENTION_US`]): none before 125 ms (blargg's `oam_stress`, verified on hardware,
-    ///   keeps OAM ~123 ms), half by 266 ms (16 frames), all by 566 ms;
-    /// - every bit has its own resting value;
+    /// - every bit has its own retention, drawn once from the losses measured on that console with
+    ///   `oamdecay.nes` (2026-11-16, [`OAM_RETENTION_US`]): none before 125 ms (that console lost
+    ///   2 bits of 1838 at 7 frames, but blargg's `oam_stress`, which passes on hardware, leaves
+    ///   rows unrefreshed for up to ~123 ms and fails below this floor), half by about 50 frames
+    ///   (0.85 s), all by 90 (1.5 s);
+    /// - every bit has its own resting value ([`oam_bit_rest`]): 0 for 76 %, 1 for 22 %, and 2 %
+    ///   lose whatever they held;
     /// - both are fixed for the console, drawn from the bit's index, so a run replays identically;
     /// - the row `OAMADDR` points at is held refreshed (assumed from the first eight bytes, with
     ///   `OAMADDR` at 0 after a frame): it is settled when the address enters it and stamped when
     ///   the address leaves it;
     /// - no decay on the 2C07 ([`Self::oam_dot_rate`]).
     ///
-    /// The probabilities and times are not measured: retention varies by console and temperature,
-    /// and this is one plausible console. Called on every CPU access to a row and, for all rows,
+    /// One console at one temperature: retention varies with both, so this is that console, not
+    /// every NES. The held row is confirmed by the same run (row 31, where `OAMADDR` was parked,
+    /// lost nothing). Called on every CPU access to a row and, for all rows,
     /// when the rendering comes back; the dots themselves do nothing.
     #[cold]
     #[inline(never)]
@@ -916,7 +920,11 @@ impl Ppu2C02 {
                 let draw = oam_bit_draw(index * 8 + bit);
                 if elapsed_us > i64::from(OAM_RETENTION_US[(draw & 0xFF) as usize]) {
                     let mask = 1u8 << bit;
-                    byte = if draw & 0x100 == 0 { byte & !mask } else { byte | mask };
+                    byte = match oam_bit_rest(draw) {
+                        OamRest::Zero => byte & !mask,
+                        OamRest::One => byte | mask,
+                        OamRest::Flips => byte ^ mask,
+                    };
                 }
             }
             self.oam[index] = if (index & 0x03) == 0x02 { byte & 0xE3 } else { byte };
@@ -4177,45 +4185,67 @@ const fn marked_palette(palette: &[u8; PALETTE_SIZE]) -> [u8; PALETTE_SIZE] {
 }
 
 /// Lot FIDPLUS-E: an OAM bit's retention without a refresh, in microseconds, at the quantiles
-/// `(k + 0.5) / 256` of a log-normal law with its median at 266 ms (16 NTSC frames) and its lowest
-/// quantile at 125 ms (sigma 0.262). Speculative: see [`Ppu2C02::refresh_oam_row`].
+/// `(k + 0.5) / 256` of the losses measured on `FireSide`'s NES with `oamdecay.nes` (2026-11-16;
+/// both passes pooled, 1838 losses, read every 1-30 frames and linear in between; NTSC frames),
+/// with a 125 ms floor for blargg's `oam_stress`.
+/// See [`Ppu2C02::refresh_oam_row`].
 const OAM_RETENTION_US: [u32; 256] = [
-    125_000, 137_534, 144_367, 149_310, 153_270, 156_617, 159_541, 162_155,
-    164_530, 166_715, 168_745, 170_645, 172_437, 174_134, 175_749, 177_293,
-    178_773, 180_197, 181_569, 182_896, 184_181, 185_428, 186_641, 187_821,
-    188_972, 190_095, 191_193, 192_268, 193_320, 194_352, 195_365, 196_360,
-    197_337, 198_299, 199_245, 200_178, 201_096, 202_002, 202_896, 203_779,
-    204_650, 205_511, 206_363, 207_205, 208_037, 208_862, 209_678, 210_486,
-    211_287, 212_081, 212_868, 213_649, 214_423, 215_192, 215_954, 216_712,
-    217_464, 218_210, 218_953, 219_690, 220_423, 221_152, 221_877, 222_598,
-    223_315, 224_029, 224_739, 225_446, 226_150, 226_851, 227_549, 228_244,
-    228_937, 229_627, 230_315, 231_001, 231_684, 232_366, 233_045, 233_723,
-    234_399, 235_073, 235_746, 236_417, 237_087, 237_755, 238_423, 239_089,
-    239_754, 240_418, 241_082, 241_744, 242_406, 243_067, 243_728, 244_388,
-    245_048, 245_707, 246_366, 247_025, 247_684, 248_343, 249_001, 249_660,
-    250_319, 250_978, 251_638, 252_297, 252_957, 253_618, 254_279, 254_940,
-    255_603, 256_266, 256_929, 257_594, 258_260, 258_926, 259_594, 260_262,
-    260_932, 261_603, 262_276, 262_949, 263_625, 264_301, 264_979, 265_659,
-    266_341, 267_024, 267_710, 268_397, 269_086, 269_777, 270_471, 271_166,
-    271_864, 272_564, 273_267, 273_972, 274_680, 275_391, 276_104, 276_820,
-    277_539, 278_262, 278_987, 279_715, 280_447, 281_182, 281_921, 282_663,
-    283_409, 284_159, 284_913, 285_670, 286_432, 287_198, 287_969, 288_743,
-    289_523, 290_307, 291_096, 291_890, 292_689, 293_494, 294_304, 295_119,
-    295_940, 296_767, 297_600, 298_439, 299_285, 300_137, 300_996, 301_862,
-    302_735, 303_615, 304_503, 305_398, 306_302, 307_214, 308_134, 309_063,
-    310_001, 310_948, 311_905, 312_872, 313_849, 314_836, 315_834, 316_843,
-    317_864, 318_897, 319_943, 321_001, 322_072, 323_157, 324_256, 325_370,
-    326_499, 327_643, 328_805, 329_983, 331_179, 332_393, 333_627, 334_880,
-    336_155, 337_451, 338_769, 340_112, 341_479, 342_872, 344_292, 345_741,
-    347_220, 348_730, 350_273, 351_851, 353_466, 355_120, 356_815, 358_553,
-    360_339, 362_173, 364_060, 366_004, 368_007, 370_075, 372_213, 374_426,
-    376_720, 379_103, 381_581, 384_165, 386_864, 389_691, 392_660, 395_787,
-    399_091, 402_597, 406_331, 410_331, 414_638, 419_308, 424_413, 430_049,
-    436_347, 443_496, 451_777, 461_642, 473_886, 490_113, 514_462, 566_048,
+    125_000, 140_795, 167_413, 175_120, 182_827, 190_535, 198_242, 204_306,
+    209_995, 215_683, 221_372, 227_061, 232_750, 238_439, 244_127, 250_438,
+    271_771, 293_104, 314_437, 333_731, 340_480, 347_230, 353_979, 360_729,
+    367_478, 374_228, 380_977, 387_727, 394_476, 401_225, 407_975, 414_724,
+    421_474, 428_223, 434_973, 441_722, 448_472, 455_221, 461_971, 468_720,
+    475_469, 482_219, 488_968, 495_718, 501_368, 505_859, 510_350, 514_841,
+    519_332, 523_824, 528_315, 532_806, 537_297, 541_788, 546_279, 550_771,
+    555_262, 559_753, 564_244, 568_735, 573_227, 577_718, 582_209, 586_700,
+    591_191, 595_682, 600_174, 604_665, 609_156, 613_647, 618_138, 622_630,
+    627_121, 631_612, 636_103, 640_594, 645_085, 649_577, 654_068, 658_559,
+    663_050, 667_541, 672_032, 676_524, 681_015, 685_506, 689_997, 694_488,
+    698_980, 703_471, 707_962, 712_453, 716_944, 721_435, 725_927, 730_418,
+    734_909, 739_400, 743_891, 748_383, 752_225, 756_005, 759_786, 763_566,
+    767_347, 771_127, 774_908, 778_688, 782_469, 786_250, 790_030, 793_811,
+    797_591, 801_372, 805_152, 808_933, 812_713, 816_494, 820_274, 824_055,
+    827_836, 831_616, 835_397, 839_177, 842_958, 846_738, 850_519, 854_299,
+    858_080, 861_861, 865_641, 869_422, 873_202, 876_983, 880_763, 884_544,
+    888_324, 892_105, 895_885, 899_666, 903_447, 907_227, 911_008, 914_788,
+    918_569, 922_349, 926_130, 929_910, 933_691, 937_472, 941_252, 945_033,
+    948_813, 952_594, 956_374, 960_155, 963_935, 967_716, 971_496, 975_277,
+    979_058, 982_838, 986_619, 990_399, 994_180, 997_960, 1_003_298, 1_008_820,
+    1_014_342, 1_019_865, 1_025_387, 1_030_909, 1_036_432, 1_041_954, 1_047_476, 1_052_998,
+    1_058_521, 1_064_043, 1_069_565, 1_075_088, 1_080_610, 1_086_132, 1_091_654, 1_097_177,
+    1_102_699, 1_108_221, 1_113_743, 1_119_266, 1_124_788, 1_130_310, 1_135_833, 1_141_355,
+    1_146_877, 1_152_399, 1_157_922, 1_163_444, 1_168_966, 1_174_489, 1_180_011, 1_185_533,
+    1_191_055, 1_196_578, 1_202_100, 1_207_622, 1_213_145, 1_218_667, 1_224_189, 1_229_711,
+    1_235_234, 1_240_756, 1_246_278, 1_251_801, 1_257_323, 1_262_845, 1_268_367, 1_273_890,
+    1_279_412, 1_284_934, 1_290_457, 1_295_979, 1_301_501, 1_307_023, 1_312_546, 1_318_068,
+    1_323_590, 1_329_113, 1_334_635, 1_340_157, 1_345_679, 1_351_202, 1_356_724, 1_362_246,
+    1_367_768, 1_373_291, 1_378_813, 1_384_335, 1_389_858, 1_395_380, 1_400_902, 1_406_424,
+    1_411_947, 1_417_469, 1_422_991, 1_428_514, 1_434_036, 1_439_558, 1_445_080, 1_450_603,
+    1_456_125, 1_461_647, 1_467_170, 1_472_692, 1_478_214, 1_483_736, 1_489_259, 1_494_781,
 ];
 
-/// A fixed draw for OAM bit `bit`: its retention quantile in the low byte, its resting value in
-/// bit 8 (`SplitMix64`).
+/// Where a decayed OAM bit settles.
+#[derive(Clone, Copy)]
+enum OamRest {
+    Zero,
+    One,
+    /// Lost whatever it held: found changed after both an all-0 and an all-1 fill.
+    Flips,
+}
+
+/// The resting class of a bit drawn by [`oam_bit_draw`], in `FireSide`'s proportions (1800 bits
+/// outside row 31: 1406 lost to 0, 432 to 1, so 38 in both passes): 1368 / 394 / 38 of 1800 as
+/// 778 / 224 / 22 of 1024.
+const fn oam_bit_rest(draw: u64) -> OamRest {
+    match (draw >> 8) & 0x3FF {
+        0..778 => OamRest::Zero,
+        778..1002 => OamRest::One,
+        _ => OamRest::Flips,
+    }
+}
+
+/// A fixed draw for OAM bit `bit`: its retention quantile in the low byte, its resting class in
+/// bits 8-17 ([`oam_bit_rest`]) (`SplitMix64`).
 const fn oam_bit_draw(bit: usize) -> u64 {
     let mut z = (bit as u64).wrapping_add(0x9E37_79B9_7F4A_7C15).wrapping_mul(0x2C07);
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);

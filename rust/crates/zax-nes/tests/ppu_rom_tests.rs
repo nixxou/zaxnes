@@ -7,7 +7,10 @@
 
 mod common;
 
-use common::{run_legacy_rom, run_shell_rom, test_rom, LEGACY_RESULT};
+use common::{
+    run_legacy_rom, run_legacy_rom_configured, run_shell_rom, run_shell_rom_configured, test_rom,
+    LEGACY_RESULT,
+};
 
 /// Result variable of the 2005-era `blargg_ppu_tests` runtime: all four park with 1 in
 /// $00F0 and print "$01" on screen, the "tests passed" code of that console.
@@ -153,6 +156,26 @@ fn req_core_116_vbl_nmi_timing_tests_pass() {
     );
 }
 
+/// blargg's `oam_stress` (passes on hardware: OAM kept through its blank) with the per-bit OAM
+/// decay of lot FIDPLUS-E on and off: the model must never lose a bit that test relies on.
+#[test]
+fn fidplus_oam_stress_passes_with_the_oam_decay() {
+    let Some(image) = test_rom("oam_stress/oam_stress.nes") else {
+        return;
+    };
+    for decay in [false, true] {
+        let result = run_shell_rom_configured(&image, 6000, |core| core.set_oam_decay(decay));
+        assert!(
+            result.passed,
+            "decay {decay}: code {}{} after {} frames, output: {}",
+            result.code,
+            if result.timed_out { " (timed out)" } else { "" },
+            result.frames,
+            result.text.replace('\n', "|")
+        );
+    }
+}
+
 #[test]
 fn req_core_116_oam_read_passes() {
     assert_shell_pass("oam_read", &["oam_read.nes"]);
@@ -172,8 +195,17 @@ fn req_core_116_sprite_overflow_tests_pass() {
             "2.Details.nes",
             "3.Timing.nes",
             "4.Obscure.nes",
-            "5.Emulator.nes",
         ],
         LEGACY_RESULT,
     );
+    // 5.Emulator switches the rendering off at line 126 dot 8: with the OAM row corruption on (the
+    // default since lot FIDELITY step 27) it passes only with the power-on at the top of the
+    // picture that comes with it, the app's defaults; the fixtures power on in vblank.
+    if let Some(image) = test_rom("sprite_overflow_tests/5.Emulator.nes") {
+        let result = run_legacy_rom_configured(&image, 2000, LEGACY_RESULT, |core| {
+            core.set_power_on_top(true);
+            core.reset();
+        });
+        assert!(result.passed, "5.Emulator: code {} after {} frames", result.code, result.frames);
+    }
 }
