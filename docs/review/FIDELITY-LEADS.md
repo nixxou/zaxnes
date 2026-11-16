@@ -878,6 +878,14 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
     runs, a pairing artifact: the aligned frame's preceding pre-render line is not aligned
     (offsets -1/-2), so Zaxnes's read latches on 280 where the netlist's latches on 286;
     golden-core identical;
+  * (2026-11-16) **the NTSC corpus at the four reset phases** (`runcorpus_ntsc.ps1` added e0/e2
+    for `g2000`, `g2005`, `g2006x`, `g3e01px`, `oam`, `r2007`; judge `c3cntsc.py`): e4 takes
+    alignment 3 and e6 alignment 2, power-on in vblank, and every program is clean there but
+    `r2007` (the pairing artifact above) and `rmw` (unpairable with this bench). At e0/e2
+    (alignments 0/1) `g2000`, `g2005`, `g2006x`, `r2007` are clean; `g3e01px` and `oam` hit
+    step 33's switch-on race on every switch on (`A 0 86 W2001=0A`: `v` `$0006` -> `$0000`, a
+    horizontal copy from `t`, then fetches), present or not with the bench's hold time: not
+    trusted, not ported, as before;
   * dedicated programs for the value patterns the corpus measures once (`$2001` values other
     than `$0A`/`$1E`/`$00`, a read on the copy dots with `t` having more vertical bits set).
 
