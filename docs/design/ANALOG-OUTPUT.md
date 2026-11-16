@@ -110,3 +110,38 @@ degrees. The same bench on the 2C02 netlist puts colour `$x8` in phase with the 
 says, which fixes the bench's direction of rotation. The two border pixels are not drawn by the
 core's picture (it keeps 256 columns). Dendy keeps the NTSC generator (its PPU is not measured).
 
+## D3 design (2026-11-16): the picture handed over as the PPU draws it
+
+What the console does: the PPU sends each line to the television as it draws it, so the bottom
+of the picture reaches the screen ~16 ms after the top, and a button read during the frame can
+show on lines drawn after the read. What Zaxnes does with B5: the machine runs in real time
+between two refreshes and the finished frame is shown at the next refresh; a line the PPU drew
+early in the frame waits for the rest (up to one refresh) before anyone sees it.
+
+D3 hands the screen the lines already drawn before the refresh, "beam racing" as WinUAE and
+GroovyMAME do (frame slices):
+
+1. The refresh is split into N slices (default 4, at most 8). During B5's wait, after each
+   machine slice, the lines the PPU has finished are uploaded to the texture (the dirty band only).
+2. With vsync off and tearing allowed (GL swap interval 0 / wgpu `Immediate`), each slice is
+   presented when the display's own scanout is about to reach it: the tear line then falls in the
+   part of the screen that does not change, and is invisible.
+3. The scanout position comes from the last refresh's timestamp and the period (B5 already keeps
+   both: `last_swap`, `paced_budget`); where the platform reports it exactly (Windows:
+   `D3DKMTGetScanLine`, DXGI frame statistics) the estimate is corrected.
+
+Placement: an option off by default (`video.beam_racing`), Fidelite+, only with `emu.realtime_input`
+on, a display whose refresh is the game's (60 Hz for NTSC, 50 Hz for PAL), and the 2D picture: the
+3D scene is built from whole frames and keeps them. Not with run-ahead (which shows a future frame).
+
+Risks to settle before code: (a) the driver may queue presents and defeat the timing (measure
+with `padbench`'s timestamps and, ideally, a photodiode); (b) composition (Windows DWM, Wayland)
+may force vsync on a windowed surface: fullscreen exclusive or a flip-model swapchain with tearing
+support is required, so the option says when it cannot run; (c) the per-slice upload and present
+cost (a GL band upload ~0.1 ms, four presents a frame) against the +1 % budget, which only applies
+to the default path (the option is off).
+
+Judge: the latency from a button to its first visible pixel, measured with `padbench`'s timer on
+a test ROM that changes the backdrop when the button is read: today ~1 refresh + scanout; with D3
+the scanout part only. Expected gain: about half a refresh on average (8 ms at 60 Hz).
+
