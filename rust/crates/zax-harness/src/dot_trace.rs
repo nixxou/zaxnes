@@ -170,6 +170,15 @@ pub fn command(args: &[String]) -> Result<(), HarnessError> {
         }
         zax_nes::ppu::Ppu2C02::set_pal_switch_override(delays);
     }
+    // ZAX_PAL_LATCH = five comma-separated $2007 latch delays (accumulators 0-4; 0 keeps the
+    // model): a measurement override.
+    if let Ok(list) = std::env::var("ZAX_PAL_LATCH") {
+        let mut dots = [0_i32; 5];
+        for (slot, item) in dots.iter_mut().zip(list.split(',')) {
+            *slot = item.trim().parse().unwrap_or(0);
+        }
+        zax_nes::ppu::Ppu2C02::set_pal_latch_override(dots);
+    }
     for frame in 1..=options.last {
         let traced = frame >= options.first;
         if traced {

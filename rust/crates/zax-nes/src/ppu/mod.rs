@@ -943,8 +943,11 @@ impl Ppu2C02 {
         // reset phases e0/e3/e6/e9, which between them switch on and off on every accumulator:
         // no differing run longer than 2 dots in any aligned frame; the earlier {0, 2} -> 3 left
         // 58 311 at e0, switch on with accumulator 1, and 371 915 at e9, switch off with 1).
+        // With the 2A07's M2 duty (19/32, bench `benchdotpal57`, adversarial review 2026-11-16):
+        // four on accumulator 4 only (`oam`, `g2001px` at the four phases, 0 long runs; the
+        // 15/24 bench's {3, 4} split leaves 890 605 differing dots there).
         let delay = if self.timing.region == NesRegion::Pal {
-            if self.dot_accumulator >= 3 {
+            if self.dot_accumulator == 4 {
                 4
             } else {
                 3
@@ -2665,9 +2668,13 @@ impl Ppu2C02 {
         // dot from one cycle to the next: X - D is 6 on the two cycles whose dot accumulator is
         // 3 or 4, 5 on the three others (Visual 2C07 netlist, lot FIDPLUS-C C3c, `r2007`: 5 in
         // 60 % of the reads and 6 in 40 %, whatever the dot; every other split of the five
-        // phases leaves 49 000 to 102 000 differing dots a frame, this one 8 400).
+        // phases leaves 49 000 to 102 000 differing dots a frame, this one 8 400). That bench
+        // drove the 2C07 with the 2A03's M2 duty (15/24); with the 2A07's 19/32 (nesdev "CPU
+        // ALL", adversarial review 2026-11-16, bench `benchdotpal57`) M2 falls earlier and
+        // only accumulator 4 takes 6: `r2007` and `g2007v` at e0/e3/e6/e9, 0 long runs, against
+        // 1 185 385 differing dots with the old split.
         let latch_dots: i32 = if self.timing.region == NesRegion::Pal {
-            if self.dot_accumulator >= 3 {
+            if self.dot_accumulator == 4 {
                 6
             } else {
                 5
@@ -2677,6 +2684,8 @@ impl Ppu2C02 {
         } else {
             5
         };
+        #[cfg(feature = "ppu-dot-trace")]
+        let latch_dots = pal_latch_override(self.timing.region, self.dot_accumulator, latch_dots);
         if self.prepaid_dots != 0 {
             return false;
         }
@@ -3959,6 +3968,15 @@ impl Ppu2C02 {
         }
     }
 
+    /// Overrides the PAL `$2007` read latch (feature `ppu-dot-trace`, measurement only): five
+    /// values, dots for accumulators 0-4; 0 keeps the model.
+    #[cfg(feature = "ppu-dot-trace")]
+    pub fn set_pal_latch_override(dots: [i32; 5]) {
+        for (slot, value) in PAL_LATCH_OVERRIDE.iter().zip(dots) {
+            slot.store(value, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
     /// Starts a per-dot trace (feature `ppu-dot-trace`), dropping any previous one.
     #[cfg(feature = "ppu-dot-trace")]
     pub fn start_dot_trace(&mut self) {
@@ -4354,6 +4372,23 @@ fn pal_switch_override(region: NesRegion, accumulator: i32, value: u8, delay: i3
     let slot = accumulator as usize + if (value & 0x18) == 0 { 5 } else { 0 };
     match PAL_SWITCH_OVERRIDE[slot].load(std::sync::atomic::Ordering::Relaxed) {
         0 => delay,
+        forced => forced,
+    }
+}
+
+#[cfg(feature = "ppu-dot-trace")]
+static PAL_LATCH_OVERRIDE: [std::sync::atomic::AtomicI32; 5] =
+    [const { std::sync::atomic::AtomicI32::new(0) }; 5];
+
+/// The measurement override of [`Ppu2C02::set_pal_latch_override`].
+#[cfg(feature = "ppu-dot-trace")]
+fn pal_latch_override(region: NesRegion, accumulator: i32, dots: i32) -> i32 {
+    if region != NesRegion::Pal {
+        return dots;
+    }
+    #[allow(clippy::cast_sign_loss)] // 0..5.
+    match PAL_LATCH_OVERRIDE[accumulator as usize].load(std::sync::atomic::Ordering::Relaxed) {
+        0 => dots,
         forced => forced,
     }
 }
