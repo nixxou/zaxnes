@@ -393,10 +393,12 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   alignments.
 - Standard core, done 2026-11-16 (`Ppu2C02::address_write_on_copy`, cold, called from the second
   `$2006` write on dots 257 / 304): the same rule, and on the PAL 2C07 its dot-257 form (open bus
-  on dot-accumulator phase 4). Judge today: the old `fidjudge.sh` no longer finds a phase in
-  +-16 (the harness's defaults moved since); `ntscjudge.py` (+-60) pairs only two frames, where
-  `g2006x` goes from 8 850 to 8 824 differing dots in both alignments (the other differences
-  dominate that pairing). To redo with a judge that pairs every frame.
+  on dot-accumulator phase 4). Judge: `ext-tools/visualnes-bench/ntscjudge.py` with the harness's
+  new `dot-trace --power-on-vblank` (the 2C02 traces of FIDPLUS-2 were taken against the power-on
+  at vblank, before `emu.power_on_top`; the old `fidjudge.sh` no longer finds a phase without it).
+  The netlist trace holds three frames, two paired: `g2006x` 4 412 differing dots a frame in both
+  alignments, exactly one per register access (the recording instant), against 4 425 before A8:
+  no rendering difference left in the standard core.
 
 ### A7. The coarse-Y wrap takes two phases — open, Fidélité+ step 3 (2026-11-15)
 - Netlist, `r2007`, alignments 2 and 3: when a Y increment wraps coarse Y from 29 (fine Y 7), `v`
