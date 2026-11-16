@@ -163,5 +163,7 @@ least the pad's 2.5 ms, at most three quarters of the refresh. Expected gain: up
 (~10 ms at 60 Hz on average less the margin), no tear line; risk: a draw that overruns the margin
 misses a refresh, hence off by default. The frames finished during the wait count for this
 displayed frame (3D interpolation, rate log). Judge: `lagtest.nes` with the camera, as for D3;
-not measured yet (needs the owner's pad and screen).
+not measured yet (needs the owner's pad and screen). Smoke-checked (2026-11-16, release build,
+scratch user data, ``--vsync 1``, ``lagtest.nes``, RTX 3050, 60 Hz): 600 frames in 10.5 s with the
+option on and off alike, 595 emulated in both: no refresh missed, the pacing unchanged.
 
