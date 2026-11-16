@@ -28,6 +28,16 @@ use zax_settings::meta::SettingKind;
 /// The tag of a line only a `wgpu` build shows.
 const WGPU_TAG: &str = "[wgpu]";
 
+/// The tag of a line only a build with the FCEUX engine shows (lot FCEUX-23 step 5).
+const FCEUX_TAG: &str = "[fceux-core]";
+
+/// Every tag, with whether *this* build carries the feature it names. A table rather than an `if`
+/// on two `cfg!`s, which clippy folds into a constant and then complains about.
+const TAGS: [(&str, bool); 2] = [
+    (WGPU_TAG, cfg!(feature = "wgpu")),
+    (FCEUX_TAG, cfg!(feature = "fceux-core")),
+];
+
 fn golden_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../goldens/desktop-options-shown.txt")
 }
@@ -40,8 +50,12 @@ fn expected() -> BTreeSet<String> {
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .filter_map(|line| match line.split_once(char::is_whitespace) {
             Some((key, tag)) => {
-                assert_eq!(WGPU_TAG, tag.trim(), "unknown tag on {key}");
-                cfg!(feature = "wgpu").then(|| key.to_owned())
+                let tag = tag.trim();
+                let (_, built) = TAGS
+                    .iter()
+                    .find(|(name, _)| *name == tag)
+                    .expect("a tag the test knows");
+                built.then(|| key.to_owned())
             }
             None => Some(line.to_owned()),
         })
@@ -104,6 +118,11 @@ fn ro_1_the_excluded_list_is_unchanged() {
             SettingId::AchievementsToken,
             SettingId::VideoHalfRate3d,
             SettingId::InputTouchPad,
+            SettingId::InputTouchScale,
+            SettingId::InputTouchHapticDpad,
+            SettingId::InputTouchHapticButtons,
+            SettingId::InputTouchExtra,
+            SettingId::UiOrientation,
             SettingId::UiLibraryView,
             SettingId::VideoMsaa20,
         ],
@@ -131,10 +150,14 @@ fn ro_1_the_layout_table_places_every_shown_setting_exactly_once() {
             "{} is placed twice",
             id.key()
         );
-        // A line for a setting the window never shows would be a silent lie in the table. The
-        // graphics API is the one exception: `is_shown` drops it off a `wgpu` build.
+        // A line for a setting the window never shows would be a silent lie in the table. Two
+        // settings are the exceptions, and for the same reason: `is_shown` drops a choice the
+        // build cannot offer. The graphics API goes off a build without `wgpu`, and the emulation
+        // engine off one without `fceux-core` (lot FCEUX-23 step 5).
         assert!(
-            options::is_shown(catalogue::descriptor(*id)) || *id == SettingId::VideoBackend,
+            options::is_shown(catalogue::descriptor(*id))
+                || *id == SettingId::VideoBackend
+                || *id == SettingId::EmuEngine,
             "{} is in LAYOUT but never shown",
             id.key()
         );
@@ -425,8 +448,10 @@ fn ro_1_every_detail_text_belongs_to_a_shown_setting() {
         .iter()
         .map(|(key, _)| *key)
         .filter(|key| key.starts_with(keys::DETAIL_PREFIX) && !shown.contains(*key))
-        // The graphics API has its text in every build; only a `wgpu` build shows the row.
-        .filter(|key| *key != "detail.video.backend")
+        // Two have their text in every build, because the table is one list and the row is what
+        // a feature gates: the graphics API off a build without `wgpu`, and the emulation engine
+        // off one without `fceux-core` (lot FCEUX-23 step 5).
+        .filter(|key| *key != "detail.video.backend" && *key != "detail.emu.engine")
         .collect();
     assert_eq!(Vec::<&str>::new(), orphans);
 }
@@ -477,8 +502,15 @@ fn ro_1_the_detailed_tooltips_are_desktop_only() {
 fn ro_3_every_console_setting_is_a_row_the_console_can_step() {
     // The 56 of `336dd8f`, `audio.classic_output` which AUDIO-2 adds, and
     // `emu.smooth_scroll_ahead` which KIRBY-MERGE does, and `video.shader_resolution` (the
-    // shaders' share of the window): a setting may move in the tree, never leave the console.
-    assert_eq!(59, advanced::ROW_SETTINGS.len());
+    // shaders' share of the window), and `emu.engine` (owner request, 2026-11-12): a setting may
+    // move in the tree, never leave the console. Lot CARTDB adds `emu.cartridge_db` and
+    // `emu.power_on_ram`. Lot FIDELITY step 28 adds `emu.cpu_ppu_alignment`, step 32
+    // `emu.palette_corruption`. Lot FIDPLUS-A adds `emu.fidelity_plus`, FIDPLUS-B
+    // `emu.exact_rate` and `emu.realtime_input`, FIDPLUS-E `emu.cpu_apu_parity`,
+    // FIDPLUS-D3a `emu.late_present`,
+    // MAPPERS-N `emu.rainbow_network` (mapper 682's ESP) and the eight `emu.vs_dip_N`.
+    assert_eq!(95, advanced::ROW_SETTINGS.len());
+    assert!(advanced::ROW_SETTINGS.contains(&SettingId::EmuEngine));
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::AudioClassicOutput));
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::EmuSmoothScrollAhead));
 
@@ -545,11 +577,15 @@ fn ro_3_the_handheld_main_pages_are_the_mockups() {
             OptionRow::Palette,
             OptionRow::Overscan,
             OptionRow::Region,
+            // Owner request: the orientation of the screen, on the main page.
+            OptionRow::Choice(SettingId::UiOrientation),
             OptionRow::Page(OptionsPage::Shaders),
             OptionRow::Page(OptionsPage::Optimizations),
             OptionRow::Page(OptionsPage::Advanced),
             OptionRow::Controls,
-            OptionRow::TouchPad,
+            // Owner request: the touch pad's row went into the touch screen's page, with its
+            // size, its vibrations and its rewind and fast-forward buttons.
+            OptionRow::Page(OptionsPage::Touch),
             OptionRow::Achievements,
             OptionRow::Profiler,
         ],
@@ -601,8 +637,9 @@ fn ro_3_every_setting_a_game_can_set_has_a_global_value_to_point_at() {
 
     // The desktop menu and the console pages of a game walk the same tree, so neither can gain a
     // row the other has not got: the main screen plus the pages, and nothing else. Thirty until
-    // KIRBY-MERGE added the smooth scrolling from the run-ahead beside the game's run-ahead.
-    assert_eq!(31, game_options::all_game_rows().count());
+    // KIRBY-MERGE added the smooth scrolling from the run-ahead beside the game's run-ahead, and
+    // thirty-two since the engine row.
+    assert_eq!(32, game_options::all_game_rows().count());
 }
 
 /// RO-3 §3: the desktop *Game options* menu follows the console tree, and does so by **walking

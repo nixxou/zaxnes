@@ -7,6 +7,7 @@ use std::any::Any;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use zax_core_api::{FrameBatch, TileRecord};
 use zax_engine3d::engine::{ConversionEngine, ConversionState};
 use zax_engine3d::frame::{ConversionFrame, FrameInstance, FrameInstanceId};
 use zax_engine3d::geometry::builder::{GeometryProgress, PatternGeometryBuilder};
@@ -19,7 +20,6 @@ use zax_engine3d::registry::PatternId;
 use zax_engine3d::script::{ScriptError, ScriptHost};
 use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::vectors::{Vec2, Vec3};
-use zax_nes::{FrameBatch, TileRecord};
 use zax_profiles::enums::{ProfileLayer, TileFlip, VariantRenderStyle};
 use zax_profiles::pattern::ProfilePattern;
 use zax_profiles::profile::GameProfile;
@@ -193,7 +193,7 @@ impl Batch {
             mask_x: self.mask_x,
             mask_y: self.mask_y,
             margin: 0,
-            visible_rows: zax_nes::STANDARD_ROWS,
+            visible_rows: zax_core_api::STANDARD_ROWS,
             margin_y: 0,
         };
         engine.convert(&batch, counter)

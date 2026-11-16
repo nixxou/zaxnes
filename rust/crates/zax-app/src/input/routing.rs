@@ -1,6 +1,6 @@
 //! How the two players' actions reach the core and the camera (SPEC-08 §4.1).
 
-use zax_nes::ControllerPortType;
+use zax_core_api::ControllerPortType;
 
 use super::input_action::{controller_byte, InputAction};
 use super::zapper::RELEASED_BYTE;

@@ -22,6 +22,8 @@ fn pixel_at(core: &NesCore, x: usize, y: usize) -> u8 {
 fn req_core_048_a_disabled_screen_is_filled_with_the_universal_backdrop() {
     let mut fixture = TileFixture::new();
     fixture.write_vram(0x3F00, &[0x21]);
+    // `v` out of palette RAM, or the screen shows the entry it points to (next test).
+    fixture.write_vram(0x2000, &[]);
     fixture.set_mask(0x00);
     fixture.next_batch();
 
@@ -34,6 +36,29 @@ fn req_core_048_a_disabled_screen_is_filled_with_the_universal_backdrop() {
             .all(|&byte| byte == 0x21),
         "rendering off: the backdrop, and the opacity bit clear"
     );
+}
+
+/// Lot FIDELITY step 32 (nesdev, "PPU palettes", the background palette hack; Mesen 2 and
+/// `TriCNES` do the same): with rendering off and `v` in palette RAM, the screen shows the entry
+/// `v` points to, $3F04/$3F08/$3F0C and the $3F1x mirrors of entry 0 folding as palette reads
+/// do, the opacity bit still clear (AMD-050).
+#[test]
+fn fidelity_palette_background_shows_the_entry_v_points_to() {
+    fn shown(address: u16) -> u8 {
+        let mut fixture = TileFixture::new();
+        fixture.write_vram(0x3F00, &[0x21, 0x16, 0x2A, 0x12, 0x05, 0x38]);
+        fixture.write_vram(address, &[]);
+        fixture.set_mask(0x00);
+        fixture.next_batch();
+        let frame = fixture.core.pixel_frame_with_mask();
+        assert!(frame.iter().all(|&byte| byte == frame[0]), "one colour");
+        frame[0]
+    }
+    assert_eq!(0x2A, shown(0x3F02));
+    assert_eq!(0x38, shown(0x3F05));
+    assert_eq!(0x05, shown(0x3F04), "$3F04 is shown as written");
+    assert_eq!(0x21, shown(0x3F10), "$3F10 mirrors $3F00");
+    assert_eq!(0x21, shown(0x2000), "out of palette RAM: entry 0");
 }
 
 #[test]
@@ -752,5 +777,775 @@ fn req_core_047_a_palette_read_under_greyscale_returns_the_value_anded_with_30()
             fixture.core.ppu_read(7) & 0x3F,
             "the stored byte of ${address:04X} is unaffected"
         );
+    }
+}
+
+/// The 2C02G/H's OAMADDR defect (lot FIDELITY step 19): "if OAMADDR is not less than eight when
+/// rendering starts, the eight bytes starting at OAMADDR & 0xF8 are copied to the first eight
+/// bytes of OAM" (nesdev, "PPU registers"). Not on a PAL 2C07, and not with the setting off.
+#[test]
+fn fidelity_oamaddr_at_8_or_more_copies_its_row_over_oam_0_when_rendering_starts() {
+    fn oam_head_after_start(oamaddr: u8, region: Option<zax_nes::NesRegion>, bug: bool) -> Vec<u8> {
+        let mut fixture = TileFixture::new();
+        for sprite in 0..8u8 {
+            fixture.set_sprite(sprite, 0xF0, sprite, 0, sprite * 16);
+        }
+        if let Some(region) = region {
+            let timing = zax_nes::RegionTiming::for_region(region);
+            fixture.core.bus_mut().ppu_mut().set_timing(timing);
+        }
+        fixture.core.set_oamaddr_bug(bug);
+        fixture.set_mask(0x18);
+        park_on_scanline(&mut fixture, 250);
+        fixture.core.bus_mut().ppu_mut().write(3, oamaddr, None);
+        park_on_scanline(&mut fixture, 0);
+        fixture.core.bus().ppu().oam()[0..8].to_vec()
+    }
+
+    let untouched = vec![0xF0, 0, 0, 0, 0xF0, 1, 0, 16];
+    let row_2 = vec![0xF0, 4, 0, 64, 0xF0, 5, 0, 80];
+    assert_eq!(
+        untouched,
+        oam_head_after_start(0x07, None, true),
+        "below 8: nothing"
+    );
+    assert_eq!(
+        row_2,
+        oam_head_after_start(0x13, None, true),
+        "OAMADDR & $F8 = $10"
+    );
+    assert_eq!(
+        untouched,
+        oam_head_after_start(0x13, None, false),
+        "setting off"
+    );
+    assert_eq!(
+        untouched,
+        oam_head_after_start(0x13, Some(zax_nes::NesRegion::Pal), true),
+        "the 2C07 does not have it"
+    );
+}
+
+/// Lot FIDPLUS-E (model measured on one console): with the rendering off, OAM keeps every bit for
+/// 7 NTSC frames; past 90 frames every bit has fallen to its own resting value, the same on every
+/// run.
+/// The row `OAMADDR` points at is held refreshed; a row the address visited in the meantime keeps
+/// its bytes; with the rendering on all along, or the setting off, nothing changes.
+#[test]
+fn fidplus_oam_decays_bit_by_bit_with_the_rendering_off() {
+    fn oam_after_blank(frames: usize, decay: bool, touch_row_1: bool) -> Vec<u8> {
+        let mut fixture = TileFixture::new();
+        for sprite in 0..4u8 {
+            fixture.set_sprite(sprite, 0x40, 0x11, 0x01, 0x22);
+        }
+        fixture.core.set_oam_decay(decay);
+        // The rendering goes off mid-picture here; the row corruption that brings (on by default
+        // since step 27) is another test's subject.
+        fixture.core.set_oam_corruption(false);
+        fixture.set_mask(0x18);
+        park_on_scanline(&mut fixture, 10);
+        fixture.set_mask(0x00);
+        for frame in 0..frames {
+            park_on_scanline(&mut fixture, 100);
+            park_on_scanline(&mut fixture, 0);
+            if touch_row_1 && frame % 4 == 0 {
+                let ppu = fixture.core.bus_mut().ppu_mut();
+                ppu.write(3, 0x08, None);
+                ppu.read(4, None);
+            }
+        }
+        fixture.set_mask(0x18);
+        fixture.core.bus().ppu().oam()[0..16].to_vec()
+    }
+
+    let kept = vec![
+        0x40, 0x11, 0x01, 0x22, 0x40, 0x11, 0x01, 0x22, 0x40, 0x11, 0x01, 0x22, 0x40, 0x11, 0x01,
+        0x22,
+    ];
+    assert_eq!(kept, oam_after_blank(100, false, false), "setting off");
+    assert_eq!(kept, oam_after_blank(7, true, false), "7 frames: kept");
+    let long = oam_after_blank(100, true, false);
+    assert_eq!(kept[0..8], long[0..8], "row 0, OAMADDR's, held refreshed");
+    assert_ne!(kept[8..16], long[8..16], "100 frames: row 1 decayed");
+    assert_eq!(long, oam_after_blank(100, true, false), "the same bits every run");
+    assert_eq!(long[8..16], oam_after_blank(140, true, false)[8..16], "settled at rest");
+    let touched = oam_after_blank(100, true, true);
+    assert_ne!(kept[0..8], touched[0..8], "row 0 left by OAMADDR at frame 0");
+    assert_eq!(kept[8..16], touched[8..16], "row 1 held by OAMADDR");
+}
+/// Plan step 2: with `set_power_on_top`, a power-on puts the PPU at the top of the picture (nesdev,
+/// "PPU power up state"; dot 11 as `BeesNES`), and without it at the start of vblank as before.
+#[test]
+fn fidelity_power_on_top_starts_the_ppu_at_line_0_dot_11() {
+    let mut fixture = TileFixture::new();
+    fixture.core.set_power_on_top(false);
+    fixture.core.reset();
+    let ppu = fixture.core.bus().ppu();
+    assert_ne!(0, ppu.scanline(), "off: vblank");
+
+    // On (the default since step 27; the fixture asks for vblank, see `machine_with`).
+    let mut fixture = TileFixture::new();
+    fixture.core.set_power_on_top(true);
+    fixture.core.reset();
+    let ppu = fixture.core.bus().ppu();
+    // Dot 11 when the CPU's reset starts; its seven cycles (21 NTSC dots) have run since.
+    assert_eq!((0, 11 + 21), (ppu.scanline(), ppu.dot()));
+}
+
+/// Parks the PPU, rendering on, with `dot` the last dot run, on a visible line past 10.
+fn park_on_dot(fixture: &mut TileFixture, dot: i32) {
+    let bus = fixture.core.bus_mut();
+    let mut guard = 0;
+    loop {
+        bus.tick();
+        bus.sync_ppu();
+        let ppu = bus.ppu();
+        if (10..200).contains(&ppu.scanline()) && ppu.dot() == dot {
+            return;
+        }
+        guard += 1;
+        assert!(guard < 2_000_000, "never reached dot {dot}");
+    }
+}
+
+fn increment_x(v: u16) -> u16 {
+    if (v & 0x1F) == 0x1F {
+        (v & !0x1F) ^ 0x400
+    } else {
+        v + 1
+    }
+}
+
+/// study/access-phase: a second `$2006` write whose delayed load lands on the coarse-X increment
+/// of dot 136 (the write at dot 133) loads the written coarse X AND the incremented one, every
+/// other field written, into `v` and `t` alike — as measured on the transistor netlists
+/// (`$2AD7` over `$210C` gives `$2AC5`). Off, or on another dot, the written address loads.
+#[test]
+fn fidelity_2006_load_on_a_coarse_x_increment_ands_coarse_x() {
+    fn load_at(dot: i32, glitch: bool) -> (u16, u16, u16) {
+        let mut fixture = TileFixture::new();
+        fixture.core.set_glitch_2006(glitch);
+        fixture.set_mask(0x0A);
+        park_on_scanline(&mut fixture, 5);
+        fixture.core.bus_mut().ppu_mut().write(6, 0x2A, None);
+        park_on_dot(&mut fixture, dot);
+        let before = fixture.core.bus().ppu().vram_v();
+        fixture.core.bus_mut().ppu_mut().write(6, 0xD7, None);
+        let ppu = fixture.core.bus().ppu();
+        (before, ppu.vram_v(), ppu.vram_t())
+    }
+
+    let (before, v, t) = load_at(133, true);
+    let expected = (0x2AD7 & !0x1F) | (0x2AD7 & increment_x(before) & 0x1F);
+    assert_eq!(
+        (expected, expected),
+        (v, t),
+        "collision at dot 136, v was {before:04X}"
+    );
+    assert_eq!(
+        (0x2AD7, 0x2AD7),
+        (load_at(133, false).1, load_at(133, false).2),
+        "setting off"
+    );
+    assert_eq!(0x2AD7, load_at(134, true).2, "no collision on dot 137");
+}
+
+/// study/access-phase: a `$2000` write that starts on dot 257 lets the copy of that dot take the
+/// nametable-X bit from the CPU's open bus (`$20` for `STA $2000`): that line's v has nametable
+/// X 0 although `t` says 1 (nesdev, "PPU registers"; the transistor netlists).
+#[test]
+fn fidelity_2000_write_on_dot_257_takes_nametable_x_from_open_bus() {
+    fn nametable_x_after(dot: i32, glitch: bool) -> u16 {
+        nametable_x_in(3, dot, glitch)
+    }
+    fn nametable_x_in(alignment: u8, dot: i32, glitch: bool) -> u16 {
+        nametable_x_on(alignment, dot, glitch, false)
+    }
+    fn nametable_x_on(alignment: u8, dot: i32, glitch: bool, pal: bool) -> u16 {
+        let mut fixture = TileFixture::new();
+        if pal {
+            fixture.core.set_region(zax_nes::NesRegion::Pal);
+        }
+        fixture.core.set_cpu_ppu_alignment(alignment);
+        fixture.core.set_glitch_2000(glitch);
+        fixture.set_mask(0x0A);
+        fixture.core.bus_mut().ppu_mut().write(0, 0x01, None);
+        park_on_dot(&mut fixture, dot);
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        ppu.note_cpu_open_bus(0x20);
+        ppu.write(0, 0x01, None);
+        (ppu.vram_v() >> 10) & 1
+    }
+
+    assert_eq!(0, nametable_x_after(257, true), "glitch");
+    assert_eq!(1, nametable_x_after(257, false), "setting off");
+    assert_eq!(1, nametable_x_after(258, true), "a dot later is safe");
+    // Alignment 3 only: the netlist with the CPU's hold time shows it in its phase a4 alone
+    // (step 33); TriCNES's alignment 0 on dot 258 does not appear there.
+    for alignment in [0, 1, 2] {
+        for dot in [257, 258] {
+            assert_eq!(
+                1,
+                nametable_x_in(alignment, dot, true),
+                "alignment {alignment}"
+            );
+        }
+    }
+    // Lot FIDPLUS-C C3c: the PAL 2C07 has no such glitch, at any CPU/PPU phase (Visual 2C07).
+    assert_eq!(1, nametable_x_on(3, 257, true, true), "PAL: no glitch");
+}
+
+/// Lot FIDELITY steps 30 and 32 (transistor netlist, `VisualNes`): a `$2005` write that lands on a
+/// copy of `t` into `v` still reaches that copy: the first write on dot 257 (coarse X), the second
+/// on dot 304 of the pre-render line (fine and coarse Y). In alignment 3, the default, the copy
+/// takes the CPU's open bus instead (`$20` for `STA $2005`), under the `$2000` glitch's switch.
+#[test]
+fn fidelity_2005_write_landing_on_a_copy_of_t_reaches_it() {
+    // A tick is three dots and one line a frame does not see every phase: a missed try skips
+    // the odd-frame dot once (rendering off over the end of the pre-render line), which moves it.
+    fn park(fixture: &mut TileFixture, line: i32, dot: i32) {
+        for _ in 0..12 {
+            loop {
+                let bus = fixture.core.bus_mut();
+                bus.tick();
+                bus.sync_ppu();
+                let (now_line, now_dot) = (bus.ppu().scanline(), bus.ppu().dot());
+                if now_line == line && now_dot == dot {
+                    return;
+                }
+                if now_line == line && now_dot > dot + 3 {
+                    break;
+                }
+            }
+            let run_until = |fixture: &mut TileFixture, at: (i32, i32)| loop {
+                let ppu = fixture.core.bus().ppu();
+                if ppu.scanline() == at.0 && ppu.dot() >= at.1 {
+                    break;
+                }
+                fixture.core.bus_mut().tick();
+                fixture.core.bus_mut().sync_ppu();
+            };
+            run_until(fixture, (261, 320));
+            fixture.set_mask(0x00);
+            run_until(fixture, (0, 20));
+            fixture.set_mask(0x0A);
+        }
+        panic!("never reached line {line} dot {dot}");
+    }
+    fn after(alignment: u8, second: bool, dot: i32, glitch: bool) -> u16 {
+        let mut fixture = TileFixture::new();
+        fixture.core.set_cpu_ppu_alignment(alignment);
+        fixture.core.set_glitch_2000(glitch);
+        fixture.set_mask(0x0A);
+        if second {
+            fixture.core.bus_mut().ppu_mut().write(5, 0x00, None);
+        }
+        park(&mut fixture, if second { 261 } else { 100 }, dot);
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        ppu.note_cpu_open_bus(0x20);
+        ppu.write(5, 0xF8, None);
+        ppu.vram_v() & if second { 0x73E0 } else { 0x001F }
+    }
+
+    for alignment in [0, 1, 2] {
+        assert_eq!(
+            0x1F,
+            after(alignment, false, 257, true),
+            "a{alignment}: first write, dot 257"
+        );
+        assert_eq!(
+            0x03E0,
+            after(alignment, true, 304, true),
+            "a{alignment}: second write, dot 304"
+        );
+    }
+    assert_eq!(
+        0x04,
+        after(3, false, 257, true),
+        "a3: coarse X from the open bus"
+    );
+    assert_eq!(
+        0x0080,
+        after(3, true, 304, true),
+        "a3: coarse Y from the open bus"
+    );
+    assert_eq!(0x1F, after(3, false, 257, false), "a3, switch off");
+    assert_eq!(0x03E0, after(3, true, 304, false), "a3, switch off");
+    // A dot later the copy is behind the write, as before.
+    assert_ne!(0x1F, after(3, false, 258, true), "dot 258");
+    assert_ne!(0x03E0, after(3, true, 305, true), "dot 305");
+}
+
+/// Lot FIDELITY step 32 (transistor netlist, `VisualNes`): a first `$2005` write made on dot `D` of a
+/// visible line changes fine X from pixel `D` on, and in alignment 3 pixel `D` takes fine X from
+/// the CPU's open bus (`$20`, fine X 0) under the `$2000` glitch's switch.
+#[test]
+fn fidelity_2005_fine_x_reaches_the_pixel_of_its_dot_per_alignment() {
+    // Tile $35 of the minimal ROM: planes $35 and $CA, so its columns alternate colours 2 and 1.
+    const PALETTE: [u8; 4] = [0x0F, 0x16, 0x2A, 0x12];
+    fn column(k: i32) -> u8 {
+        let bit = 7 - (k & 7);
+        PALETTE[usize::from(((0x35u8 >> bit) & 1) | (((0xCAu8 >> bit) & 1) << 1))]
+    }
+    /// Pixels D - 1, D and D + 1 of the line the write lands on, fine X going from 3 to 6.
+    fn pixels(alignment: u8, glitch: bool, dot: i32) -> [u8; 3] {
+        let mut fixture = TileFixture::new();
+        fixture.core.set_cpu_ppu_alignment(alignment);
+        fixture.core.set_glitch_2000(glitch);
+        fixture.fill_vram(0x2000, 960, 0x35);
+        fixture.fill_vram(0x23C0, 64, 0x00);
+        fixture.write_vram(0x3F00, &PALETTE);
+        fixture.set_control(0x00);
+        fixture.set_scroll(3, 0);
+        fixture.set_mask(0x0A);
+        fixture.core.run_frame(0);
+        park_on_dot(&mut fixture, dot);
+        let line = usize::try_from(fixture.core.bus().ppu().scanline()).unwrap();
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        ppu.read(2, None);
+        ppu.note_cpu_open_bus(0x20);
+        ppu.write(5, 0x06, None);
+        let bus = fixture.core.bus_mut();
+        while usize::try_from(bus.ppu().scanline()).unwrap() == line {
+            bus.tick();
+            bus.sync_ppu();
+        }
+        let x = usize::try_from(dot).unwrap();
+        [
+            pixel_at(&fixture.core, x - 1, line),
+            pixel_at(&fixture.core, x, line),
+            pixel_at(&fixture.core, x + 1, line),
+        ]
+    }
+
+    // A dot where old (3), new (6) and open-bus (0) fine X give different colours around it.
+    let dot = (20..200)
+        .find(|&d| {
+            column(d - 1 + 3) != column(d - 1 + 6)
+                && column(d + 6) != column(d)
+                && column(d + 3) != column(d + 6)
+        })
+        .unwrap();
+    let old = |x: i32| column(x + 3);
+    let new = |x: i32| column(x + 6);
+    for alignment in [0, 1, 2] {
+        assert_eq!(
+            [old(dot - 1), new(dot), new(dot + 1)],
+            pixels(alignment, true, dot),
+            "a{alignment}"
+        );
+    }
+    assert_eq!(
+        [old(dot - 1), column(dot), new(dot + 1)],
+        pixels(3, true, dot),
+        "a3: open bus"
+    );
+    assert_eq!(
+        [old(dot - 1), new(dot), new(dot + 1)],
+        pixels(3, false, dot),
+        "a3, switch off"
+    );
+}
+
+/// Lot FIDELITY steps 32-33 (transistor netlist, `VisualNes`, with the CPU's hold time; alignments
+/// 0 to 3 are its phases a2, a0, a6 and a4): written on dot `D` of a visible line, a `$2001` switch
+/// off shows the backdrop from pixel `D + 1` in alignments 0 and 1 and `D + 2` in 2 and 3, a switch
+/// on shows the tiles from pixel `D + 3` in all four, and with rendering off a `$2006` load into
+/// palette RAM shows its palette background from pixel `D + 2` in all four.
+#[test]
+fn fidelity_switch_and_load_pixel_edges_follow_the_netlist() {
+    const PALETTE: [u8; 8] = [0x0F, 0x16, 0x2A, 0x12, 0x05, 0x38, 0x21, 0x1C];
+    /// The first pixel from `D - 2` on that `changed` accepts, written `value` to `register`
+    /// on dot `D`.
+    fn first_changed(
+        alignment: u8,
+        mask: u8,
+        register: u16,
+        value: u8,
+        dot: i32,
+        changed: fn(u8) -> bool,
+    ) -> i32 {
+        let mut fixture = TileFixture::new();
+        fixture.core.set_cpu_ppu_alignment(alignment);
+        fixture.fill_vram(0x2000, 960, 0x35);
+        fixture.fill_vram(0x23C0, 64, 0x00);
+        fixture.write_vram(0x3F00, &PALETTE);
+        fixture.write_vram(0x2000, &[]);
+        fixture.set_control(0x00);
+        fixture.set_scroll(0, 0);
+        fixture.set_mask(0x0A);
+        fixture.core.run_frame(0);
+        if mask == 0x00 && register == 1 {
+            // Switched off 18 dots before, as in the netlist loop: the shift registers still hold
+            // tiles.
+            park_on_dot(&mut fixture, dot - 18);
+            fixture.core.bus_mut().ppu_mut().write(1, 0x00, None);
+            let bus = fixture.core.bus_mut();
+            while bus.ppu().dot() != dot {
+                bus.tick();
+                bus.sync_ppu();
+            }
+        } else {
+            fixture.set_mask(mask);
+            park_on_dot(&mut fixture, dot);
+        }
+        let line = usize::try_from(fixture.core.bus().ppu().scanline()).unwrap();
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        if register == 6 {
+            ppu.write(6, 0x3F, None);
+        }
+        ppu.write(register, value, None);
+        let bus = fixture.core.bus_mut();
+        while usize::try_from(bus.ppu().scanline()).unwrap() == line {
+            bus.tick();
+            bus.sync_ppu();
+        }
+        (dot - 2..dot + 8)
+            .find(|&x| changed(pixel_at(&fixture.core, usize::try_from(x).unwrap(), line)))
+            .unwrap()
+            - dot
+    }
+    for (alignment, off) in [(0, 1), (1, 1), (2, 2), (3, 2)] {
+        for dot in [100, 101] {
+            assert_eq!(
+                off,
+                first_changed(alignment, 0x0A, 1, 0x00, dot, |c| c == 0x0F),
+                "switch off, alignment {alignment}, dot {dot}"
+            );
+            assert_eq!(
+                3,
+                first_changed(alignment, 0x00, 1, 0x0A, dot, |c| c != 0x0F),
+                "switch on, alignment {alignment}, dot {dot}"
+            );
+            assert_eq!(
+                2,
+                first_changed(alignment, 0x00, 6, 0x05, dot, |c| c == 0x38),
+                "$2006 into palette RAM, alignment {alignment}, dot {dot}"
+            );
+        }
+    }
+}
+
+/// Lot FIDELITY steps 28-29: a `$2007` read made while rendering latches its buffer six dots after
+/// the access in alignments 2 and 3 (3 is the default) and five in 0 and 1, so a read one dot
+/// later in alignment 0 buffers exactly what a read one dot earlier does in alignment 3.
+#[test]
+fn fidelity_2007_latch_dot_follows_the_cpu_ppu_alignment() {
+    fn buffered(alignment: u8, dot: i32) -> u8 {
+        let mut fixture = TileFixture::new();
+        fixture.core.set_cpu_ppu_alignment(alignment);
+        fixture.core.set_bus_conflicts(true);
+        // A nametable of distinct bytes, so the fetches the buffer can take differ.
+        let bytes: Vec<u8> = (0..0x3C0u16)
+            .map(|index| (index.wrapping_mul(7) + 3).to_le_bytes()[0])
+            .collect();
+        fixture.write_vram(0x2000, &bytes);
+        fixture.set_mask(0x1E);
+        park_on_dot(&mut fixture, dot);
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        ppu.read(7, None);
+        ppu.read(7, None)
+    }
+
+    let mut differs = false;
+    for dot in (20..240).step_by(3) {
+        assert_eq!(buffered(3, dot - 1), buffered(0, dot), "dot {dot}");
+        assert_eq!(buffered(2, dot), buffered(3, dot), "dot {dot}");
+        assert_eq!(buffered(1, dot), buffered(0, dot), "dot {dot}");
+        differs |= buffered(3, dot) != buffered(0, dot);
+    }
+    assert!(differs, "the two alignments never latched different bytes");
+}
+
+/// Lot FIDELITY step 37 (C6): before the 2C02G a `$2007` read of palette RAM is buffered like the
+/// rest of the PPU memory (nesdev "PPU registers"); the 2C02G returns the palette at once.
+#[test]
+fn fidelity_palette_reads_need_the_g_revision() {
+    for pre_g in [false, true] {
+        let (_, mut bus) = loaded_core(None);
+        bus.ppu_mut().set_pre_g_revision(pre_g);
+        bus.poke(0x2006, 0x3F);
+        bus.poke(0x2006, 0x01);
+        bus.poke(0x2007, 0x2A);
+        bus.poke(0x2006, 0x3F);
+        bus.poke(0x2006, 0x01);
+        let first = bus.read(0x2007) & 0x3F;
+        if pre_g {
+            assert_ne!(0x2A, first, "before G: the buffer, not the palette");
+        } else {
+            assert_eq!(0x2A, first, "2C02G: the palette at once");
+        }
+    }
+}
+
+/// Lot FIDELITY step 37 (D4, `emu.oamaddr_write_corruption`, off by default): on a 2C02G a
+/// `$2003` write copies the OAM row the CPU's previous bus byte points to over the row it writes.
+#[test]
+fn fidelity_oamaddr_write_copies_the_bus_row_when_switched_on() {
+    for enabled in [false, true] {
+        let (_, mut bus) = loaded_core(None);
+        bus.ppu_mut().set_oamaddr_write_corruption(enabled);
+        *bus.ppu_mut().oam_mut() = std::array::from_fn(|index| index.to_le_bytes()[0]);
+        bus.write(0x0000, 0x20); // The previous byte on the CPU bus: $20.
+        bus.write(0x2003, 0x48);
+        let row: Vec<u8> = bus.ppu().oam()[0x48..0x50].to_vec();
+        if enabled {
+            assert_eq!(
+                row,
+                (0x20..0x28).collect::<Vec<u8>>(),
+                "row $20 copied over row $48"
+            );
+        } else {
+            assert_eq!(row, (0x48..0x50).collect::<Vec<u8>>(), "off: untouched");
+        }
+    }
+}
+
+/// Lot FIDELITY step 39: rendering switched back on mid-line releases on dot `D + 2` of a write on
+/// `D`; on an odd dot that dot's fetch happens. In alignments 0 and 1 it reads its own address; in
+/// 2 and 3 its ALE was missed and the read takes the low byte of the last address latched before
+/// the switch off (the transistor netlist, as `TriCNES`). The minimal ROM's tile `t` has `t` for
+/// low plane and `255 - t` for high plane, tile 0 is empty. On a line of coarse Y 8 every tile is
+/// tile 1; the switch off lands on dot 97, the nametable fetch of `$2000 | $0E`, and the switch on on dot 127, the
+/// high plane fetch of the tile drawn at x 136-143: in 2 and 3 it reads `$000E`, tile 0, and the
+/// tile loses its high plane.
+#[test]
+fn fidelity_switch_on_fetch_reads_the_stale_low_byte_in_alignments_2_and_3() {
+    const PALETTE: [u8; 4] = [0x0F, 0x16, 0x2A, 0x12];
+    /// Runs to `dot` of one of `lines` (the CPU clock reaches one dot in three); a write through
+    /// the bus lands three dots later.
+    fn run_to(fixture: &mut TileFixture, lines: std::ops::RangeInclusive<i32>, dot: i32) -> i32 {
+        let bus = fixture.core.bus_mut();
+        while !lines.contains(&bus.ppu().scanline()) || bus.ppu().dot() != dot {
+            bus.tick();
+            bus.sync_ppu();
+        }
+        bus.ppu().scanline()
+    }
+    for alignment in 0..4u8 {
+        let mut fixture = TileFixture::new();
+        fixture.core.set_cpu_ppu_alignment(alignment);
+        fixture.fill_vram(0x2000, 960, 0x01);
+        fixture.fill_vram(0x23C0, 64, 0x00);
+        fixture.write_vram(0x3F00, &PALETTE);
+        fixture.write_vram(0x2000, &[]);
+        fixture.set_control(0x00);
+        fixture.set_scroll(0, 0);
+        fixture.set_mask(0x0A);
+        fixture.core.run_frame(0);
+        // Lines 64 to 71 have coarse Y 8: the nametable addresses' low byte is coarse X.
+        let line = run_to(&mut fixture, 64..=66, 92);
+        fixture.core.bus_mut().write(0x2001, 0x00);
+        run_to(&mut fixture, line..=line, 122);
+        fixture.core.bus_mut().write(0x2001, 0x0A);
+        run_to(&mut fixture, line..=line, 299);
+        let y = usize::try_from(line).unwrap();
+        let row: Vec<u8> = (136..143).map(|x| pixel_at(&fixture.core, x, y)).collect();
+        let expected = if alignment >= 2 { 0x0F } else { 0x2A };
+        assert_eq!(row, vec![expected; 7], "alignment {alignment}");
+    }
+}
+
+/// Lot FIDPLUS-C C3c (Visual 2C07 netlist, `g2001px`): the PAL 2C07 switches the rendering four
+/// dots after a `$2001` write, the 2C02 two. Switched off on dot 12, the coarse-X increment of
+/// dot 16 still happens on PAL and not on NTSC.
+#[test]
+fn fidplus_c3c_pal_rendering_switch_takes_four_dots() {
+    fn increments(pal: bool, phase: i32) -> bool {
+        let mut fixture = TileFixture::new();
+        if pal {
+            fixture.core.set_region(zax_nes::NesRegion::Pal);
+        }
+        fixture.set_mask(0x0A);
+        fixture.core.run_frame(0);
+        park_on_dot(&mut fixture, 12);
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        if pal {
+            ppu.set_dot_accumulator_phase(phase);
+        }
+        let before = ppu.vram_v();
+        ppu.write(1, 0x00, None);
+        ppu.vram_v() == increment_x(before)
+    }
+    for phase in [1, 3, 4] {
+        assert!(increments(true, phase), "PAL phase {phase}: dot 16 still renders");
+    }
+    // Three dots on the phase-0 and phase-2 cycles (`oam`, `g2001px` at reset phase e3, whose
+    // five programs all fit dot phase 2): the switch is in force by dot 16.
+    assert!(!increments(true, 0), "PAL phase 0");
+    assert!(!increments(true, 2), "PAL phase 2");
+    assert!(!increments(false, 0), "NTSC: the switch is in force by dot 16");
+}
+
+/// Lot FIDPLUS-C C3c (Visual 2C07 netlist, `g2006x`): the second `$2006` write's delayed load
+/// lands two dots after the write on the PAL 2C07's phase-0 cycle, three on the others (and always
+/// three on the 2C02): the write runs that many dots, plus the one after, before returning.
+#[test]
+fn fidplus_c3c_pal_2006_load_delay_follows_the_cycle_phase() {
+    fn dots_run(pal: bool, phase: i32) -> i32 {
+        let mut fixture = TileFixture::new();
+        if pal {
+            fixture.core.set_region(zax_nes::NesRegion::Pal);
+        }
+        fixture.set_mask(0x0A);
+        fixture.core.run_frame(0);
+        park_on_dot(&mut fixture, 100);
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        ppu.set_dot_accumulator_phase(phase);
+        ppu.write(6, 0x21, None);
+        ppu.write(6, 0x08, None);
+        ppu.dot() - 100
+    }
+    assert_eq!(3, dots_run(true, 0), "PAL, phase 0");
+    for phase in 1..5 {
+        assert_eq!(4, dots_run(true, phase), "PAL, phase {phase}");
+    }
+    assert_eq!(4, dots_run(false, 0), "NTSC");
+}
+
+/// Lot FIDPLUS-C C3c (Visual 2C07 netlist, `g2005`, `g2005px`): a first `$2005` write landing on
+/// the dot-257 copy takes the written coarse X on the PAL 2C07, the CPU's open bus only on the
+/// cycle whose dot accumulator is 4 (alignment 3, the default).
+#[test]
+fn fidplus_c3c_pal_2005_on_dot_257_takes_the_open_bus_one_cycle_in_five() {
+    fn coarse_x(phase: i32) -> u16 {
+        let mut fixture = TileFixture::new();
+        fixture.core.set_region(zax_nes::NesRegion::Pal);
+        fixture.set_mask(0x0A);
+        fixture.core.run_frame(0);
+        park_on_dot(&mut fixture, 257);
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        ppu.set_dot_accumulator_phase(phase);
+        ppu.note_cpu_open_bus(0x20);
+        ppu.write(5, 0xF8, None);
+        ppu.vram_v() & 0x1F
+    }
+    for phase in 0..5 {
+        let expected = if phase == 4 { 0x04 } else { 0x1F };
+        assert_eq!(expected, coarse_x(phase), "accumulator {phase}");
+    }
+}
+
+/// Lot FIDPLUS-C C3c (Visual 2C07 netlist, `r2007`): on the PAL 2C07 a `$2007` read during
+/// rendering latches 6 dots after its access dot on the cycles whose dot accumulator is 3 or 4,
+/// 5 on the others. Read on dot 98: with 6 the latch is dot 104, which increments coarse X anyway,
+/// so the two merge (one X step by the end of dot 104); with 5 it is dot 103 (two steps).
+#[test]
+fn fidplus_c3c_pal_2007_read_latch_follows_the_cycle_phase() {
+    fn coarse_x_steps(phase: i32) -> u16 {
+        let mut fixture = TileFixture::new();
+        fixture.core.set_region(zax_nes::NesRegion::Pal);
+        fixture.core.set_bus_conflicts(true);
+        fixture.set_mask(0x0A);
+        fixture.core.run_frame(0);
+        park_on_dot(&mut fixture, 98);
+        let ppu = fixture.core.bus_mut().ppu_mut();
+        ppu.set_dot_accumulator_phase(phase);
+        let before = ppu.vram_v() & 0x1F;
+        ppu.read(7, None);
+        assert_eq!(104, ppu.dot(), "the read runs to its latch");
+        (ppu.vram_v() & 0x1F).wrapping_sub(before) & 0x1F
+    }
+    for phase in 0..5 {
+        let expected = if phase >= 3 { 1 } else { 2 };
+        assert_eq!(expected, coarse_x_steps(phase), "accumulator {phase}");
+    }
+}
+
+/// Lot FIDPLUS-C C3c (Visual 2C07 netlist, `g2000`, `g2001px`): the PAL 2C07 copies `t`'s
+/// vertical bits into `v` from dot 278 of the pre-render line, the 2C02 from dot 280. By dot 279
+/// the copy is in `v` on PAL and not yet on NTSC.
+#[test]
+fn fidplus_c3c_pal_vertical_copy_starts_on_dot_278() {
+    fn copied_by_279(pal: bool) -> bool {
+        let mut fixture = TileFixture::new();
+        if pal {
+            fixture.core.set_region(zax_nes::NesRegion::Pal);
+        }
+        fixture.set_control(0x00);
+        fixture.set_scroll(0, 80);
+        fixture.set_mask(0x0A);
+        let bus = fixture.core.bus_mut();
+        let mut guard = 0;
+        loop {
+            bus.tick();
+            bus.sync_ppu();
+            let ppu = bus.ppu();
+            if ppu.scanline() == ppu.pre_render_scanline() && ppu.dot() == 279 {
+                return (ppu.vram_v() & 0x7BE0) == (ppu.vram_t() & 0x7BE0);
+            }
+            guard += 1;
+            assert!(guard < 5_000_000, "never reached dot 279 of the pre-render line");
+        }
+    }
+    assert!(copied_by_279(true), "PAL: copied from dot 278");
+    assert!(!copied_by_279(false), "NTSC: not before dot 280");
+}
+
+/// Lot FIDPLUS-2 (A5, transistor netlist): a `$2001` write landing on dot 254 switches the
+/// fetches and increments from dot 257 on, but the horizontal copy of dot 257 still follows the
+/// old state in alignments 2 and 3: switched off, the copy is made; switched on, it is not.
+/// Nametable 0 holds tile 1, nametable 1 tile 2: a missed copy leaves `v` in the wrong column and
+/// nametable, which the next line shows.
+#[test]
+fn fidplus2_dot_257_copy_follows_the_state_before_a_switch_on_dot_256() {
+    const PALETTE: [u8; 4] = [0x0F, 0x16, 0x2A, 0x12];
+    fn run_to(fixture: &mut TileFixture, lines: std::ops::RangeInclusive<i32>, dot: i32) -> i32 {
+        let bus = fixture.core.bus_mut();
+        while !lines.contains(&bus.ppu().scanline()) || bus.ppu().dot() != dot {
+            bus.tick();
+            bus.sync_ppu();
+        }
+        bus.ppu().scanline()
+    }
+    let row = |fixture: &TileFixture, y: usize| -> Vec<u8> {
+        (0..256).map(|x| pixel_at(&fixture.core, x, y)).collect()
+    };
+    for switch_on in [false, true] {
+        for alignment in 0..4u8 {
+            let mut fixture = TileFixture::new();
+            fixture.core.set_cpu_ppu_alignment(alignment);
+            fixture.fill_vram(0x2000, 960, 0x01);
+            fixture.fill_vram(0x23C0, 64, 0x00);
+            fixture.fill_vram(0x2400, 960, 0x02);
+            fixture.fill_vram(0x27C0, 64, 0x00);
+            fixture.write_vram(0x3F00, &PALETTE);
+            fixture.write_vram(0x2000, &[]);
+            fixture.set_control(0x00);
+            fixture.set_scroll(0, 0);
+            fixture.set_mask(0x0A);
+            fixture.core.run_frame(0);
+            // The CPU reaches one dot in three: 98, 251 and 296 share a phase on one line.
+            let line = run_to(&mut fixture, 64..=66, 98);
+            if switch_on {
+                // Off well before, on with the write landing on dot 254.
+                fixture.core.bus_mut().write(0x2001, 0x00);
+                run_to(&mut fixture, line..=line, 251);
+                fixture.core.bus_mut().write(0x2001, 0x0A);
+            } else {
+                // Off with the write landing on dot 254, on again before the next line's fetches.
+                run_to(&mut fixture, line..=line, 251);
+                fixture.core.bus_mut().write(0x2001, 0x00);
+                run_to(&mut fixture, line..=line, 296);
+                fixture.core.bus_mut().write(0x2001, 0x0A);
+            }
+            // Past line + 3, whatever the dot.
+            let bus = fixture.core.bus_mut();
+            while bus.ppu().scanline() <= line + 3 {
+                bus.tick();
+                bus.sync_ppu();
+            }
+            let y = usize::try_from(line).unwrap();
+            let next = row(&fixture, y + 1);
+            let reference = row(&fixture, y + 3);
+            // Switched off: the copy happens in 2 and 3 (next line right), not in 0 and 1.
+            // Switched on: the copy is missed in 2 and 3, made in 0 and 1.
+            let copied = (alignment >= 2) != switch_on;
+            assert_eq!(
+                next == reference,
+                copied,
+                "switch on {switch_on}, alignment {alignment}"
+            );
+        }
     }
 }

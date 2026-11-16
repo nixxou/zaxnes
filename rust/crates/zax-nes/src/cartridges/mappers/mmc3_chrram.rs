@@ -1,3 +1,5 @@
+#[cfg(feature = "board-191")]
+use super::Mmc3ChrRam191;
 use super::{Mapper, Mmc3ChrRam192, Mmc3ChrRam194, Mmc3ChrRam74, WaixingFs303};
 use crate::cartridges::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
@@ -37,6 +39,9 @@ pub enum Mmc3ChrRamBoard {
     Mapper194(Mmc3ChrRam194),
     /// Mapper 195, the Waixing FS303: 8 KiB wired, the window chosen at run time by the GAL.
     WaixingFs303(WaixingFs303),
+    /// Mapper 191 (lot MAPPERS-N): 2 KiB at banks `$80-$FF`.
+    #[cfg(feature = "board-191")]
+    Mapper191(Mmc3ChrRam191),
 }
 
 impl Mmc3ChrRamBoard {
@@ -47,6 +52,8 @@ impl Mmc3ChrRamBoard {
             192 => Self::Mapper192(Mmc3ChrRam192::new(memory, mapper)),
             194 => Self::Mapper194(Mmc3ChrRam194::new(memory, mapper)),
             195 => Self::WaixingFs303(WaixingFs303::new(memory, mapper)),
+            #[cfg(feature = "board-191")]
+            191 => Self::Mapper191(Mmc3ChrRam191::new(memory, mapper)),
             _ => return None,
         })
     }
@@ -61,6 +68,8 @@ impl Mmc3ChrRamBoard {
             74 | 194 => Mmc3ChrRam74::CHR_RAM_SIZE,
             192 => Mmc3ChrRam192::CHR_RAM_SIZE,
             195 => WaixingFs303::CHR_RAM_SIZE,
+            #[cfg(feature = "board-191")]
+            191 => Mmc3ChrRam191::CHR_RAM_SIZE,
             _ => return None,
         })
     }
@@ -127,6 +136,8 @@ macro_rules! inner {
             Mmc3ChrRamBoard::Mapper192($b) => $body,
             Mmc3ChrRamBoard::Mapper194($b) => $body,
             Mmc3ChrRamBoard::WaixingFs303($b) => $body,
+            #[cfg(feature = "board-191")]
+            Mmc3ChrRamBoard::Mapper191($b) => $body,
         }
     };
 }
@@ -154,6 +165,13 @@ impl Mapper for Mmc3ChrRamBoard {
 
     fn reset(&mut self, memory: &mut CartridgeMemory) {
         inner!(self, b => b.reset(memory));
+    }
+
+    /// A press on RESET, forwarded so that a **reset-detecting multicart** inside this dispatch
+    /// hears it: see [`Mapper::soft_reset`], whose default is to do nothing. One cold body in a
+    /// dispatch nothing hot inlines — this is called once per reset, not once per cycle.
+    fn soft_reset(&mut self, memory: &mut CartridgeMemory) {
+        inner!(self, b => b.soft_reset(memory));
     }
 
     fn irq_asserted(&self) -> bool {

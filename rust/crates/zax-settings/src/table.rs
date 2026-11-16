@@ -986,6 +986,9 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
             opt(1, "PAL"),
             opt(2, "MULTI"),
             opt(3, "DENDY"),
+            // Lot FIDPLUS-1, G2: the famiclone regions (docs/review/FIDELITY-LEADS.md).
+            opt(4, "PAL-M"),
+            opt(5, "PAL-N"),
         ]))
         .with_lua("TVMode")
         .with_field("34")
@@ -1049,6 +1052,11 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
     video_sprite_limit(out);
     video_overscan(out);
     video_nes_palette(out);
+    emulation_engine(out);
+    emulation_cartridge(out);
+    emulation_rainbow(out);
+    emulation_vs(out);
+    emulation_power_on_ppu(out);
     out.push(
         SettingDescriptor::new(
             SettingId::EmuCore,
@@ -1064,6 +1072,360 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
         .with_lua("Core")
         .with_field("22"),
     );
+}
+
+/// The per-game engine choice of lot FCEUX-23 step 5 (`docs/review/FCEUX-ENGINE.md` §4).
+///
+/// A per-game option with a global default, both `zaxnes`, and **no "auto"** — an automatic
+/// choice would need a quality judgement the application cannot make. It takes effect at the next
+/// ROM load, because changing engines means re-powering the machine, and the options window shows
+/// "(at the next load)" for that effect of its own accord.
+///
+/// The descriptor is in **every** build so that a `games.json` written by a build with FCEUX
+/// still loads in one without it, and the other way round. A build without the `fceux-core`
+/// feature has one engine: `options::is_shown` drops the row and `EmulationHost::engine_for_game`
+/// answers Zaxnes whatever the stored value says.
+///
+/// Its own function because `emulation` is at clippy's hundred lines without it.
+fn emulation_engine(out: &mut Vec<SettingDescriptor>) {
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuEngine,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Zaxnes"),
+            opt(1, "FCEUX"),
+            // Lot NESHAWK-REWRITE: the Rust port of BizHawk's NesHawk core, which is in
+            // **every** build (safe Rust, no feature gate) -- so the row is now a real choice
+            // even where `fceux-core` is off. **3, not 2**: lot NESHAWK-COMPAT-ENGINE on
+            // `feat/neshawk-profile` gives 2 to `zaxnes-neshawk`, Zaxnes's own core on the
+            // NesHawk-compatible chip, and these values are persisted in `games.json`.
+            opt(3, "NesHawk"),
+        ]))
+        .with_label("Emulation engine"),
+    );
+}
+
+/// Lot CARTDB (Rust-only): the cartridge database and the power-on RAM, both read at the next
+/// ROM load. The database is on by default — it only completes iNES 1.0 headers it knows, never
+/// changes a mapper number and never touches a NES 2.0 header; the RAM takes FCEUX's and NesHawk's
+/// pattern by default (owner, 2026-11-13).
+/// Lot FIDELITY step 36 (docs/review/FIDELITY-LEADS.md B3): the PPU's palette RAM, OAM and
+/// nametable RAM at power-on. Zeros by default: no console is the right one.
+fn emulation_power_on_ppu(out: &mut Vec<SettingDescriptor>) {
+    // Lot FIDELITY step 37 (docs/review/FIDELITY-LEADS.md C6, D4): the PPU revision, and the
+    // 2C02G's OAMADDR write corruption (off: the console-checked OAM tests pass without it).
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuPpuRevision,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "2C02G"),
+            opt(1, "2C02 before G"),
+        ]))
+        .with_label("PPU revision"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuOamaddrWriteCorruption,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("OAMADDR write corruption"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuPowerOnPpuRam,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Zeros"),
+            opt(1, "Blargg's console"),
+            opt(2, "Random"),
+        ]))
+        .with_label("Power-on video memory"),
+    );
+    // Lot FIDPLUS-C (docs/design/CONSOLE-MODEL.md): the MMC3's scanline counter, the cartridge's
+    // (its header and the database) by default, or a chip revision chosen.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuMmc3Revision,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "The cartridge's"),
+            opt(1, "MMC3A / MMC6"),
+            opt(2, "MMC3B / MMC3C"),
+        ]))
+        .with_label("MMC3 revision"),
+    );
+    // Lot FIDPLUS-C (FIDELITY-LEADS G4): the CPU's revision, the RP2A03G and later by default, or
+    // the letterless RP2A03 of the early Famicoms (its noise channel: no short mode, its own
+    // period table).
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuCpuRevision,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "RP2A03G and later"),
+            opt(1, "Letterless RP2A03"),
+        ]))
+        .with_label("CPU revision"),
+    );
+}
+
+/// Lot MAPPERS-N: the eight DIP switches of a VS. System cabinet, read by most games at
+/// power-on, so they take effect at the next load. All off by default: the per-ROM table
+/// records no factory setting (`zax_nes::vs`).
+fn emulation_vs(out: &mut Vec<SettingDescriptor>) {
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuVsDip1,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("VS. System DIP switch 1"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuVsDip2,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("VS. System DIP switch 2"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuVsDip3,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("VS. System DIP switch 3"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuVsDip4,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("VS. System DIP switch 4"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuVsDip5,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("VS. System DIP switch 5"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuVsDip6,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("VS. System DIP switch 6"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuVsDip7,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("VS. System DIP switch 7"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuVsDip8,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("VS. System DIP switch 8"),
+    );
+}
+
+fn emulation_rainbow(out: &mut Vec<SettingDescriptor>) {
+    // Lot MAPPERS-N: the Rainbow board's (mapper 682) ESP reaches the host's network only when
+    // the player asks; off, Wi-Fi reports "not connected" (the owner's request).
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuRainbowNetwork,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Rainbow board network"),
+    );
+}
+
+fn emulation_cartridge(out: &mut Vec<SettingDescriptor>) {
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuCartridgeDb,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Cartridge database"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuPowerOnRam,
+            SettingKind::Enum,
+            SettingValue::Enum(1),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Zeros"),
+            opt(1, "FCEUX pattern"),
+            opt(2, "All $FF"),
+            opt(3, "Random"),
+        ]))
+        .with_label("Power-on RAM"),
+    );
+    // Lot FIDELITY step 9: the OAM row corruption of a rendering switched off inside a line. On by
+    // default since step 27, together with `emu.power_on_top`, with which blargg's `5.Emulator`
+    // passes (docs/progress/FIDELITY.md).
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuOamCorruption,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("OAM corruption"),
+    );
+    // Lot FIDELITY steps 16 and 25: the fetch a `$2007` read collides with, from the transistor
+    // netlists. On by default since a PAL console video of *Super Mario Bros. 3* (Europe) shows
+    // the damage it predicts, same place and same rate (docs/review/FIDELITY-LEADS.md, I1).
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuPpuBusConflicts,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("PPU bus conflicts"),
+    );
+    // Lot FIDELITY step 19: the 2C02G/H's OAMADDR copy when rendering starts (nesdev, "PPU
+    // registers"). On by default: documented hardware, and never on a PAL console.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuOamaddrBug,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("OAMADDR defect (2C02G)"),
+    );
+    // Lot FIDELITY step 20: OAM decays with the rendering off for 8 NTSC frames (nesdev, "PPU
+    // OAM"; BeesNES). Off by default: the decay stamps are not in the savestate, so run-ahead and
+    // rewind, which load a state every frame, would never let it happen.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuOamDecay,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("OAM decay"),
+    );
+    // Plan step 2 of lot FIDELITY: the PPU powers on at the top of the picture (nesdev, "PPU power
+    // up state"), dot 11 as BeesNES. On by default since step 27 (it moves every game's timeline
+    // by a fraction of a frame: golden-core, recordings, recipes).
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuPowerOnTop,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Power on at the top of the picture"),
+    );
+    ppu_write_timings(out);
+    fidelity_plus(out);
 }
 
 /// The emulation settings of the Rust port alone, in their place in the catalogue.
@@ -1330,7 +1692,86 @@ fn touch(out: &mut Vec<SettingDescriptor>) {
         ]))
         .with_label("Touch pad"),
     );
+    // Rust-only (owner request): the size of the pad, each control growing or shrinking from the
+    // edge or the corner of the screen it keeps to; in percent of the size it was made at.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::InputTouchScale,
+            SettingKind::Enum,
+            SettingValue::Enum(100),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Input,
+        )
+        .with_domain(Domain::choice(
+            TOUCH_SCALES
+                .iter()
+                .map(|percent| opt(*percent, &format!("{percent} %")))
+                .collect(),
+        ))
+        .with_label("Touch pad size"),
+    );
+    // Rust-only (owner request): the vibration of a press, the cross apart from the buttons.
+    for (id, label) in [
+        (SettingId::InputTouchHapticDpad, "Vibration of the cross"),
+        (
+            SettingId::InputTouchHapticButtons,
+            "Vibration of the buttons",
+        ),
+    ] {
+        out.push(
+            SettingDescriptor::new(
+                id,
+                SettingKind::Enum,
+                SettingValue::Enum(0),
+                SettingScope::User,
+                SettingEffect::Immediate,
+                SettingTheme::Input,
+            )
+            .with_domain(Domain::choice(vec![
+                opt(0, "Off"),
+                opt(1, "Light"),
+                opt(2, "Medium"),
+                opt(3, "Strong"),
+            ]))
+            .with_label(label),
+        );
+    }
+    // Rust-only (owner request): the rewind and fast-forward buttons of the pad.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::InputTouchExtra,
+            SettingKind::Enum,
+            SettingValue::Enum(1),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Input,
+        )
+        .with_domain(Domain::choice(vec![opt(0, "Off"), opt(1, "On")]))
+        .with_label("Rewind and fast forward"),
+    );
+    // Rust-only (owner request, Android): the screen's orientation, as the device is held by
+    // default. In portrait the game takes the top of the screen and the pad the bottom.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::UiOrientation,
+            SettingKind::Enum,
+            SettingValue::Enum(2),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Interface,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Landscape"),
+            opt(1, "Portrait"),
+            opt(2, "Auto"),
+        ]))
+        .with_label("Orientation"),
+    );
 }
+
+/// The sizes of the touch pad, in percent (`input.touch_scale`).
+pub const TOUCH_SCALES: [i32; 11] = [50, 60, 70, 80, 90, 100, 110, 120, 135, 150, 175];
 
 fn audio_input_interface(out: &mut Vec<SettingDescriptor>) {
     out.push(
@@ -1760,6 +2201,7 @@ fn reimplementation_extras(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("Classic audio output (v0.4.2)"),
     );
+    console_audio_profile(out);
     out.push(
         SettingDescriptor::new(
             SettingId::UiShowFps,
@@ -1828,6 +2270,217 @@ fn reimplementation_extras(out: &mut Vec<SettingDescriptor>) {
             SettingTheme::Interface,
         )
         .with_label("ROM folder"),
+    );
+}
+
+/// `audio.console_profile` (lot FIDELITY plan step 3).
+fn console_audio_profile(out: &mut Vec<SettingDescriptor>) {
+    // Plan step 3 of lot FIDELITY: the analog audio path of one console BeesNES measured. None by
+    // default, which keeps the output bit for bit.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::AudioConsoleProfile,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Audio,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "None"),
+            opt(1, "NES Front-Loading N0260073"),
+            opt(2, "NES Front-Loading N1151667"),
+            opt(3, "NES Front-Loading N13721267"),
+            opt(4, "NES Front-Loading N20914398, Sunsoft 5B"),
+            opt(5, "NES Front-Loading N32670105"),
+            opt(6, "NES Front-Loading N34169630"),
+            opt(7, "NES Front-Loading N8869725, NESRGB"),
+            opt(8, "NES Front-Loading N8869725, NESRGB, stock RCA"),
+            opt(9, "NES Top-Loading NN101255729, NESRGB"),
+            opt(10, "Twin Famicom 441850, stock RCA"),
+            opt(11, "Twin Famicom 475711, NESRGB, stock RCA"),
+            opt(12, "Twin Famicom 475711, NESRGB, SCART"),
+            opt(13, "PAL NES NESE-001 (AUS) PM313006"),
+            opt(14, "PAL NES NESE-001 (GBR) PM608755"),
+        ]))
+        .with_label("Console audio profile"),
+    );
+}
+
+/// The PPU write timings measured on the transistor netlists (study/access-phase).
+fn ppu_write_timings(out: &mut Vec<SettingDescriptor>) {
+    // study/access-phase: the three PPU write timings measured on the transistor netlists of the
+    // 2A03 and 2C02 (docs/review/FIDELITY-LEADS.md, A3c). On by default.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuPpu2006Delay,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("$2006 load delay"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuPpu2006Glitch,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("$2006 scroll glitch"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuPpu2000Glitch,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("$2000/$2005 open-bus glitch"),
+    );
+    // Lot FIDELITY step 32 (docs/review/FIDELITY-LEADS.md D5): TriCNES's palette RAM corruption,
+    // which it applies in alignment 2 only.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuPaletteCorruption,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Palette corruption"),
+    );
+    // Lot FIDELITY step 34 (docs/review/FIDELITY-LEADS.md B5): the PPU's /RST pin on the reset
+    // line, as on the front-loading NES (NES-001). Off: homebrew that does not wait for it breaks
+    // (`Duelito` in the test ROMs), and TriCNES and NesHawk leave it out.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuPpuResetLine,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("PPU reset line"),
+    );
+    // Lot FIDELITY steps 28-29: which of the four CPU/PPU clock alignments the PPU follows,
+    // numbered as AccuracyCoin and TriCNES do (docs/review/FIDELITY-LEADS.md, A4 and D1). 3 is the
+    // one the core has always followed.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuCpuPpuAlignment,
+            SettingKind::Enum,
+            SettingValue::Enum(3),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Alignment 0"),
+            opt(1, "Alignment 1"),
+            opt(2, "Alignment 2"),
+            opt(3, "Alignment 3"),
+            opt(4, "Random"),
+        ]))
+        .with_label("CPU/PPU alignment"),
+    );
+    // Lot FIDPLUS-E (FIDELITY-LEADS G5): the CPU / APU get-put parity and the DMC output timer a
+    // power-on starts with. 0 the one Zaxnes has always started with; 1 the 2A03 netlist's (the
+    // CPU differential is identical cycle for cycle with it); 2 drawn at each load.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuCpuApuParity,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Zaxnes"),
+            opt(1, "2A03 netlist"),
+            opt(2, "Random"),
+        ]))
+        .with_label("CPU/APU parity"),
+    );
+}
+
+/// The Fidélité+ options (lots FIDPLUS-A and FIDPLUS-B), each its own switch (owner,
+/// 2026-11-15).
+fn fidelity_plus(out: &mut Vec<SettingDescriptor>) {
+    // Lot FIDPLUS-A (docs/design/HALF-CYCLE.md): the Fidelite+ machine, register effects on
+    // their measured edges. Off by default: its own frame loop costs speed.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuFidelityPlus,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Fidelity+"),
+    );
+    // Lot FIDPLUS-B step 1 (docs/design/REALTIME-PACING.md): frames chained at the console's own
+    // rate (60.0988 Hz NTSC, 50.0070 Hz PAL) and the sound with them. Off: the nominal 60 and 50
+    // of DEC-R2-T3.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuExactRate,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Console frame rate"),
+    );
+    // Lot FIDPLUS-B steps 3 and 5: the machine run in slices of real time, the pads read about
+    // every millisecond between two displayed frames and at the game's own strobe. On by default
+    // (owner, 2026-11-16). Off: whole frames on the frame clock, the pads read once a refresh.
+    // Run-ahead and movies keep whole frames.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuRealtimeInput,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Real-time pad"),
+    );
+    // Lot FIDPLUS-D step D3a (docs/design/ANALOG-OUTPUT.md): with the real-time pad, the wait
+    // before the refresh is spent before the picture is drawn, not after, so the refresh shows
+    // the machine as it stands just before it rather than a refresh earlier. Off by default: the
+    // draw then has to fit between the end of the wait and the refresh.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuLatePresent,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Late present"),
     );
 }
 
@@ -2127,6 +2780,36 @@ fn video_nes_palette(out: &mut Vec<SettingDescriptor>) {
             opt(10, "Wavebeam"),
         ]))
         .with_label("NES colour palette"),
+    );
+    // Lot FIDPLUS-D2b step 2 (Fidélité+, a cost per pixel): the 2D picture decoded from the
+    // 2C02's composite signal as a television does (`zax_nes::composite::RowDecoder`): colour
+    // fringes at the edges and the dot crawl. Off: the palette. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoCompositeSignal,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Composite signal"),
+    );
+    // Lot FIDPLUS-D2b (owner request, 2026-11-15): the 3D scene tinted with the colour emphasis
+    // of the displayed frame (its most common value), the way the console's signal tints the
+    // whole picture. Off: the 3D view as it always was. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoEmphasis3d,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Colour emphasis in 3D"),
     );
 }
 

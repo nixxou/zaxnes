@@ -208,6 +208,7 @@ pub fn loaded_core(program: Option<&[u8]>) -> (Cpu6502, NesBus) {
     let rom = RomImage::try_load(&minimal_rom(0x01, program, None), "Minimal.nes").unwrap();
     let mut bus = NesBus::new(Ppu2C02::new(), Apu2A03::new(), InputPorts::new());
     bus.attach(Some(Cartridge::create(rom).unwrap()));
+    bus.ppu_mut().set_reset_line(false);
     bus.ppu_mut().reset();
     let mut cpu = Cpu6502::new();
     cpu.reset(&mut bus);
@@ -225,6 +226,7 @@ pub fn bus_with(image: &[u8], name: &str) -> NesBus {
     let rom = RomImage::try_load(image, name).unwrap();
     let mut bus = NesBus::new(Ppu2C02::new(), Apu2A03::new(), InputPorts::new());
     bus.attach(Some(Cartridge::create(rom).unwrap()));
+    bus.ppu_mut().set_reset_line(false);
     bus.ppu_mut().reset();
     bus
 }
@@ -232,6 +234,13 @@ pub fn bus_with(image: &[u8], name: &str) -> NesBus {
 /// A machine with `image` loaded.
 pub fn machine_with(image: &[u8], name: &str) -> NesCore {
     let mut machine = NesCore::new();
+    // The tests built on these fixtures count from the power-on in vblank they were written
+    // against; the power-on at the top of the picture (on by default since lot FIDELITY step 27)
+    // has its own tests.
+    machine.set_power_on_top(false);
+    // Nor do they wait for the PPU's reset line to let their first register writes through (lot
+    // FIDELITY step 34, which has its own test).
+    machine.set_ppu_reset_line(false);
     let load = machine.load_rom(image, name);
     assert!(load.success, "{:?}", load.error);
     machine
@@ -320,6 +329,9 @@ impl TileFixture {
         for value in [y, tile, attribute, x] {
             self.core.write_memory(0x2004, value);
         }
+        // OAMADDR back to 0, as a game leaves it: rendering that starts with it at 8 or more
+        // copies a row of OAM over the first (the 2C02G/H defect, `set_oamaddr_bug`).
+        self.core.write_memory(0x2003, 0);
     }
 
     pub fn write_vram(&mut self, address: u16, values: &[u8]) {
@@ -413,7 +425,26 @@ pub fn run_shell_rom_kind(
     press_reset: bool,
     soft_reset: bool,
 ) -> RomRun {
+    run_shell_core(machine_with(image, "shell"), max_frames, press_reset, soft_reset)
+}
+
+/// [`run_shell_rom`] on a core the caller has configured (an option on, say).
+pub fn run_shell_rom_configured(
+    image: &[u8],
+    max_frames: i64,
+    configure: impl FnOnce(&mut NesCore),
+) -> RomRun {
     let mut core = machine_with(image, "shell");
+    configure(&mut core);
+    run_shell_core(core, max_frames, true, false)
+}
+
+fn run_shell_core(
+    mut core: NesCore,
+    max_frames: i64,
+    press_reset: bool,
+    soft_reset: bool,
+) -> RomRun {
     let mut frames = 0;
     let mut started = false;
     let mut reset_delay = 0;
@@ -495,7 +526,22 @@ pub fn run_shell_rom_kind(
 /// Runs a ROM of the 2005-era suites: it parks in a one-instruction endless loop once it has
 /// reported, and the result code, 1 meaning "passed", stays in `result_address`.
 pub fn run_legacy_rom(image: &[u8], max_frames: i64, result_address: u16) -> RomRun {
+    run_legacy_core(machine_with(image, "legacy"), max_frames, result_address)
+}
+
+/// [`run_legacy_rom`] on a core the caller has configured after the load.
+pub fn run_legacy_rom_configured(
+    image: &[u8],
+    max_frames: i64,
+    result_address: u16,
+    configure: impl FnOnce(&mut NesCore),
+) -> RomRun {
     let mut core = machine_with(image, "legacy");
+    configure(&mut core);
+    run_legacy_core(core, max_frames, result_address)
+}
+
+fn run_legacy_core(mut core: NesCore, max_frames: i64, result_address: u16) -> RomRun {
     let mut frames = 0;
     let mut parked_at = 0u16;
     let mut parked_frames = 0;

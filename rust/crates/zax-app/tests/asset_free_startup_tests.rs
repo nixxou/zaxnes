@@ -132,6 +132,7 @@ fn req_pub_001_the_default_3d_entry_converts_in_3d_and_the_2d_entry_does_not() {
             two_dimensional_mode,
             console_interface: false,
             tiles: None,
+            engine: zax_core_api::EngineKind::Zaxnes,
         };
         GameSession::create(request, &mut SettingsModel::new()).unwrap()
     };

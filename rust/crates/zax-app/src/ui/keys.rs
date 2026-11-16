@@ -13,6 +13,8 @@ pub const MENU_SAVE_STATE: &str = "menu.save_state";
 pub const MENU_DELETE_STATE: &str = "menu.delete_state";
 pub const MENU_SPEED: &str = "menu.speed";
 pub const MENU_REGION: &str = "menu.region";
+/// The console model submenu (lot FIDPLUS-1, G1).
+pub const MENU_CONSOLE_MODEL: &str = "menu.console_model";
 pub const MENU_PORTS: &str = "menu.ports";
 pub const MENU_CAMERA_MODE: &str = "menu.camera_mode";
 pub const MENU_VOLUME: &str = "menu.volume";
@@ -26,6 +28,10 @@ pub const MENU_CAMERA_FIRST_PERSON: &str = "menu.camera.first_person";
 pub const SLOT_EMPTY: &str = "slot.empty";
 pub const SLOT_OTHER_PATCH: &str = "slot.other_patch";
 pub const SLOT_OTHER_HACK_VERSION: &str = "slot.other_hack_version";
+/// The engine a state was made with, shown when it is not Zaxnes or the game runs on another.
+pub const SLOT_ENGINE: &str = "slot.engine";
+/// A state made with another engine than the one the game runs on: it cannot load.
+pub const SLOT_OTHER_ENGINE: &str = "slot.other_engine";
 /// Submenu of the movies to play.
 pub const MENU_MOVIES: &str = "menu.movies";
 /// Title of the window that asks for a note on the frame on screen.
@@ -187,6 +193,27 @@ pub const HINT_NEEDS_CURVATURE: &str = "hint.needs_curvature";
 pub const HINT_REGION_AUTOMATIC: &str = "hint.region_automatic";
 /// `emu.core`: this version has one core, so the value is always 0.
 pub const HINT_SINGLE_CORE: &str = "hint.single_core";
+/// The widescreen rows while an engine other than Zaxnes's own is chosen for the game (lot
+/// FCEUX-23 step 5; lot NESHAWK-REWRITE made the text engine-neutral, because NesHawk has none of
+/// the four either and `Capabilities::NESHAWK` says so). The key keeps its name so that a
+/// translation written before that lot still resolves.
+pub const HINT_FCEUX_NO_WIDESCREEN: &str = "hint.fceux_no_widescreen";
+/// The hack-pack rows, likewise.
+pub const HINT_FCEUX_NO_HACKS: &str = "hint.fceux_no_hacks";
+/// The sprite-limit row, likewise.
+pub const HINT_FCEUX_NO_SPRITE_LIMIT: &str = "hint.fceux_no_sprite_limit";
+/// The run-ahead rows, likewise (lot FCEUX-5 is what would implement it).
+pub const HINT_FCEUX_NO_RUN_AHEAD: &str = "hint.fceux_no_run_ahead";
+/// The marker the status line and the game's options show while FCEUX is the engine.
+pub const STATUS_ENGINE_FCEUX: &str = "status.engine_fceux";
+/// The same, while the NesHawk port is the engine (lot NESHAWK-REWRITE).
+pub const STATUS_ENGINE_NESHAWK: &str = "status.engine_neshawk";
+/// The engine row, while FCEUX is chosen for a game lot FCEUX-6 validated for 3D on it
+/// (lot FCEUX-48 step 2).
+pub const HINT_FCEUX_VALIDATED: &str = "hint.fceux_validated";
+/// The engine row, while FCEUX is chosen for a game nobody validated for 3D on it. The option
+/// still works — this is a marker, not a refusal.
+pub const HINT_FCEUX_NOT_VALIDATED: &str = "hint.fceux_not_validated";
 /// `audio.latency_ms` while the classic output of `v0.4.2` is on (AUDIO-2): that output has the
 /// fixed buffer it always had and reads no latency.
 pub const HINT_CLASSIC_AUDIO: &str = "hint.classic_audio";
@@ -340,7 +367,7 @@ pub const HANDHELD_MENU_TITLE: &str = "handheld.menu.title";
 pub const HANDHELD_MENU_RESUME: &str = "handheld.menu.resume";
 pub const HANDHELD_MENU_SAVE_STATE: &str = "handheld.menu.save_state";
 pub const HANDHELD_MENU_LOAD_STATE: &str = "handheld.menu.load_state";
-pub const HANDHELD_MENU_FAST_FORWARD: &str = "handheld.menu.fast_forward";
+pub const HANDHELD_MENU_GAME_SPEED: &str = "handheld.menu.game_speed";
 pub const HANDHELD_MENU_QUIT_TO_LIST: &str = "handheld.menu.quit_to_list";
 pub const HANDHELD_MENU_EXIT: &str = "handheld.menu.exit";
 pub const HANDHELD_OPTION_RENDER_SCALE: &str = "handheld.option.render_scale";
@@ -354,6 +381,7 @@ pub const HANDHELD_OPTION_PIPELINE: &str = "handheld.option.pipeline";
 pub const HANDHELD_OPTION_OPTIMIZATIONS: &str = "handheld.option.optimizations";
 pub const HANDHELD_REGION_AUTO: &str = "handheld.region.auto";
 pub const HANDHELD_OPTION_TOUCH_PAD: &str = "handheld.option.touch_pad";
+pub const HANDHELD_OPTION_TOUCH_SCREEN: &str = "handheld.option.touch_screen";
 pub const HANDHELD_OPTION_ADVANCED: &str = "handheld.option.advanced";
 pub const HANDHELD_TOUCH_PAD_ON: &str = "handheld.touch_pad.on";
 pub const HANDHELD_TOUCH_PAD_OFF: &str = "handheld.touch_pad.off";
@@ -377,6 +405,8 @@ pub const HANDHELD_GLOBAL_VALUE: &str = "handheld.game_options.global";
 pub const HANDHELD_OWN_COUNT: &str = "handheld.game_options.own_count";
 /// Q-103, the console's own, shorter note: Run-ahead is held at 0 by this game's scripts.
 pub const HANDHELD_RUN_AHEAD_FORCED: &str = "handheld.options.run_ahead_forced";
+/// A console row of a control only Zaxnes's own engine has, while another engine is chosen.
+pub const HANDHELD_ZAXNES_ONLY: &str = "handheld.options.zaxnes_only";
 pub const HANDHELD_HINT_GAME_OPTIONS: &str = "handheld.hint.game_options";
 /// L2 on the home screen: the favourite mark of the selected game (AMD-053 REQ-UI-210).
 pub const HANDHELD_HINT_FAVORITE: &str = "handheld.hint.favorite";
@@ -581,6 +611,7 @@ pub const PUBLISHED: &[&str] = &[
     MENU_DELETE_STATE,
     MENU_SPEED,
     MENU_REGION,
+    MENU_CONSOLE_MODEL,
     MENU_PORTS,
     MENU_CAMERA_MODE,
     MENU_VOLUME,
@@ -594,6 +625,8 @@ pub const PUBLISHED: &[&str] = &[
     SLOT_EMPTY,
     SLOT_OTHER_PATCH,
     SLOT_OTHER_HACK_VERSION,
+    SLOT_ENGINE,
+    SLOT_OTHER_ENGINE,
     MENU_MOVIES,
     WINDOW_MOVIE_NOTE,
     MOVIE_NOTE_WRITE,
@@ -693,6 +726,14 @@ pub const PUBLISHED: &[&str] = &[
     HINT_NEEDS_CURVATURE,
     HINT_REGION_AUTOMATIC,
     HINT_SINGLE_CORE,
+    HINT_FCEUX_NO_WIDESCREEN,
+    HINT_FCEUX_NO_HACKS,
+    HINT_FCEUX_NO_SPRITE_LIMIT,
+    HINT_FCEUX_NO_RUN_AHEAD,
+    STATUS_ENGINE_FCEUX,
+    STATUS_ENGINE_NESHAWK,
+    HINT_FCEUX_VALIDATED,
+    HINT_FCEUX_NOT_VALIDATED,
     HINT_NEEDS_ACHIEVEMENTS,
     HINT_STYLE_CLASSIC,
     HINT_MENU_BUTTON_UNUSED,
@@ -804,7 +845,7 @@ pub const PUBLISHED: &[&str] = &[
     HANDHELD_MENU_RESUME,
     HANDHELD_MENU_SAVE_STATE,
     HANDHELD_MENU_LOAD_STATE,
-    HANDHELD_MENU_FAST_FORWARD,
+    HANDHELD_MENU_GAME_SPEED,
     HANDHELD_MENU_QUIT_TO_LIST,
     HANDHELD_MENU_EXIT,
     HANDHELD_OPTION_RENDER_SCALE,
@@ -818,6 +859,7 @@ pub const PUBLISHED: &[&str] = &[
     HANDHELD_OPTION_OPTIMIZATIONS,
     HANDHELD_REGION_AUTO,
     HANDHELD_OPTION_TOUCH_PAD,
+    HANDHELD_OPTION_TOUCH_SCREEN,
     HANDHELD_OPTION_ADVANCED,
     HANDHELD_TOUCH_PAD_ON,
     HANDHELD_TOUCH_PAD_OFF,
@@ -837,6 +879,7 @@ pub const PUBLISHED: &[&str] = &[
     HANDHELD_GLOBAL_VALUE,
     HANDHELD_OWN_COUNT,
     HANDHELD_RUN_AHEAD_FORCED,
+    HANDHELD_ZAXNES_ONLY,
     HANDHELD_HINT_GAME_OPTIONS,
     HANDHELD_HINT_FAVORITE,
     HANDHELD_HINT_RESET_ALL,

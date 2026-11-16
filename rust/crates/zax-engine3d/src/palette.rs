@@ -285,6 +285,81 @@ pub const fn nes_color_in(palette: NesPalette, index: usize) -> Rgb24 {
     Rgb24::from_packed(palette.table()[index & 0x3F])
 }
 
+/// The colour emphasis the 3D scene is shown with (`video.emphasis_3d`, lot FIDPLUS-D2b): 0 for
+/// none, the default; the host sets the displayed frame's dominant emphasis before building its
+/// draw list. One for the whole process, as [`SELECTED`].
+static SCENE_EMPHASIS: AtomicU8 = AtomicU8::new(0);
+
+/// Shows the 3D scene's colours with the emphasis bits `emphasis` (0 to 7) from now on.
+pub fn set_scene_emphasis(emphasis: u8) {
+    SCENE_EMPHASIS.store(emphasis & 7, Ordering::Relaxed);
+}
+
+/// The colour of NES colour index `index` in the 3D scene: [`nes_color`], with the scene's
+/// emphasis when one is set ([`set_scene_emphasis`]).
+#[must_use]
+pub fn scene_color(index: usize) -> Rgb24 {
+    match SCENE_EMPHASIS.load(Ordering::Relaxed) {
+        0 => nes_color(index),
+        emphasis => nes_color_emphasized(index, emphasis),
+    }
+}
+
+/// The RGB colour of NES colour index `index` shown with the colour emphasis bits `emphasis`
+/// (PPUMASK bits 5-7 as 0 to 7: red, green, blue on NTSC), in the palette chosen (lot
+/// FIDPLUS-D2b). Emphasis 0 is [`nes_color`] itself.
+///
+/// The palettes are 64-colour tables; the emphasis is applied to them per channel by the ratio
+/// `TriCNES`'s 512-colour table gives for that colour and emphasis (`crate::emphasis_table`), so
+/// that a measured or third-party table keeps its own colours and is tinted the way the console
+/// tints its signal. (The ratio of our own composite decoder was tried first and found too far
+/// from it: red emphasis left green at 0.89 and blue at 0.31 on colour `$37`, `TriCNES` 0.75 and
+/// 0.67.)
+#[must_use]
+pub fn nes_color_emphasized(index: usize, emphasis: u8) -> Rgb24 {
+    let base = nes_color(index);
+    let emphasis = usize::from(emphasis & 7);
+    if emphasis == 0 {
+        return base;
+    }
+    let factors = emphasis_factors()[(emphasis << 6) | (index & 0x3F)];
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // clamped to 0-255
+    let scale =
+        |channel: u8, factor: f32| (f32::from(channel) * factor).round().clamp(0.0, 255.0) as u8;
+    Rgb24::new(
+        scale(base.r, factors[0]),
+        scale(base.g, factors[1]),
+        scale(base.b, factors[2]),
+    )
+}
+
+/// Per emphasis (0-7) and colour index (0-63), the factor each channel takes: the ratio of
+/// `TriCNES`'s emphasized colour to its plain one (`crate::emphasis_table`), the reference closest to
+/// the hardware at hand. A channel the plain colour leaves near zero takes no ratio larger than 1
+/// (a ratio of two near-zero values is noise).
+fn emphasis_factors() -> &'static [[f32; 3]; 512] {
+    static FACTORS: std::sync::OnceLock<[[f32; 3]; 512]> = std::sync::OnceLock::new();
+    FACTORS.get_or_init(|| {
+        let channels = |packed: u32| -> [f32; 3] {
+            let [_, r, g, b] = packed.to_be_bytes();
+            [f32::from(r), f32::from(g), f32::from(b)]
+        };
+        let mut table = [[1.0; 3]; 512];
+        for (slot, factors) in table.iter_mut().enumerate() {
+            let plain = channels(crate::emphasis_table::TRICNES_EMPHASIS[slot & 0x3F]);
+            let tinted = channels(crate::emphasis_table::TRICNES_EMPHASIS[slot]);
+            for channel in 0..3 {
+                factors[channel] = if plain[channel] < 16.0 {
+                    ((tinted[channel] + 4.0) / (plain[channel] + 4.0)).min(1.0)
+                } else {
+                    (tinted[channel] / plain[channel]).clamp(0.0, 2.0)
+                };
+            }
+        }
+        table
+    })
+}
+
 /// The palette of one frame: 16 tables of 4 NES colour indices (REQ-E3D-250).
 ///
 /// Entry `e` is `p[0]` when `e mod 4 = 0` and `p[e mod 32]` otherwise, where `p` is the 32-byte
@@ -328,13 +403,13 @@ impl FramePalette {
     /// The RGB colour of entry `entry` (REQ-E3D-251), or `None` outside 0..63.
     #[must_use]
     pub fn color(&self, entry: usize) -> Option<Rgb24> {
-        self.get(entry).map(|index| nes_color(usize::from(index)))
+        self.get(entry).map(|index| scene_color(usize::from(index)))
     }
 
     /// The RGB colour of entry 0, the universal background colour (REQ-E3D-254).
     #[must_use]
     pub fn universal_color(&self) -> Rgb24 {
-        nes_color(self.entries[0] as usize)
+        scene_color(self.entries[0] as usize)
     }
 
     /// Rebuilds the 64 entries from the 32 palette bytes of a frame batch.
@@ -372,7 +447,7 @@ impl FramePalette {
     /// Writes the 64 resolved RGB colours of the frame (SPEC-04B REQ-E3D-641).
     pub fn copy_colors_to(&self, destination: &mut [Rgb24; Self::ENTRY_COUNT]) {
         for (color, &entry) in destination.iter_mut().zip(&self.entries) {
-            *color = nes_color(usize::from(entry));
+            *color = scene_color(usize::from(entry));
         }
     }
 
@@ -411,6 +486,25 @@ mod tests {
 #[cfg(test)]
 mod palette_choice_tests {
     use super::*;
+
+    #[test]
+    fn fidplus_d2b_emphasis_darkens_the_other_colours() {
+        // White ($30) with no emphasis is the palette's own; with red emphasis (bit 0) its green
+        // and blue go down and its red stays the strongest channel; all three darken it.
+        assert_eq!(nes_color_emphasized(0x30, 0), nes_color(0x30));
+        let white = nes_color(0x30);
+        let red = nes_color_emphasized(0x30, 1);
+        assert!(
+            red.g < white.g && red.b < white.b,
+            "{red:?} against {white:?}"
+        );
+        assert!(red.r >= red.g && red.r >= red.b, "{red:?}");
+        let all = nes_color_emphasized(0x30, 7);
+        assert!(
+            all.r < white.r && all.g < white.g && all.b < white.b,
+            "{all:?}"
+        );
+    }
 
     #[test]
     fn each_palette_has_its_own_colours() {

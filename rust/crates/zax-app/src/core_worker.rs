@@ -9,11 +9,11 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use zax_nes::NesCore;
+use crate::emulation::engine_handle::EngineHandle;
 
-/// One frame to run: the core, the input word of the frame, and the run-ahead in force.
+/// One frame to run: the engine, the input word of the frame, and the run-ahead in force.
 struct Job {
-    core: Box<NesCore>,
+    core: EngineHandle,
     word: u16,
     /// Frames of run-ahead (AMD-041 REQ-LOOP-064), 0 for an ordinary frame. The whole sequence
     /// of REQ-LOOP-065 runs on this thread, which is the unit the thread already was: one real
@@ -25,7 +25,7 @@ struct Job {
 /// A frame the thread ran: the core back, and the time the frame took.
 pub struct FinishedFrame {
     /// The core, which the session owns again.
-    pub core: Box<NesCore>,
+    pub core: EngineHandle,
     /// How long `NesCore::run_frame` took on the emulation thread.
     pub elapsed: Duration,
 }
@@ -74,13 +74,17 @@ impl CoreWorker {
     }
 
     /// Hands `core` to the thread to run one real frame with `word` and `run_ahead` frames in
-    /// advance (AMD-041 REQ-LOOP-065; 0 for an ordinary frame). Gives the core back when the
+    /// advance (AMD-041 REQ-LOOP-065; 0 for an ordinary frame). Gives the engine back when the
     /// thread is gone.
+    ///
+    /// The engine *moves* to the thread, which is what makes `Engine: Send` enough and `Sync`
+    /// unnecessary: FCEUX keeps one machine in process globals, so two threads must never be
+    /// inside it, and this hands it over rather than sharing it (lot FCEUX-23 step 4).
     ///
     /// # Errors
     ///
     /// The thread has stopped; the core is returned untouched.
-    pub fn start(&self, core: Box<NesCore>, word: u16, run_ahead: u8) -> Result<(), Box<NesCore>> {
+    pub fn start(&self, core: EngineHandle, word: u16, run_ahead: u8) -> Result<(), EngineHandle> {
         match &self.jobs {
             Some(jobs) => jobs
                 .send(Job {

@@ -194,7 +194,12 @@ impl FlashRom {
     }
 
     /// The sector `offset` falls in, or `None` when it is past the end of the chip.
-    #[cfg(feature = "board-111")]
+    #[cfg(any(
+        feature = "board-111",
+        feature = "board-682",
+        feature = "board-406",
+        feature = "board-451"
+    ))]
     fn sector_of(&self, offset: usize) -> Option<usize> {
         let sector = offset / self.sector_size;
         if sector < self.original.len() {
@@ -227,7 +232,12 @@ impl FlashRom {
     /// Flash can only clear bits, so the byte written is `ANDed` with what is already there — a game
     /// that has not erased the sector first sees exactly that, which is the chip and not an
     /// approximation of it.
-    #[cfg(feature = "board-111")]
+    #[cfg(any(
+        feature = "board-111",
+        feature = "board-682",
+        feature = "board-406",
+        feature = "board-451"
+    ))]
     pub(crate) fn program(&mut self, rom: &mut [u8], offset: usize, value: u8) {
         let Some(sector) = self.sector_of(offset) else {
             return;
@@ -240,7 +250,12 @@ impl FlashRom {
     }
 
     /// Erases to `$FF` the sector `offset` falls in, the `$80`/`$30` command.
-    #[cfg(feature = "board-111")]
+    #[cfg(any(
+        feature = "board-111",
+        feature = "board-682",
+        feature = "board-406",
+        feature = "board-451"
+    ))]
     pub(crate) fn erase_sector(&mut self, rom: &mut [u8], offset: usize) {
         let Some(sector) = self.sector_of(offset) else {
             return;

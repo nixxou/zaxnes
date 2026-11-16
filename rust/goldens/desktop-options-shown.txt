@@ -6,7 +6,8 @@
 # A set, not an order: the file is sorted by key. The tab each one was in before is recorded in
 # `rust/docs/OPTIONS-LAYOUT.md`, which is where the old → new mapping lives.
 #
-# A line tagged [wgpu] is only a row in a build carrying that feature (`options::is_shown`).
+# A line tagged [wgpu] or [fceux-core] is only a row in a build carrying that feature
+# (`options::is_shown`).
 #
 # Checked by `crates/zax-app/tests/desktop_options_golden_tests.rs`.
 
@@ -16,19 +17,53 @@ achievements.encore
 achievements.sound
 achievements.unofficial
 audio.classic_output
+audio.console_profile
 audio.latency_ms
 audio.volume
 camera.fov
 emu.auto_tv_mode
+emu.cartridge_db
 emu.catch_up
 emu.catch_up_last_3d
 emu.core
+emu.engine
 emu.game_speed
 emu.lua_experimental
 emu.lua_optimized
 emu.lua_smooth_gc
+emu.oam_corruption
+emu.ppu_bus_conflicts
+emu.oamaddr_bug
+emu.oam_decay
+emu.rainbow_network
+emu.vs_dip_1
+emu.vs_dip_2
+emu.vs_dip_3
+emu.vs_dip_4
+emu.vs_dip_5
+emu.vs_dip_6
+emu.vs_dip_7
+emu.vs_dip_8
+emu.power_on_top
+emu.ppu_2006_delay
+emu.ppu_2006_glitch
+emu.ppu_2000_glitch
+emu.palette_corruption
+emu.ppu_reset_line
+emu.cpu_apu_parity
+emu.cpu_ppu_alignment
+emu.fidelity_plus
+emu.exact_rate
+emu.realtime_input
+emu.late_present
 emu.pause_3d_in_2d
 emu.pipeline
+emu.power_on_ram
+emu.power_on_ppu_ram
+emu.ppu_revision
+emu.mmc3_revision
+emu.cpu_revision
+emu.oamaddr_write_corruption
 emu.run_ahead
 emu.smooth_scroll_ahead
 emu.smooth_scroll_view
@@ -72,6 +107,8 @@ video.shader_resolution
 video.frame_rate
 video.max_queued_frames
 video.nes_palette
+video.composite_signal
+video.emphasis_3d
 video.overscan_mode
 video.overscan_ntsc_bottom
 video.overscan_ntsc_left

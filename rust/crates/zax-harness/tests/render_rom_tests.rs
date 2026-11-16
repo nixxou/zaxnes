@@ -12,10 +12,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde_json::Value;
+use zax_core_api::TileRecord;
 use zax_harness::render::frame_json;
 use zax_harness::render::input_script::InputScript;
 use zax_harness::render::{self, FrameSource, Options};
-use zax_nes::TileRecord;
 use zax_profiles::enums::{TileFlip, VariantGeometry, VariantRenderStyle};
 use zax_profiles::format;
 use zax_profiles::layout::FieldPresence;

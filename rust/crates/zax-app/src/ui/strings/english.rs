@@ -16,6 +16,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::MENU_DELETE_STATE, "Delete a state"),
     (keys::MENU_SPEED, "Speed"),
     (keys::MENU_REGION, "Region"),
+    (keys::MENU_CONSOLE_MODEL, "Console model"),
     (keys::MENU_PORTS, "Ports"),
     (keys::MENU_CAMERA_MODE, "Camera mode"),
     (keys::MENU_VOLUME, "Volume"),
@@ -29,6 +30,8 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::SLOT_EMPTY, "empty"),
     (keys::SLOT_OTHER_PATCH, "made with the built-in patches set the other way"),
     (keys::SLOT_OTHER_HACK_VERSION, "made with another version of the built-in hack"),
+    (keys::SLOT_ENGINE, "engine: {engine}"),
+    (keys::SLOT_OTHER_ENGINE, "made with the {engine} engine: set this game's engine to {engine} to load it"),
     (keys::MENU_MOVIES, "Play a movie"),
     (keys::WINDOW_MOVIE_NOTE, "Note on this frame"),
     (keys::MOVIE_NOTE_WRITE, "Write"),
@@ -160,6 +163,32 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
         "(this version has one core: the value is always 0)",
     ),
     (
+        keys::HINT_FCEUX_NO_WIDESCREEN,
+        "(this engine has no widescreen: choose the Zaxnes engine for this game)",
+    ),
+    (
+        keys::HINT_FCEUX_NO_HACKS,
+        "(this engine applies no hack pack: choose the Zaxnes engine for this game)",
+    ),
+    (
+        keys::HINT_FCEUX_NO_SPRITE_LIMIT,
+        "(this engine keeps the 8 sprites a line: choose the Zaxnes engine for this game)",
+    ),
+    (
+        keys::HINT_FCEUX_NO_RUN_AHEAD,
+        "(run-ahead is not implemented on this engine)",
+    ),
+    (keys::STATUS_ENGINE_FCEUX, "FCEUX engine"),
+    (keys::STATUS_ENGINE_NESHAWK, "NesHawk engine"),
+    (
+        keys::HINT_FCEUX_VALIDATED,
+        "(this ROM is validated for 3D on the FCEUX engine)",
+    ),
+    (
+        keys::HINT_FCEUX_NOT_VALIDATED,
+        "(this ROM is not validated for 3D on the FCEUX engine: the 3D may differ from Zaxnes's)",
+    ),
+    (
         keys::HINT_CLASSIC_AUDIO,
         "(no effect: the classic audio output has its own fixed buffer)",
     ),
@@ -208,9 +237,9 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::KEYS_COMMANDS, "Menu commands"),
     // ------------------------------------------------------ file browser
     (keys::BROWSER_COMPUTER, "This computer"),
-    (keys::BROWSER_FILTER_NES_ROMS, "NES ROMs (*.nes, *.zip)"),
-    (keys::BROWSER_FILTER_NES_FILES, ".nes files"),
-    (keys::BROWSER_FILTER_MOVIES, "Movies (.fm2, .fcm, .mv)"),
+    (keys::BROWSER_FILTER_NES_ROMS, "NES ROMs (*.nes, *.unf, *.studybox, *.fds, *.zip)"),
+    (keys::BROWSER_FILTER_NES_FILES, ".nes, .unf, .studybox and .fds files"),
+    (keys::BROWSER_FILTER_MOVIES, "Movies (.fm2, .fcm, .bk2, .mv)"),
     (keys::MOVIE_BAR_PLAY, "Play"),
     (keys::MOVIE_BAR_PAUSE, "Pause"),
     (keys::MOVIE_BAR_SEEKING, "going to"),
@@ -276,6 +305,12 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     // AMD-044 §3: the two resets now sit side by side, so the hard one is named as such.
     ("cmd.emulation.reset", "Hard Reset"),
     ("cmd.emulation.soft_reset", "Soft Reset"),
+    ("cmd.emulation.insert_coin_1", "Insert Coin (Slot 1)"),
+    ("cmd.emulation.insert_coin_2", "Insert Coin (Slot 2)"),
+    ("cmd.emulation.vs_service", "Service Button (VS. System)"),
+    ("cmd.emulation.switch_disk_side", "Switch Disk Side (Disk System)"),
+    ("cmd.emulation.insert_next_disk", "Insert Next Disk (Disk System)"),
+    ("cmd.emulation.eject_disk", "Eject Disk (Disk System)"),
     ("cmd.emulation.stop", "Stop"),
     ("cmd.emulation.fast_forward", "Fast forward"),
     ("cmd.emulation.rollback", "Rollback"),
@@ -286,6 +321,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("cmd.emulation.speed_down", "Slower"),
     ("cmd.emulation.set_region", "Region"),
     ("cmd.emulation.auto_region", "Region: Auto"),
+    ("cmd.emulation.set_console_model", "Console model"),
     ("cmd.emulation.set_port_type", "Port type"),
     ("cmd.video.toggle_2d", "3D mode / 2D mode"),
     ("cmd.video.reset_view", "Reset the view"),
@@ -475,6 +511,57 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.auto_tv_mode", "Region detected automatically"),
     ("setting.emu.tv_mode", "Video region"),
     ("setting.emu.core", "Emulation core"),
+    ("setting.emu.engine", "Emulation engine (this game)"),
+    ("setting.emu.cartridge_db", "Cartridge database"),
+    ("setting.emu.oam_corruption", "OAM corruption"),
+    ("setting.emu.ppu_bus_conflicts", "PPU bus conflicts"),
+    ("setting.emu.oamaddr_bug", "OAMADDR defect (2C02G)"),
+    ("setting.emu.oam_decay", "OAM decay"),
+    ("setting.emu.rainbow_network", "Rainbow board network"),
+    ("setting.emu.vs_dip_1", "VS. System DIP switch 1"),
+    ("setting.emu.vs_dip_2", "VS. System DIP switch 2"),
+    ("setting.emu.vs_dip_3", "VS. System DIP switch 3"),
+    ("setting.emu.vs_dip_4", "VS. System DIP switch 4"),
+    ("setting.emu.vs_dip_5", "VS. System DIP switch 5"),
+    ("setting.emu.vs_dip_6", "VS. System DIP switch 6"),
+    ("setting.emu.vs_dip_7", "VS. System DIP switch 7"),
+    ("setting.emu.vs_dip_8", "VS. System DIP switch 8"),
+    ("setting.emu.power_on_top", "Power on at the top of the picture"),
+    ("setting.emu.ppu_2006_delay", "$2006 load delay"),
+    ("setting.emu.ppu_2006_glitch", "$2006 scroll glitch"),
+    ("setting.emu.ppu_2000_glitch", "$2000/$2005 open-bus glitch"),
+    ("setting.emu.palette_corruption", "Palette corruption"),
+    ("setting.emu.ppu_reset_line", "PPU reset line"),
+    ("setting.emu.cpu_ppu_alignment", "CPU/PPU alignment"),
+    ("setting.emu.cpu_apu_parity", "CPU/APU parity"),
+    ("option.Zaxnes", "Zaxnes"),
+    ("option.2A03 netlist", "2A03 netlist"),
+    ("setting.emu.fidelity_plus", "Fidelity+"),
+    ("setting.emu.exact_rate", "Console frame rate"),
+    ("setting.emu.realtime_input", "Real-time pad"),
+    ("setting.emu.late_present", "Late present"),
+    ("option.Alignment 0", "Alignment 0"),
+    ("option.Alignment 1", "Alignment 1"),
+    ("option.Alignment 2", "Alignment 2"),
+    ("option.Alignment 3", "Alignment 3"),
+    ("option.Blargg's console", "Blargg's console"),
+    ("option.2C02G", "2C02G"),
+    ("option.2C02 before G", "2C02 before G"),
+    ("setting.emu.mmc3_revision", "MMC3 revision"),
+    ("option.The cartridge's", "The cartridge's"),
+    ("option.MMC3A / MMC6", "MMC3A / MMC6"),
+    ("option.MMC3B / MMC3C", "MMC3B / MMC3C"),
+    ("setting.emu.cpu_revision", "CPU revision"),
+    ("option.RP2A03G and later", "RP2A03G and later"),
+    ("option.Letterless RP2A03", "Letterless RP2A03"),
+    ("setting.emu.power_on_ram", "Work RAM at power-on"),
+    ("setting.emu.power_on_ppu_ram", "Video memory at power-on"),
+    ("setting.emu.ppu_revision", "Video chip revision"),
+    ("setting.emu.oamaddr_write_corruption", "OAMADDR write corruption"),
+    ("option.Zeros", "Zeros"),
+    ("option.FCEUX pattern", "FCEUX pattern"),
+    ("option.All $FF", "All $FF"),
+    ("option.Random", "Random"),
     ("setting.emu.catch_up", "Catch-up when late (frames)"),
     // AMD-041 §3: the title and the four values of the Run-ahead list.
     ("setting.emu.run_ahead", "Run-ahead"),
@@ -537,6 +624,8 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.video.overscan_right", "Overscan: right"),
     ("setting.video.overscan_mode", "Overscan: fit (edges hidden) or resize (enlarged)"),
     ("setting.video.nes_palette", "NES colour palette"),
+    ("setting.video.composite_signal", "Composite signal"),
+    ("setting.video.emphasis_3d", "Colour emphasis in 3D"),
     ("setting.emu.builtin_patches", "Built-in ROM patches (at the next ROM load)"),
     ("setting.audio.volume", "Master volume"),
     ("setting.audio.bg_music", "Menu music"),
@@ -546,6 +635,25 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
         "setting.audio.classic_output",
         "Classic audio output (v0.4.2)",
     ),
+    ("setting.audio.console_profile", "Console audio profile"),
+    (
+        "detail.audio.console_profile",
+        "Makes the sound go through the filters of one real console, measured by the BeesNES emulator: each NES or Famicom model, and each video output, softens the treble and the bass differently and balances the five channels a little differently. The oldest NES (N0260073) also has no short noise mode. None keeps Zaxnes's usual sound. Takes effect at once. Default: none.",
+    ),
+    ("option.NES Front-Loading N0260073", "NES Front-Loading N0260073"),
+    ("option.NES Front-Loading N1151667", "NES Front-Loading N1151667"),
+    ("option.NES Front-Loading N13721267", "NES Front-Loading N13721267"),
+    ("option.NES Front-Loading N20914398, Sunsoft 5B", "NES Front-Loading N20914398, Sunsoft 5B"),
+    ("option.NES Front-Loading N32670105", "NES Front-Loading N32670105"),
+    ("option.NES Front-Loading N34169630", "NES Front-Loading N34169630"),
+    ("option.NES Front-Loading N8869725, NESRGB", "NES Front-Loading N8869725, NESRGB"),
+    ("option.NES Front-Loading N8869725, NESRGB, stock RCA", "NES Front-Loading N8869725, NESRGB, stock RCA"),
+    ("option.NES Top-Loading NN101255729, NESRGB", "NES Top-Loading NN101255729, NESRGB"),
+    ("option.Twin Famicom 441850, stock RCA", "Twin Famicom 441850, stock RCA"),
+    ("option.Twin Famicom 475711, NESRGB, stock RCA", "Twin Famicom 475711, NESRGB, stock RCA"),
+    ("option.Twin Famicom 475711, NESRGB, SCART", "Twin Famicom 475711, NESRGB, SCART"),
+    ("option.PAL NES NESE-001 (AUS) PM313006", "PAL NES NESE-001 (AUS) PM313006"),
+    ("option.PAL NES NESE-001 (GBR) PM608755", "PAL NES NESE-001 (GBR) PM608755"),
     (
         "help.audio.classic_output",
         "Use if the new audio output misbehaves on this device; it has the old, shorter buffer \
@@ -553,6 +661,11 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ),
     ("setting.input.emulated_menu_button", "Menu = Select + Start"),
     ("setting.input.touch_pad", "Touch pad"),
+    ("setting.input.touch_scale", "Touch pad size"),
+    ("setting.input.touch_haptic_dpad", "Vibration of the cross"),
+    ("setting.input.touch_haptic_buttons", "Vibration of the buttons"),
+    ("setting.input.touch_extra", "Rewind and fast forward"),
+    ("setting.ui.orientation", "Orientation"),
     ("setting.ui.fullscreen", "Full screen"),
     ("setting.ui.show_fps", "Show the FPS"),
     ("setting.ui.profiler", "Performance measures (log)"),
@@ -563,6 +676,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     // ----------------------------------- labels of the enumerated values
     ("option.Off", "Off"),
     ("option.Auto", "Auto"),
+    ("option.Light", "Light"),
+    ("option.Strong", "Strong"),
+    ("option.Landscape", "Landscape"),
+    ("option.Portrait", "Portrait"),
     ("option.Always", "Always"),
     ("option.Disabled", "Disabled"),
     ("option.Smart", "Smart"),
@@ -740,6 +857,14 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ),
 
     // --------------------------------------------------------- NES picture tab
+    (
+        "detail.video.emphasis_3d",
+        "Some games tint or darken the whole screen through the console's colour emphasis (a pause, a fade, a flash, an underwater level): the console weakens its video signal on two of the three colours. The flat picture always shows it; this shows it in the 3D view too, the whole scene taking the tint the game asks for. A game that changes the emphasis in the middle of the screen gets its most common tint for the whole scene. Default: off.",
+    ),
+    (
+        "detail.video.composite_signal",
+        "Fidelity+: the flat picture made the way a television made it from the console's composite signal, generated pixel by pixel as the video chip generates it, then decoded: the colours bleed a little at the edges of objects and the fringes crawl from frame to frame, as on a set plugged in with the yellow cable. The colours of large areas are the console's own signal, not the palette's. Costs some processor time per frame. The 3D view is not affected. Default: off.",
+    ),
     (
         "detail.video.nes_palette",
         "Which table of RGB colours the console's 64 colours are shown in, in the flat picture and \
@@ -1102,6 +1227,147 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
          nothing uses it. The row is kept because the key is part of the settings file and of the \
          script surface (Setting.Core). Default: 0.",
     ),
+    (
+        "detail.emu.cartridge_db",
+        "Completes what an old iNES header cannot say about a cartridge, from a database of about 10 000 dumps: the chip revision (an MMC3A or an MMC1A, say), the submapper, the real save RAM, the battery, the region. It never changes the mapper number and never touches a NES 2.0 header. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.oam_corruption",
+        "A defect of the real console: switching the picture off in the middle of a line damages one row of the sprite memory when the picture comes back, so a few sprites can go missing for a frame. Games written for the console avoid it or live with it. The model follows measurements made on a console (AccuracyCoin); with the power-on at the top of the picture it passes every test program known. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.ppu_bus_conflicts",
+        "A defect of the real console: a game that reads video memory while the picture is being drawn collides with what the video chip is reading at that instant, and the value it gets, or a background tile, comes from the wrong place. Most games avoid it; Super Mario Bros. 3 shows it on the line above the floor of its title screen, as the console does. Test programs check it. The delay of a new video address has its own setting. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.oamaddr_bug",
+        "A defect of the NES and Famicom video chip (2C02G and later): if a game leaves the sprite memory address at 8 or more when the picture starts, eight bytes of sprite memory are copied over the first eight, so a couple of sprites can take the place of others for a frame. Games written for the console reset that address and never show it. A PAL console does not have this defect, so it never applies there. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.vs_dip_1",
+        "Switch 1 of the eight DIP switches of a VS. System arcade cabinet. Each game gives them its own meaning: difficulty, lives, coins per credit, sometimes the language or a test mode; the game's manual or the operator's card lists them. Only for VS. System games. Takes effect at the next load, as on a cabinet, which reads them when it is switched on. Default: off.",
+    ),
+    (
+        "detail.emu.vs_dip_2",
+        "Switch 2 of the eight DIP switches of a VS. System arcade cabinet. Each game gives them its own meaning: difficulty, lives, coins per credit, sometimes the language or a test mode; the game's manual or the operator's card lists them. Only for VS. System games. Takes effect at the next load, as on a cabinet, which reads them when it is switched on. Default: off.",
+    ),
+    (
+        "detail.emu.vs_dip_3",
+        "Switch 3 of the eight DIP switches of a VS. System arcade cabinet. Each game gives them its own meaning: difficulty, lives, coins per credit, sometimes the language or a test mode; the game's manual or the operator's card lists them. Only for VS. System games. Takes effect at the next load, as on a cabinet, which reads them when it is switched on. Default: off.",
+    ),
+    (
+        "detail.emu.vs_dip_4",
+        "Switch 4 of the eight DIP switches of a VS. System arcade cabinet. Each game gives them its own meaning: difficulty, lives, coins per credit, sometimes the language or a test mode; the game's manual or the operator's card lists them. Only for VS. System games. Takes effect at the next load, as on a cabinet, which reads them when it is switched on. Default: off.",
+    ),
+    (
+        "detail.emu.vs_dip_5",
+        "Switch 5 of the eight DIP switches of a VS. System arcade cabinet. Each game gives them its own meaning: difficulty, lives, coins per credit, sometimes the language or a test mode; the game's manual or the operator's card lists them. Only for VS. System games. Takes effect at the next load, as on a cabinet, which reads them when it is switched on. Default: off.",
+    ),
+    (
+        "detail.emu.vs_dip_6",
+        "Switch 6 of the eight DIP switches of a VS. System arcade cabinet. Each game gives them its own meaning: difficulty, lives, coins per credit, sometimes the language or a test mode; the game's manual or the operator's card lists them. Only for VS. System games. Takes effect at the next load, as on a cabinet, which reads them when it is switched on. Default: off.",
+    ),
+    (
+        "detail.emu.vs_dip_7",
+        "Switch 7 of the eight DIP switches of a VS. System arcade cabinet. Each game gives them its own meaning: difficulty, lives, coins per credit, sometimes the language or a test mode; the game's manual or the operator's card lists them. Only for VS. System games. Takes effect at the next load, as on a cabinet, which reads them when it is switched on. Default: off.",
+    ),
+    (
+        "detail.emu.vs_dip_8",
+        "Switch 8 of the eight DIP switches of a VS. System arcade cabinet. Each game gives them its own meaning: difficulty, lives, coins per credit, sometimes the language or a test mode; the game's manual or the operator's card lists them. Only for VS. System games. Takes effect at the next load, as on a cabinet, which reads them when it is switched on. Default: off.",
+    ),
+    (
+        "detail.emu.rainbow_network",
+        "Lets games on the Rainbow board (mapper 682, Broke Studio) use your network through the board's Wi-Fi chip: connecting to their game server and downloading files. Off, the chip still works (files, random numbers) but reports no Wi-Fi, and nothing leaves the emulator. Savestates, rewind and replays cannot restore a connection. Takes effect at the next load. Default: off.",
+    ),
+    (
+        "detail.emu.oam_decay",
+        "The console keeps its sprites in a memory that fades unless the picture is being drawn: if a game leaves the screen blank for long enough (about 8 frames here, it varies from one console to another) and then shows sprites without sending them again, they come back scrambled. Games written for the console send their sprites every frame and never show it. Run-ahead and rewind restart the delay at every frame, so with them on it never happens. Takes effect at the next load. Default: off.",
+    ),
+    (
+        "detail.emu.power_on_top",
+        "Where the video chip is in its picture when the console is switched on. The real console starts at the top of the picture; Zaxnes has always started at the end of it, which shortens the wait of a game for its first frame by a fraction of a frame. On, games start as on the console, a fraction of a frame later than older versions of Zaxnes, so recordings and saved states made right after switching on with an older version can drift. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.ppu_2006_delay",
+        "When a game writes a new video address during the picture, the console only takes it three dots later, in the middle of a fetch, which can briefly read a tile from a mixed address. Measured on the console's transistor-level design. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.ppu_2006_glitch",
+        "A defect of the video chip: if that new address arrives on the very dot the chip moves to the next tile, the two collide and the scroll position becomes a mix of both, until the game sets it again. Games written for the console avoid it. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.cpu_ppu_alignment",
+        "When it is switched on, the console's processor and video chip settle into one of four ways their clocks line up (numbered 0 to 3, as the AccuracyCoin test cartridge numbers them), a different one from one power-on to the next. A few defects depend on it: when a read of video memory made during the picture lands, the open-bus glitch of the $2000 and $2005 writes (alignment 3), the edge pixel of a picture switched off mid-line, and the sprite-memory damage, which a console in alignment 1 or 2 does not show when the picture is switched back on mid-screen. Games written for the console work in all four. Alignment 3 is the one Zaxnes has always followed; Random draws one at each load, as a console does at each power-on. Takes effect at the next load. Default: Alignment 3.",
+    ),
+    (
+        "detail.emu.cpu_apu_parity",
+        "At power-on the console's processor and its sound unit start their two-cycle rhythm on one cycle or the other, and the sample channel's timer starts somewhere in its count. It decides whether a sprite transfer takes 513 or 514 cycles and where the sample channel's fetch pauses a read. Zaxnes is the start it has always used; 2A03 netlist the one the transistor-level model of the chip starts with (with it the processor matches that model cycle for cycle); Random draws one at each load, as a console does at each power-on. Games written for the console work with any. Takes effect at the next load. Default: Zaxnes.",
+    ),
+    (
+        "detail.emu.ppu_2000_glitch",
+        "A defect of the video chip: a write to its control register that starts on one precise dot of a line can make the next line drawn from the left screen half, and a write to its scroll register that lands on the copy of the scroll can scroll a line or a frame by what was last on the data bus instead. It happens only on some consoles, depending on how the chips lined up when switched on. Games written for the console avoid it. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.exact_rate",
+        "Runs the games at the console's own frame rate, 60.0988 images a second on an NTSC console and 50.0070 on a PAL one, instead of a round 60 or 50, and the sound with it, at its true pitch. On a 60 Hz screen an image is shown twice about every ten seconds; a variable refresh rate screen shows every one. Takes effect at once. Default: off.",
+    ),
+    (
+        "detail.emu.late_present",
+        "With the real-time pad, the time left before the screen's refresh is spent running the console first, and the picture is drawn just before the refresh, from the console as it stands then. Without it the picture is drawn first and shown at the next refresh, nearly one refresh older than the console. A press shows on screen up to one refresh sooner (about 10 ms at 60 Hz). Needs a computer that draws a frame well within a refresh; if the drawing is late a refresh is missed. Only with the real-time pad on and a refresh to wait for. Takes effect at once. Default: off.",
+    ),
+    (
+        "detail.emu.realtime_input",
+        "Reads the pad about every millisecond and runs the console in slices of real time between two screen refreshes, instead of reading the pad once a refresh and running a whole image at once: the game sees a button about 9 ms sooner on average (up to 16 ms), and reads it at the moment it asks for it, as on the console. Not used with run-ahead or while a movie is recorded or played: those keep whole images. Takes effect at once. Default: on."
+    ),
+    (
+        "detail.emu.fidelity_plus",
+        "Runs the console through the Fidelity+ machine: the effects of the game's accesses to the video chip land on the clock edges measured on the transistor-level model of the chips, instead of on the delays of the standard core. Closest to the console, slower. Under construction: NTSC consoles only so far (PAL and Dendy run as without it). Takes effect at the next load. Default: off.",
+    ),
+    (
+        "detail.emu.ppu_reset_line",
+        "On the front-loading NES the reset line also reaches the video chip: for about half a frame after the console is switched on or the Reset button is pressed, the chip ignores the game's writes to its control, mask, scroll and address registers, and the Reset button sends the picture back to its first line. Off: the top-loading NES and the Famicom, whose video chip does not see the button. Games written for the console wait for it, but some homebrew does not and stays on a blank screen with it. Takes effect at the next load. Default: off.",
+    ),
+    (
+        "detail.emu.palette_corruption",
+        "A defect of the video chip: switching the picture off in the middle of a line, or moving the video address out of the colour palette, can change some palette colours. Only modelled for consoles in alignment 2, the one where it was observed reliably, from the measurements of the AccuracyCoin author; the exact colours are an approximation. Games written for the console avoid it. Takes effect at the next load. Default: on.",
+    ),
+    (
+        "detail.emu.cpu_revision",
+        "Which revision of the console's processor, which also makes its sound. The RP2A03G and later, the default, are in nearly every console; the letterless RP2A03 of the first Famicoms has a simpler noise channel: no metallic short mode, and a different lowest pitch. Only the noise sounds of some games change. Takes effect at the next load. Default: RP2A03G and later.",
+    ),
+    (
+        "detail.emu.mmc3_revision",
+        "Which revision of the MMC3 chip a cartridge that uses it holds. The two count the lines of the picture slightly differently when a game sets the count to zero: the MMC3A and the MMC6 interrupt once, the MMC3B and MMC3C at every line. The cartridge's, the default, takes what the ROM's header and the cartridge database say, which is the MMC3B / MMC3C for nearly every game. Choose a revision only for a test program written for it. Takes effect at the next load. Default: the cartridge's.",
+    ),
+    (
+        "detail.emu.ppu_revision",
+        "Which revision of the video chip the console has. The 2C02G, the default and the most common in later consoles, lets a game read the colour palette back; the revisions before it cannot, and a read there returns what the chip read before, as for the rest of its memory. Games written for the console do not read the palette. Takes effect at the next load. Default: 2C02G.",
+    ),
+    (
+        "detail.emu.oamaddr_write_corruption",
+        "A defect reported for the 2C02G video chip: setting the sprite memory address copies one row of eight sprite bytes over the row it points to. Several test cartridges checked on consoles pass without it, so it is off; turn it on to imitate a console that shows it. Takes effect at the next load. Default: off.",
+    ),
+    (
+        "detail.emu.power_on_ppu_ram",
+        "What the video chip's own memories (colour palette, sprite table and background memory) hold when the console is switched on. Like the work RAM they start with whatever their cells settled to, which differs from one console to the next. Zeros, the default, is what this emulator always did; Blargg's console is the palette a well-known test ROM expects (measured on one console); Random changes at every power-on. Only the first pictures before a game sets its colours can show it. Takes effect at the next load. Default: Zeros.",
+    ),
+    (
+        "detail.emu.power_on_ram",
+        "What the console's 2 KiB of work RAM hold when it is switched on. A real NES starts with whatever its memory settled to; most games clear it first, a few read it before. The FCEUX pattern (00 00 00 00 FF FF FF FF), the default, is what FCEUX and BizHawk use and what a few games need; Zeros is what Mesen uses; Random changes at every power-on. Takes effect at the next load. Default: FCEUX pattern.",
+    ),
+    (
+        "detail.emu.engine",
+        "Which emulator plays this game: Zaxnes's own core, FCEUX, or NesHawk. It is a choice per \
+         game, not a preference, because the reason to reach for another engine is always a \
+         particular game. FCEUX is for coverage — a game Zaxnes runs badly, or on a board it \
+         does not have. NesHawk is the Rust port of BizHawk's own core, and it is what makes a \
+         BizHawk movie replay exactly: a .bk2 recorded on NesHawk plays back on it frame for \
+         frame, which no other engine can promise. It takes effect at the next load, since \
+         changing engines means starting the machine again. Neither FCEUX nor NesHawk has \
+         widescreen, hack packs, a sprite-limit control or run-ahead: those are part of Zaxnes's \
+         own machine, and their rows say so while another engine is chosen. A save state made on \
+         one engine cannot be loaded on another. Default: Zaxnes.",
+    ),
 
     // ----------------------------------------------------------- Interface tab
     (
@@ -1209,6 +1475,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::HANDHELD_GLOBAL_VALUE, "Global: {0}"),
     (keys::HANDHELD_OWN_COUNT, "{0} own"),
     (keys::HANDHELD_RUN_AHEAD_FORCED, "(forced to 0: scripts)"),
+    (keys::HANDHELD_ZAXNES_ONLY, "(Zaxnes engine only)"),
     (keys::HANDHELD_HINT_GAME_OPTIONS, "Game options"),
     (keys::HANDHELD_HINT_FAVORITE, "Favorite"),
     (keys::HANDHELD_HINT_RESET_ALL, "Reset all"),
@@ -1253,7 +1520,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::SHORTCUT_HOME, "Home"),
     (keys::HANDHELD_MENU_SAVE_STATE, "Save state"),
     (keys::HANDHELD_MENU_LOAD_STATE, "Load state"),
-    (keys::HANDHELD_MENU_FAST_FORWARD, "Fast forward"),
+    (keys::HANDHELD_MENU_GAME_SPEED, "Game speed"),
     (keys::HANDHELD_MENU_QUIT_TO_LIST, "Quit to ROM list"),
     (keys::HANDHELD_MENU_EXIT, "Exit to launcher"),
     (keys::HANDHELD_OPTION_RENDER_SCALE, "Render scale"),
@@ -1268,6 +1535,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::HANDHELD_REGION_AUTO, "Auto (ROM)"),
     (keys::HANDHELD_OPTION_ADVANCED, "Advanced options"),
     (keys::HANDHELD_OPTION_TOUCH_PAD, "Touch pad"),
+    (keys::HANDHELD_OPTION_TOUCH_SCREEN, "Touch screen"),
     (keys::HANDHELD_TOUCH_PAD_ON, "Yes"),
     (keys::HANDHELD_TOUCH_PAD_OFF, "No"),
     (keys::HANDHELD_CAMERA_RESET, "Default view"),

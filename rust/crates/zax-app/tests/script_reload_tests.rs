@@ -15,6 +15,16 @@ use zax_app::emulation::commands::{Command, CommandArgs};
 
 use run_ahead_rom as rom;
 
+/// FCEUX keeps one machine per process: with `fceux-core` a movie here plays on it, so the tests of
+/// this file take turns rather than fall back to Zaxnes's core when another holds FCEUX.
+static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn lock() -> std::sync::MutexGuard<'static, ()> {
+    SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Counts its `Update` calls by `step` into `PData[0]`, and writes `mark` into `PData[1]`.
 fn counting(step: u32, mark: u32) -> String {
     format!("function Update()\n  n = (n or 0) + {step}\n  SetPData(0, n)\n  SetPData(1, {mark})\nend\n")
@@ -85,8 +95,18 @@ fn reload(harness: &mut LoopHarness, exact: bool) {
     panic!("the exact reload did not arrive");
 }
 
+/// A **fast** reload during a movie, which is the Zaxnes movie path's own case.
+///
+/// Compiled only without `fceux-core`, and for a reason rather than to go green: a movie the
+/// engine plays itself is loaded again by the reload (FCEUX's state block is the machine, not the
+/// movie mode), so its clock goes to 0 and the frame on screen is reachable only by replaying to
+/// it — the reload there is **always exact**, which lot FCEUX-48 step 4 records and
+/// `fceux_movie_app_tests::reloading_the_profile_mid_movie_keeps_the_movie_and_the_engine` holds.
+/// `a_reload_without_a_movie_is_fast` below still covers the fast path in both builds.
 #[test]
+#[cfg(not(feature = "fceux-core"))]
 fn a_fast_reload_keeps_the_frame_and_starts_the_new_scripts_there() {
+    let _serial = lock();
     let (mut harness, path) = playing(&counting(1, 1));
     harness.run(Command::Pause);
     assert!(pdata(&mut harness, 0) > 250.0);
@@ -96,10 +116,11 @@ fn a_fast_reload_keeps_the_frame_and_starts_the_new_scripts_there() {
     reload(&mut harness, false);
     let _ = std::fs::remove_file(&path);
     assert_eq!(ram(&harness), before, "the core moved");
-    assert!(
-        harness.host.session().unwrap().movie().is_some(),
-        "the movie was lost"
-    );
+    // `movie_mode` rather than `session.movie()`: lot FCEUX-48 step 4 gave the application a
+    // second source of movie frames — FCEUX's own movie mode, which an `.fm2` goes to in a build
+    // with `fceux-core` and which keeps no `MovieRun` — and "the movie was lost" is the question
+    // either way.
+    assert!(harness.host.movie_mode().is_some(), "the movie was lost");
 
     harness.run(Command::Resume);
     harness.tick_frame();
@@ -110,6 +131,7 @@ fn a_fast_reload_keeps_the_frame_and_starts_the_new_scripts_there() {
 
 #[test]
 fn an_exact_reload_replays_the_movie_with_the_new_scripts() {
+    let _serial = lock();
     let (mut harness, path) = playing(&counting(1, 1));
     harness.run(Command::Pause);
     let before = ram(&harness);
@@ -130,6 +152,7 @@ fn an_exact_reload_replays_the_movie_with_the_new_scripts() {
 
 #[test]
 fn scripts_that_change_the_core_force_an_exact_reload() {
+    let _serial = lock();
     let writer = "function Update()\n  n = (n or 0) + 1\n  SetPData(0, n)\n  Script:WriteMem(0x0300, 1)\nend\n";
     let (mut harness, path) = playing(writer);
     harness.run(Command::Pause);
@@ -149,6 +172,7 @@ fn scripts_that_change_the_core_force_an_exact_reload() {
 
 #[test]
 fn a_reload_without_a_movie_is_fast() {
+    let _serial = lock();
     let mut harness = LoopHarness::create();
     harness.launch_rom_with_script("vector", &rom::build(), Some(&counting(1, 1)));
     for _ in 0..60 {

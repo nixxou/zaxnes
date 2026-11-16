@@ -191,6 +191,11 @@ pub type Mmc3ChrRam192 = Mmc3ChrRam<0x08, 0x0B, 4>;
 #[cfg(feature = "board-mmc3-chrram")]
 pub type Mmc3ChrRam194 = Mmc3ChrRam<0x00, 0x01, 2>;
 
+/// Mapper 191, the Waixing MMC3 with 2 KiB of CHR-RAM on every bank with bit 7 set (lot
+/// MAPPERS-N): Mesen2 `MapperFactory.cpp` builds it as `MMC3_ChrRam(0x80, 0xFF, 2)`.
+#[cfg(feature = "board-191")]
+pub type Mmc3ChrRam191 = Mmc3ChrRam<0x80, 0xFF, 2>;
+
 /// Mapper 195, the Waixing **FS303**: an MMC3 clone "with a GAL that can dynamically change
 /// which CHR banks are mapped to RAM" (nesdev, "INES Mapper 195").
 ///
@@ -454,7 +459,11 @@ impl<
             // AMD-061 §8: "le sous-mappeur NES 2.0 d'une image l'emporte sur la révision par
             // défaut". Submapper 4 is "NEC MMC3 (Loading latch with 0 disables IRQ)" (nesdev,
             // "NES 2.0 submappers"), which is the revision A counter.
-            irq_revision_a: mapper_number == 4 && header.is_nes20 && header.submapper == 4,
+            // Lot FIDPLUS-C (FIDELITY-LEADS G3): the MMC6's counter is revision A's too
+            // (blargg's `6-MMC6`: no IRQ on a reload once the counter reached zero), so submapper
+            // 1 takes it with the MMC6's RAM.
+            irq_revision_a: (mapper_number == 4 && header.is_nes20 && header.submapper == 4)
+                || is_mmc6,
             irq_prescaler: 0,
             #[cfg(feature = "board-119")]
             chr_ram_windows: 0,
@@ -696,7 +705,9 @@ impl<
         feature = "board-208",
         feature = "board-219",
         feature = "board-262",
-        feature = "board-292"
+        feature = "board-292",
+        feature = "board-chip-switch",
+        feature = "board-394"
     ))]
     pub(crate) fn refresh_banks(&mut self) {
         self.update_banks();
@@ -708,7 +719,11 @@ impl<
     /// Behind `board-268`, its only caller. [`Mmc3Outer`](super::Mmc3Outer) recomputes all twelve
     /// windows itself rather than laying an overlay over the chip's, because mapper 268's outer
     /// register replaces *address lines* of both bank numbers — see that type's `refresh`.
-    #[cfg(feature = "board-268")]
+    #[cfg(any(
+        feature = "board-268",
+        feature = "board-mmc3-clones",
+        feature = "board-mmc3-p"
+    ))]
     pub(crate) const fn select(&self) -> u8 {
         self.select
     }
@@ -718,7 +733,12 @@ impl<
     ///
     /// **The second caller is mapper 208's submapper 1** (MF-UNL-11 step 2), whose page makes its
     /// one 32 KiB PRG page "the bank register value SHR 2" of the chip's own `R6`.
-    #[cfg(any(feature = "board-268", feature = "board-208"))]
+    #[cfg(any(
+        feature = "board-268",
+        feature = "board-208",
+        feature = "board-mmc3-clones",
+        feature = "board-mmc3-p",
+    ))]
     pub(crate) const fn bank_register(&self, index: usize) -> u8 {
         self.bank[index & 0x07]
     }
@@ -752,6 +772,13 @@ impl<
     ))]
     pub(crate) fn force_irq_revision_a(&mut self) {
         self.irq_revision_a = true;
+    }
+
+    /// The console model's MMC3 (lot FIDPLUS-C): the revision of the scanline counter chosen by
+    /// the player or the test campaign over the one the header implies (`true` revision A, the
+    /// NEC / Sharp MMC3A and the MMC6's counter; `false` revision B, the MMC3B / MMC3C).
+    pub(crate) fn set_irq_revision_a(&mut self, revision_a: bool) {
+        self.irq_revision_a = revision_a;
     }
 
     /// Makes `$A000` inert, for a board that holds this chip and whose own page takes the

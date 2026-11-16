@@ -64,6 +64,9 @@ pub enum OptionRow {
     Achievements,
     /// The touch pad (Rust-only, a touch screen only): no, yes or automatic.
     TouchPad,
+    /// A setting stepped through the choices of its domain, its label and its choices those of
+    /// the catalogue: the touch screen's (size, vibrations, orientation).
+    Choice(SettingId),
     /// A setting of the desktop's options window shown as a stepped row
     /// ([`super::advanced::ROW_SETTINGS`] names every one the console offers).
     Setting(SettingId),
@@ -121,11 +124,14 @@ pub enum OptionsPage {
     Audio,
     /// The slang shaders of the four slots (owner request, the desktop's Shaders window).
     Shaders,
+    /// The touch screen (Android, owner request): the pad, its size and vibrations, the
+    /// orientation.
+    Touch,
 }
 
 impl OptionsPage {
     /// Every page, for the tests that walk them all.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Optimizations,
         Self::Advanced,
         Self::Display,
@@ -138,6 +144,7 @@ impl OptionsPage {
         Self::Emulation,
         Self::Audio,
         Self::Shaders,
+        Self::Touch,
     ];
 
     /// The key of the page's title.
@@ -156,6 +163,7 @@ impl OptionsPage {
             Self::Emulation => keys::TAB_EMULATION,
             Self::Audio => keys::TAB_AUDIO,
             Self::Shaders => "shaders.title",
+            Self::Touch => keys::HANDHELD_OPTION_TOUCH_SCREEN,
         }
     }
 
@@ -175,6 +183,7 @@ impl OptionsPage {
             Self::Emulation => &EMULATION_ROWS,
             Self::Audio => &AUDIO_ROWS,
             Self::Shaders => &SHADER_ROWS,
+            Self::Touch => &TOUCH_SCREEN_ROWS,
         }
     }
 
@@ -205,7 +214,7 @@ pub const ROWS: [OptionRow; 13] = [
 
 /// The rows of the main page where the touch pad is offered (Android): its row after the
 /// controls, which is where it was before RO-3.
-pub const TOUCH_ROWS: [OptionRow; 14] = [
+pub const TOUCH_ROWS: [OptionRow; 15] = [
     OptionRow::Language,
     OptionRow::Volume,
     OptionRow::RenderScale,
@@ -213,14 +222,50 @@ pub const TOUCH_ROWS: [OptionRow; 14] = [
     OptionRow::Palette,
     OptionRow::Overscan,
     OptionRow::Region,
+    // Owner request: the orientation of the screen.
+    OptionRow::Choice(SettingId::UiOrientation),
     OptionRow::Page(OptionsPage::Shaders),
     OptionRow::Page(OptionsPage::Optimizations),
     OptionRow::Page(OptionsPage::Advanced),
     OptionRow::Controls,
-    OptionRow::TouchPad,
+    OptionRow::Page(OptionsPage::Touch),
     OptionRow::Achievements,
     OptionRow::Profiler,
 ];
+
+/// The rows of the touch screen's page (owner request): the pad, its size, its vibrations and its
+/// rewind and fast-forward buttons.
+pub const TOUCH_SCREEN_ROWS: [OptionRow; 5] = [
+    OptionRow::TouchPad,
+    OptionRow::Choice(SettingId::InputTouchScale),
+    OptionRow::Choice(SettingId::InputTouchHapticDpad),
+    OptionRow::Choice(SettingId::InputTouchHapticButtons),
+    OptionRow::Choice(SettingId::InputTouchExtra),
+];
+
+/// The values of a setting's choices, in their order.
+fn choice_values(id: SettingId) -> Vec<i32> {
+    catalogue::descriptor(id)
+        .domain()
+        .options()
+        .unwrap_or_default()
+        .iter()
+        .map(|option| {
+            #[allow(clippy::cast_possible_truncation)] // A choice's value.
+            let value = option.value as i32;
+            value
+        })
+        .collect()
+}
+
+/// The label of the choice the setting `id` holds.
+fn choice_text(id: SettingId, settings: &SettingsModel) -> String {
+    let current = settings.get(id).as_int();
+    catalogue::descriptor(id)
+        .domain()
+        .label_of(f64::from(current))
+        .map_or_else(|| current.to_string(), text::label_of_option)
+}
 
 /// The values of the touch pad row (`input.touch_pad`): no, yes, automatic.
 const TOUCH_PADS: [i32; 3] = [0, 1, 2];
@@ -334,9 +379,12 @@ pub const LIGHT_SHADOWS_ROWS: [OptionRow; 9] = [
 
 /// *Advanced options › NES picture*. The palette is the main page's row and the overscan its own
 /// screen, so what is left is what the console puts out beyond them.
-pub const NES_PICTURE_ROWS: [OptionRow; 2] = [
+pub const NES_PICTURE_ROWS: [OptionRow; 4] = [
     OptionRow::Setting(SettingId::VideoRemoveSpriteLimit),
     OptionRow::Setting(SettingId::VideoWidescreenStrictEdges),
+    // Lot FIDPLUS-D2b: the composite signal (Fidélité+) and the emphasis in 3D.
+    OptionRow::Setting(SettingId::VideoCompositeSignal),
+    OptionRow::Setting(SettingId::VideoEmphasis3d),
 ];
 
 /// *Advanced options › Camera*: the preset row that left the main page, and the field of view.
@@ -350,7 +398,41 @@ pub const CAMERA_ROWS: [OptionRow; 2] =
 /// run-ahead's frames and does nothing without it. The debugging view that goes with it
 /// (`emu.smooth_scroll_view`) is **not** here: like `audio.latency_ms` it stays a desktop row,
 /// this screen being a short curated list.
-pub const EMULATION_ROWS: [OptionRow; 6] = [
+pub const EMULATION_ROWS: [OptionRow; 39] = [
+    OptionRow::Setting(SettingId::EmuEngine),
+    // Lot CARTDB: the cartridge database and the power-on RAM, as in the window.
+    OptionRow::Setting(SettingId::EmuCartridgeDb),
+    OptionRow::Setting(SettingId::EmuPowerOnRam),
+    OptionRow::Setting(SettingId::EmuPowerOnPpuRam),
+    OptionRow::Setting(SettingId::EmuPpuRevision),
+    OptionRow::Setting(SettingId::EmuMmc3Revision),
+    OptionRow::Setting(SettingId::EmuCpuRevision),
+    OptionRow::Setting(SettingId::EmuOamaddrWriteCorruption),
+    OptionRow::Setting(SettingId::EmuOamCorruption),
+    OptionRow::Setting(SettingId::EmuPpuBusConflicts),
+    OptionRow::Setting(SettingId::EmuOamaddrBug),
+    OptionRow::Setting(SettingId::EmuOamDecay),
+    OptionRow::Setting(SettingId::EmuRainbowNetwork),
+    OptionRow::Setting(SettingId::EmuVsDip1),
+    OptionRow::Setting(SettingId::EmuVsDip2),
+    OptionRow::Setting(SettingId::EmuVsDip3),
+    OptionRow::Setting(SettingId::EmuVsDip4),
+    OptionRow::Setting(SettingId::EmuVsDip5),
+    OptionRow::Setting(SettingId::EmuVsDip6),
+    OptionRow::Setting(SettingId::EmuVsDip7),
+    OptionRow::Setting(SettingId::EmuVsDip8),
+    OptionRow::Setting(SettingId::EmuPowerOnTop),
+    OptionRow::Setting(SettingId::EmuPpu2006Delay),
+    OptionRow::Setting(SettingId::EmuPpu2006Glitch),
+    OptionRow::Setting(SettingId::EmuPpu2000Glitch),
+    OptionRow::Setting(SettingId::EmuPaletteCorruption),
+    OptionRow::Setting(SettingId::EmuPpuResetLine),
+    OptionRow::Setting(SettingId::EmuCpuPpuAlignment),
+    OptionRow::Setting(SettingId::EmuCpuApuParity),
+    OptionRow::Setting(SettingId::EmuFidelityPlus),
+    OptionRow::Setting(SettingId::EmuExactRate),
+    OptionRow::Setting(SettingId::EmuRealtimeInput),
+    OptionRow::Setting(SettingId::EmuLatePresent),
     OptionRow::Setting(SettingId::EmuRunAhead),
     OptionRow::Setting(SettingId::EmuSmoothScrollAhead),
     OptionRow::Setting(SettingId::EmuGameSpeed),
@@ -362,7 +444,10 @@ pub const EMULATION_ROWS: [OptionRow; 6] = [
 /// *Advanced options › Audio* (AUDIO-2): the choice of output. The volume stays on the main page,
 /// and `audio.latency_ms` is deliberately not here — AUDIO-1 left it out of the console screen
 /// (owner request: that screen is a short curated list), and nothing of this lot changes that.
-pub const AUDIO_ROWS: [OptionRow; 1] = [OptionRow::Setting(SettingId::AudioClassicOutput)];
+pub const AUDIO_ROWS: [OptionRow; 2] = [
+    OptionRow::Setting(SettingId::AudioClassicOutput),
+    OptionRow::Setting(SettingId::AudioConsoleProfile),
+];
 
 /// The values of the palette row (`video.nes_palette`): the setting's choices.
 fn palettes() -> Vec<i32> {
@@ -595,6 +680,9 @@ impl HandheldOptionsModel {
                     self.open(page);
                 }
             }
+            // A control only Zaxnes's own engine has does not step while another is chosen.
+            PadButton::Left | PadButton::Right | PadButton::A
+                if engine_lock(self.selected(), settings).is_some() => {}
             PadButton::Left => return self.step(settings, -1),
             PadButton::Right => return self.step(settings, 1),
             PadButton::A => {
@@ -691,6 +779,13 @@ pub fn step_row(row: OptionRow, settings: &mut SettingsModel, step: i32) -> Opti
             let next = *cycled(&TOUCH_PADS, &touch_pad(settings), step);
             settings.set(SettingId::InputTouchPad, SettingValue::Enum(next));
         }
+        OptionRow::Choice(id) => {
+            let values = choice_values(id);
+            if !values.is_empty() {
+                let next = *cycled(&values, &settings.get(id).as_int(), step);
+                settings.set(id, SettingValue::Enum(next));
+            }
+        }
         OptionRow::Controls | OptionRow::Page(_) | OptionRow::Group(_) => {}
         OptionRow::Setting(id) => super::advanced::step(id, settings, step),
         OptionRow::Achievements => return Some(OptionsCommand::OpenAchievements),
@@ -744,6 +839,7 @@ pub fn label(row: OptionRow) -> String {
         OptionRow::Pipeline => strings::get(keys::HANDHELD_OPTION_PIPELINE),
         OptionRow::Region => strings::get(keys::HANDHELD_OPTION_REGION),
         OptionRow::TouchPad => strings::get(keys::HANDHELD_OPTION_TOUCH_PAD),
+        OptionRow::Choice(id) => text::label_of(catalogue::descriptor(id)),
         OptionRow::Setting(id) => super::advanced::label(id),
         OptionRow::Controls => strings::get(keys::HANDHELD_OPTION_CONTROLS),
         OptionRow::Achievements => strings::get(keys::TAB_ACHIEVEMENTS),
@@ -799,6 +895,7 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
             RegionChoice::Ntsc => "NTSC".to_owned(),
             RegionChoice::Pal => "PAL".to_owned(),
         },
+        OptionRow::Choice(id) => choice_text(id, settings),
         OptionRow::TouchPad => match touch_pad(settings) {
             0 => strings::get(keys::HANDHELD_TOUCH_PAD_OFF),
             1 => strings::get(keys::HANDHELD_TOUCH_PAD_ON),
@@ -835,6 +932,23 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
 pub fn forced_run_ahead_note(row: OptionRow, forced: bool) -> Option<String> {
     (forced && row == OptionRow::Setting(SettingId::EmuRunAhead))
         .then(|| strings::get(keys::HANDHELD_RUN_AHEAD_FORCED))
+}
+
+/// Why `row` is locked on the console: it is a control only Zaxnes's own engine has (the
+/// widescreen, the hack packs, the sprite limit, the run-ahead) and another engine is chosen in
+/// `model`. The same list as the desktop window's, `ui::options::engine_reason`.
+#[must_use]
+pub fn engine_lock(row: OptionRow, model: &SettingsModel) -> Option<&'static str> {
+    match row {
+        OptionRow::Setting(id) => crate::ui::options::engine_reason(id, model),
+        _ => None,
+    }
+}
+
+/// The note a console row shows after its value while [`engine_lock`] locks it.
+#[must_use]
+pub fn engine_lock_note(row: OptionRow, model: &SettingsModel) -> Option<String> {
+    engine_lock(row, model).map(|_| strings::get(keys::HANDHELD_ZAXNES_ONLY))
 }
 
 /// The name of a camera preset, in the language in force.

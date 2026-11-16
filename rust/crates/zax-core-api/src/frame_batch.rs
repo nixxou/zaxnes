@@ -1,5 +1,14 @@
 use crate::TileRecord;
 
+/// The 32 bytes of PPU palette RAM (`$3F00-$3F1F`) as one frame left them, each a NES colour
+/// index 0 to 63 (REQ-CORE-045).
+///
+/// A plain array, named because it is half of what the 3D renderer reads out of a frame — lot
+/// FCEUX-6 found 29 frames being called identical across the two engines on the strength of
+/// their records alone, with a palette byte differing — and because both engines have to produce
+/// the same thing here.
+pub type PaletteSnapshot = [u8; 32];
+
 /// For each band of 8 lines (row 0 = lines 0 to 7), the range of screen x `[low, high)` the
 /// tiles of that band could show in: what the game keeps drawn there. A shape that reaches the
 /// edge of its band's range may be cut there.
@@ -19,7 +28,7 @@ pub struct FrameBatch<'a> {
     pub records: &'a [TileRecord],
     /// The 32 bytes of PPU palette RAM ($3F00-$3F1F) at the end of the frame
     /// (REQ-CORE-045). Each value is a NES colour index, 0 to 63.
-    pub palette: [u8; 32],
+    pub palette: PaletteSnapshot,
     /// The margin decoder's own background palette for the frame (16 NES colour indices, as
     /// `$3F00-$3F0F`): background records in sub-palettes 4-7 are in its sub-palettes 0-3.
     /// `None` for a frame without (its records stay in sub-palettes 0-3).

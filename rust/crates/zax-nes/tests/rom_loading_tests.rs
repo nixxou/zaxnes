@@ -61,15 +61,16 @@ fn req_core_011_truncated_image_is_rejected() {
 
 #[test]
 fn req_core_011_unsupported_mapper_is_rejected_with_its_number() {
-    // Mapper 200 = low nibble 8 in byte 6, high nibble C in byte 7.
+    // Mapper 84 (AMD-MAPPERS-N-200; 200 until that board was implemented) = low nibble 4 in
+    // byte 6, high nibble 5 in byte 7.
     let mut image = minimal();
-    image[6] = 0x80;
-    image[7] = 0xC0;
+    image[6] = 0x40;
+    image[7] = 0x50;
     let mut core = NesCore::new();
-    let result = core.load_rom(&image, "Mapper200.nes");
+    let result = core.load_rom(&image, "Mapper84.nes");
     assert!(!result.success);
     assert_eq!(RomLoadFailure::UnsupportedMapper, result.failure);
-    assert!(result.error.unwrap().contains("200"));
+    assert!(result.error.unwrap().contains("84"));
     assert!(!core.is_running());
 }
 
@@ -79,13 +80,13 @@ fn req_core_102_only_implemented_mappers_are_accepted() {
     // mapper_tests, here only that it is the gate the loader uses.
     //
     // **116 is in the table exactly when `board-116` is on** (MF-6a3 step 4, answering Q-130
-    // question 1). Mapper 200 is the number REQ-CORE-102's own acceptance criterion names and
-    // §6 item 1 of `docs/review/MF-6-inventory.md` keeps out, so it is unconditional.
+    // question 1). Mapper 84 is the number REQ-CORE-102's own acceptance criterion names since
+    // AMD-MAPPERS-N-200 (200 before; it is a board now), so it is unconditional.
     assert_eq!(
         cfg!(feature = "board-116"),
         NesCore::SUPPORTED_MAPPERS.contains(&116)
     );
-    assert!(!NesCore::SUPPORTED_MAPPERS.contains(&200));
+    assert!(!NesCore::SUPPORTED_MAPPERS.contains(&84));
     assert!(NesCore::SUPPORTED_MAPPERS.contains(&0));
     assert!(NesCore::SUPPORTED_MAPPERS.contains(&228));
 }

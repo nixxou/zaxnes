@@ -11,6 +11,7 @@ use zax_settings::values::{Color, SettingValue};
 use super::{centre, play, BrowserPurpose, ZaxUi};
 use crate::application::AppHost;
 use crate::audio::UiSound;
+use crate::emulation::fceux_validated;
 use crate::ui::options::{self, CompactRow, OptionsGroup, OptionsRow, TabEntry};
 use crate::ui::{strings, text};
 
@@ -92,6 +93,9 @@ impl ZaxUi {
         let run_ahead_forced = host
             .session()
             .is_some_and(crate::game_session::GameSession::forces_run_ahead_to_zero);
+        // Lot FCEUX-48 step 2: whether the ROM in play is one lot FCEUX-6 validated for 3D on
+        // FCEUX, read once for the whole tab like the line above — only the engine row shows it.
+        let fceux_validation = host.fceux_validation();
         // AMD-055 §3 point 6: the style parameters live in a collapsible group, whose rows are
         // drawn only while the style is Enhanced. Read once for the whole tab.
         let style_note = options::style_group_note(host.settings());
@@ -111,7 +115,7 @@ impl ZaxUi {
                     if options::is_folder(&row) {
                         self.draw_folder_row(ui, host, &row);
                     } else {
-                        draw_row(ui, host, &row, run_ahead_forced);
+                        draw_row(ui, host, &row, run_ahead_forced, fceux_validation);
                     }
                 }
                 TabEntry::Compact(compact, cells) => {
@@ -242,8 +246,15 @@ fn draw_compact_row(ui: &Ui, host: &mut AppHost, compact: CompactRow, cells: &[O
 }
 
 /// One row of a tab. `run_ahead_forced` is Q-103's verdict on the running game, which only the
-/// Run-ahead row shows.
-fn draw_row(ui: &Ui, host: &mut AppHost, row: &OptionsRow, run_ahead_forced: bool) {
+/// Run-ahead row shows; `fceux_validation` is lot FCEUX-6's verdict on it, which only the engine
+/// row shows.
+fn draw_row(
+    ui: &Ui,
+    host: &mut AppHost,
+    row: &OptionsRow,
+    run_ahead_forced: bool,
+    fceux_validation: fceux_validated::Status,
+) {
     let descriptor = row.descriptor;
     let id = descriptor.id();
     let _id = ui.push_id(descriptor.key());
@@ -306,6 +317,12 @@ fn draw_row(ui: &Ui, host: &mut AppHost, row: &OptionsRow, run_ahead_forced: boo
     if let Some(note) = options::forced_run_ahead_note(id, run_ahead_forced) {
         ui.same_line();
         side_note(ui, &note);
+    }
+    // Lot FCEUX-48 step 2: the engine row says whether this ROM is validated for 3D on FCEUX. The
+    // row stays live — the option is available for every game, which is the owner's choice.
+    if let Some(note) = options::fceux_validation_note(id, host.settings(), fceux_validation) {
+        ui.same_line();
+        ui.text_disabled(note);
     }
     if hovered {
         draw_tooltip(ui, id);

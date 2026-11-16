@@ -1,9 +1,9 @@
 //! The frames the `meshes` command feeds the engine: synthetic layouts of a profile's own
 //! patterns, or a frame dump (port of `DumpFrame`, `SyntheticFrames` and `FrameDump`).
 
+use zax_core_api::{FrameBatch, TileRecord};
 use zax_engine3d::engine::ConversionEngine;
 use zax_engine3d::image::TileImageKey;
-use zax_nes::{FrameBatch, TileRecord};
 
 use crate::HarnessError;
 
@@ -47,7 +47,7 @@ impl DumpFrame {
             mask_x: 0,
             mask_y: 0,
             margin: 0,
-            visible_rows: zax_nes::STANDARD_ROWS,
+            visible_rows: zax_core_api::STANDARD_ROWS,
             margin_y: 0,
         };
         engine.convert(&batch, counter);

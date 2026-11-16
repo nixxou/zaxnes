@@ -33,9 +33,12 @@ use run_ahead_rom as rom;
 /// A harness playing the vector ROM at `run_ahead`, past the ROM's warm-up.
 fn playing(run_ahead: i32) -> LoopHarness {
     let mut harness = LoopHarness::create();
-    harness
-        .host
-        .update_settings(|model| model.set(SettingId::EmuRunAhead, SettingValue::Int(run_ahead)));
+    // The real-time pad (on by default) reads the pads inside the frame at N = 0 only; these
+    // tests compare whole frames across N, so they run without it.
+    harness.host.update_settings(|model| {
+        model.set(SettingId::EmuRunAhead, SettingValue::Int(run_ahead));
+        model.set(SettingId::EmuRealtimeInput, SettingValue::Bool(false));
+    });
     harness.launch_rom_with_script("vector", &rom::build(), None);
     for _ in 0..8 {
         harness.tick_frame();
@@ -322,7 +325,7 @@ fn req_arch_012_the_real_states_do_not_depend_on_n() {
         let session = harness.host.session().unwrap();
         let state = (
             session.core().frame_count(),
-            session.core().bus().ram().to_vec(),
+            session.core().bus().expect("Zaxnes's bus").ram().to_vec(),
         );
         match &reference {
             None => reference = Some(state),
@@ -515,7 +518,8 @@ const ONLY_READS_THE_CORE: &str = r"
 /// frame drew, k + N (the acceptance criterion of REQ-LOOP-065).
 fn effective_run_ahead(harness: &LoopHarness) -> i64 {
     let session = harness.host.session().expect("a session");
-    i64::from(rom::displayed(session.core())) + 1 - i64::from(counter(harness))
+    let core = session.core().zaxnes().expect("Zaxnes's core");
+    i64::from(rom::displayed(core)) + 1 - i64::from(counter(harness))
 }
 
 /// Q-103, point 2 of the answer: a profile whose scripts change the core from a frame hook runs
@@ -635,6 +639,7 @@ fn session_of(source: &str) -> GameSession {
             two_dimensional_mode: None,
             console_interface: false,
             tiles: None,
+            engine: zax_core_api::EngineKind::Zaxnes,
         },
         &mut model,
     )
@@ -787,8 +792,8 @@ fn run_ahead_and_emulation_ahead_give_the_same_real_frames() {
         let left = serial.host.session().unwrap();
         let right = threaded.host.session().unwrap();
         assert_eq!(
-            left.core().bus().ram(),
-            right.core().bus().ram(),
+            left.core().bus().expect("Zaxnes's bus").ram(),
+            right.core().bus().expect("Zaxnes's bus").ram(),
             "N = {ahead}: the work RAM of the two paths parted"
         );
     }

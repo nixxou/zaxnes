@@ -19,7 +19,18 @@ workspace = true
 # `docs/review/BOARD-FEATURES.md` is the table: a row per feature, with the measured cost per
 # ROM on both runs and the one command that flips it.
 [features]
+# Lot FIDPLUS-2: per-dot trace of the PPU (`Ppu2C02::start_dot_trace`) for the differential
+# against the transistor netlist. Diagnostics only; never in `default`.
+ppu-dot-trace = []
+# Lot CPU-NETLIST-DIAG: every bus access the DMA units make (`NesBus::take_dma_trace`), for the
+# differential of the DMA cycles against the 2A03 netlist. Diagnostics only; never in `default`.
+bus-trace = []
 default = [
+    # Q-139 closed 2026-11-12: the owner validated SMB3 and Zelda II by eye (lot ACCURACY-1).
+    "ppu-2007-render-read",
+    # In `default` since lot FIDELITY (2026-11-13): the owner put fidelity to the console first, and
+    # its +0.04 % to +0.13 % is inside the per-release budget of 2026-11-09.
+    "ppu-exact-sprite-eval",
     "board-94",
     "board-105",
     "board-116",
@@ -79,7 +90,631 @@ default = [
     # In `default` since 2026-11-09 (R0, on the owner's go): MF-LEG-3 arms the two modes at run
     # time, worst ROM +0.011 %, Castlevania III -0.030 %. See the feature's own note.
     "board-mmc5-exattr-split",
+    # Lot CORE-3 (2026-11-14): back in `default` once the popular boards run their own
+    # specialised paths (lot CORE-2), which these features cannot reach. See
+    # `docs/progress/CORE-3.md` for the measurement.
+    "board-292",
+    "board-143-open-bus",
+    "mmc1-snrom-e-bit",
+    "board-jy-asic-tile-latch",
+    "board-44",
+    "board-45",
+    "board-49",
+    "board-52",
+    "board-134",
+    "board-196",
+    "board-197",
+    "board-205",
+    "board-238",
+    "board-245",
+    "board-249",
+    "board-250",
+    "board-252",
+    "board-168",
+    "board-253",
+    "board-57",
+    "board-58",
+    "board-59",
+    "board-63",
+    "board-200",
+    "board-234",
+    "board-188",
+    "board-201",
+    "board-202",
+    "board-203",
+    "board-204",
+    "board-212",
+    "board-213",
+    "board-214",
+    "board-221",
+    "board-226",
+    "board-227",
+    "board-229",
+    "board-230",
+    "board-231",
+    "board-233",
+    "board-235",
+    "board-236",
+    "board-240",
+    "board-241",
+    "board-242",
+    "board-244",
+    "board-255",
+    "board-46",
+    "board-51",
+    "board-60",
+    "board-61",
+    "board-62",
+    "board-104",
+    "board-108",
+    "board-113",
+    "board-120",
+    "board-125",
+    "board-170",
+    "board-174",
+    "board-177",
+    "board-179",
+    "board-216",
+    "board-261",
+    "board-274",
+    "board-286",
+    "board-126",
+    "board-224",
+    "board-259",
+    "board-287",
+    "board-313",
+    "board-325",
+    "board-191",
+    "board-40",
+    "board-42",
+    "board-43",
+    "board-50",
+    "board-106",
+    "board-183",
+    "board-117",
+    "board-222",
+    "board-6",
+    "board-8",
+    "board-17",
+    "board-176",
+    "board-39",
+    "board-54",
+    "board-148",
+    "board-171",
+    "board-312",
+    "board-56",
+    "board-142",
+    "board-31",
+    "board-103",
+    "board-175",
+    "board-307",
+    "board-303",
+    "board-53",
+    "board-487",
+    "board-518",
+    "board-519",
+    "board-328",
+    "board-323",
+    "board-513",
+    "board-260",
+    "board-530",
+    "board-529",
+    "board-266",
+    "board-284",
+    "board-682",
+    "board-355",
+    "board-562",
+    "board-342",
+    "board-446",
+    "board-436",
+    "board-256",
+    "board-561",
+    "board-547",
+    "board-451",
+    "board-406",
+    "board-413",
+    "board-560",
+    "board-512",
+    "board-351",
+    "board-556",
+    "board-369",
+    "board-528",
+    "board-540",
+    "board-359",
+    "board-398",
+    "board-362",
+    "board-452",
+    "board-442",
+    "board-347",
+    "board-272",
+    "board-558",
+    "board-539",
+    "board-526",
+    "board-471",
+    "board-555",
+    "board-557",
+    "board-559",
+    "board-100",
+    "board-353",
+    "board-527",
+    "board-269",
+    "board-356",
+    "board-432",
+    "board-344",
+    "board-370",
+    "board-543",
+    "board-534",
+    "board-422",
+    "board-536",
+    "board-248",
+    "board-532",
+    "board-186",
+    "board-fds",
+    "board-551",
+    "board-417",
+    "board-416",
+    "board-368",
+    "board-357",
+    "board-311",
+    "board-340",
+    "board-524",
+    "board-447",
+    "board-384",
+    "board-308",
+    "board-412",
+    "board-393",
+    "board-516",
+    "board-457",
+    "board-456",
+    "board-455",
+    "board-420",
+    "board-411",
+    "board-410",
+    "board-401",
+    "board-399",
+    "board-395",
+    "board-377",
+    "board-372",
+    "board-361",
+    "board-345",
+    "board-339",
+    "board-334",
+    "board-327",
+    "board-322",
+    "board-315",
+    "board-291",
+    "board-267",
+    "board-550",
+    "board-404",
+    "board-374",
+    "board-297",
+    "board-554",
+    "board-525",
+    "board-564",
+    "board-541",
+    "board-538",
+    "board-481",
+    "board-438",
+    "board-437",
+    "board-434",
+    "board-433",
+    "board-421",
+    "board-394",
+    "board-431",
+    "board-429",
+    "board-428",
+    "board-415",
+    "board-414",
+    "board-397",
+    "board-409",
+    "board-403",
+    "board-400",
+    "board-396",
+    "board-388",
+    "board-387",
+    "board-386",
+    "board-390",
+    "board-382",
+    "board-380",
+    "board-354",
+    "board-358",
+    "board-375",
+    "board-350",
+    "board-337",
+    "board-381",
+    "board-360",
+    "board-352",
+    "board-343",
+    "board-341",
+    "board-338",
+    "board-335",
+    "board-271",
+    "board-295",
+    "board-282",
+    "board-281",
+    "board-517",
+    "board-389",
+    "board-237",
+    "board-122",
+    "board-81",
+    "board-55",
+    # MAPPERS-N: the VS. System, out of `parked-boards` since its quirks left the PPU and the
+    # specialised paths (`Ppu2C02::remap_palette`, `BoardKind::RUNS_VS`): mm2/zelda2 `core`
+    # +0.000 % / +0.001 % with it on.
+    "board-vs-system",
+    "board-302",
+    "board-305",
+    "board-306",
+    "board-217",
+    "board-254",
+    "board-165",
+    "board-198",
+    "board-199",
+    "board-265",
+    "board-283",
+    "board-285",
+    "board-288",
+    "board-290",
+    "board-299",
+    "board-300",
+    "board-336",
+    "board-349",
+    "board-289",
+    "board-301",
+    "board-314",
+    "board-319",
+    "board-258",
+    "board-333",
+    "board-348",
+    "board-366",
+    "board-309",
+    "board-320",
+    "board-329",
+    "board-331",
+    "board-332",
+    "board-346",
+    "board-521",
+    "board-166",
+    "board-167",
+    "board-324",
+    "board-522",
+    "board-304",
 ]
+
+# MAPPERS-N umbrella (docs/progress/MAPPERS-N.md).
+board-mmc3-clones = []
+# MAPPERS-P umbrella: the MMC3 multicarts of `mmc3_p.rs`.
+board-mmc3-p = []
+board-451 = ["board-mmc3-p"]
+board-406 = ["board-mmc3-p"]
+board-512 = ["board-mmc3-p"]
+# MAPPERS-P umbrella: the chip-switching boards of `chip_switch.rs`.
+board-chip-switch = []
+board-446 = ["board-chip-switch"]
+board-351 = ["board-chip-switch"]
+board-556 = ["board-chip-switch"]
+board-369 = ["board-mmc3-p"]
+board-555 = ["board-mmc3-p"]
+board-100 = ["board-mmc3-p"]
+board-353 = ["board-mmc3-p"]
+board-269 = ["board-mmc3-p"]
+board-356 = ["board-mmc3-p"]
+board-432 = ["board-mmc3-p"]
+board-344 = ["board-mmc3-p"]
+board-370 = ["board-mmc3-p"]
+board-534 = ["board-mmc3-p"]
+board-422 = ["board-mmc3-p"]
+# MAPPERS-P umbrella: the CPU-cycle IRQ boards of `irq_p.rs`.
+board-irq-p = []
+board-355 = ["board-irq-p"]
+board-562 = ["board-irq-p"]
+board-342 = ["board-irq-p"]
+board-436 = ["board-irq-p"]
+board-256 = ["board-irq-p"]
+board-561 = ["board-irq-p"]
+board-547 = ["board-irq-p"]
+board-413 = ["board-irq-p"]
+board-560 = ["board-irq-p"]
+board-528 = ["board-irq-p"]
+board-540 = ["board-irq-p"]
+board-359 = ["board-irq-p"]
+board-442 = ["board-irq-p"]
+board-272 = ["board-irq-p"]
+board-558 = ["board-irq-p"]
+board-526 = ["board-irq-p"]
+board-471 = ["board-irq-p"]
+board-417 = ["board-irq-p"]
+board-416 = ["board-irq-p"]
+board-368 = ["board-irq-p"]
+board-357 = ["board-irq-p"]
+board-311 = ["board-irq-p"]
+# MAPPERS-P umbrella: the VRC2/VRC4 boards of `vrc_p.rs`.
+board-vrc-p = []
+board-398 = ["board-vrc-p"]
+board-362 = ["board-vrc-p"]
+board-559 = ["board-vrc-p"]
+board-527 = ["board-vrc-p"]
+board-524 = ["board-vrc-p"]
+board-447 = ["board-vrc-p"]
+board-384 = ["board-vrc-p"]
+board-308 = ["board-vrc-p"]
+board-412 = ["board-mmc3-p"]
+board-393 = ["board-mmc3-p"]
+board-516 = ["board-mmc3-p"]
+board-457 = ["board-mmc3-p"]
+board-456 = ["board-mmc3-p"]
+board-455 = ["board-mmc3-p"]
+board-420 = ["board-mmc3-p"]
+board-411 = ["board-mmc3-p"]
+board-410 = ["board-mmc3-p"]
+board-401 = ["board-mmc3-p"]
+board-399 = ["board-mmc3-p"]
+board-395 = ["board-mmc3-p"]
+board-377 = ["board-mmc3-p"]
+board-372 = ["board-mmc3-p"]
+board-361 = ["board-mmc3-p"]
+board-345 = ["board-mmc3-p"]
+board-339 = ["board-mmc3-p"]
+board-334 = ["board-mmc3-p"]
+board-327 = ["board-mmc3-p"]
+board-322 = ["board-mmc3-p"]
+board-315 = ["board-mmc3-p"]
+board-291 = ["board-mmc3-p"]
+board-267 = ["board-mmc3-p"]
+
+board-44 = ["board-mmc3-clones"]
+
+board-45 = ["board-mmc3-clones"]
+
+board-49 = ["board-mmc3-clones"]
+
+board-52 = ["board-mmc3-clones"]
+
+board-134 = ["board-mmc3-clones"]
+
+board-196 = ["board-mmc3-clones"]
+
+board-197 = ["board-mmc3-clones"]
+
+board-205 = ["board-mmc3-clones"]
+
+board-238 = ["board-mmc3-clones"]
+
+board-245 = ["board-mmc3-clones"]
+
+board-249 = ["board-mmc3-clones"]
+
+board-250 = ["board-mmc3-clones"]
+board-253 = []
+# MAPPERS-N: the Waixing VRC4 clone with CHR-RAM selected by mask/compare (`Waixing252`).
+board-252 = []
+# MAPPERS-N: RacerMate Challenge II (`Racermate`).
+board-168 = []
+
+# MAPPERS-N umbrella.
+board-latch-multi = ["board-decode-boards"]
+# MAPPERS-P umbrella: the boards of `mmc1_outer.rs`.
+board-mmc1-outer = ["board-decode-boards"]
+board-543 = ["board-mmc1-outer"]
+board-550 = ["board-mmc1-outer"]
+board-404 = ["board-mmc1-outer"]
+board-374 = ["board-mmc1-outer"]
+board-297 = ["board-mmc1-outer"]
+# MAPPERS-P umbrella: the discrete boards of `multicart_p.rs`.
+board-multi-p = ["board-decode-boards"]
+board-452 = ["board-multi-p"]
+board-347 = ["board-multi-p"]
+board-539 = ["board-multi-p"]
+board-557 = ["board-multi-p"]
+board-536 = ["board-mmc3-chrram"]
+board-248 = ["board-mmc3-scramble"]
+# MAPPERS-P: 532 (China Ersan 2), the Namco 163 with its font overlay.
+board-532 = []
+# MAPPERS-P: the Study Box (186), from a .studybox tape and StudyBox.bin; a bare iNES 186
+# stays refused.
+board-186 = ["board-irq-p"]
+# Lot FDS: the Famicom Disk System, from a .fds/.qd image and the user's disksys.rom.
+board-fds = ["board-irq-p"]
+board-551 = ["board-178"]
+board-340 = ["board-multi-p"]
+board-554 = ["board-multi-p"]
+board-525 = ["board-multi-p"]
+board-564 = ["board-multi-p"]
+board-541 = ["board-multi-p"]
+board-538 = ["board-multi-p"]
+board-481 = ["board-multi-p"]
+board-438 = ["board-multi-p"]
+board-437 = ["board-multi-p"]
+board-434 = ["board-multi-p"]
+board-433 = ["board-multi-p"]
+board-421 = ["board-jy-asic"]
+board-394 = ["board-jy-asic"]
+board-431 = ["board-multi-p"]
+board-429 = ["board-multi-p"]
+board-428 = ["board-multi-p"]
+board-415 = ["board-multi-p"]
+board-414 = ["board-multi-p"]
+board-397 = ["board-jy-asic"]
+board-409 = ["board-multi-p"]
+board-403 = ["board-multi-p"]
+board-400 = ["board-multi-p"]
+board-396 = ["board-multi-p"]
+board-388 = ["board-jy-asic"]
+board-387 = ["board-jy-asic"]
+board-386 = ["board-jy-asic"]
+board-390 = ["board-multi-p"]
+board-382 = ["board-multi-p"]
+board-380 = ["board-multi-p"]
+board-354 = ["board-multi-p"]
+board-358 = ["board-jy-asic"]
+board-375 = ["board-multi-p"]
+board-350 = ["board-multi-p"]
+board-337 = ["board-multi-p"]
+board-381 = ["board-multi-p"]
+board-360 = ["board-multi-p"]
+board-352 = ["board-multi-p"]
+board-343 = ["board-multi-p"]
+board-341 = ["board-multi-p"]
+board-338 = ["board-multi-p"]
+board-335 = ["board-multi-p"]
+board-271 = ["board-multi-p"]
+board-295 = ["board-jy-asic"]
+board-282 = ["board-jy-asic"]
+board-281 = ["board-jy-asic"]
+board-517 = ["board-multi-p"]
+board-389 = ["board-multi-p"]
+board-237 = ["board-multi-p"]
+board-122 = ["board-multi-p"]
+board-81 = ["board-multi-p"]
+board-55 = ["board-multi-p"]
+board-57 = ["board-latch-multi"]
+board-58 = ["board-latch-multi"]
+board-59 = ["board-latch-multi"]
+board-63 = ["board-latch-multi"]
+# Mapper 200 in default since the owner accepted AMD-MAPPERS-N-200 (2026-11-15): SPEC-02's refusal
+# criteria now name mapper 84.
+board-200 = ["board-latch-multi"]
+board-201 = ["board-latch-multi"]
+board-202 = ["board-latch-multi"]
+board-203 = ["board-latch-multi"]
+board-204 = ["board-latch-multi"]
+board-212 = ["board-latch-multi"]
+board-213 = ["board-latch-multi"]
+board-214 = ["board-latch-multi"]
+board-221 = ["board-latch-multi"]
+board-226 = ["board-latch-multi"]
+board-227 = ["board-latch-multi"]
+board-229 = ["board-latch-multi"]
+board-230 = ["board-latch-multi"]
+board-231 = ["board-latch-multi"]
+board-233 = ["board-latch-multi"]
+board-235 = ["board-latch-multi"]
+board-236 = ["board-latch-multi"]
+board-240 = ["board-latch-multi"]
+board-241 = ["board-latch-multi"]
+board-242 = ["board-latch-multi"]
+board-244 = ["board-latch-multi"]
+board-255 = ["board-latch-multi"]
+board-46 = ["board-latch-multi"]
+board-51 = ["board-latch-multi"]
+board-60 = ["board-latch-multi"]
+board-61 = ["board-latch-multi"]
+board-62 = ["board-latch-multi"]
+board-104 = ["board-latch-multi"]
+board-108 = ["board-latch-multi"]
+board-113 = ["board-latch-multi"]
+board-120 = ["board-latch-multi"]
+board-125 = ["board-latch-multi"]
+board-170 = ["board-latch-multi"]
+board-174 = ["board-latch-multi"]
+board-177 = ["board-latch-multi"]
+board-179 = ["board-latch-multi"]
+board-216 = ["board-latch-multi"]
+board-261 = ["board-latch-multi"]
+board-274 = ["board-latch-multi"]
+board-286 = ["board-latch-multi"]
+board-126 = ["board-mmc3-clones"]
+board-224 = ["board-mmc3-clones"]
+board-259 = ["board-mmc3-clones"]
+board-287 = ["board-mmc3-clones"]
+board-313 = ["board-mmc3-clones"]
+board-325 = ["board-mmc3-clones"]
+board-191 = ["board-mmc3-chrram"]
+
+# MAPPERS-N umbrella.
+board-irq-latch = []
+board-40 = ["board-irq-latch"]
+board-42 = ["board-irq-latch"]
+board-43 = ["board-irq-latch"]
+board-50 = ["board-irq-latch"]
+board-106 = ["board-irq-latch"]
+board-183 = ["board-irq-latch"]
+board-117 = ["board-irq-latch"]
+board-222 = ["board-irq-latch"]
+board-6 = ["board-irq-latch"]
+board-8 = ["board-irq-latch"]
+board-17 = ["board-irq-latch"]
+board-176 = []
+board-39 = ["board-latch-multi"]
+board-54 = ["board-latch-multi"]
+board-148 = ["board-latch-multi"]
+board-171 = ["board-latch-multi"]
+board-312 = ["board-latch-multi"]
+board-56 = ["board-irq-latch"]
+board-142 = ["board-irq-latch"]
+
+# MAPPERS-N umbrella.
+board-fine-rom = ["board-decode-boards"]
+# MAPPERS-N: the Maxi 15 multicart, registers latched on reads too (`Maxi15`).
+board-234 = ["board-decode-boards"]
+# MAPPERS-N: Bandai's Karaoke Studio and its microphone (`BandaiKaraoke`).
+board-188 = ["board-decode-boards"]
+board-302 = ["board-fine-rom"]
+# MAPPERS-N: more boards with PRG finer than 8 KiB or ROM and RAM in one window (`FineRom`).
+board-31 = ["board-fine-rom"]
+board-103 = ["board-fine-rom"]
+board-175 = ["board-fine-rom"]
+board-307 = ["board-fine-rom"]
+# MAPPERS-N: Kaiser KS7017, the 16-bit CPU-cycle IRQ (`Kaiser7017`).
+board-303 = []
+# MAPPERS-N: small unlicensed boards with one quirk each (`MiscN`).
+board-misc-n = ["board-decode-boards"]
+board-53 = ["board-misc-n"]
+board-487 = ["board-misc-n"]
+board-518 = ["board-misc-n"]
+board-519 = ["board-misc-n"]
+board-328 = ["board-misc-n"]
+# MAPPERS-N: Farid's SLROM multicart, an MMC1 behind an outer register (`FaridSlrom`).
+board-323 = ["board-decode-boards"]
+board-305 = ["board-fine-rom"]
+board-306 = ["board-latch-multi"]
+board-217 = ["board-mmc3-clones"]
+board-254 = ["board-mmc3-clones"]
+board-165 = ["board-mmc3-clones"]
+board-198 = ["board-mmc3-clones"]
+board-199 = ["board-mmc3-clones"]
+board-513 = ["board-mmc3-clones"]
+board-260 = ["board-mmc3-clones"]
+# MAPPERS-N: the AX5705, a VRC4 behind crossed lines (`Ax5705`).
+board-530 = []
+# MAPPERS-N: the T-230, a VRC4e with one 16 KiB bank (`T230`).
+board-529 = []
+# MAPPERS-N: City Fighter IV, a VRC4 with A13/A14 crossed (`CityFighter`).
+board-266 = []
+# MAPPERS-N: the Drip homebrew board, extended attributes on the MMC5's path (`Drip`).
+board-284 = ["board-mmc5-exattr-split"]
+# MAPPERS-N: Broke Studio's Rainbow board, its nametables on the MMC5's path (`Rainbow`).
+board-682 = ["board-mmc5-exattr-split"]
+board-265 = ["board-latch-multi"]
+board-283 = ["board-latch-multi"]
+board-285 = ["board-latch-multi"]
+board-288 = ["board-latch-multi"]
+board-290 = ["board-latch-multi"]
+board-299 = ["board-latch-multi"]
+board-300 = ["board-latch-multi"]
+board-336 = ["board-latch-multi"]
+board-349 = ["board-latch-multi"]
+board-289 = ["board-latch-multi"]
+board-301 = ["board-latch-multi"]
+board-314 = ["board-latch-multi"]
+board-319 = ["board-latch-multi"]
+board-258 = ["board-mmc3-clones"]
+board-333 = ["board-mmc3-clones"]
+board-348 = ["board-mmc3-clones"]
+board-366 = ["board-mmc3-clones"]
+board-309 = ["board-latch-multi"]
+board-320 = ["board-latch-multi"]
+board-329 = ["board-latch-multi"]
+board-331 = ["board-latch-multi"]
+board-332 = ["board-latch-multi"]
+board-346 = ["board-latch-multi"]
+board-521 = ["board-latch-multi"]
+board-166 = ["board-latch-multi"]
+board-167 = ["board-latch-multi"]
+board-324 = ["board-latch-multi"]
+board-522 = ["board-latch-multi"]
+board-304 = ["board-irq-latch"]
+# MAPPERS-N end
 
 # Mappers 76, 88, 95, 154 and 206, the Namco 108 / DxROM family: one board with four
 # parameters, 45 titles (MF-6a step 1, which measured `smb3/core` +45 707 and `m4` +66 921).
@@ -1089,7 +1724,6 @@ board-taito-x1 = ["board-small-boards"]
 # vertical split: over the tolerance on four of PR-1's thirteen and two of level 2's five, its
 # own note above carrying the figures and the one symbol they come from.
 parked-boards = [
-    "board-vs-system",
     "board-292",
     "board-143-open-bus",
 ]
@@ -1200,8 +1834,29 @@ ppu-exact-sprite-eval = []
 #
 # Not in `parked-boards`, for the reason `ppu-exact-sprite-eval` is not: that umbrella is for
 # left-out *boards*. `docs/review/BOARD-FEATURES.md` has the row and the command.
+#
+# **In `default` since 2026-11-12 (Q-139 closed).** Lot ACCURACY-1 measured SMB3's status bar one
+# line low without it against both MesenCE and NesHawk, and identical to NesHawk with it; the owner
+# then validated SMB3 and Zelda II by eye, with and without the widescreen pack. Golden-core over
+# the 98 originals moves on the 8 SMB3 and 3 Zelda II dumps only, picture and tiles only (cycles
+# and audio unchanged): `268b4adbd7ce36155bb02f591c892f08c91a4b9ff063aba7fea2d48198341840`.
 ppu-2007-render-read = []
+
+# BizHawk's `.bk2` movies and the TAS reader the harness and the application share (owner request:
+# the application opens a `.bk2`). Off by default so the core alone pulls no archive library.
+bk2 = ["dep:sha1", "dep:zip", "dep:serde_json"]
+
+# The types the two engines share (lot FCEUX-23 step 2). Everything of it is re-exported below at
+# the path it used to be at, so a consumer of this crate need not know it moved.
+[dependencies]
+zax-core-api = { path = "../zax-core-api" }
+# The `.bk2` reader (feature `bk2`): the archive and the ROM's SHA-1 the movie names.
+sha1 = { version = "0.11.0", default-features = false, optional = true }
+zip = { version = "7.3.0", default-features = false, features = ["deflate"], optional = true }
+serde_json = { workspace = true, optional = true }
 
 [dev-dependencies]
 sha2 = "0.10"
+zax-core-api = { path = "../zax-core-api" }
 zax-goldens = { path = "../zax-goldens" }
+

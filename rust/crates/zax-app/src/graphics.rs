@@ -369,20 +369,21 @@ impl Graphics {
     }
 
     /// Puts the frame on the window: the scene picture `view` (when there is one) under the
-    /// menu bar, `view_height` pixels high, then the interface [`ImguiFrontend::build`] built.
+    /// menu bar, `view_height` pixels high and `view_bottom` above the window's bottom (the
+    /// touch pad's band in portrait), then the interface [`ImguiFrontend::build`] built.
     pub fn draw_window(
         &self,
         window: &mut HostWindow,
         view: Option<&SceneView>,
         ui: &mut ImguiFrontend,
         (width, height): (i32, i32),
-        view_height: i32,
+        (view_height, view_bottom): (i32, i32),
     ) {
         match self {
             Self::Gl { gl, .. } => {
                 framebuffer::begin_window_pass(gl, width, height);
                 if let Some(SceneView::Gl(view)) = view {
-                    view.blit_to_default_framebuffer(width, view_height);
+                    view.blit_to_default_framebuffer(width, view_height, view_bottom);
                 }
                 ui.render();
             }
@@ -393,6 +394,7 @@ impl Graphics {
                         view: &view.view,
                         texture: &view.texture,
                         height: size(view_height),
+                        bottom: u32::try_from(view_bottom).unwrap_or(0),
                     }),
                     _ => None,
                 };

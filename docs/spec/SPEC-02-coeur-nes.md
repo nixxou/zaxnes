@@ -87,7 +87,7 @@ La ROM et le type des ports sont conservés.
 - numéro de mapper non supporté.
 
 Le message d'erreur DEVRAIT préciser la cause (« en-tête corrompu », « mapper N non supporté », « fichier tronqué »).
-- Critère d'acceptation : 16 octets `00` → échec ; ROM minimale tronquée de 1 octet → échec ; en-tête annonçant le mapper 200 → échec avec un message contenant « 200 ».
+- Critère d'acceptation : 16 octets `00` → échec ; ROM minimale tronquée de 1 octet → échec ; en-tête annonçant le mapper 84 → échec avec un message contenant « 84 » (AMD-MAPPERS-N-200).
 - Notes : la référence ne détecte pas les fichiers tronqués. L'échec est ici une amélioration (divergence acceptée).
 
 **REQ-CORE-012** (P1) — Interprétation de l'en-tête (iNES / NES 2.0, d'après nesdev) :
@@ -448,7 +448,7 @@ Le bloc commence par un numéro de version du format.
 - Critère d'acceptation : sans objet si non supporté ; un chargement refusé produit le message de REQ-CORE-011.
 
 **REQ-CORE-102** (P2) — Tout autre numéro de mapper DOIT être refusé au chargement (REQ-CORE-011). Ajouter des mappers au-delà de la liste est permis.
-- Critère d'acceptation : en-tête annonçant le mapper 200 → échec.
+- Critère d'acceptation : en-tête annonçant le mapper 84 → échec (AMD-MAPPERS-N-200 ; le mapper 200 est une vraie carte, implémentée).
 
 ### 3.12 Exactitude
 

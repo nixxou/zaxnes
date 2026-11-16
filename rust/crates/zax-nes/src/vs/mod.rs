@@ -428,6 +428,9 @@ pub struct VsSystem {
     coin_frames: [u8; Self::COIN_SLOTS],
     /// Whether the service button is held.
     service: bool,
+    /// Frames the service button is still held for after [`Self::press_service`] (lot
+    /// MAPPERS-N: a host's one-shot press, timed like a coin).
+    service_frames: u8,
 }
 
 impl VsSystem {
@@ -527,6 +530,7 @@ impl VsSystem {
             title,
             dip: 0,
             coin_frames: [0; Self::COIN_SLOTS],
+            service_frames: 0,
             service: false,
         }
     }
@@ -659,7 +663,13 @@ impl VsSystem {
     /// Whether the service button is held.
     #[must_use]
     pub const fn service_button(&self) -> bool {
-        self.service
+        self.service || self.service_frames != 0
+    }
+
+    /// Presses the service button for [`Self::COIN_FRAMES`] frames, the way a host's one-shot key
+    /// gives a credit (lot MAPPERS-N); [`Self::set_service_button`] holds it instead.
+    pub const fn press_service(&mut self) {
+        self.service_frames = Self::COIN_FRAMES;
     }
 
     /// Holds or releases the service button, which a cabinet's operator presses to give a free
@@ -674,6 +684,9 @@ impl VsSystem {
     /// A line held with [`Self::set_coin`] stays at [`u8::MAX`] and is never counted down, which
     /// is what makes that call "hold it until I say otherwise".
     pub const fn begin_frame(&mut self) {
+        if self.service_frames != 0 {
+            self.service_frames -= 1;
+        }
         let mut slot = 0;
         while slot < Self::COIN_SLOTS {
             if self.coin_frames[slot] != 0 && self.coin_frames[slot] != u8::MAX {
@@ -720,7 +733,7 @@ impl VsSystem {
     pub const fn port_bits(&self, port: usize) -> u8 {
         if port == 0 {
             let mut bits = (self.dip & 0x03) << 3;
-            if self.service {
+            if self.service_button() {
                 bits |= 0x04;
             }
 
@@ -846,7 +859,9 @@ impl VsSystem {
             writer.write_u8(frames);
         }
 
-        writer.write_bool(self.service);
+        // The pulse of `press_service` is saved as the button held, and comes back as a fresh
+        // pulse: the block keeps its layout (REQ-CORE-091).
+        writer.write_bool(self.service || self.service_frames != 0);
     }
 
     /// Restores the cabinet's state (REQ-CORE-091).
@@ -859,7 +874,9 @@ impl VsSystem {
             self.coin_frames[slot] = reader.read_u8()?;
         }
 
-        self.service = reader.read_bool()?;
+        let held = reader.read_bool()?;
+        self.service = false;
+        self.service_frames = if held { Self::COIN_FRAMES } else { 0 };
         Ok(())
     }
 }

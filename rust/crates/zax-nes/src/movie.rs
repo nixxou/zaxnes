@@ -13,8 +13,15 @@
 //! Frames are counted from the start state: frame `n` is the picture after `n` input words, and
 //! an annotation on frame `n` was written while that picture was on screen.
 
+/// BizHawk's `.bk2`, the zip archive its movies are.
+#[cfg(feature = "bk2")]
+pub mod bk2;
 pub mod fcm;
 pub mod fm2;
+/// The movie files a TAS tool writes, reduced to what an engine replays (from the harness's
+/// `movie-sync`, so that the application reads a `.bk2` with the same reader).
+#[cfg(feature = "bk2")]
+pub mod tas;
 
 /// The kind of an FCEUX or FCE Ultra movie file, by its extension: `.fm2` (text) or `.fcm`
 /// (binary). `None` for any other file.

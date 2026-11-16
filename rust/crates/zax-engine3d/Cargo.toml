@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 thiserror = "2"
+zax-core-api = { path = "../zax-core-api" }
 zax-nes = { path = "../zax-nes" }
 zax-profiles = { path = "../zax-profiles" }
 

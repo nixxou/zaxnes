@@ -54,6 +54,7 @@ impl Session {
             two_dimensional_mode: None,
             console_interface,
             tiles: None,
+            engine: zax_core_api::EngineKind::Zaxnes,
         };
         let mut game = GameSession::create(request, &mut model).unwrap();
         assert!(game.load_rom(&SyntheticRom::counter(), "test.nes").success);

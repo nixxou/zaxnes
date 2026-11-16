@@ -124,6 +124,13 @@ commands! {
     Resume => "emulation.resume", Shortcut::None, false;
     Reset => "emulation.reset", Shortcut::Fixed("Ctrl+R"), false;
     SoftReset => "emulation.soft_reset", Shortcut::None, false;
+    InsertCoin1 => "emulation.insert_coin_1", Shortcut::None, false;
+    InsertCoin2 => "emulation.insert_coin_2", Shortcut::None, false;
+    VsService => "emulation.vs_service", Shortcut::None, false;
+    // Lot FDS: the Disk System drive, in the Emulation menu, greyed out without one.
+    SwitchDiskSide => "emulation.switch_disk_side", Shortcut::None, false;
+    InsertNextDisk => "emulation.insert_next_disk", Shortcut::None, false;
+    EjectDisk => "emulation.eject_disk", Shortcut::None, false;
     Stop => "emulation.stop", Shortcut::None, false;
     FastForward => "emulation.fast_forward", Shortcut::Key("shortcut.fast_forward"), true;
     Rollback => "emulation.rollback", Shortcut::Key("shortcut.rollback"), false;
@@ -134,6 +141,7 @@ commands! {
     SpeedDown => "emulation.speed_down", Shortcut::None, false;
     SetRegion => "emulation.set_region", Shortcut::None, false;
     ToggleAutoRegion => "emulation.auto_region", Shortcut::None, true;
+    SetConsoleModel => "emulation.set_console_model", Shortcut::None, false;
     SetPortType => "emulation.set_port_type", Shortcut::None, false;
     ToggleTwoDimensional => "video.toggle_2d", Shortcut::Fixed("F11"), true;
     ResetView => "video.reset_view", Shortcut::Key("shortcut.long_press_menu"), false;

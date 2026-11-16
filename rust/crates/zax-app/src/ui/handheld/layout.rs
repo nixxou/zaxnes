@@ -85,6 +85,38 @@ impl Metrics {
     }
 }
 
+/// The window of a list to draw: its first row and how many rows, each `heights[i]` pixels high
+/// (a row whose value goes under its label is taller, owner request), so that `selected` shows
+/// whole in `room` pixels. It starts from `start` (the window rows of one height would have) and
+/// moves down while the selection does not fit, then up while room is left at the list's end.
+#[must_use]
+pub fn list_window(heights: &[f32], selected: usize, room: f32, start: usize) -> (usize, usize) {
+    let total = heights.len();
+    if total == 0 {
+        return (0, 0);
+    }
+    let selected = selected.min(total - 1);
+    let mut first = start.min(selected);
+    while first < selected && heights[first..=selected].iter().sum::<f32>() > room {
+        first += 1;
+    }
+    let mut used = 0.0;
+    let mut count = 0;
+    for height in &heights[first..] {
+        if count > 0 && used + height > room {
+            break;
+        }
+        used += height;
+        count += 1;
+    }
+    while first > 0 && first + count == total && used + heights[first - 1] <= room {
+        first -= 1;
+        used += heights[first];
+        count += 1;
+    }
+    (first, count.max(1))
+}
+
 /// A control hint: the button, and the key of its meaning.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Hint {
@@ -197,6 +229,21 @@ pub const CAPTURE_HINTS: &[Hint] = &[hint("Menu", keys::HANDHELD_HINT_CANCEL)];
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_list_window_keeps_the_selection_whole_with_rows_of_two_lines() {
+        // Six rows of 40 in 160 pixels: four fit, a two-line row (60) takes more room.
+        let heights = [40.0, 60.0, 40.0, 60.0, 40.0, 40.0];
+        assert_eq!((0, 3), list_window(&heights, 0, 160.0, 0));
+        // The fifth selected from the start: the window moves down until it shows.
+        let (first, count) = list_window(&heights, 4, 160.0, 0);
+        assert!(first <= 4 && first + count > 4);
+        let used: f32 = heights[first..first + count].iter().sum();
+        assert!(used <= 160.0);
+        // At the end, room left above is filled.
+        assert_eq!((3, 3), list_window(&heights, 5, 160.0, 5));
+        assert_eq!((0, 0), list_window(&[], 0, 160.0, 0));
+    }
     use crate::ui::strings::{self, UiLanguage};
 
     #[test]

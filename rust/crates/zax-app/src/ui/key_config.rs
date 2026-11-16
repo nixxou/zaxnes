@@ -33,7 +33,7 @@ pub struct KeyConfigSection {
 }
 
 /// The commands a binding cannot run, because they need an argument a key cannot carry.
-pub const COMMANDS_NEEDING_ARGUMENTS: [Command; 11] = [
+pub const COMMANDS_NEEDING_ARGUMENTS: [Command; 12] = [
     Command::OpenRecentRom,
     Command::LaunchGame,
     Command::SaveSlot,
@@ -41,6 +41,7 @@ pub const COMMANDS_NEEDING_ARGUMENTS: [Command; 11] = [
     Command::DeleteSlot,
     Command::SetSpeed,
     Command::SetRegion,
+    Command::SetConsoleModel,
     Command::SetPortType,
     Command::SetCameraMode,
     Command::SetSkybox,
@@ -71,13 +72,16 @@ pub const CAMERA_ACTIONS: [InputAction; 6] = [
 
 /// The six hotkeys: the five of SPEC-08 §3.11 and the soft reset AMD-044 REQ-INP-125 adds,
 /// which is bindable here and bound to nothing by default.
-pub const HOTKEYS: [InputAction; 6] = [
+pub const HOTKEYS: [InputAction; 9] = [
     InputAction::MENU,
     InputAction::ROLL_BACK,
     InputAction::FAST_FORWARD,
     InputAction::QUICK_SAVE,
     InputAction::QUICK_LOAD,
     InputAction::SOFT_RESET,
+    InputAction::COIN_1,
+    InputAction::COIN_2,
+    InputAction::SERVICE,
 ];
 
 /// The sections of the window, rebuilt when the language changes.

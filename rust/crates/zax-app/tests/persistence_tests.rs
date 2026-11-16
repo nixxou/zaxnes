@@ -71,10 +71,10 @@ fn req_pers_071_portable_mode_uses_the_userdata_folder() {
     assert_eq!(std::path::absolute(&forced).unwrap(), overridden.root);
 }
 
-/// Owner request: a portable start with no `userdata` yet takes along the per-user root, so that
-/// the saves of a version that was not portable are still there.
+/// Owner request (2026-11-12): a portable folder starts on its own; nothing of the per-user root
+/// is read or copied into it.
 #[test]
-fn the_first_portable_start_copies_the_per_user_root() {
+fn a_portable_start_reads_nothing_of_the_per_user_root() {
     let root = TemporaryRoot::new("zax-pers-");
     let executable = root.path().join("bin");
     std::fs::create_dir_all(&executable).unwrap();
@@ -84,14 +84,8 @@ fn the_first_portable_start_copies_the_per_user_root() {
     std::fs::write(local.join(PRODUCT_NAME).join("settings.json"), "mine").unwrap();
     let paths = UserDataPaths::resolve(None, Some(&executable), Some(&local));
     assert_eq!(UserDataRootKind::Portable, paths.kind);
-    assert_eq!(Some(local.join(PRODUCT_NAME)), paths.migrated_from);
-    assert_eq!(
-        "mine",
-        std::fs::read_to_string(&paths.settings_file).unwrap()
-    );
-    // The next start finds its own folder and copies nothing.
-    let again = UserDataPaths::resolve(None, Some(&executable), Some(&local));
-    assert!(again.migrated_from.is_none());
+    assert!(paths.migrated_from.is_none());
+    assert!(!paths.settings_file.exists());
 }
 
 /// Owner request: a portable folder that takes no writes (Program Files) leaves the data in the
@@ -408,7 +402,7 @@ fn req_pers_060_the_battery_ram_survives_a_restart() {
     harness.run_frames(10);
     assert_eq!(
         0x5A,
-        harness.host.session().unwrap().core().export_battery_ram()[0]
+        harness.host.session().unwrap().core().battery_ram()[0]
     );
     harness.run(Command::Stop);
     let files: Vec<_> = std::fs::read_dir(&harness.paths.battery_directory)
@@ -427,7 +421,7 @@ fn req_pers_060_the_battery_ram_survives_a_restart() {
     harness.run_with(Command::LaunchGame, CommandArgs::of_text("bat"));
     assert_eq!(
         0x5A,
-        harness.host.session().unwrap().core().export_battery_ram()[0]
+        harness.host.session().unwrap().core().battery_ram()[0]
     );
 }
 
@@ -442,5 +436,129 @@ fn req_pers_060_a_rom_without_a_battery_writes_nothing() {
         std::fs::read_dir(&harness.paths.battery_directory)
             .unwrap()
             .count()
+    );
+}
+
+/// Lot MAPPERS-P: a `.studybox` tape loads with `StudyBox.bin` found beside it, packaged as the
+/// NES 2.0 image the core runs (mapper 186); without the BIOS the user is told where to put it.
+#[test]
+fn a_study_box_tape_is_read_with_its_bios() {
+    let root = TemporaryRoot::new("zax-pers-");
+    let mut tape = b"STBX".to_vec();
+    tape.extend_from_slice(&4u32.to_le_bytes());
+    tape.extend_from_slice(&0x100u32.to_le_bytes());
+    tape.extend_from_slice(b"PAGE");
+    tape.extend_from_slice(&14u32.to_le_bytes());
+    tape.extend_from_slice(&[0, 0, 0, 0, 4, 0, 0, 0, 0xC5, 1, 2, 3, 4, 0]);
+    let path = root.path().join("lesson.studybox");
+    std::fs::write(&path, &tape).unwrap();
+    assert_eq!(
+        zax_app::emulation::rom_file::STUDY_BOX_BIOS_MISSING_MESSAGE,
+        rom_file::read(&path).unwrap_err()
+    );
+    std::fs::write(root.path().join("StudyBox.bin"), vec![0u8; 0x4_0000]).unwrap();
+    let rom = rom_file::read(&path).unwrap();
+    assert_eq!("lesson.studybox", rom.name);
+    assert_eq!(16 + 0x4_0000 + tape.len(), rom.image.len());
+    assert_eq!(&rom.image[..4], b"NES\x1A");
+}
+
+/// Lot FDS: a `.fds` disk image loads with `disksys.rom` found beside it, packaged as the NES 2.0
+/// image the core runs (mapper 20: the BIOS twice, then the disk); without the BIOS the user is
+/// told where to put it, and a `.qd` is read as a Quick Disk image.
+#[test]
+fn a_disk_image_is_read_with_the_disk_system_bios() {
+    let root = TemporaryRoot::new("zax-pers-");
+    let mut disk = b"FDS\x1A\x01".to_vec();
+    disk.resize(16, 0);
+    let mut side = vec![0u8; 65_500];
+    side[0] = 0x01;
+    side[1..15].copy_from_slice(b"*NINTENDO-HVC*");
+    disk.extend_from_slice(&side);
+    let path = root.path().join("game.fds");
+    std::fs::write(&path, &disk).unwrap();
+    assert_eq!(
+        zax_app::emulation::rom_file::FDS_BIOS_MISSING_MESSAGE,
+        rom_file::read(&path).unwrap_err()
+    );
+    std::fs::write(root.path().join("disksys.rom"), vec![0u8; 0x2000]).unwrap();
+    let rom = rom_file::read(&path).unwrap();
+    assert_eq!("game.fds", rom.name);
+    assert_eq!(16 + 2 * 0x2000 + disk.len(), rom.image.len());
+    assert_eq!(&rom.image[..4], b"NES\x1A");
+
+    let mut core = zax_nes::NesCore::new();
+    assert!(core.load_rom(&rom.image, &rom.name).success);
+    assert_eq!(1, core.disk_sides());
+}
+
+/// Lot MAPPERS-P: a board whose save medium is its flash (here the COOLGIRL's save area) keeps
+/// it in `<rom>.flash` beside the RAM files, written when the game stops and read back before
+/// the first frame of the next launch.
+#[test]
+fn a_flash_save_survives_a_restart() {
+    // A COOLGIRL image (mapper 342, NES 2.0): 128 KiB of PRG, CHR-RAM. The reset code at $E000
+    // copies a routine to $0300 (moving the PRG base moves every window) that maps the save area
+    // at $8000, enables flash writes and programs $5A at $8000 by the JEDEC sequence.
+    let mut routine = Vec::new();
+    for (value, address) in [
+        (0xFE, 0x5000u16),
+        (0x00, 0x5001),
+        (0x04, 0x5007),
+        (0xAA, 0x8AAA),
+        (0x55, 0x8555),
+        (0xA0, 0x8AAA),
+        (0x5A, 0x8000),
+    ] {
+        routine.extend_from_slice(&[0xA9, value, 0x8D]);
+        routine.extend_from_slice(&address.to_le_bytes());
+    }
+    let here = 0x0300 + u16::try_from(routine.len()).unwrap();
+    routine.push(0x4C);
+    routine.extend_from_slice(&here.to_le_bytes());
+    let length = u8::try_from(routine.len() - 1).unwrap();
+    let mut code = vec![
+        0xA2, length, 0xBD, 0x10, 0xE0, 0x9D, 0x00, 0x03, 0xCA, 0x10, 0xF7,
+    ];
+    code.extend_from_slice(&[0x4C, 0x00, 0x03]);
+    code.resize(0x10, 0xEA);
+    code.extend_from_slice(&routine);
+
+    let prg = 128 * 1024;
+    let mut image = vec![0u8; 16 + prg];
+    image[..16].copy_from_slice(&[
+        0x4E, 0x45, 0x53, 0x1A, 8, 0, 0x60, 0x58, 0x01, 0, 0, 0, 0, 0, 0, 0,
+    ]);
+    let last_bank = 16 + prg - 0x2000;
+    image[last_bank..last_bank + code.len()].copy_from_slice(&code);
+    for vector in 0..3 {
+        image[16 + prg - 6 + vector * 2] = 0x00;
+        image[16 + prg - 5 + vector * 2] = 0xE0;
+    }
+
+    let mut harness = LoopHarness::create();
+    let rom = harness.write_rom(&image, "coolgirl.nes");
+    harness.catalog().add("cg", Some(&rom));
+    harness.run_with(Command::LaunchGame, CommandArgs::of_text("cg"));
+    harness.run_frames(5);
+    let saved = harness.host.session().unwrap().core().export_flash_save();
+    assert_eq!(b"ZXCG", &saved[..4]);
+    harness.run(Command::Stop);
+    let files: Vec<_> = std::fs::read_dir(&harness.paths.battery_directory)
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "flash")
+        })
+        .collect();
+    assert_eq!(1, files.len());
+    assert_eq!(saved, std::fs::read(&files[0]).unwrap());
+    // The next launch reads it back before the first frame runs.
+    harness.run_with(Command::LaunchGame, CommandArgs::of_text("cg"));
+    assert_eq!(
+        saved,
+        harness.host.session().unwrap().core().export_flash_save()
     );
 }

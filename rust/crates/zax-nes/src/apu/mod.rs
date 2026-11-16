@@ -15,6 +15,7 @@
 //! clipped (AMD-061 §6.2).
 
 mod band_limited_resampler;
+pub mod console_profile;
 mod dmc_channel;
 mod envelope;
 mod length_counter;
@@ -46,45 +47,11 @@ pub(crate) use sunsoft5b_audio::Sunsoft5bAudio;
 pub(crate) use vrc6_audio::Vrc6Audio;
 pub(crate) use vrc7_audio::Vrc7Audio;
 
-/// A rejected audio setting or read (the C# throws `ArgumentException` for these).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum AudioError {
-    /// The sample rate is outside [`Apu2A03::MIN_SAMPLE_RATE`, `Apu2A03::MAX_SAMPLE_RATE`].
-    SampleRateOutOfRange(i32),
-    /// The speed factor is zero or negative.
-    SpeedNotPositive(f64),
-    /// The fine ratio adjustment exceeds [`Apu2A03::MAX_RATIO_ADJUSTMENT`].
-    RatioAdjustmentOutOfRange(f64),
-    /// A stereo buffer must hold an even number of values.
-    OddStereoBuffer(usize),
-}
-
-impl std::fmt::Display for AudioError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::SampleRateOutOfRange(rate) => write!(
-                f,
-                "sample rate {rate} is outside {}..={}",
-                Apu2A03::MIN_SAMPLE_RATE,
-                Apu2A03::MAX_SAMPLE_RATE
-            ),
-            Self::SpeedNotPositive(speed) => write!(f, "speed {speed} must be positive"),
-            Self::RatioAdjustmentOutOfRange(value) => write!(
-                f,
-                "ratio adjustment {value} exceeds ±{}",
-                Apu2A03::MAX_RATIO_ADJUSTMENT
-            ),
-            Self::OddStereoBuffer(len) => {
-                write!(
-                    f,
-                    "a stereo buffer must hold an even number of values, not {len}"
-                )
-            }
-        }
-    }
-}
-
-impl std::error::Error for AudioError {}
+// A rejected audio setting or read is on the `Engine` trait (`read_audio`), so it lives in
+// `zax-core-api` since lot FCEUX-23 step 2, with the three bounds its messages print; re-exported
+// here at the path it was at, and `Apu2A03`'s three associated constants are defined as those
+// bounds, so every message is unchanged to the character.
+pub use zax_core_api::AudioError;
 
 /// Four-step frame sequencer, NTSC, in CPU cycles after the sequencer reset (nesdev, "APU
 /// Frame Counter"). The last entry closes the sequence and restarts it.
@@ -241,12 +208,20 @@ pub struct Apu2A03 {
     noise: NoiseChannel,
     dmc: DmcChannel,
     resampler: BandLimitedResampler,
+    /// The console whose analog audio path is imitated (`console_profile`); `None`, the default,
+    /// keeps the output as it always was.
+    console_profile: Option<&'static console_profile::ConsoleAudioProfile>,
+    /// The console model's letterless RP2A03 (lot FIDPLUS-C), a setting, not state.
+    letterless_cpu: bool,
     ring: Arc<Mutex<SampleRing>>,
 
     timing: RegionTiming,
     sample_rate: i32,
     speed: f64,
     ratio_adjustment: f64,
+    /// Lot FIDPLUS-B: the samples follow the console's clock (`RegionTiming::exact_frames_per_second`)
+    /// rather than the nominal frame rate, for a host that chains frames at the exact rate.
+    exact_rate: bool,
 
     cycles: i64,
     apu_cycle: bool,
@@ -303,11 +278,14 @@ impl Clone for Apu2A03 {
             noise: self.noise.clone(),
             dmc: self.dmc.clone(),
             resampler: self.resampler.clone(),
+            console_profile: self.console_profile,
+            letterless_cpu: self.letterless_cpu,
             ring: Arc::new(Mutex::new(ring)),
             timing: self.timing,
             sample_rate: self.sample_rate,
             speed: self.speed,
             ratio_adjustment: self.ratio_adjustment,
+            exact_rate: self.exact_rate,
             cycles: self.cycles,
             apu_cycle: self.apu_cycle,
             frame_counter: self.frame_counter,
@@ -339,15 +317,15 @@ impl Default for Apu2A03 {
 
 impl Apu2A03 {
     /// Lowest output sample rate the core accepts (REQ-CORE-070).
-    pub const MIN_SAMPLE_RATE: i32 = 22_050;
+    pub const MIN_SAMPLE_RATE: i32 = zax_core_api::MIN_SAMPLE_RATE;
     /// Highest output sample rate the core accepts (REQ-CORE-070).
-    pub const MAX_SAMPLE_RATE: i32 = 96_000;
+    pub const MAX_SAMPLE_RATE: i32 = zax_core_api::MAX_SAMPLE_RATE;
     /// Default output sample rate (REQ-CORE-070, SPEC-11 REQ-AUD-001).
     pub const DEFAULT_SAMPLE_RATE: i32 = 48_000;
     /// Minimum capacity of the output buffer, in mono samples (REQ-CORE-071).
     pub const MIN_BUFFER_SAMPLES: usize = 10_000;
     /// Largest fine adjustment of the resampling ratio a frontend may ask for (REQ-CORE-070).
-    pub const MAX_RATIO_ADJUSTMENT: f64 = 0.005;
+    pub const MAX_RATIO_ADJUSTMENT: f64 = zax_core_api::MAX_RATIO_ADJUSTMENT;
     // The linear steps and the 1.526 gain of REQ-CORE-073 before AMD-054 are gone: the mixing
     // is the non-linear form of `mixer`.
 
@@ -361,11 +339,14 @@ impl Apu2A03 {
             noise: NoiseChannel::default(),
             dmc: DmcChannel::default(),
             resampler: BandLimitedResampler::new(),
+            console_profile: None,
+            letterless_cpu: false,
             ring: Arc::new(Mutex::new(SampleRing::new(Self::MIN_BUFFER_SAMPLES))),
             timing: RegionTiming::default(),
             sample_rate: Self::DEFAULT_SAMPLE_RATE,
             speed: 1.0,
             ratio_adjustment: 0.0,
+            exact_rate: false,
             cycles: 0,
             apu_cycle: false,
             frame_counter: 0,
@@ -442,6 +423,18 @@ impl Apu2A03 {
         }
     }
 
+    /// With a console profile, the expansion audio takes the profile chain's own path (owner,
+    /// 2026-11-15): a step of its band-limited signal from `from` to `to`, and nothing in the
+    /// clip. Called from the mix on the cycle after the level moved, on the mix's cache miss that
+    /// move forces, so the setter the MMC5 calls stays what it was before the profiles; out of
+    /// line, the standard path never reaches it.
+    #[cold]
+    #[inline(never)]
+    fn profile_expansion_step(&mut self, from: i32, to: i32) {
+        self.resampler
+            .add_expansion_step(mixer::to_float(-to) - mixer::to_float(-from));
+    }
+
     /// Whether the DMC's memory reader wants a byte (nesdev, "DMA").
     #[must_use]
     pub const fn needs_dmc_dma(&self) -> bool {
@@ -465,9 +458,19 @@ impl Apu2A03 {
         self.dmc.cycles_until_fetch()
     }
 
+    /// The half of the APU cycle the next CPU cycle is: the parity the `$4017` reset delay and the
+    /// DMC's load delay read.
+    #[must_use]
+    pub const fn apu_cycle(&self) -> bool {
+        self.apu_cycle
+    }
+
     /// Hands the byte a DMC DMA fetched to the memory reader.
-    pub fn supply_dmc_byte(&mut self, value: u8) {
-        self.dmc.supply_byte(value);
+    ///
+    /// `Some` when the hardware would ask for one more fetch and take it back (see
+    /// `DmcChannel::supply_byte`).
+    pub fn supply_dmc_byte(&mut self, value: u8) -> Option<u32> {
+        self.dmc.supply_byte(value)
     }
 
     /// Mono samples waiting to be read.
@@ -547,6 +550,15 @@ impl Apu2A03 {
     #[must_use]
     pub const fn ratio_adjustment(&self) -> f64 {
         self.ratio_adjustment
+    }
+
+    /// Lot FIDPLUS-B: samples at the console's own frame rate (`true`) or at the nominal one the
+    /// host chains frames at by default (REQ-CORE-070).
+    pub fn set_exact_rate(&mut self, exact: bool) {
+        if self.exact_rate != exact {
+            self.exact_rate = exact;
+            self.recompute_ratio();
+        }
     }
 
     /// Sets the fine ratio adjustment.
@@ -644,9 +656,15 @@ impl Apu2A03 {
         self.frame_irq_status = false;
         self.frame_irq_clear_at = 0;
         self.frame_irq_pending = false;
-        self.frame_counter = 0;
-        self.frame_step = 0;
-        self.pending_sequencer_reset = 0;
+        // Q-078 keeps the 2A03G's reset of the frame sequencer; the letterless RP2A03 leaves it
+        // running (nesdev "CPU power up state", BeesNES `LSNApu2A0X.h:576`, which excludes the
+        // PAL chip). Owner, 2026-11-15: that chip, when chosen (`emu.cpu_revision` or a letterless
+        // audio profile), keeps its own behaviour (FIDELITY-LEADS G4).
+        if !self.letterless_reset() {
+            self.frame_counter = 0;
+            self.frame_step = 0;
+            self.pending_sequencer_reset = 0;
+        }
 
         // Every channel output may have moved, and the status byte a read would see with it.
         // The level is recomputed on the next cycle, test point included.
@@ -696,7 +714,9 @@ impl Apu2A03 {
         // 08.irq_timing).
         if self.frame_irq_pending {
             self.frame_irq_pending = false;
-            self.frame_irq_flag = true;
+            // With the interrupt inhibited the flag still shows in `$4015` (see
+            // `set_frame_irq`); only the line stays up.
+            self.frame_irq_flag = !self.irq_inhibited;
             // The flag being raised again overrides a clear a `$4015` read had armed and whose
             // get cycle has not come: two stores in a branch three cycles of a frame take, and
             // nothing outside it.
@@ -866,7 +886,20 @@ impl Apu2A03 {
                     self.clock_half_frame();
                     self.set_frame_irq();
                 }
-                _ => self.set_frame_irq(),
+                3 => self.set_frame_irq(),
+                _ => {
+                    if self.irq_inhibited {
+                        // The third cycle sets bit 6 "according to the Suppress Frame Counter
+                        // Interrupts flag": inhibited, the bit the two cycles before raised goes
+                        // back down, seen from the next cycle like everything the sequencer does
+                        // (`AccuracyCoin`, `Frame Counter IRQ` L).
+                        if self.frame_irq_status {
+                            self.frame_irq_clear_at = self.cycles + 1;
+                        }
+                    } else {
+                        self.set_frame_irq();
+                    }
+                }
             }
         }
 
@@ -891,10 +924,16 @@ impl Apu2A03 {
         }
     }
 
+    /// Raises bit 6 of `$4015` for the next cycle, and the IRQ line with it unless the interrupt
+    /// is inhibited.
+    ///
+    /// **Inhibited, the bit is still raised**, on the first two of the sequence's last three
+    /// cycles: "29828 cycles after frame counter reset: $4015.6 is set to 1. 29829: $4015.6 is
+    /// set to 1 (the IRQ level detector is only pulled low if the Suppress Frame Counter
+    /// Interrupts flag is false). 29830: $4015.6 is set according to the flag" (`AccuracyCoin`,
+    /// `Frame Counter IRQ` I to M). `step_cpu_cycle` keeps the line up when it applies this.
     fn set_frame_irq(&mut self) {
-        if !self.irq_inhibited {
-            self.frame_irq_pending = true;
-        }
+        self.frame_irq_pending = true;
     }
 
     fn clock_quarter_frame(&mut self) {
@@ -1070,6 +1109,8 @@ impl Apu2A03 {
     fn apply_timing(&mut self) {
         self.noise.set_timing(&self.timing);
         self.dmc.set_timing(&self.timing);
+        self.pulse1.set_swaps_duty(self.timing.swaps_pulse_duty);
+        self.pulse2.set_swaps_duty(self.timing.swaps_pulse_duty);
     }
 
     fn recompute_ratio(&mut self) {
@@ -1082,13 +1123,74 @@ impl Apu2A03 {
         // REQ-CORE-070: a frame at speed 1 yields sampleRate / nominalFps samples (800 at
         // 48 kHz in NTSC, 960 in PAL; DEC-R2-T3). REQ-CORE-072 divides that by the speed
         // factor; the frontend's fine adjustment rides on top.
-        let samples_per_frame = f64::from(self.sample_rate)
-            / (f64::from(timing.nominal_frames_per_second) * self.speed);
+        let frames_per_second = if self.exact_rate {
+            timing.exact_frames_per_second()
+        } else {
+            f64::from(timing.nominal_frames_per_second)
+        };
+        let samples_per_frame = f64::from(self.sample_rate) / (frames_per_second * self.speed);
         let samples_per_cycle =
             samples_per_frame * (1.0 + self.ratio_adjustment) / cycles_per_frame;
 
         self.resampler
             .set_ratio(samples_per_cycle, self.sample_rate);
+        self.resampler
+            .set_profile(self.console_profile, self.sample_rate);
+    }
+
+    /// Diagnostic: the DMC output unit's timer and bit counter, whose power-on values the
+    /// console leaves undefined (the CPU differential against the 2A03 netlist aligns them).
+    #[doc(hidden)]
+    pub fn diagnostic_set_dmc_phase(&mut self, timer: i32, bits_remaining: i32) {
+        self.dmc.set_output_phase(timer, bits_remaining);
+        self.level_dirty = true;
+    }
+
+    /// Diagnostic: the APU's get / put parity against the CPU, random at power-on on a console.
+    #[doc(hidden)]
+    pub fn diagnostic_flip_parity(&mut self) {
+        self.apu_cycle = !self.apu_cycle;
+    }
+
+    /// The console model's CPU (lot FIDPLUS-C, FIDELITY-LEADS G4): a letterless RP2A03 chosen
+    /// by itself, whatever the audio profile. The noise channel takes the letterless chip when
+    /// either says so.
+    pub fn set_letterless_cpu(&mut self, letterless: bool) {
+        self.letterless_cpu = letterless;
+        self.apply_letterless();
+    }
+
+    /// Whether a reset leaves the frame sequencer running: a letterless NTSC RP2A03.
+    fn letterless_reset(&self) -> bool {
+        !self.timing.uses_pal_noise_and_dmc_periods
+            && (self.letterless_cpu
+                || self
+                    .console_profile
+                    .is_some_and(|profile| profile.letterless))
+    }
+
+    fn apply_letterless(&mut self) {
+        self.noise.set_letterless(
+            self.letterless_cpu
+                || self
+                    .console_profile
+                    .is_some_and(|profile| profile.letterless),
+        );
+    }
+
+    /// Imitates the analog audio path of one measured console (`console_profile`): `index` 0 for
+    /// none, the output as it always was; `n` for `CONSOLE_AUDIO_PROFILES[n - 1]`. Out-of-range
+    /// indices mean none. Nothing changes per CPU cycle: the channel gains apply when the level
+    /// moves and the filters once per output sample.
+    pub fn set_console_profile(&mut self, index: usize) {
+        self.console_profile = index
+            .checked_sub(1)
+            .and_then(|slot| console_profile::CONSOLE_AUDIO_PROFILES.get(slot));
+        self.apply_letterless();
+        self.resampler
+            .set_profile(self.console_profile, self.sample_rate);
+        self.level_key = -1;
+        self.level_dirty = true;
     }
 
     /// The mixed output level, in [-1, 1] (REQ-CORE-073): the non-linear mix `A` of the five
@@ -1127,9 +1229,22 @@ impl Apu2A03 {
         }
 
         self.level_key = key;
+        let clipped_expansion = match self.console_profile {
+            None => {
+                self.mixer_apu = mixer::mix(pulse1, pulse2, triangle, noise, dmc);
+                self.expansion_level
+            }
+            Some(profile) => {
+                self.mixer_apu = profile_mix(profile, [pulse1, pulse2, triangle, noise, dmc]);
+                // The expansion audio takes its own path (`profile_expansion_step`).
+                if self.expansion_level != self.level_expansion {
+                    self.profile_expansion_step(self.level_expansion, self.expansion_level);
+                }
+                0
+            }
+        };
         self.level_expansion = self.expansion_level;
-        self.mixer_apu = mixer::mix(pulse1, pulse2, triangle, noise, dmc);
-        self.mixer_output = mixer::clip(self.mixer_apu, self.expansion_level);
+        self.mixer_output = mixer::clip(self.mixer_apu, clipped_expansion);
         self.level = mixer::to_float(self.mixer_output);
         self.level
     }
@@ -1149,6 +1264,42 @@ impl Apu2A03 {
 impl Apu2A03 {
     /// Bytes the APU's part of a savestate occupies at most (REQ-ARCH-013).
     pub const MAX_STATE_SIZE: usize = 512 + BandLimitedResampler::STATE_SIZE;
+
+    /// Bytes the console profile's filter block occupies (lot FIDPLUS-D1b).
+    pub const PROFILE_FILTER_STATE_SIZE: usize = BandLimitedResampler::PROFILE_STATE_SIZE + 8;
+
+    /// Whether a console audio profile is set, so that a savestate carries its filters' memory.
+    #[must_use]
+    pub const fn has_profile_filter(&self) -> bool {
+        self.resampler.has_profile_filter()
+    }
+
+    /// Appends the console profile's filter memory (nothing without a profile).
+    pub fn save_profile_filter(&self, writer: &mut StateWriter) {
+        if self.resampler.has_profile_filter() {
+            self.resampler.save_profile_filter(writer);
+            // The expansion level the band-limited signal stands at (lot FIDPLUS-D1e): the plain
+            // block leaves `M` out and restarts it at 0, which with a profile would add the
+            // board's level a second time when it pushes it back.
+            writer.write_i32(self.expansion_level);
+            writer.write_i32(self.level_expansion);
+        }
+    }
+
+    /// Reads the console profile's filter memory into the filters in force, or skips it.
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated.
+    pub fn load_profile_filter(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.resampler.load_profile_filter(reader)?;
+        let expansion_level = reader.read_i32()?;
+        let level_expansion = reader.read_i32()?;
+        if self.resampler.has_profile_filter() {
+            self.expansion_level = expansion_level;
+            self.level_expansion = level_expansion;
+        }
+        Ok(())
+    }
 
     /// Appends the APU state to `writer` (REQ-CORE-090).
     pub fn save_state(&self, writer: &mut StateWriter) {
@@ -1247,13 +1398,17 @@ impl Apu2A03 {
         //
         // The mix is written out rather than calling `current_level`, which must keep its single
         // call site to stay inlined in the per-cycle step (see the note there).
-        self.mixer_apu = mixer::mix(
+        let levels = [
             self.pulse1.output(),
             self.pulse2.output(),
             self.triangle.output(),
             self.noise.output(),
             self.dmc.output(),
-        );
+        ];
+        self.mixer_apu = match self.console_profile {
+            None => mixer::mix(levels[0], levels[1], levels[2], levels[3], levels[4]),
+            Some(profile) => profile_mix(profile, levels),
+        };
         self.mixer_output = mixer::clip(self.mixer_apu, 0);
         self.level = mixer::to_float(self.mixer_output);
 
@@ -1266,5 +1421,43 @@ impl Apu2A03 {
             self.drop_pending_samples();
         }
         Ok(())
+    }
+}
+
+/// `A` of REQ-CORE-073 for a console profile: its weighted exact mix, on the tables' scale.
+#[cold]
+#[inline(never)]
+#[allow(clippy::cast_possible_truncation)] // At most FULL_SCALE.
+fn profile_mix(profile: &console_profile::ConsoleAudioProfile, levels: [i32; 5]) -> i32 {
+    (mixer::NORMALISATION * profile.mix(levels)).round() as i32
+}
+
+#[cfg(test)]
+mod letterless_tests {
+    use super::*;
+
+    #[test]
+    fn fidplus_c_a_reset_leaves_the_letterless_sequencer_running() {
+        for (letterless, kept) in [(false, false), (true, true)] {
+            let mut apu = Apu2A03::new();
+            apu.set_letterless_cpu(letterless);
+            apu.run_cpu_cycles(5000);
+            let before = (apu.frame_counter, apu.frame_step);
+            assert_ne!((0, 0), before);
+            apu.soft_reset();
+            let after = (apu.frame_counter, apu.frame_step);
+            assert_eq!(
+                kept,
+                after == before,
+                "letterless {letterless}: {before:?} -> {after:?}"
+            );
+        }
+        // The PAL chip has no letterless revision.
+        let mut apu = Apu2A03::new();
+        apu.set_timing(RegionTiming::for_region(crate::NesRegion::Pal));
+        apu.set_letterless_cpu(true);
+        apu.run_cpu_cycles(5000);
+        apu.soft_reset();
+        assert_eq!((0, 0), (apu.frame_counter, apu.frame_step));
     }
 }

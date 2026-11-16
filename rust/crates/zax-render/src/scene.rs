@@ -488,6 +488,57 @@ pub struct SceneFrame<'a> {
     pub nes_picture: &'a [u8],
     /// The rows of `nes_picture`: 240, more with a vertical widescreen margin (0 reads as 240).
     pub nes_picture_height: usize,
+    /// The colour emphasis of each pixel of `nes_picture` (PPUMASK bits 5-7 as 0 to 7), laid out
+    /// as the picture; empty for a frame without emphasis, which costs the upload nothing (lot
+    /// FIDPLUS-D2b).
+    pub nes_picture_emphasis: &'a [u8],
+    /// The picture already decoded to colours, three bytes (R, G, B) a pixel laid out as
+    /// `nes_picture`, which then only gives the opacity: the composite decoder's output (lot
+    /// FIDPLUS-D2b step 2). Empty: the palette (with `nes_picture_emphasis`) gives the colours.
+    pub nes_picture_rgb: &'a [u8],
+}
+
+impl SceneFrame<'_> {
+    /// How the picture's pixels get their colours.
+    #[must_use]
+    pub const fn picture_colours(&self) -> PictureColours<'_> {
+        PictureColours {
+            emphasis: self.nes_picture_emphasis,
+            rgb: self.nes_picture_rgb,
+        }
+    }
+}
+
+/// What colours the NES picture beside its colour indices (lot FIDPLUS-D2b): each pixel's
+/// emphasis, or the whole picture already decoded to R, G, B. Both empty: the palette alone.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PictureColours<'a> {
+    /// PPUMASK bits 5-7 as 0 to 7 per pixel, or empty.
+    pub emphasis: &'a [u8],
+    /// Three bytes a pixel, or empty; wins over `emphasis`.
+    pub rgb: &'a [u8],
+}
+
+impl PictureColours<'_> {
+    /// The colour of pixel `at` of colour index `index`.
+    #[must_use]
+    pub fn color(&self, at: usize, index: u8) -> zax_engine3d::palette::Rgb24 {
+        if let Some(rgb) = self.rgb.get(at * 3..at * 3 + 3) {
+            return zax_engine3d::palette::Rgb24::new(rgb[0], rgb[1], rgb[2]);
+        }
+        match self.emphasis.get(at) {
+            Some(&bits) if bits != 0 => {
+                zax_engine3d::palette::nes_color_emphasized(usize::from(index & 0x3F), bits)
+            }
+            _ => zax_engine3d::palette::nes_color(usize::from(index & 0x3F)),
+        }
+    }
+
+    /// Whether the palette alone colours the picture.
+    #[must_use]
+    pub const fn plain(&self) -> bool {
+        self.emphasis.is_empty() && self.rgb.is_empty()
+    }
 }
 
 impl<'a> SceneFrame<'a> {
@@ -498,6 +549,8 @@ impl<'a> SceneFrame<'a> {
             draw_list: Some(draw_list),
             nes_picture: &[],
             nes_picture_height: 0,
+            nes_picture_emphasis: &[],
+            nes_picture_rgb: &[],
         }
     }
 }

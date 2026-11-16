@@ -37,8 +37,8 @@
 //! `LB`, `RB`, `CBT`, `FON`, `DRV`). The harness cannot hear it, so the row is a timeout with a
 //! blank screen and the PNG shows it.
 
+use super::machine::TestMachine;
 use serde_json::json;
-use zax_nes::NesCore;
 
 use super::screen::{self, Font};
 use super::{Outcome, Verdict};
@@ -50,7 +50,7 @@ const DETAILED: &str = "DETAILED TEST RESULT:";
 ///
 /// `header_mapper` is the iNES mapper of the file, so a board the ROM detects as something else
 /// is caught: that is the whole point of the suite.
-pub fn run(core: &mut NesCore, header_mapper: Option<i32>, budget: u32) -> Verdict {
+pub fn run<M: TestMachine>(core: &mut M, header_mapper: Option<i32>, budget: u32) -> Verdict {
     let frames = screen::run_until_settled(core, budget);
     let rows = screen::rows(core, Font::Ascii6);
     let text = screen::joined(&rows);

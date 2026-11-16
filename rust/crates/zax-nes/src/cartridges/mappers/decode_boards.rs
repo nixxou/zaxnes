@@ -25,6 +25,14 @@
     feature = "board-246",
     feature = "board-jaleco-72-92-86",
     feature = "board-jv001",
+    feature = "board-fine-rom",
+    feature = "board-234",
+    feature = "board-188",
+    feature = "board-misc-n",
+    feature = "board-323",
+    feature = "board-latch-multi",
+    feature = "board-mmc1-outer",
+    feature = "board-multi-p",
     feature = "board-nina03",
     feature = "board-sachen-8reg",
     feature = "board-sachen8259",
@@ -35,17 +43,35 @@ compile_error!(
      meant to be selected on its own"
 );
 
+#[cfg(feature = "board-188")]
+use super::BandaiKaraoke;
 #[cfg(feature = "board-111")]
 use super::Cheapocabra;
 #[cfg(any(feature = "board-162", feature = "board-163"))]
 use super::ChrWindowBoard;
+#[cfg(feature = "board-323")]
+use super::FaridSlrom;
+#[cfg(feature = "board-fine-rom")]
+use super::FineRom;
 #[cfg(feature = "board-77")]
 use super::IremLrog017;
 #[cfg(feature = "board-jv001")]
 use super::Jv001;
+#[cfg(feature = "board-latch-multi")]
+use super::LatchMulti;
 #[cfg(feature = "board-218")]
 use super::MagicFloor;
 use super::Mapper;
+#[cfg(feature = "board-234")]
+use super::Maxi15;
+#[cfg(feature = "board-misc-n")]
+use super::MiscN;
+#[cfg(feature = "board-mmc1-outer")]
+use super::Mmc1Outer;
+#[cfg(feature = "board-111")]
+use super::Mmc1Parallel;
+#[cfg(feature = "board-multi-p")]
+use super::MultiP;
 #[cfg(feature = "board-nina03")]
 use super::Nina03;
 #[cfg(feature = "board-96")]
@@ -143,6 +169,22 @@ pub enum DecodeBoard {
     /// Mapper 111, the Membler Industries GTROM / Cheapocabra board.
     #[cfg(feature = "board-111")]
     Cheapocabra(Cheapocabra),
+    /// Mapper 111 with CHR-ROM: the non-serialized MMC1 of the Chinese *Ninja Ryukenden*
+    /// ([`Mmc1Parallel`]).
+    #[cfg(feature = "board-111")]
+    Mmc1Parallel(Mmc1Parallel),
+    /// Mapper 234, the Maxi 15 ([`Maxi15`]).
+    #[cfg(feature = "board-234")]
+    Maxi15(Maxi15),
+    /// Mapper 188, Bandai's Karaoke Studio ([`BandaiKaraoke`]).
+    #[cfg(feature = "board-188")]
+    BandaiKaraoke(BandaiKaraoke),
+    /// Mappers 53, 487, 518 and 519 ([`MiscN`]).
+    #[cfg(feature = "board-misc-n")]
+    MiscN(MiscN),
+    /// Mapper 323, Farid's SLROM multicart ([`FaridSlrom`]).
+    #[cfg(feature = "board-323")]
+    FaridSlrom(Box<FaridSlrom>),
     // Appended by MF-VS step 4, the lot's one board: the register is a `$4016` write and not a
     // cartridge write, which is the only thing that makes it unusual here.
     /// Mapper 99, the Nintendo VS. System board.
@@ -216,6 +258,19 @@ pub enum DecodeBoard {
     /// `$6800-$6FFF`, and PRG A17 forced high on a read of `$FFE4-$FFE7` and three more ranges.
     #[cfg(feature = "board-246")]
     G0151(G0151),
+    // Appended by MAPPERS-N: the discrete multicarts, twenty-six numbers on one variant.
+    /// Lot MAPPERS-N's discrete multicarts ([`LatchMulti`]).
+    #[cfg(feature = "board-latch-multi")]
+    LatchMulti(LatchMulti),
+    /// Lot MAPPERS-N's Kaiser boards with 2 KiB PRG pages ([`FineRom`]).
+    #[cfg(feature = "board-fine-rom")]
+    FineRom(FineRom),
+    /// Lot MAPPERS-P's discrete boards ([`MultiP`]).
+    #[cfg(feature = "board-multi-p")]
+    MultiP(MultiP),
+    /// Lot MAPPERS-P's MMC1 multicarts ([`Mmc1Outer`]).
+    #[cfg(feature = "board-mmc1-outer")]
+    Mmc1Outer(Box<Mmc1Outer>),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as [`SmallBoard`]'s own `inner!` does.
@@ -234,6 +289,16 @@ macro_rules! inner {
             DecodeBoard::OekaKids($b) => $body,
             #[cfg(feature = "board-111")]
             DecodeBoard::Cheapocabra($b) => $body,
+            #[cfg(feature = "board-111")]
+            DecodeBoard::Mmc1Parallel($b) => $body,
+            #[cfg(feature = "board-234")]
+            DecodeBoard::Maxi15($b) => $body,
+            #[cfg(feature = "board-188")]
+            DecodeBoard::BandaiKaraoke($b) => $body,
+            #[cfg(feature = "board-misc-n")]
+            DecodeBoard::MiscN($b) => $body,
+            #[cfg(feature = "board-323")]
+            DecodeBoard::FaridSlrom($b) => $body,
             #[cfg(feature = "board-vs-system")]
             DecodeBoard::VsBoard($b) => $body,
             #[cfg(feature = "board-jv001")]
@@ -267,6 +332,14 @@ macro_rules! inner {
             DecodeBoard::Pec9588($b) => $body,
             #[cfg(feature = "board-246")]
             DecodeBoard::G0151($b) => $body,
+            #[cfg(feature = "board-latch-multi")]
+            DecodeBoard::LatchMulti($b) => $body,
+            #[cfg(feature = "board-fine-rom")]
+            DecodeBoard::FineRom($b) => $body,
+            #[cfg(feature = "board-mmc1-outer")]
+            DecodeBoard::Mmc1Outer($b) => $body,
+            #[cfg(feature = "board-multi-p")]
+            DecodeBoard::MultiP($b) => $body,
         }
     };
 }
@@ -294,6 +367,13 @@ impl Mapper for DecodeBoard {
 
     fn reset(&mut self, memory: &mut CartridgeMemory) {
         inner!(self, b => b.reset(memory));
+    }
+
+    /// A press on RESET, forwarded so that a **reset-detecting multicart** inside this dispatch
+    /// hears it: see [`Mapper::soft_reset`], whose default is to do nothing. One cold body in a
+    /// dispatch nothing hot inlines — this is called once per reset, not once per cycle.
+    fn soft_reset(&mut self, memory: &mut CartridgeMemory) {
+        inner!(self, b => b.soft_reset(memory));
     }
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
@@ -355,7 +435,14 @@ impl Mapper for DecodeBoard {
     /// whose window is *shorter* than its PRG-RAM: the 512 bytes of its 93C66 sit behind the
     /// volatile chip in the same `Vec`, where REQ-CORE-095's battery slice finds them, and the
     /// CPU's $6000-$7FFF window must stop at the volatile chip and mirror inside it.
-    #[cfg(any(feature = "board-164", feature = "board-178"))]
+    #[cfg(any(
+        feature = "board-164",
+        feature = "board-178",
+        feature = "board-latch-multi",
+        feature = "board-mmc1-outer",
+        feature = "board-multi-p",
+        feature = "board-323"
+    ))]
     fn prg_ram_window(&self, memory: &CartridgeMemory) -> (usize, usize) {
         inner!(self, b => b.prg_ram_window(memory))
     }
@@ -374,9 +461,62 @@ impl Mapper for DecodeBoard {
     /// **Behaviour-neutral for every other board here**: none of them overrides it, so each takes
     /// `Mapper`'s own default — the four offsets of its `BankWindows` — which is what the
     /// un-forwarded dispatch gave the whole variant.
-    #[cfg(feature = "board-246")]
+    /// Forwarded for lot MAPPERS-N's `LatchMulti` alone, whose kinds 46, 51, 108, 120, 125 and
+    /// 170 put PRG-ROM or a register — never work RAM — at `$6000-$7FFF`. Asked once per CPU write,
+    /// through `cpu_read_windows`, and not once per read, as `prg_ram_window` above.
+    #[cfg(any(
+        feature = "board-111",
+        feature = "board-latch-multi",
+        feature = "board-mmc1-outer",
+        feature = "board-multi-p",
+        feature = "board-fine-rom",
+        feature = "board-323"
+    ))]
+    fn prg_ram_enabled(&self) -> bool {
+        inner!(self, b => b.prg_ram_enabled())
+    }
+
+    /// Forwarded for mapper 234 (MAPPERS-N), whose registers latch on a CPU read, and mapper
+    /// 188, whose microphone answers `$6000-$7FFF`. Reached only for a read the cached ROM
+    /// windows do not serve (`NesBus::read_internal_body_as`), so the other boards of this enum,
+    /// which leave their windows cacheable, are not on it for ROM.
+    #[cfg(any(
+        feature = "board-234",
+        feature = "board-188",
+        feature = "board-fine-rom",
+        feature = "board-multi-p"
+    ))]
+    #[inline(never)]
+    fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+        inner!(self, b => b.cpu_read_override(memory, address))
+    }
+
+    #[cfg(any(
+        feature = "board-234",
+        feature = "board-188",
+        feature = "board-fine-rom",
+        feature = "board-multi-p"
+    ))]
+    fn cpu_peek_override(&self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+        inner!(self, b => b.cpu_peek_override(memory, address))
+    }
+
+    #[cfg(any(
+        feature = "board-234",
+        feature = "board-188",
+        feature = "board-misc-n",
+        feature = "board-246",
+        feature = "board-latch-multi",
+        feature = "board-mmc1-outer",
+        feature = "board-multi-p"
+    ))]
     fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {
         inner!(self, b => b.rom_windows(memory))
+    }
+
+    #[cfg(feature = "board-188")]
+    fn set_input_word(&mut self, word: u16) {
+        inner!(self, b => b.set_input_word(word));
     }
 
     /// Forwarded for mapper 246 alone (MF-UNL-12 step 3), the one board here with registers
@@ -390,7 +530,14 @@ impl Mapper for DecodeBoard {
     ///
     /// **Behaviour-neutral for every other board here**: none of them overrides it, so each
     /// answers `false` through `Mapper`'s own default exactly as the un-forwarded dispatch did.
-    #[cfg(feature = "board-246")]
+    #[cfg(any(
+        feature = "board-246",
+        feature = "board-latch-multi",
+        feature = "board-mmc1-outer",
+        feature = "board-multi-p",
+        feature = "board-fine-rom",
+        feature = "board-323"
+    ))]
     fn intercept_cpu_write(
         &mut self,
         memory: &mut CartridgeMemory,
@@ -435,7 +582,12 @@ impl Mapper for DecodeBoard {
         feature = "board-164",
         feature = "board-246",
         feature = "board-jv001",
-        feature = "board-sachen-8reg"
+        feature = "board-latch-multi",
+        feature = "board-mmc1-outer",
+        feature = "board-multi-p",
+        feature = "board-sachen-8reg",
+        feature = "board-fine-rom",
+        feature = "board-fine-rom",
     ))]
     #[inline(never)]
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
@@ -462,7 +614,8 @@ impl Mapper for DecodeBoard {
         feature = "board-96",
         feature = "board-162",
         feature = "board-163",
-        feature = "board-164"
+        feature = "board-164",
+        feature = "board-518"
     ))]
     fn on_ppu_address_bus(&mut self, memory: &mut CartridgeMemory, address: u16, clock: i64) {
         inner!(self, b => b.on_ppu_address_bus(memory, address, clock));
@@ -487,7 +640,8 @@ impl Mapper for DecodeBoard {
         feature = "board-111",
         feature = "board-218",
         feature = "board-sachen-8reg",
-        feature = "board-sachen8259"
+        feature = "board-sachen8259",
+        feature = "board-307"
     ))]
     #[inline(never)]
     fn nametable_page(&self, table: i32) -> i32 {

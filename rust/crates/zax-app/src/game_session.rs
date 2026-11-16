@@ -16,6 +16,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 
+use zax_core_api::{ControllerPortType, FrameBatch, RomLoadResult, TileRecord};
 use zax_engine3d::draw_list::FrameDrawList;
 use zax_engine3d::engine::ConversionEngine;
 use zax_engine3d::error::EngineError;
@@ -23,9 +24,11 @@ use zax_engine3d::palette::Rgb24;
 use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::vectors::Vec3;
 use zax_nes::movie::{Movie, MovieRun};
-use zax_nes::rom::RomLoadResult;
-use zax_nes::{ControllerPortType, FrameBatch, NesBus, NesCore, TileRecord, ZapperPosition};
+use zax_nes::{NesBus, NesCore, ZapperPosition};
 use zax_profiles::hash::tiles::TileResolver;
+
+use crate::emulation::engine_handle::EngineHandle;
+use zax_core_api::EngineKind;
 use zax_profiles::profile::GameProfile;
 use zax_profiles::setting_application;
 use zax_render::scene::SceneState;
@@ -83,7 +86,7 @@ struct ScriptInputState {
 /// The machine as scripts see it, borrowed for one call into the engine: the players' action
 /// masks, the ports and the CPU address space of the core, and the Zapper aim offset.
 struct CoreMachine<'a> {
-    core: &'a mut NesCore,
+    core: &'a mut EngineHandle,
     input: &'a mut ScriptInputState,
     /// The console RAM of the frame being converted while the core runs the next one
     /// (emulation ahead); `None` reads the core itself.
@@ -135,7 +138,7 @@ impl ScriptInput for CoreMachine<'_> {
 
     fn port_byte(&self, port: usize) -> i32 {
         if port < 2 {
-            i32::from(self.core.bus().input().port_byte(port))
+            i32::from(self.core.port_byte(port))
         } else {
             0
         }
@@ -183,7 +186,7 @@ impl ScriptMemory for CoreMachine<'_> {
 /// Runs `operation` with the scene, the core and the script inputs lent to the script API.
 fn with_context<R>(
     scene: &mut SceneState,
-    core: &mut NesCore,
+    core: &mut EngineHandle,
     input: &mut ScriptInputState,
     snapshot: Option<&MemorySnapshot>,
     operation: impl FnOnce(&mut ScriptContext<'_>) -> R,
@@ -226,6 +229,11 @@ pub struct SessionRequest<'a> {
     /// the ROM gave; what is still waiting is looked for in each displayed frame and in the
     /// cartridge's CHR-RAM.
     pub tiles: Option<TileResolver>,
+    /// The engine this game plays on (lot FCEUX-23 step 5, `emu.engine`). It is chosen **here**,
+    /// when the session is made, because changing engines means a new machine: the host decides
+    /// to rebuild the session when the choice changed, and the setting's effect is
+    /// `NextRomLoad`.
+    pub engine: EngineKind,
 }
 
 /// The inputs of one emulated frame.
@@ -243,15 +251,26 @@ pub struct SessionFrame {
 
 /// What [`GameSession::capture_batch`] keeps of a frame's batch besides its records: palettes
 /// (the PPU's and a margin decoder's own), edge masks, widescreen margin and visible rows.
-type CapturedBatch = (Palettes, i32, i32, (i32, zax_nes::VisibleRows, i32));
+type CapturedBatch = (Palettes, i32, i32, (i32, zax_core_api::VisibleRows, i32));
 
 /// A frame's PPU palette and the margin decoder's own background palette, if any.
 type Palettes = ([u8; 32], Option<[u8; 16]>);
 
+/// Lot FDS: a disk change in the Famicom Disk System's drive, as a player makes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiskChange {
+    /// The other side of the disk in the drive.
+    SwitchSide,
+    /// Side A of the next disk, back to the first after the last.
+    NextDisk,
+    /// The disk out.
+    Eject,
+}
+
 /// One game being played.
 #[allow(clippy::struct_excessive_bools)] // Independent states of the session.
 pub struct GameSession {
-    core: Box<NesCore>,
+    core: EngineHandle,
     engine: ConversionEngine,
     input: ScriptInputState,
     events: Receiver<SessionEvent>,
@@ -277,6 +296,13 @@ pub struct GameSession {
     overscan: crate::overscan::Overscan,
     /// The movie being recorded or played (see `zax_nes::movie`).
     movie: Option<MovieRun>,
+    /// Lot FIDPLUS-B (B3): the scripts' pad of the frame being run in slices, taken at its start
+    /// by the input hook (the mask and the player it goes to), so that each slice merges it with
+    /// the pad's state of its own time.
+    slice_script_pad: (InputAction, i32),
+    /// The resets and power cycles of a played `.bk2`, each at the movie frame it comes before,
+    /// in order: Zaxnes's movie format has no column for them (`bk2_movies.rs`).
+    movie_commands: Vec<(u32, zax_nes::movie::tas::FrameCommand)>,
     /// Run-ahead N, 0 to `NesCore::MAX_RUN_AHEAD` (AMD-041 REQ-LOOP-064, and `Q-181` for the
     /// bound the owner raised to 10): the frames of a real frame the core runs in
     /// advance of it. 0 — what a freshly created session carries — runs the frame of
@@ -305,8 +331,12 @@ pub struct GameSession {
 #[derive(Default)]
 struct FramePipeline {
     worker: Option<CoreWorker>,
-    /// A core without a ROM that stands in `GameSession::core` while the real one is away.
-    spare: Option<Box<NesCore>>,
+    /// An engine without a ROM that stands in `GameSession::core` while the real one is away.
+    ///
+    /// Always a **Zaxnes** core, whatever engine the game is running: it is only ever a
+    /// placeholder for a moved-out field, nothing is ever asked of it, and FCEUX cannot have two
+    /// instances in one process (lot FCEUX-23 step 4).
+    spare: Option<EngineHandle>,
     /// The input word of the prepared frame that has not started yet.
     prepared: Option<u16>,
     /// Whether the emulation thread holds the core.
@@ -315,6 +345,10 @@ struct FramePipeline {
     picture: Vec<u8>,
     /// Its rows.
     picture_height: usize,
+    /// Its colour emphasis, empty without any (lot FIDPLUS-D2b).
+    picture_emphasis: Vec<u8>,
+    /// Its subcarrier phase ([`NesCore::video_phase`]).
+    video_phase: usize,
     /// Its experimental smooth scrolling shift ([`NesCore::picture_shift`]).
     picture_shift: Option<(f32, i32, i32)>,
     /// Its camera motion to the next frame ([`NesCore::picture_motion`]).
@@ -404,8 +438,9 @@ impl GameSession {
             two_dimensional_mode,
             console_interface,
             tiles,
+            engine: engine_kind,
         } = request;
-        let mut core = NesCore::new();
+        let mut core = EngineHandle::of_kind(engine_kind);
         let mut input = ScriptInputState::default();
         let mut engine = ConversionEngine::new();
         engine.use_geometry();
@@ -460,7 +495,7 @@ impl GameSession {
         }
         engine.set_script_host(Box::new(runtime));
         let mut session = Self {
-            core: Box::new(core),
+            core,
             engine,
             input,
             events,
@@ -475,6 +510,8 @@ impl GameSession {
             strict_wide_edges: false,
             overscan: crate::overscan::Overscan::default(),
             movie: None,
+            slice_script_pad: (InputAction::NONE, 0),
+            movie_commands: Vec::new(),
             run_ahead: 0,
             run_ahead_forced_to_zero: false,
             run_ahead_held_at_zero: false,
@@ -633,13 +670,13 @@ impl GameSession {
 
     /// The core, for reading.
     #[must_use]
-    pub fn core(&self) -> &NesCore {
+    pub fn core(&self) -> &EngineHandle {
         &self.core
     }
 
     /// The core, for writing.
     #[must_use]
-    pub fn core_mut(&mut self) -> &mut NesCore {
+    pub fn core_mut(&mut self) -> &mut EngineHandle {
         &mut self.core
     }
 
@@ -708,6 +745,18 @@ impl GameSession {
     #[must_use]
     pub fn nominal_frame_rate(&self) -> i32 {
         self.core.timing().nominal_frames_per_second
+    }
+
+    /// The rate frames are chained at: the console's own with `emu.exact_rate` on a Zaxnes core
+    /// (lot FIDPLUS-B, whose sound follows it), else the nominal one.
+    #[must_use]
+    pub fn frame_rate(&self, exact: bool) -> f64 {
+        let timing = self.core.timing();
+        if exact && self.core.kind() == zax_core_api::EngineKind::Zaxnes {
+            timing.exact_frames_per_second()
+        } else {
+            f64::from(timing.nominal_frames_per_second)
+        }
     }
 
     /// Loads a ROM image into the core (REQ-LOOP-021 step 4). The core patches a ROM a
@@ -841,11 +890,11 @@ impl GameSession {
         clock.add_thread(Thread::Emulation, finished.elapsed);
         let captured = self.capture_batch(clock);
         self.pipeline.pending = Some(captured);
-        self.pipeline
-            .memory
-            .ram
-            .copy_from_slice(self.core.bus().ram());
+        self.core.work_ram_into(&mut self.pipeline.memory.ram);
         self.pipeline.picture_height = self.core.wide_picture_into(&mut self.pipeline.picture);
+        self.core
+            .wide_emphasis_into(&mut self.pipeline.picture_emphasis);
+        self.pipeline.video_phase = self.core.video_phase();
         self.pipeline.picture_shift = self.core.picture_shift();
         self.pipeline.picture_motion = self.core.picture_motion();
         self.core
@@ -887,6 +936,9 @@ impl GameSession {
                 self.pipeline.pending = Some(captured);
                 self.pipeline.picture_height =
                     self.core.wide_picture_into(&mut self.pipeline.picture);
+                self.core
+                    .wide_emphasis_into(&mut self.pipeline.picture_emphasis);
+                self.pipeline.video_phase = self.core.video_phase();
                 self.pipeline.picture_shift = self.core.picture_shift();
                 self.pipeline.picture_motion = self.core.picture_motion();
                 self.core
@@ -965,6 +1017,28 @@ impl GameSession {
     /// on a relaunch and on a savestate restore (REQ-E3D-281); the learned conversion state is
     /// kept, which is what distinguishes this from a relaunch. Called with the core home, like
     /// every other command of the tick.
+    /// Whether the game loaded is a VS. System (lot MAPPERS-N).
+    #[must_use]
+    pub fn is_vs_system(&self) -> bool {
+        self.core.is_vs_system()
+    }
+
+    /// A coin in slot `slot` (1 or 2), or the service button with `None`.
+    pub fn drive_vs_cabinet(&mut self, slot: Option<usize>) {
+        self.core.drive_vs_cabinet(slot);
+    }
+
+    /// Lot FDS: the disk sides of the game's Disk System drive, 0 without one.
+    #[must_use]
+    pub fn disk_sides(&self) -> usize {
+        self.core.disk_sides()
+    }
+
+    /// Lot FDS: a disk change in the drive.
+    pub fn change_disk(&mut self, change: DiskChange) {
+        self.core.change_disk(change);
+    }
+
     pub fn soft_reset(&mut self) {
         self.core.soft_reset();
         self.frame_counter = 0;
@@ -1008,6 +1082,7 @@ impl GameSession {
     /// The start state does not load.
     pub fn start_movie_playback(&mut self, movie: Movie) -> Result<(), String> {
         self.restore_core(&movie.start_state)?;
+        self.movie_commands.clear();
         self.movie = Some(MovieRun::play(self.core.frame_count(), movie));
         self.hold_run_ahead_for_the_movie();
         Ok(())
@@ -1015,6 +1090,7 @@ impl GameSession {
 
     /// Ends the movie being recorded or played, and gives it.
     pub fn stop_movie(&mut self) -> Option<Movie> {
+        self.movie_commands.clear();
         let movie = self.movie.take().map(MovieRun::into_movie);
         self.hold_run_ahead_for_the_movie();
         movie
@@ -1036,10 +1112,63 @@ impl GameSession {
         self.core_follows_the_inputs
     }
 
+    /// The resets and power cycles of the movie being played, each at the movie frame it comes
+    /// before (a `.bk2`'s, owner request).
+    pub fn set_movie_commands(
+        &mut self,
+        mut commands: Vec<(u32, zax_nes::movie::tas::FrameCommand)>,
+    ) {
+        commands.sort_by_key(|(frame, _)| *frame);
+        self.movie_commands = commands;
+    }
+
+    /// Applies the movie's reset or power cycle due before the frame about to run, if any. The
+    /// frame counter is kept, so the movie's frames go on being read where they were.
+    fn apply_movie_command(&mut self) {
+        use zax_nes::movie::tas::FrameCommand;
+        if self.movie_commands.is_empty() {
+            return;
+        }
+        let frame_count = self.core.frame_count();
+        let Some(index) = self
+            .movie
+            .as_ref()
+            .and_then(|movie| movie.frame_at(frame_count))
+        else {
+            return;
+        };
+        let Ok(at) = self
+            .movie_commands
+            .binary_search_by_key(&index, |(frame, _)| *frame)
+        else {
+            return;
+        };
+        match self.movie_commands[at].1 {
+            FrameCommand::SoftReset => self.core.soft_reset(),
+            FrameCommand::HardReset => self.core.reset(),
+            FrameCommand::None => return,
+        }
+        self.core.set_frame_count(frame_count);
+    }
+
     /// Runs the frame of the movie being played with the core alone: no input hook, no capture,
     /// no conversion, no frame hook (a seek, when [`GameSession::core_follows_the_inputs`]).
     /// Returns `false`, running nothing, outside the movie.
     pub fn run_movie_frame_core_only(&mut self) -> bool {
+        // Lot FCEUX-48 step 4: a movie the **engine** plays itself needs no word from us — its
+        // movie mode loads each frame's record over the pad state inside `run_frame` — and has no
+        // `MovieRun` to take one from. The word handed over is therefore ignored, and the only
+        // question is whether the movie still has a frame.
+        if self.movie.is_none() {
+            if let Some((frame, length)) = self.core.own_movie_position() {
+                if frame >= length {
+                    return false;
+                }
+                self.core.run_frame(0);
+                return true;
+            }
+            return false;
+        }
         let frame_count = self.core.frame_count();
         let Some(word) = self
             .movie
@@ -1048,6 +1177,7 @@ impl GameSession {
         else {
             return false;
         };
+        self.apply_movie_command();
         self.core.run_frame(word);
         true
     }
@@ -1298,7 +1428,7 @@ impl GameSession {
             match CoreWorker::spawn() {
                 Ok(worker) => {
                     self.pipeline.worker = Some(worker);
-                    self.pipeline.spare = Some(Box::new(NesCore::new()));
+                    self.pipeline.spare = Some(EngineHandle::zaxnes_core());
                 }
                 Err(error) => {
                     crate::app_log::error(&format!(
@@ -1317,6 +1447,9 @@ impl GameSession {
         // kept the picture of the frame it captured).
         if self.pipeline.pending.is_none() {
             self.pipeline.picture_height = self.core.wide_picture_into(&mut self.pipeline.picture);
+            self.core
+                .wide_emphasis_into(&mut self.pipeline.picture_emphasis);
+            self.pipeline.video_phase = self.core.video_phase();
             self.pipeline.picture_shift = self.core.picture_shift();
             self.pipeline.picture_motion = self.core.picture_motion();
             self.core
@@ -1377,12 +1510,6 @@ impl GameSession {
         frame: SessionFrame,
         clock: &mut StageClock,
     ) -> u16 {
-        let SessionFrame {
-            player_one,
-            player_two,
-            zapper_byte,
-            zapper_position,
-        } = frame;
         let counter = self.frame_counter;
         let started = clock.start();
         #[allow(clippy::cast_precision_loss)] // the C# `FrameCounter / 60f`
@@ -1396,12 +1523,29 @@ impl GameSession {
             })
             .unwrap_or((0, 0));
         clock.stop(Stage::Lua, started);
-        let (first, second) = routing::merge_script_pad(
-            player_one,
-            player_two,
+        self.slice_script_pad = (
             InputAction::from_bits(u32::try_from(pad).unwrap_or(0)),
             pad_index,
         );
+        let word = self.frame_word(frame);
+        self.apply_movie_command();
+        let frame_count = self.core.frame_count();
+        self.movie
+            .as_mut()
+            .map_or(word, |movie| movie.input(frame_count, word))
+    }
+
+    /// The core's input word for `frame`'s physical pads merged with the scripts' pad of the
+    /// frame ([`GameSession::begin_frame_lent`] takes it; a frame run in slices keeps it).
+    fn frame_word(&mut self, frame: SessionFrame) -> u16 {
+        let SessionFrame {
+            player_one,
+            player_two,
+            zapper_byte,
+            zapper_position,
+        } = frame;
+        let (pad, pad_index) = self.slice_script_pad;
+        let (first, second) = routing::merge_script_pad(player_one, player_two, pad, pad_index);
         self.input.players = [
             i32::try_from(first.bits()).unwrap_or(0),
             i32::try_from(second.bits()).unwrap_or(0),
@@ -1412,17 +1556,59 @@ impl GameSession {
                 .set_zapper_position_source(Some(Box::new(move |_| zapper_position)));
         }
         // REQ-INP-004: a Zapper port carries the Zapper byte and no controller button at all.
-        let word = routing::core_word(
+        routing::core_word(
             first,
             second,
             self.core.port_type(0).unwrap_or_default(),
             self.core.port_type(1).unwrap_or_default(),
             zapper_byte,
-        );
-        let frame_count = self.core.frame_count();
-        self.movie
-            .as_mut()
-            .map_or(word, |movie| movie.input(frame_count, word))
+        )
+    }
+
+    /// Lot FIDPLUS-B (B3, `docs/design/REALTIME-PACING.md`): one real-time slice of a frame, up
+    /// to core cycle `until`. A slice that starts a frame runs the first half of
+    /// [`GameSession::run_frame_timed`] (the scripts' input hook, the movie word); one that ends
+    /// it runs the second half (capture, conversion, frame hooks). The slices in between take the
+    /// pads of their own time, which the game reads at its next strobe. Whether a frame ended.
+    /// Run-ahead and movies keep whole frames: the host does not slice with them on.
+    pub fn run_frame_slice_timed(
+        &mut self,
+        model: &mut SettingsModel,
+        scene: &mut SceneState,
+        frame: SessionFrame,
+        until: i64,
+        clock: &mut StageClock,
+    ) -> bool {
+        self.complete_frame_timed(model, scene, clock);
+        if clock.enabled() != self.engine.last_hook_time().is_some() {
+            self.engine.set_hook_timing(clock.enabled());
+        }
+        self.lend(model, scene, |session, scene| {
+            let word = if session.core.frame_in_progress() {
+                session.frame_word(frame)
+            } else {
+                session.begin_frame_lent(scene, frame, clock)
+            };
+            let started = clock.start();
+            let ended = session.core.run_frame_slice(word, until).is_some();
+            clock.stop(Stage::Core, started);
+            if ended {
+                session.finish_frame_lent(scene, clock);
+            }
+            ended
+        })
+    }
+
+    /// Whether a frame run in slices is in progress (lot FIDPLUS-B).
+    #[must_use]
+    pub fn frame_in_progress(&self) -> bool {
+        self.core.frame_in_progress()
+    }
+
+    /// Whether a movie is being recorded or played: its frames are whole ones (lot FIDPLUS-B).
+    #[must_use]
+    pub const fn has_movie(&self) -> bool {
+        self.movie.is_some()
     }
 
     /// The tile capture, the conversion and the frame hooks of the frame the core just ran (the
@@ -1488,7 +1674,7 @@ impl GameSession {
         clock: &mut StageClock,
         (palette, margin_palette): Palettes,
         (mask_x, mask_y): (i32, i32),
-        (margin, visible_rows, margin_y): (i32, zax_nes::VisibleRows, i32),
+        (margin, visible_rows, margin_y): (i32, zax_core_api::VisibleRows, i32),
     ) {
         if (self.paused_3d || self.catching_up) && self.pipeline.ahead_allowed {
             // Kept for when the 3D comes back; the scripts' clock goes on.
@@ -1625,6 +1811,27 @@ impl GameSession {
         height
     }
 
+    /// The colour emphasis of the picture [`GameSession::copy_nes_picture`] copies, into
+    /// `destination`; empty for a frame without any (lot FIDPLUS-D2b).
+    pub fn copy_nes_emphasis(&self, destination: &mut Vec<u8>) {
+        if self.pipeline.in_flight || self.pipeline.pending.is_some() {
+            destination.clear();
+            destination.extend_from_slice(&self.pipeline.picture_emphasis);
+        } else {
+            self.core.wide_emphasis_into(destination);
+        }
+    }
+
+    /// The subcarrier phase of the picture [`GameSession::copy_nes_picture`] copies.
+    #[must_use]
+    pub fn nes_video_phase(&self) -> usize {
+        if self.pipeline.in_flight || self.pipeline.pending.is_some() {
+            self.pipeline.video_phase
+        } else {
+            self.core.video_phase()
+        }
+    }
+
     /// The experimental smooth scrolling's shift of the picture [`GameSession::copy_nes_picture`]
     /// copies ([`NesCore::picture_shift`]).
     #[must_use]
@@ -1667,10 +1874,16 @@ impl GameSession {
         // its widescreen was turned off). A profile whose scripts reach into the core is still
         // converted while paused (`convert_batch_lent`): its frames hold the colour, the core's
         // snapshot not (a grey sky in SMB3's 2D on a handheld). The kept frame's palette comes
-        // first: the core may be on its own thread, its copy here not the frame's.
+        // first: the core may be on its own thread, its copy here not the frame's. An engine with
+        // no Zaxnes PPU gives its frame's palette.
         if self.paused_3d && self.pipeline.ahead_allowed {
             let backdrop = self.skipped_batch.as_ref().map_or_else(
-                || self.core.ppu().snapshot_palette()[0],
+                || {
+                    self.core.ppu().map_or_else(
+                        || self.core.frame_batch().palette[0],
+                        |ppu| ppu.snapshot_palette()[0],
+                    )
+                },
                 |((palette, _), ..)| palette[0],
             ) & 0x3F;
             return zax_engine3d::palette::nes_color(usize::from(backdrop));

@@ -35,6 +35,9 @@ pub fn read(path: &Path) -> Result<RomData, String> {
     match extension.as_deref() {
         Some("zip") => read_zip(path),
         Some("7z") => Err(UNCOMPRESSION_FAILED_MESSAGE.to_owned()),
+        Some("studybox") => read_study_box(path),
+        Some("fds") => read_disk(path, false),
+        Some("qd") => read_disk(path, true),
         _ => {
             let image = fs::read(path).map_err(|error| error.to_string())?;
             let name = path
@@ -44,6 +47,70 @@ pub fn read(path: &Path) -> Result<RomData, String> {
             Ok(RomData { image, name })
         }
     }
+}
+
+/// The BIOS a Study Box tape runs with (lot MAPPERS-P, as Mesen 2 names it).
+pub const STUDY_BOX_BIOS: &str = "StudyBox.bin";
+
+/// Text of a Study Box tape without its BIOS.
+pub const STUDY_BOX_BIOS_MISSING_MESSAGE: &str =
+    "StudyBox.bin (256 KiB) is needed: put it beside the tape or beside the program";
+
+/// A `.studybox` tape packaged with `StudyBox.bin`, found beside the tape, then beside the
+/// executable or in its `firmware` folder, into the image the core runs.
+fn read_study_box(path: &Path) -> Result<RomData, String> {
+    let tape = fs::read(path).map_err(|error| error.to_string())?;
+    let bios =
+        find_bios(path, STUDY_BOX_BIOS).ok_or_else(|| STUDY_BOX_BIOS_MISSING_MESSAGE.to_owned())?;
+    let image = zax_nes::rom::package_study_box(&tape, &bios)?;
+    Ok(RomData {
+        image,
+        name: file_name(path),
+    })
+}
+
+/// The Famicom Disk System's BIOS, which the player supplies (lot FDS, as Mesen 2 names it).
+pub const FDS_BIOS: &str = "disksys.rom";
+
+/// Text of a disk image without its BIOS.
+pub const FDS_BIOS_MISSING_MESSAGE: &str = "disksys.rom (8 KiB, the Disk System's BIOS) is \
+     needed: put it beside the disk image or beside the program";
+
+/// A `.fds` (or a `.qd`, `qd`) disk image packaged with `disksys.rom`, looked for as the Study
+/// Box's BIOS is, into the image the core runs as mapper 20.
+fn read_disk(path: &Path, qd: bool) -> Result<RomData, String> {
+    let disk = fs::read(path).map_err(|error| error.to_string())?;
+    let bios = find_bios(path, FDS_BIOS).ok_or_else(|| FDS_BIOS_MISSING_MESSAGE.to_owned())?;
+    let image = zax_nes::rom::package_fds(&disk, &bios, qd)?;
+    Ok(RomData {
+        image,
+        name: file_name(path),
+    })
+}
+
+/// The BIOS file `bios`, read from beside the game `path`, then beside the executable, then in
+/// the executable's `firmware` folder.
+fn find_bios(path: &Path, bios: &str) -> Option<Vec<u8>> {
+    let executable = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf));
+    let candidates = [
+        path.parent().map(|folder| folder.join(bios)),
+        executable.as_ref().map(|folder| folder.join(bios)),
+        executable
+            .as_ref()
+            .map(|folder| folder.join("firmware").join(bios)),
+    ];
+    candidates
+        .iter()
+        .flatten()
+        .find_map(|candidate| fs::read(candidate).ok())
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 fn read_zip(path: &Path) -> Result<RomData, String> {

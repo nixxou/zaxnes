@@ -74,7 +74,7 @@ fn req_core_082_writing_work_ram_has_the_same_effect_as_a_cpu_write() {
 #[test]
 fn req_core_095_battery_ram_is_exported_and_imported_only_with_a_battery() {
     let mut without_battery = loaded_machine();
-    assert_eq!(without_battery.export_battery_ram(), []);
+    assert_eq!(without_battery.export_battery_ram(), Vec::<u8>::new());
     assert!(!without_battery.import_battery_ram(&[0; 8192]));
 
     let mut image = minimal();
@@ -92,7 +92,11 @@ fn req_core_095_battery_ram_is_exported_and_imported_only_with_a_battery() {
 
     // Reload the ROM, import the save: the contents come back.
     assert!(core.load_rom(&image, "Battery.nes").success);
-    assert_eq!(0x00, core.read_memory(0x6000));
+    // Without a save the battery RAM powers on as the seeded pattern (MAPPERS-N,
+    // FIDELITY-LEADS J14), not as what the previous load left.
+    let mut fresh = vec![0u8; 8192];
+    zax_nes::PowerOnRam::Random(zax_nes::NesCore::BATTERY_RAM_SEED).fill(&mut fresh);
+    assert_eq!(fresh, core.export_battery_ram());
     assert!(core.import_battery_ram(&exported));
     assert_eq!(0xAB, core.read_memory(0x6000));
     assert_eq!(0xCD, core.read_memory(0x7FFF));

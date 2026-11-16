@@ -20,30 +20,52 @@ macro_rules! banked {
     };
 }
 
+#[cfg(feature = "board-530")]
+mod ax5705;
 #[cfg(feature = "board-small-boards")]
 mod bandai74161;
 mod bandai_fcg;
+#[cfg(feature = "board-188")]
+mod bandai_karaoke;
 #[cfg(feature = "board-small-boards")]
 mod bf9096;
 #[cfg(feature = "board-111")]
 mod cheapocabra;
+#[cfg(feature = "board-chip-switch")]
+mod chip_switch;
 #[cfg(any(feature = "board-162", feature = "board-163"))]
 mod chr_window;
+#[cfg(feature = "board-266")]
+mod city_fighter;
 #[cfg(feature = "board-small-boards")]
 mod cnrom_protect;
 #[cfg(feature = "board-cony")]
 mod cony;
+#[cfg(feature = "board-342")]
+mod cool_girl;
 mod daou306;
 #[cfg(feature = "board-decode-boards")]
 mod decode_boards;
 mod discrete;
+#[cfg(feature = "board-284")]
+mod drip;
 #[cfg(feature = "board-eeprom")]
 mod eeprom24c0x;
-#[cfg(feature = "board-164")]
+#[cfg(any(feature = "board-164", feature = "board-irq-p"))]
 mod eeprom93c66;
+#[cfg(feature = "board-323")]
+mod farid_slrom;
+#[cfg(feature = "board-fds")]
+pub mod fds;
+#[cfg(feature = "board-fine-rom")]
+mod fine_rom;
+#[cfg(feature = "board-176")]
+mod fk23c;
 mod fme7;
 #[cfg(feature = "board-246")]
 mod g0151;
+#[cfg(feature = "board-562")]
+mod game_doctor;
 #[cfg(feature = "board-huang1")]
 mod huang1;
 mod irem_h3001;
@@ -53,6 +75,10 @@ mod irem_lrog017;
 mod irem_tam_s1;
 mod iremg101;
 mod irq_boards;
+#[cfg(feature = "board-irq-latch")]
+mod irq_latch;
+#[cfg(feature = "board-irq-p")]
+mod irq_p;
 #[cfg(feature = "board-small-boards")]
 mod jaleco_jf11;
 #[cfg(feature = "board-jaleco-72-92-86")]
@@ -64,17 +90,31 @@ mod jaleco_ss88006;
 mod jv001;
 #[cfg(feature = "board-jy-asic")]
 mod jy_company;
+#[cfg(feature = "board-303")]
+mod kaiser7017;
+#[cfg(feature = "board-latch-multi")]
+mod latch_multi;
 #[cfg(feature = "board-218")]
 mod magic_floor;
 #[cfg(feature = "board-91")]
 mod mapper091;
+#[cfg(feature = "board-234")]
+mod maxi15;
+#[cfg(feature = "board-misc-n")]
+mod misc_n;
 mod mmc1;
+#[cfg(feature = "board-mmc1-outer")]
+mod mmc1_outer;
+#[cfg(feature = "board-111")]
+mod mmc1_parallel;
 mod mmc2;
 mod mmc3;
 #[cfg(feature = "board-219")]
 mod mmc3_a9461;
 #[cfg(feature = "board-mmc3-chrram")]
 mod mmc3_chrram;
+#[cfg(feature = "board-mmc3-clones")]
+mod mmc3_clones;
 #[cfg(feature = "board-292")]
 mod mmc3_dragonfighter;
 #[cfg(feature = "board-208")]
@@ -83,6 +123,8 @@ mod mmc3_gouder208;
 mod mmc3_kof97;
 #[cfg(feature = "board-268")]
 mod mmc3_outer;
+#[cfg(feature = "board-mmc3-p")]
+mod mmc3_p;
 #[cfg(feature = "board-mmc3-scramble")]
 mod mmc3_scramble;
 #[cfg(feature = "board-262")]
@@ -93,6 +135,8 @@ mod mmc3_txc189;
 mod mmc3_unl8237;
 mod mmc5;
 mod multicart;
+#[cfg(feature = "board-multi-p")]
+mod multicart_p;
 mod namco163;
 #[cfg(feature = "board-namcot108")]
 mod namcot108;
@@ -103,8 +147,18 @@ mod nina03;
 mod nrom;
 #[cfg(feature = "board-96")]
 mod oeka_kids;
+#[cfg(any(feature = "board-256", feature = "board-436"))]
+mod one_bus;
 #[cfg(feature = "board-164")]
 mod pec9588;
+#[cfg(feature = "board-355")]
+mod pic16c54;
+#[cfg(feature = "board-168")]
+mod racermate;
+#[cfg(feature = "board-682")]
+mod rainbow;
+#[cfg(feature = "board-682")]
+mod rainbow_esp;
 mod rambo1;
 #[cfg(feature = "board-133")]
 mod sachen_72008;
@@ -127,6 +181,8 @@ mod single_latch;
 mod small_boards;
 #[cfg(feature = "board-116")]
 mod somari;
+#[cfg(feature = "board-186")]
+pub mod study_box;
 #[cfg(feature = "board-small-boards")]
 mod sunsoft1;
 #[cfg(feature = "board-small-boards")]
@@ -134,6 +190,8 @@ mod sunsoft2;
 mod sunsoft3;
 #[cfg(feature = "board-68")]
 mod sunsoft4;
+#[cfg(feature = "board-529")]
+mod t230;
 #[cfg(feature = "board-small-boards")]
 mod taito_tc0190;
 mod taito_tc0690;
@@ -148,20 +206,34 @@ mod vrc3;
 mod vrc6;
 mod vrc7;
 mod vrc_irq;
+#[cfg(feature = "board-vrc-p")]
+mod vrc_p;
 #[cfg(feature = "board-vs-system")]
 mod vs_system;
+#[cfg(feature = "board-252")]
+mod waixing252;
+#[cfg(feature = "board-253")]
+mod waixing253;
 #[cfg(feature = "board-178")]
 mod waixing_fs305;
 
+#[cfg(feature = "board-530")]
+pub use ax5705::Ax5705;
 #[cfg(feature = "board-small-boards")]
 pub use bandai74161::Bandai74161;
 pub use bandai_fcg::BandaiFcg;
+#[cfg(feature = "board-188")]
+pub use bandai_karaoke::BandaiKaraoke;
 #[cfg(feature = "board-small-boards")]
 pub use bf9096::Bf9096;
 #[cfg(feature = "board-111")]
 pub use cheapocabra::Cheapocabra;
+#[cfg(feature = "board-chip-switch")]
+pub use chip_switch::{ChipSwitch, ChipSwitchKind};
 #[cfg(any(feature = "board-162", feature = "board-163"))]
 pub use chr_window::{ChrWindowBoard, ChrWindowKind};
+#[cfg(feature = "board-266")]
+pub use city_fighter::CityFighter;
 #[cfg(feature = "board-small-boards")]
 pub use cnrom_protect::CnRomProtect;
 #[cfg(feature = "board-cony")]
@@ -172,10 +244,18 @@ pub use decode_boards::DecodeBoard;
 pub use discrete::{
     AxRom, CnRom, Codemasters, ColorDreams, CpRom, GxRom, Mapper078, UnRom512, UxRom,
 };
+#[cfg(feature = "board-284")]
+pub use drip::Drip;
 #[cfg(feature = "board-eeprom")]
 pub use eeprom24c0x::{Eeprom24C0X, EepromKind, EepromPort};
-#[cfg(feature = "board-164")]
+#[cfg(any(feature = "board-164", feature = "board-irq-p"))]
 pub use eeprom93c66::Eeprom93C66;
+#[cfg(feature = "board-323")]
+pub use farid_slrom::FaridSlrom;
+#[cfg(feature = "board-fine-rom")]
+pub use fine_rom::{FineRom, FineRomKind};
+#[cfg(feature = "board-176")]
+pub use fk23c::Fk23c;
 pub use fme7::Fme7;
 #[cfg(feature = "board-246")]
 pub use g0151::G0151;
@@ -188,6 +268,10 @@ pub use irem_lrog017::IremLrog017;
 pub use irem_tam_s1::IremTamS1;
 pub use iremg101::IremG101;
 pub use irq_boards::IrqBoard;
+#[cfg(feature = "board-irq-latch")]
+pub use irq_latch::{IrqLatch, IrqLatchKind};
+#[cfg(feature = "board-irq-p")]
+pub use irq_p::{IrqP, IrqPKind};
 #[cfg(feature = "board-small-boards")]
 pub use jaleco_jf11::JalecoJf11;
 #[cfg(feature = "board-jaleco-72-92-86")]
@@ -199,12 +283,26 @@ pub use jaleco_ss88006::JalecoSs88006;
 pub use jv001::Jv001;
 #[cfg(feature = "board-jy-asic")]
 pub use jy_company::JyCompany;
+#[cfg(feature = "board-303")]
+pub use kaiser7017::Kaiser7017;
+#[cfg(feature = "board-latch-multi")]
+pub use latch_multi::{LatchKind, LatchMulti};
 #[cfg(feature = "board-218")]
 pub use magic_floor::MagicFloor;
 #[cfg(feature = "board-91")]
 pub use mapper091::Mapper091;
+#[cfg(feature = "board-234")]
+pub use maxi15::Maxi15;
+#[cfg(feature = "board-misc-n")]
+pub use misc_n::{MiscKind, MiscN};
 pub use mmc1::Mmc1;
+#[cfg(feature = "board-mmc1-outer")]
+pub use mmc1_outer::{Mmc1Outer, Mmc1OuterKind};
+#[cfg(feature = "board-111")]
+pub use mmc1_parallel::Mmc1Parallel;
 pub use mmc2::Mmc2;
+#[cfg(feature = "board-191")]
+pub use mmc3::Mmc3ChrRam191;
 #[cfg(feature = "board-mmc3-multicart")]
 pub use mmc3::Mmc3Multicart;
 #[cfg(feature = "board-119")]
@@ -216,6 +314,8 @@ pub use mmc3::{Mmc3ChrRam, Mmc3ChrRam192, Mmc3ChrRam194, Mmc3ChrRam74, WaixingFs
 pub use mmc3_a9461::Mmc3A9461;
 #[cfg(feature = "board-mmc3-chrram")]
 pub use mmc3_chrram::Mmc3ChrRamBoard;
+#[cfg(feature = "board-mmc3-clones")]
+pub use mmc3_clones::{Mmc3Clone, Mmc3CloneKind};
 #[cfg(feature = "board-292")]
 pub use mmc3_dragonfighter::Mmc3Dragonfighter;
 #[cfg(feature = "board-208")]
@@ -224,6 +324,8 @@ pub use mmc3_gouder208::Mmc3Gouder208;
 pub use mmc3_kof97::Mmc3Kof97;
 #[cfg(feature = "board-268")]
 pub use mmc3_outer::Mmc3Outer;
+#[cfg(feature = "board-mmc3-p")]
+pub use mmc3_p::{Mmc3P, Mmc3PKind};
 #[cfg(feature = "board-mmc3-scramble")]
 pub use mmc3_scramble::Mmc3Scramble;
 #[cfg(feature = "board-262")]
@@ -238,6 +340,8 @@ pub use mmc5::Mmc5Ext;
 pub use multicart::{
     Action52, Action53, Caltron6In1, JalecoJ87, Mapper015, Mapper034, Multicart225,
 };
+#[cfg(feature = "board-multi-p")]
+pub use multicart_p::{MultiP, MultiPKind};
 pub use namco163::{Namco163, NamcoVariant};
 #[cfg(feature = "board-namcot108")]
 pub use namcot108::Namcot108;
@@ -250,6 +354,10 @@ pub use nrom::Nrom;
 pub use oeka_kids::OekaKids;
 #[cfg(feature = "board-164")]
 pub use pec9588::Pec9588;
+#[cfg(feature = "board-168")]
+pub use racermate::Racermate;
+#[cfg(feature = "board-682")]
+pub use rainbow::Rainbow;
 #[cfg(feature = "board-158")]
 pub use rambo1::Tengen800037;
 pub use rambo1::{Rambo1, Rambo1Board};
@@ -281,6 +389,8 @@ pub use sunsoft2::Sunsoft2;
 pub use sunsoft3::Sunsoft3;
 #[cfg(feature = "board-68")]
 pub use sunsoft4::Sunsoft4;
+#[cfg(feature = "board-529")]
+pub use t230::T230;
 #[cfg(feature = "board-small-boards")]
 pub use taito_tc0190::TaitoTc0190;
 pub use taito_tc0690::TaitoTc0690;
@@ -294,8 +404,14 @@ pub use vrc2_vrc4::Vrc2Vrc4;
 pub use vrc3::Vrc3;
 pub use vrc6::Vrc6;
 pub use vrc7::Vrc7;
+#[cfg(feature = "board-vrc-p")]
+pub use vrc_p::{VrcP, VrcPKind};
 #[cfg(feature = "board-vs-system")]
 pub use vs_system::VsBoard;
+#[cfg(feature = "board-252")]
+pub use waixing252::Waixing252;
+#[cfg(feature = "board-253")]
+pub use waixing253::Waixing253;
 #[cfg(feature = "board-178")]
 pub use waixing_fs305::WaixingFs305;
 
@@ -373,7 +489,33 @@ pub trait Mapper {
     }
 
     /// Puts the registers back to their power-on values and recomputes the windows.
+    ///
+    /// This is the **power-on** path (REQ-CORE-004): `NesCore::reset` is a power cycle
+    /// (DEC-02-Q3), and [`Mapper::soft_reset`] is what a press on RESET does.
     fn reset(&mut self, _memory: &mut CartridgeMemory) {}
+
+    /// What a press on the console's **RESET** button does to the board.
+    ///
+    /// **Nothing**, and that is the hardware's answer rather than a simplification. nesdev's
+    /// "Cartridge connector" lists every pin of both the 60-pin Famicom and the 72-pin NES edge
+    /// — power, the CPU address, data and control lines, the PPU lines, CIRAM, audio, `/IRQ`,
+    /// `M2`, `/ROMSEL`, `SYSTEM CLK`, the expansion pins and the CIC's two — and there is **no
+    /// `/RESET` among them**. A mapper cannot see the reset button, so its registers, its IRQ
+    /// unit and its A12 watcher hold whatever the game last put there, across as many resets as
+    /// the player presses. nesdev, "CPU power up state", *after reset*: the internal RAM is
+    /// "unchanged", and the cartridge is not mentioned at all.
+    ///
+    /// A board **may** still react, and two or three do: the *reset-detecting multicarts* notice
+    /// the **absence of M2** rather than a reset line. nesdev, "NES 2.0 Mapper 313" (reset-based
+    /// multicarts around the MMC3 ASIC): *"When an interruption of the M2 signal is detected, the
+    /// higher address lines are automatically incremented."* Of the boards this build has, one is
+    /// of that family — see `Mmc3Unl8237::soft_reset`, whose page states the behaviour in so many
+    /// words — and it is the only one that overrides this.
+    ///
+    /// Overriding it is therefore a claim about a **documented** reset reaction of a particular
+    /// board, and the default is what every ordinary cartridge does. (AMD proposed for
+    /// REQ-CORE-122: `docs/review/AMD-REQ-CORE-122-mapper-reset.md`.)
+    fn soft_reset(&mut self, _memory: &mut CartridgeMemory) {}
 
     /// Whether the board asserts the CPU IRQ line.
     fn irq_asserted(&self) -> bool {
@@ -556,6 +698,23 @@ pub trait Mapper {
     /// A write to PPUCTRL.
     fn on_ppu_control(&mut self, _control: u8) {}
 
+    /// A CPU write of `$2000-$3FFF` (mirrors folded to `$2000-$2007`) that the board snoops, for
+    /// mapper 682 alone: the bus asks only when [`Cartridge::snoops_cpu_bus`] said so at attach.
+    ///
+    /// [`Cartridge::snoops_cpu_bus`]: crate::cartridges::Cartridge::snoops_cpu_bus
+    #[cfg(feature = "board-682")]
+    fn snoop_cpu_bus_write(&mut self, _address: u16, _value: u8) {}
+
+    /// A CPU read of the 2A03's `$4011` the board answers, `None` for the open bus (mapper 682).
+    #[cfg(feature = "board-682")]
+    fn snoop_cpu_bus_read(&mut self, _address: u16) -> Option<u8> {
+        None
+    }
+
+    /// The emulation option `emu.rainbow_network` (mapper 682's ESP), off by default.
+    #[cfg(feature = "board-682")]
+    fn set_network_enabled(&mut self, _enabled: bool) {}
+
     /// The start of a scanline.
     fn on_ppu_scanline(&mut self, _memory: &mut CartridgeMemory, _scanline: i32, _rendering: bool) {
     }
@@ -641,6 +800,10 @@ pub trait Mapper {
     /// One CPU cycle elapsed (`memory.cpu_cycle()` already incremented).
     fn on_cpu_cycle(&mut self, _memory: &mut CartridgeMemory) {}
 
+    /// The frame's input word (`NesCore::run_frame`), once at the start of each frame, for a
+    /// board with an input device of its own: mapper 188's microphone buttons (lot MAPPERS-N).
+    fn set_input_word(&mut self, _word: u16) {}
+
     /// `M` of REQ-CORE-073: the board's expansion audio in the mixer's integer units
     /// (REQ-CORE-075, AMD-054), or `None` for a board without any — which is every board but
     /// the MMC5, so the bus never looks at the expansion audio for them.
@@ -651,6 +814,84 @@ pub trait Mapper {
     fn expansion_audio_output(&self) -> Option<i32> {
         None
     }
+
+    /// The program a copier's BIOS would have loaded before the game starts, run at power-on
+    /// only (lot MAPPERS-P, puNES `EXTCL_CPU_INIT_PC`); `None` for every board but the copier
+    /// loaders, so a power-on asks once and does nothing more.
+    fn boot_program(&self, _memory: &CartridgeMemory) -> Option<BootProgram> {
+        None
+    }
+
+    /// Lot FDS: the disk sides of a disk drive, 0 for every board without one.
+    fn disk_sides(&self) -> usize {
+        0
+    }
+
+    /// The side in the drive, `None` when it is empty or there is no drive.
+    fn disk_side(&self) -> Option<usize> {
+        None
+    }
+
+    /// Puts `side` in the drive (a disk in it comes out first, the new one a moment later).
+    fn insert_disk(&mut self, _side: usize) {}
+
+    /// Takes the disk out.
+    fn eject_disk(&mut self) {}
+
+    /// Turns the drive's automatic disk changes on or off.
+    fn set_disk_auto_insert(&mut self, _enabled: bool) {}
+
+    /// Whether the BIOS looked for a disk this frame, so that the core reads what it looks for.
+    fn disk_wanted(&self) -> bool {
+        false
+    }
+
+    /// Once per frame: the drive's delayed and automatic disk changes, `header` what the BIOS
+    /// looks for when [`Mapper::disk_wanted`].
+    fn disk_end_frame(&mut self, _header: Option<[u8; 10]>) {}
+
+    /// A save medium the board keeps itself, outside [`CartridgeMemory`]'s PRG-RAM and flash
+    /// (lot MAPPERS-P: the COOLGIRL's save area), as the file a host keeps; `None` for every
+    /// other board.
+    fn export_save_area(&self) -> Option<Vec<u8>> {
+        None
+    }
+
+    /// Applies a file written by [`Mapper::export_save_area`]; `false` when the board has no such
+    /// medium or the file is not one it reads, the medium then left as it was.
+    fn import_save_area(&mut self, _data: &[u8]) -> bool {
+        false
+    }
+
+    /// A CPU write to an APU register (`$4000-$4013`, `$4015`, `$4017`) seen by a board whose
+    /// chip shares the APU's address space, and the value the APU then gets (lot MAPPERS-P,
+    /// the `OneBus` PCM channel of 256 and 436, puNES `extcl_wr_apu_OneBus`).
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    fn snoop_apu_write(&mut self, _address: u16, value: u8) -> u8 {
+        value
+    }
+
+    /// The `$4015` status as such a board alters it (puNES `extcl_rd_apu_OneBus`).
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    fn apu_status(&self, status: u8) -> u8 {
+        status
+    }
+
+    /// A byte the board's PCM channel wrote to the APU's `$4011` since the last call.
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    fn take_dac_write(&mut self) -> Option<u8> {
+        None
+    }
+}
+
+/// A copier loader's boot (puNES `extcl_cpu_init_pc_561`): `data` copied to `address` (CPU RAM
+/// below `$2000`, work RAM above), then, when `init` is not 0, the CPU started at `$0700` on
+/// `JSR init` / `JMP ($FFFC)` written there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BootProgram {
+    pub address: u16,
+    pub init: u16,
+    pub data: Vec<u8>,
 }
 
 /// A window of [`Mapper::rom_windows`] that is not a plain PRG-ROM read.

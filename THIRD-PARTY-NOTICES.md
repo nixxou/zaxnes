@@ -17,6 +17,72 @@ auteur sous GNU GPL v3. Les fichiers concernés portent l'en-tête :
 3DNes_Engine est distribué sous GNU GPL v3 ; c'est cette licence qui impose à Zaxnes d'être
 lui-même sous GPL v3. Le texte complet de la licence est dans `LICENSE`.
 
+### BeesNES — (c) 2020 Shawn (L. Spiro) Wilcoxen — licence MIT
+
+Les **profils audio de console** (`rust/crates/zax-nes/src/apu/console_profile.rs`, réglage
+`audio.console_profile`) reprennent les mesures de BeesNES (<https://github.com/L-Spiro/BeesNES>,
+`Src/Audio/LSNAudioOptions.cpp`) : fréquences de coupure des filtres, gains par voie, inversion et
+CPU « letterless » de chaque console mesurée, ainsi que la formule de ses filtres passe-haut. Les
+choix d'émulation documentés d'après BeesNES (position de démarrage du PPU, effacement de l'OAM,
+défaut OAMADDR, horloges et géométrie des régions PAL-M et PAL-N, inversion des rapports
+cycliques des famiclones) en citent le fichier et la ligne. BeesNES est distribué sous licence MIT :
+
+    MIT License
+
+    Copyright (c) 2020 Shawn (L. Spiro) Wilcoxen
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
+### TriCNES — (c) 2025 Chris Siebert — licence MIT
+
+Les **réglages d'alignement CPU/PPU** (`emu.cpu_ppu_alignment`, `rust/crates/zax-nes/src/ppu`)
+reprennent le modèle de TriCNES (<https://github.com/100thCoin/TriCNES>), l'émulateur de
+l'auteur d'AccuracyCoin : verrou de lecture de `$2007` selon l'alignement, règles de la **corruption de
+l'OAM** quand le rendu est coupé hors vblank (ligne d'origine, copie immédiate ou différée,
+perte au rallumage en milieu d'image) et de la **corruption de palette** (déclencheurs et
+table). Ces règles ont été mesurées en exécutant TriCNES et Zaxnes sur les mêmes programmes de
+test ; le code de Zaxnes est écrit à neuf en Rust, sauf la table de la corruption de palette
+(`rust/crates/zax-nes/src/ppu/palette_corruption.rs`), traduite automatiquement de la fonction
+`CorruptPalettes` de TriCNES. TriCNES est distribué sous licence MIT :
+
+    MIT License
+
+    Copyright (c) 2025 Chris Siebert
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
 ### Mesen 2 — (c) Sour — GNU GPL v3
 
 Plusieurs expressions de cartes du cœur NES (`rust/crates/zax-nes/src/cartridges/mappers`) et de
@@ -24,6 +90,11 @@ leur audio d'extension (`rust/crates/zax-nes/src/apu`) sont **adaptées de Mesen
 (<https://github.com/SourMesen/Mesen2>, dépôt local `third_party/mesen2`, commit `b9fa69d`),
 publié sous GNU GPL v3 :
 
+- la **base de cartouches** (`rust/crates/zax-nes/data/cartdb.csv`), générée par
+  `rust/tools/cartdb_from_mesen.py` à partir de `MesenNesDB.txt` de Mesen (édition MesenCE 2.2.1),
+  elle-même construite par Mesen à partir de la base d'en-têtes NES 2.0 de NewRisingSun, de
+  NesCartDB (BootGod) et de la base de Nestopia UE ; seuls les champs dont le chargeur a besoin
+  sont gardés (lot CARTDB) ;
 - le choix du jeu de registres CHR du MMC5 (`mmc5.rs`, `chr_address`), repris de l'expression
   `chrA` de `Core/NES/Mappers/Nintendo/MMC5.h` ;
 - l'heuristique de décodage des lignes d'adresse des VRC2/VRC4 quand le sous-mappeur NES 2.0 est
@@ -226,6 +297,84 @@ repli quand aucune police système n'est trouvée (AMD-024 REQ-PUB-006).
 
 Le format de profil `.3dn` est lu et écrit par un codec écrit pour ce projet
 (`rust/crates/zax-profiles/src/wire/`) ; aucune bibliothèque protobuf n'est livrée.
+
+### MAME — émulateur PIC16C5x — (c) Tony La Porta — licence BSD-3-Clause
+
+Le microcontrôleur PIC16C54 des cartes du mapper 355 (`rust/crates/zax-nes/src/cartridges/mappers/pic16c54.rs`,
+fonctionnalité `board-355`) est un portage en Rust de l'émulateur PIC16C5x écrit pour MAME
+(version 1.16), dans la version que puNES embarque (`src/c++/pic16c5x/`). En-tête d'origine :
+
+    license:BSD-3-Clause
+    copyright-holders:Tony La Porta
+    Microchip PIC16C5x Emulator — Copyright Tony La Porta — Originally written for the MAME project.
+
+### puNES — (c) Fabio Cavallo (FHorse) — GNU GPL v2 ou ultérieure
+
+Les cartes du lot MAPPERS-P sont écrites d'après les fichiers `src/core/mappers/mapper_NNN.c` de
+puNES 0.111, que chaque module cite. Trois tables de données sont reprises telles que puNES les
+porte, sur décision du propriétaire (2026-11-15) ; ce sont des dumps de micrologiciels des cartes
+d'origine, pas du code de puNES :
+
+* `cartridges/mappers/data/vtgd_bios.bin` : le BIOS de 2 Kio du copieur Venus Turbo Game Doctor
+  (mapper 562, `bios[]` de `mapper_562.c`) ;
+* `cartridges/mappers/data/pic355_3d_block.bin` et `pic355_block_force.bin` : les programmes
+  EPROM du PIC de *3D Block* et de *Block Force* (mapper 355, `mapper_355.c`), utilisés quand
+  l'image n'apporte pas le sien en misc ROM NES 2.0.
+
+La table des caractères de *China Ersan 2* (`rust/crates/zax-nes/src/ersan2_overlay.rs`, `txt[]`
+de `mapper_532.c`, que puNES attribue à l'équipe de Nintendulator) et la table des noms de
+cartes UNIF (`rust/crates/zax-nes/src/rom/unif.rs`, `find_board` de `unif.c`) sont reprises de
+puNES.
+
+puNES est distribué sous GNU GPL v2 ou ultérieure, compatible avec la GPL v3 de Zaxnes.
+
+## FCEUX — second moteur d'émulation, en option (non livré par défaut)
+
+### FCEUX — (c) les auteurs de FCEUX — GNU GPL v2 ou ultérieure
+
+Zaxnes peut être construit avec **FCEUX** comme second moteur d'émulation, choisi jeu par jeu par
+l'option `emu.engine` (lots FCEUX-1, FCEUX-23 et FCEUX-48). Cette possibilité est derrière la fonctionnalité
+Cargo `fceux-core`, **désactivée par défaut** — à la fois pour `zax-app` et pour `zax-harness` :
+les binaires livrés ne contiennent aucun code de FCEUX, l'option n'est pas affichée, et le
+constructeur qui n'active pas cette fonctionnalité n'a rien à faire de cette section.
+
+**Aucun code de FCEUX n'est repris dans les sources de Zaxnes.** Il vit uniquement dans un fork
+séparé, `cleanroom/fceux-zax` (branche `zax`), qui conserve l'historique complet de FCEUX amont ;
+le côté Rust (`rust/crates/zax-fceux`) ne parle qu'à l'interface C de ce fork
+(`zax/zaxfceux.h`) et à rien d'autre. Chaque en-tête de copyright de FCEUX est conservé tel quel,
+et les fichiers ajoutés dans `zax/` portent la même licence que FCEUX.
+
+FCEUX est publié sous **GNU GPL v2 ou ultérieure** ; « ou ultérieure » permet de l'utiliser sous
+GPL v3, qui est la licence de Zaxnes, de sorte que l'ensemble lié reste sous GPL v3 — que la
+bibliothèque soit liée statiquement ou dynamiquement.
+
+**Ce qu'impose une distribution avec FCEUX** : si un binaire de Zaxnes est livré avec la
+bibliothèque de ce fork, les **sources complètes correspondantes du fork** doivent voyager avec
+lui (offertes aux mêmes conditions, à côté du binaire). C'est la raison pour laquelle
+l'historique de FCEUX est conservé intact dans le fork : chacune de nos modifications est un
+`git diff` lisible par-dessus l'amont. `zax/README.md` les énumère, et c'est lui qui fait foi : au
+terme du lot **FCEUX-48**, **six fichiers de `src/`** et le répertoire `zax/`.
+
+Le lot FCEUX-23 n'avait fait qu'agrandir `zax/` (trois appels de plus pour la mémoire de
+sauvegarde, aucun fichier de FCEUX touché). Le lot FCEUX-48 ajoute deux fichiers de `src/`, et la
+distinction entre les deux compte :
+
+- `src/movie.cpp` — un `FCEUFILE` consommé une fois, pour ouvrir un film `.fm2` depuis la mémoire
+  plutôt que depuis un chemin, exactement comme `src/fceu.cpp` le fait déjà pour une image de
+  cartouche. C'est une **adaptation** pour Zaxnes, marquée `// ZAX:` comme les autres ;
+- `src/ines.cpp` — un **correctif d'un défaut de FCEUX lui-même** : l'allocation de la CHR-RAM est
+  complétée à 8 Kio, parce que `setchr8()` installe une fenêtre linéaire de 8 Kio quelle que soit
+  la taille de la puce et qu'une CHR-RAM plus petite faisait donc écrire hors du tampon. Il ne
+  porte **pas** de marque `// ZAX:`, volontairement : il est écrit pour être proposé tel quel en
+  amont de FCEUX, et ce signalement revient au propriétaire du projet.
+
+Le lot ajoute aussi six appels de film à l'interface C (`zax/zaxfceux.cpp`), qui ne touchent aucun
+fichier de FCEUX.
+
+Le fork compile aussi la copie de **zlib** que FCEUX embarque déjà
+(`src/drivers/win/zlib`, zlib 1.1.4, licence zlib) quand aucune zlib système n'est trouvée, et la
+copie de **minizip** de FCEUX (`src/utils/unzip.cpp`, licence zlib) ; les deux sont du code de
+l'arbre amont, sous les licences de leurs auteurs.
 
 ## Assets
 

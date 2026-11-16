@@ -77,3 +77,39 @@ fn the_widescreen_of_a_portable_pack_switches_while_playing() {
     harness.host.set_game_options(&rom_path, Vec::new());
     assert!(!patched(&harness), "the game's own widescreen gone");
 }
+
+/// Portrait (owner request): the widescreen held off while the screen is too narrow, the
+/// settings untouched, and back on with the landscape.
+#[test]
+fn the_portrait_screen_holds_the_widescreen_off_without_the_settings() {
+    let Some(rom) = demo_rom() else {
+        eprintln!("skipped: no FlappyZaxNes.nes in zax-app/demo");
+        return;
+    };
+    let mut harness = LoopHarness::create();
+    harness.host.update_settings(|model| {
+        model.set(SettingId::EmuBuiltinPatches, SettingValue::Bool(true));
+        model.set(SettingId::VideoWidescreen, SettingValue::Enum(1));
+    });
+    harness.launch_rom_with_script("flappy", &rom, None);
+    harness.settle();
+    harness.run_frames(120);
+    assert!(patched(&harness), "launched wide");
+
+    harness.host.set_widescreen_held_off(true);
+    assert!(!patched(&harness), "portrait: the original ROM at once");
+    assert_eq!(
+        1,
+        harness
+            .host
+            .settings()
+            .get(SettingId::VideoWidescreen)
+            .as_int(),
+        "the setting as it was"
+    );
+    harness.run_frames(120);
+    assert!(!patched(&harness));
+
+    harness.host.set_widescreen_held_off(false);
+    assert!(patched(&harness), "landscape: wide again");
+}

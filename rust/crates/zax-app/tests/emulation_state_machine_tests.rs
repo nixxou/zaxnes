@@ -13,7 +13,7 @@ use zax_app::emulation::rom_file::INVALID_ROM_MESSAGE;
 use zax_app::persistence::app_settings::{AppSettings, AppSettingsMut, TvRegionSetting};
 use zax_app::persistence::save_slots::QUICK_SLOT_ID;
 use zax_app::persistence::settings_store::SettingsStore;
-use zax_nes::NesRegion;
+use zax_core_api::NesRegion;
 use zax_settings::model::SettingsModel;
 
 fn launch(harness: &mut LoopHarness, game_id: &str) {

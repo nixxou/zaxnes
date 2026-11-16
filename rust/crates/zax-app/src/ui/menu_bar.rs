@@ -6,7 +6,7 @@
 //! ([`Submenu`]) and a choice names what makes it selected ([`Selection`]); the model reads the
 //! host it is given at the moment it builds the children or answers.
 
-use zax_nes::ControllerPortType;
+use zax_core_api::ControllerPortType;
 use zax_render::camera::CameraMode;
 use zax_settings::catalogue::{self, SettingId};
 
@@ -19,6 +19,7 @@ use crate::emulation::commands::{Command, CommandArgs, Shortcut};
 use crate::emulation::host::SlotPatchStatus;
 use crate::emulation::speed_setting;
 use crate::persistence::app_settings::{AppSettings, TvRegionSetting};
+use crate::persistence::console_model::ConsoleModel;
 use crate::persistence::save_slots::{
     numbered_slot_id, SaveSlotRecord, EXPOSED_SLOT_COUNT, QUICK_SLOT_ID,
 };
@@ -54,6 +55,8 @@ pub enum Submenu {
     Speed,
     /// The video regions.
     Region,
+    /// The console models (lot FIDPLUS-1, G1).
+    ConsoleModel,
     /// The two controller ports.
     Ports,
     /// The device of one port.
@@ -75,6 +78,8 @@ pub enum Selection {
     Speed(i32),
     /// The video region is this one and not detected automatically.
     Region(TvRegionSetting),
+    /// Every value this console model sets is in force.
+    ConsoleModel(ConsoleModel),
     /// This port holds this device.
     Port(usize, ControllerPortType),
     /// The camera is in this mode.
@@ -290,6 +295,7 @@ impl MenuBarModel {
             Submenu::DeleteState => delete_slot_items(host),
             Submenu::Speed => speed_items(),
             Submenu::Region => region_items(),
+            Submenu::ConsoleModel => console_model_items(),
             Submenu::Ports => port_items(),
             Submenu::Port(port) => port_device_items(port),
             Submenu::CameraMode => camera_items(),
@@ -319,6 +325,7 @@ fn is_selected(selection: Selection, host: &AppHost) -> bool {
     match selection {
         Selection::Speed(value) => settings.game_speed() == value,
         Selection::Region(region) => !settings.auto_tv_mode() && settings.tv_mode() == region,
+        Selection::ConsoleModel(console) => console.is_selected(settings),
         Selection::Port(port, device) => host.port_type(port) == device,
         Selection::Camera(mode) => host.scene().camera.mode() == mode,
         Selection::Skybox(value) => settings.skybox() == value,
@@ -328,6 +335,35 @@ fn is_selected(selection: Selection, host: &AppHost) -> bool {
             let shown = (settings.volume() * 100.0).round_ties_even() as i32;
             shown == percent
         }
+    }
+}
+
+/// The Emulation menu; lot FDS: the Disk System drive's commands, greyed out without one.
+fn emulation_menu() -> Menu {
+    let item = |command| MenuItem::of(command, None, CommandArgs::default());
+    Menu {
+        title: text::menu_emulation(),
+        items: vec![
+            item(Command::PauseResume),
+            item(Command::Reset),
+            // AMD-044 REQ-LOOP-072: the soft reset sits right next to the hard one.
+            item(Command::SoftReset),
+            item(Command::Stop),
+            MenuItem::rule(),
+            item(Command::SwitchDiskSide),
+            item(Command::InsertNextDisk),
+            item(Command::EjectDisk),
+            MenuItem::rule(),
+            item(Command::FastForward),
+            item(Command::Rollback),
+            item(Command::FrameBack),
+            item(Command::FrameAdvance),
+            MenuItem::rule(),
+            MenuItem::sub(text::speed(), Submenu::Speed),
+            MenuItem::sub(text::region(), Submenu::Region),
+            MenuItem::sub(text::console_model(), Submenu::ConsoleModel),
+            MenuItem::sub(text::ports(), Submenu::Ports),
+        ],
     }
 }
 
@@ -372,25 +408,7 @@ fn build_menus() -> Vec<Menu> {
             item(Command::Quit),
         ],
     };
-    let emulation = Menu {
-        title: text::menu_emulation(),
-        items: vec![
-            item(Command::PauseResume),
-            item(Command::Reset),
-            // AMD-044 REQ-LOOP-072: the soft reset sits right next to the hard one.
-            item(Command::SoftReset),
-            item(Command::Stop),
-            MenuItem::rule(),
-            item(Command::FastForward),
-            item(Command::Rollback),
-            item(Command::FrameBack),
-            item(Command::FrameAdvance),
-            MenuItem::rule(),
-            MenuItem::sub(text::speed(), Submenu::Speed),
-            MenuItem::sub(text::region(), Submenu::Region),
-            MenuItem::sub(text::ports(), Submenu::Ports),
-        ],
-    };
+    let emulation = emulation_menu();
     let video = Menu {
         title: text::menu_video(),
         items: vec![
@@ -486,6 +504,16 @@ fn slot_items(numbered: Command, quick: Command, host: &AppHost) -> Vec<MenuItem
                 MenuWarning::Blocked
             }
         };
+        // The engine that made the state, when it is not Zaxnes or the game runs on another;
+        // a state of another engine than the one in play cannot load at all.
+        let (label, warning) = match slot_engine_note(host, &id) {
+            Some(EngineNote::Shown(note)) => (format!("{label} · {note}"), warning),
+            Some(EngineNote::Refused(note)) => (
+                format!("{} ({note})", slot_label(slot, host.slots.find(&id))),
+                MenuWarning::Blocked,
+            ),
+            None => (label, warning),
+        };
         let mut item = MenuItem::of(numbered, Some(label), CommandArgs::of_number(slot));
         item.warning = warning;
         items.push(item);
@@ -542,6 +570,28 @@ fn slot_count() -> i32 {
 }
 
 /// The label of numbered slot `slot` in the state submenus: "Slot 3 — date" or "Slot 3 — empty".
+/// What the slot lists say of the engine a state was made with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EngineNote {
+    /// The engine, shown because it is not Zaxnes or the game in play runs on another one.
+    Shown(String),
+    /// The state was made with another engine than the game in play's: why it cannot load.
+    Refused(String),
+}
+
+/// The engine note of the slot `slot_id`, `None` when there is nothing to say: an empty slot, or
+/// a Zaxnes state while the game runs on Zaxnes (or no game runs).
+#[must_use]
+pub fn slot_engine_note(host: &AppHost, slot_id: &str) -> Option<EngineNote> {
+    let engine = host.slot_engine(slot_id)?;
+    let in_play = host.engine_in_play();
+    if in_play.is_some_and(|in_play| in_play != engine) {
+        return Some(EngineNote::Refused(text::slot_other_engine(engine)));
+    }
+    (engine != zax_core_api::EngineKind::Zaxnes)
+        .then(|| EngineNote::Shown(text::slot_engine(engine)))
+}
+
 #[must_use]
 pub fn slot_label(slot: i32, record: Option<&SaveSlotRecord>) -> String {
     format!("{} {slot} — {}", text::slot_prefix(), state_stamp(record))
@@ -584,6 +634,8 @@ fn region_items() -> Vec<MenuItem> {
         ("NTSC", TvRegionSetting::Ntsc),
         ("PAL", TvRegionSetting::Pal),
         ("Dendy", TvRegionSetting::Dendy),
+        ("PAL-M (famiclone)", TvRegionSetting::PalM),
+        ("PAL-N (famiclone)", TvRegionSetting::PalN),
     ] {
         items.push(MenuItem::choice(
             Command::SetRegion,
@@ -593,6 +645,20 @@ fn region_items() -> Vec<MenuItem> {
         ));
     }
     items
+}
+
+fn console_model_items() -> Vec<MenuItem> {
+    ConsoleModel::ALL
+        .into_iter()
+        .map(|console| {
+            MenuItem::choice(
+                Command::SetConsoleModel,
+                console.label().to_owned(),
+                CommandArgs::of_number(console as i32),
+                Selection::ConsoleModel(console),
+            )
+        })
+        .collect()
 }
 
 fn port_items() -> Vec<MenuItem> {

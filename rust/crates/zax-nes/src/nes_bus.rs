@@ -1,12 +1,13 @@
 use crate::apu::Apu2A03;
 #[cfg(feature = "board-vs-system")]
 use crate::cartridges::mappers::VsBoard;
-use crate::cartridges::Cartridge;
+use crate::cartridges::{AnyBoard, BoardKind, Cartridge, Fid};
 use crate::cpu::CpuBus;
 use crate::input::InputPorts;
 use crate::ppu::Ppu2C02;
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::wide::WideExtension;
+use std::marker::PhantomData;
 
 /// Size of CPU work RAM.
 const RAM_SIZE: usize = 2048;
@@ -45,6 +46,30 @@ const DMA_OAM: u8 = 0x08;
 /// game that runs no DMA nothing: `dma` is zero on every one of its cycles, which is the single
 /// `cmpb` [`NesBus::read_cycle`] already made.
 const DMA_DMC_WAIT: u8 = 0x10;
+
+/// [`NesBus::dma`]: a `$4015` write has just switched the DMC off while its memory reader had, or
+/// was about to have, a fetch to make, and the switch-off has not reached the DMA unit yet.
+///
+/// "Disabling takes effect with a 1 APU cycle delay. If a DMA starts during this time, it gets
+/// cancelled, but this will still cause the CPU to be halted" (Mesen 2,
+/// `DeltaModulationChannel::SetEnabled`; `AccuracyCoin`, `Explicit DMA Abort`). The channel itself
+/// is switched off at once — nothing but the DMA unit can tell — and this flag holds the fetch the
+/// reader *would* have made, with the cycle its halt may land on in [`NesBus::dmc_ready_cycle`]
+/// and the cycle the switch-off arrives in [`NesBus::dmc_abort_cycle`]. It lives at most three
+/// cycles and costs the cycles of a game that never does this nothing: it is one more bit of the
+/// `dma` byte [`NesBus::read_cycle`] already tests against zero.
+const DMA_DMC_GHOST: u8 = 0x20;
+
+/// `NesBus::vs_port` bits (lot MAPPERS-N): the mapper-99 port, a VS image, an RC2C05 PPU, a
+/// remapping PPU.
+#[cfg(feature = "board-vs-system")]
+const VS_PORT: u8 = 0x01;
+#[cfg(feature = "board-vs-system")]
+const VS_IMAGE: u8 = 0x02;
+#[cfg(feature = "board-vs-system")]
+const VS_RC2C05: u8 = 0x04;
+#[cfg(feature = "board-vs-system")]
+const VS_REMAP: u8 = 0x08;
 
 /// The CPU bus: memory map, open bus, OAM DMA and the master cycle clock (REQ-CORE-080 to
 /// REQ-CORE-082).
@@ -89,8 +114,18 @@ pub struct NesBus {
     /// Earliest cycle the halt of the DMC request held by [`DMA_DMC_WAIT`] may land on; only read
     /// while that bit is set.
     dmc_ready_cycle: i64,
+    /// The cycle a `$4015` switch-off reaches the DMA unit, while [`DMA_DMC_GHOST`] is set.
+    /// Transient like `dma`, and not in the savestate for the same reason.
+    dmc_abort_cycle: i64,
+    /// The byte a DMA read left on the pins when its value came from `$4015` instead (see
+    /// `dmc_fetch_read`). Read back on the same call only.
+    dma_pins: u8,
     oam_dma_count: i64,
     dmc_dma_count: i64,
+    /// Every access a DMA unit made on the bus, `(cycle, address, read, byte)`, the cycle
+    /// numbered as `CpuBus::cycle_count` minus one (the recorder's numbering).
+    #[cfg(feature = "bus-trace")]
+    dma_trace: Vec<(i64, u16, bool, u8)>,
     /// CPU cycles the PPU still owes: while `deferred_ppu` is on, the PPU runs in batches,
     /// caught up before anything that could see or change it (see [`NesBus::sync_ppu`]).
     ppu_lag: u32,
@@ -111,8 +146,13 @@ pub struct NesBus {
     /// Whether the cartridge is a mapper-99 board, the one board whose register is a `$4016`
     /// write, asked once in [`NesBus::attach`] beside `expansion_audio`. See
     /// [`NesBus::write_vs_port`]; `false` for every other image, including every other VS one.
+    ///
+    /// **A byte of flags since lot MAPPERS-N, and still one byte**: bit 0 the mapper-99 port
+    /// above, bit 1 a VS image, bit 2 its PPU is an RC2C05, bit 3 its PPU remaps the palette.
+    /// The PPU's own VS fields moved here and into `InputPorts::vs` so that `Ppu2C02` keeps the
+    /// layout of a build without the VS. System (see `Ppu2C02::remap_palette`).
     #[cfg(feature = "board-vs-system")]
-    vs_port: bool,
+    vs_port: u8,
     /// Whether the cartridge is a board that reads something of the **console** when it answers a
     /// CPU read below `$8000`: mapper 143's protection read, whose two top bits the page calls open
     /// bus (Q-145), and mapper 292's data registers, which the page fills from "the desired values"
@@ -129,6 +169,16 @@ pub struct NesBus {
     /// test for everybody else.
     #[cfg(any(feature = "board-143-open-bus", feature = "board-292"))]
     samples_console: bool,
+    /// Mapper 682 (lot MAPPERS-N): the Rainbow copies OAM's Y bytes from `$2003`/`$2004` writes
+    /// and answers a `$4011` read (Mesen2 `Rainbow.cpp`, `RegisterWriteHandler(0x2003, 0x2004)`
+    /// and `RegisterReadHandler(0x4011)`). Settled at attach like `samples_console`; every other
+    /// game pays this flag's test on a PPU register write.
+    #[cfg(feature = "board-682")]
+    snoops_cpu_bus: bool,
+    /// Lot MAPPERS-P: a `OneBus` famiclone (256, 436) is attached; its chip takes the CPU writes
+    /// to `$2008-$3FFF` and shares the APU's registers (see `Cartridge::has_vt_bus`).
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    vt_bus: bool,
     /// `deferred_ppu && !expansion_audio`: whether the APU may lag at all, kept as one flag so
     /// that the per-cycle catch-up tests it **instead of** `deferred_ppu` rather than on top of
     /// it. Everything the MMC5's audio needs sits on the other side of that single test, out of
@@ -177,17 +227,25 @@ impl NesBus {
             dma: 0,
             dma_oam_page: 0,
             dmc_ready_cycle: 0,
+            dmc_abort_cycle: 0,
+            dma_pins: 0,
             oam_dma_count: 0,
             dmc_dma_count: 0,
+            #[cfg(feature = "bus-trace")]
+            dma_trace: Vec::new(),
             ppu_lag: 0,
             ppu_deadline: 0,
             deferred_ppu: false,
             apu_lag: 0,
             expansion_audio: false,
             #[cfg(feature = "board-vs-system")]
-            vs_port: false,
+            vs_port: 0,
             #[cfg(any(feature = "board-143-open-bus", feature = "board-292"))]
             samples_console: false,
+            #[cfg(feature = "board-682")]
+            snoops_cpu_bus: false,
+            #[cfg(any(feature = "board-256", feature = "board-436"))]
+            vt_bus: false,
             apu_batching: false,
             apu_quiet: 0,
             zone_instruction: false,
@@ -284,6 +342,15 @@ impl NesBus {
         &self.apu
     }
 
+    /// Diagnostic (the CPU differential against the 2A03 netlist): the other CPU / APU get-put
+    /// parity, which a console takes at power-on: the bus's cycle parity (the DMA's get and put
+    /// cycles) and the APU's together, as one clock.
+    #[doc(hidden)]
+    pub fn diagnostic_flip_get_put(&mut self) {
+        self.cycles += 1;
+        self.apu.diagnostic_flip_parity();
+    }
+
     /// The APU, mutably, caught up first.
     pub fn apu_mut(&mut self) -> &mut Apu2A03 {
         self.sync_apu();
@@ -312,7 +379,65 @@ impl NesBus {
     #[cfg(feature = "board-vs-system")]
     pub fn set_vs_system(&mut self, vs: Option<crate::vs::VsSystem>) {
         self.input.set_vs_system(vs);
-        self.ppu.set_vs_ppu(self.input.vs());
+        let port = self.vs_port & VS_PORT;
+        self.vs_port = port
+            | match self.input.vs() {
+                None => 0,
+                Some(vs) => {
+                    VS_IMAGE
+                        | if vs.is_rc2c05() { VS_RC2C05 } else { 0 }
+                        | if vs.palette_lut().is_some() {
+                            VS_REMAP
+                        } else {
+                            0
+                        }
+                }
+            };
+        self.reapply_vs_palette();
+    }
+
+    /// Whether the image loaded is a VS. System: `NesCore` then runs it on the generic path
+    /// (`BoardKind::RUNS_VS`, lot MAPPERS-N).
+    #[cfg(feature = "board-vs-system")]
+    #[must_use]
+    pub const fn is_vs_image(&self) -> bool {
+        self.vs_port & VS_IMAGE != 0
+    }
+
+    /// Without the VS. System no image is one.
+    #[cfg(not(feature = "board-vs-system"))]
+    #[must_use]
+    pub const fn is_vs_image(&self) -> bool {
+        false
+    }
+
+    /// Re-shows palette RAM through the VS PPU's remap after the PPU rewrote it (a palette
+    /// write, the power-on fill, a state load); nothing for any other image.
+    #[cfg(feature = "board-vs-system")]
+    pub fn reapply_vs_palette(&mut self) {
+        if self.vs_port & VS_REMAP != 0 {
+            if let Some(lut) = self.input.vs().and_then(crate::vs::VsSystem::palette_lut) {
+                self.ppu.remap_palette(lut);
+            }
+        }
+    }
+
+    /// Without the VS. System there is nothing to re-show.
+    #[cfg(not(feature = "board-vs-system"))]
+    #[allow(clippy::unused_self)]
+    pub const fn reapply_vs_palette(&mut self) {}
+
+    /// An RC2C05's `$2002`: its identifier in bits 0-4 instead of the PPU's open bus (nesdev,
+    /// "PPU registers"). Out of line and cold: a VS image with that chip is the only caller.
+    #[cfg(feature = "board-vs-system")]
+    #[cold]
+    #[inline(never)]
+    fn vs_status(&self, value: u8) -> u8 {
+        let (latch_mask, id) = self
+            .input
+            .vs()
+            .map_or((0x1F, 0), |vs| vs.ppu().status_identifier());
+        (value & 0xE0) | (value & latch_mask & 0x1F) | id
     }
 
     /// Hands a `$4016` write to the cartridge, for the **one** board whose register is a CPU
@@ -328,7 +453,7 @@ impl NesBus {
     #[cfg(feature = "board-vs-system")]
     #[inline]
     fn write_vs_port(&mut self, value: u8) {
-        if self.vs_port {
+        if self.vs_port & VS_PORT != 0 {
             if let Some(cartridge) = self.cartridge.as_mut() {
                 cartridge.cpu_write(VsBoard::PORT, value);
             }
@@ -362,6 +487,14 @@ impl NesBus {
         self.expansion_audio = cartridge
             .as_ref()
             .is_some_and(Cartridge::has_expansion_audio);
+        // A OneBus PCM channel writes the APU's `$4011` on the cycle it fetches; the APU is kept
+        // in step with the cartridge as for expansion audio, and `push_expansion_audio` hands
+        // it the byte.
+        #[cfg(any(feature = "board-256", feature = "board-436"))]
+        {
+            self.vt_bus = cartridge.as_ref().is_some_and(Cartridge::has_vt_bus);
+            self.expansion_audio |= self.vt_bus;
+        }
         self.apu_batching = self.deferred_ppu && !self.expansion_audio;
         if !self.expansion_audio {
             // A board with no expansion audio leaves the APU's `M` at 0 for good.
@@ -372,9 +505,10 @@ impl NesBus {
         // `bool` and never the `Board` enum.
         #[cfg(feature = "board-vs-system")]
         {
-            self.vs_port = cartridge
+            let port = cartridge
                 .as_ref()
                 .is_some_and(|cartridge| cartridge.mapper_number() == VsBoard::MAPPER);
+            self.vs_port = (self.vs_port & !VS_PORT) | if port { VS_PORT } else { 0 };
         }
         // Q-145 and Q-172 section 2 / MF-FIX: the two boards that read something of the console
         // when they answer a read below $8000 -- mapper 143 the cartridge-edge data bus, mapper 292
@@ -385,6 +519,10 @@ impl NesBus {
             self.samples_console = cartridge
                 .as_ref()
                 .is_some_and(|cartridge| matches!(cartridge.mapper_number(), 143 | 292));
+        }
+        #[cfg(feature = "board-682")]
+        {
+            self.snoops_cpu_bus = cartridge.as_ref().is_some_and(Cartridge::snoops_cpu_bus);
         }
         self.cartridge = cartridge;
     }
@@ -405,6 +543,7 @@ impl NesBus {
         self.dma = 0;
         self.dma_oam_page = 0;
         self.dmc_ready_cycle = 0;
+        self.dmc_abort_cycle = 0;
         self.oam_dma_count = 0;
         self.dmc_dma_count = 0;
         self.ppu_lag = 0;
@@ -415,12 +554,17 @@ impl NesBus {
 
     /// Advances the whole machine by one CPU cycle.
     pub fn tick(&mut self) {
+        self.tick_as::<AnyBoard>();
+    }
+
+    /// [`Self::tick`] with the board reached through `K` (lot CORE-2).
+    pub fn tick_as<K: BoardKind>(&mut self) {
         // Widescreen extension overclock: the PPU and the APU stay still for this cycle. The
         // cartridge still sees it: MMC1 tells consecutive writes apart by their cycle, and a
         // bank switch is five writes in a row.
         if self.ppu.wide_mut().take_stall_cycle() {
             if let Some(cartridge) = self.cartridge.as_mut() {
-                cartridge.step_cpu_cycle();
+                cartridge.step_cpu_cycle_as::<K>();
             }
             return;
         }
@@ -428,7 +572,7 @@ impl NesBus {
         self.cycles += 1;
         self.ppu_lag += 1;
         if self.cycles >= self.ppu_deadline {
-            self.catch_up_ppu();
+            self.catch_up_ppu_as::<K>();
         }
 
         // The cartridge goes before the APU: a board with expansion audio (REQ-CORE-075) has
@@ -439,7 +583,7 @@ impl NesBus {
         // CPU reads on, so the question is asked by [`NesBus::poll_dmc_dma`] where the APU
         // runs and answered by [`CpuBus::read`] (MF-4a step 1).
         if let Some(cartridge) = self.cartridge.as_mut() {
-            cartridge.step_cpu_cycle();
+            cartridge.step_cpu_cycle_as::<K>();
         }
 
         self.apu_lag += 1;
@@ -452,7 +596,12 @@ impl NesBus {
     /// may move the NMI line ($2000), the vblank flag ($2002) or the cartridge's IRQ, so
     /// the next cycle is run in step and recomputes the deadline.
     pub fn sync_ppu(&mut self) {
-        self.catch_up_ppu();
+        self.sync_ppu_as::<AnyBoard>();
+    }
+
+    /// [`Self::sync_ppu`] with the board reached through `K` (lot CORE-2).
+    pub fn sync_ppu_as<K: BoardKind>(&mut self) {
+        self.catch_up_ppu_as::<K>();
         self.ppu_deadline = self.cycles + 1;
     }
 
@@ -465,22 +614,25 @@ impl NesBus {
     /// where the cartridge's IRQ line could follow the PPU (see
     /// [`Cartridge::ppu_irq_horizon`]). Outside [`NesBus::defer_ppu`] the PPU runs on every
     /// cycle, as before.
-    fn catch_up_ppu(&mut self) {
+    #[allow(clippy::inline_always)]
+    // Lot CORE-2: called from every board kind's copy of the hot path, LLVM stops inlining it (measured, +2.8 % on metroid for span_pixel alone).
+    #[inline(always)]
+    fn catch_up_ppu_as<K: BoardKind>(&mut self) {
         if self.ppu_lag > 0 {
             self.ppu
-                .run_cpu_cycles(self.ppu_lag, self.cartridge.as_mut());
+                .run_cpu_cycles_as::<K>(self.ppu_lag, self.cartridge.as_mut());
             self.ppu_lag = 0;
         }
 
         self.ppu_deadline = if self.deferred_ppu {
-            self.cycles + self.ppu_horizon()
+            self.cycles + self.ppu_horizon_as::<K>()
         } else {
             self.cycles + 1
         };
     }
 
     /// CPU cycles the PPU may lag from now on, at least 1.
-    fn ppu_horizon(&self) -> i64 {
+    fn ppu_horizon_as<K: BoardKind>(&self) -> i64 {
         // The PPU's sample of /NMI lags its line by a dot or two: when they differ, the
         // next cycle must be run in step.
         if self.ppu.nmi_line_sample() != self.ppu.nmi_asserted() {
@@ -491,7 +643,7 @@ impl NesBus {
         // the dot or two by which the sample trails and the odd frame's skipped dot.
         let nmi = self.ppu.dots_until_nmi_change() / 4 - 2;
         let irq = self.cartridge.as_ref().map_or(i64::MAX, |cartridge| {
-            match cartridge.ppu_irq_horizon() {
+            match cartridge.ppu_irq_horizon_as::<K>() {
                 Some(dots) => dots / 4 - 2,
                 None => 0,
             }
@@ -610,6 +762,12 @@ impl NesBus {
     /// saved register — RU-3a's +15.7 % on `tick`.
     #[inline(never)]
     fn push_expansion_audio(&mut self) {
+        #[cfg(any(feature = "board-256", feature = "board-436"))]
+        if self.vt_bus {
+            if let Some(byte) = self.cartridge.as_mut().and_then(Cartridge::take_dac_write) {
+                let _ = self.apu.write(0x4011, byte);
+            }
+        }
         if let Some(level) = self
             .cartridge
             .as_ref()
@@ -623,7 +781,7 @@ impl NesBus {
     pub fn defer_ppu(&mut self) {
         self.deferred_ppu = true;
         self.apu_batching = !self.expansion_audio;
-        self.sync_ppu();
+        self.sync_ppu_as::<AnyBoard>();
         self.sync_apu();
     }
 
@@ -631,7 +789,7 @@ impl NesBus {
     pub fn end_deferred_ppu(&mut self) {
         self.deferred_ppu = false;
         self.apu_batching = false;
-        self.sync_ppu();
+        self.sync_ppu_as::<AnyBoard>();
         self.sync_apu();
     }
 
@@ -679,7 +837,7 @@ impl NesBus {
     // Q-119
     // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
     #[inline(never)]
-    fn run_dma<const ZONE: bool>(&mut self, read_address: u16) {
+    fn run_dma_as<K: BoardKind, const ZONE: bool>(&mut self, read_address: u16) {
         // Only the **first** idle read of $4016/$4017 is a read as far as the controller is
         // concerned: /OE stays active for the cycles that follow, so the shift register is
         // clocked once however many idle cycles the DMA spends (nesdev, "DMA"; the original
@@ -703,7 +861,7 @@ impl NesBus {
         // happens with the CPU's address still on the bus.
         self.dma &= !DMA_HALT;
         if !halt_is_invisible {
-            self.dma_repeat_read::<ZONE>(read_address);
+            self.dma_repeat_read_as::<K, ZONE>(read_address);
         }
 
         // Bytes read and written so far, counted the way the hardware's pair counter is: even
@@ -724,7 +882,7 @@ impl NesBus {
             if fast && self.dma == DMA_OAM && (self.cycles & 1) != 0 && (oam_steps & 1) == 0 {
                 let pairs = self.oam_fast_pairs(0x100 - (oam_steps >> 1));
                 if pairs > 0 {
-                    oam_index = self.copy_oam_pairs(pairs, oam_index);
+                    oam_index = self.copy_oam_pairs_as::<K>(pairs, oam_index);
                     oam_steps += pairs * 2;
                     if oam_steps == 0x200 {
                         self.dma &= !DMA_OAM;
@@ -745,25 +903,30 @@ impl NesBus {
 
             if get_cycle && (self.dma & (DMA_HALT | DMA_DUMMY | DMA_DMC)) == DMA_DMC {
                 // The memory reader has had its halt and its dummy cycle: it reads.
-                self.dma_cycle();
+                self.dma_cycle_as::<K>();
                 self.dmc_dma_count += 1;
                 let address = self.apu.dmc_dma_address();
-                let value = self.dmc_fetch_read(address, internal, &mut decoded_before);
+                let value = self.dmc_fetch_read_as::<K>(address, internal, &mut decoded_before);
                 self.sync_apu();
-                self.apu.supply_dmc_byte(value);
+                let taken_back = self.apu.supply_dmc_byte(value);
                 // Cleared last: the `sync_apu` above polls the request, which is still raised
                 // until the byte lands.
                 self.dma &= !DMA_DMC;
+                if let Some(until_reset) = taken_back {
+                    self.arm_implicit_dmc_abort(until_reset);
+                }
             } else if get_cycle && (self.dma & DMA_OAM) != 0 {
-                self.dma_cycle();
+                self.dma_cycle_as::<K>();
                 let address = (u16::from(self.dma_oam_page) << 8) | u16::from(oam_index);
-                oam_byte = self.dma_read(address, internal, &mut decoded_before);
+                oam_byte = self.dma_read_as::<K>(address, internal, &mut decoded_before);
+                self.trace_dma(address, true, oam_byte);
                 oam_index = oam_index.wrapping_add(1);
                 oam_steps += 1;
             } else if !get_cycle && (self.dma & DMA_OAM) != 0 && (oam_steps & 1) != 0 {
-                self.dma_cycle();
-                self.sync_ppu();
+                self.dma_cycle_as::<K>();
+                self.sync_ppu_as::<K>();
                 self.ppu.write_oam_dma(oam_byte);
+                self.trace_dma(0x2004, false, oam_byte);
                 oam_steps += 1;
                 if oam_steps == 0x200 {
                     self.dma &= !DMA_OAM;
@@ -772,9 +935,9 @@ impl NesBus {
             } else {
                 // A cycle no unit can use: the DMC's dummy read, or an alignment before a get.
                 // The CPU's address is still on the bus, so its read happens again.
-                self.dma_cycle();
+                self.dma_cycle_as::<K>();
                 if !input_port {
-                    self.dma_repeat_read::<ZONE>(read_address);
+                    self.dma_repeat_read_as::<K, ZONE>(read_address);
                 }
             }
         }
@@ -792,12 +955,12 @@ impl NesBus {
     /// `ZONE` carries [`NesBus::run_dma`]'s meaning, and suppresses the same re-reads.
     // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
     #[inline(never)]
-    fn dmc_only_dma<const ZONE: bool>(&mut self, read_address: u16) {
+    fn dmc_only_dma_as<K: BoardKind, const ZONE: bool>(&mut self, read_address: u16) {
         // The halt cycle has already run; what is left of it is its read, with the CPU's address
         // still on the bus. `halt_is_invisible` needs `internal`, which the caller excluded.
         self.dma &= !DMA_HALT;
-        self.dma_repeat_read::<ZONE>(read_address);
-        self.dmc_fetch_cycles::<ZONE>(read_address);
+        self.dma_repeat_read_as::<K, ZONE>(read_address);
+        self.dmc_fetch_cycles_as::<K, ZONE>(read_address);
     }
 
     /// The read a DMA unit makes of the **CPU's** address while it holds the bus: the halt cycle's
@@ -835,11 +998,27 @@ impl NesBus {
     /// same cycles, whatever halted it.
     #[allow(clippy::inline_always)] // The whole point: `ZONE` false must leave no trace.
     #[inline(always)]
-    fn dma_repeat_read<const ZONE: bool>(&mut self, read_address: u16) {
+    fn dma_repeat_read_as<K: BoardKind, const ZONE: bool>(&mut self, read_address: u16) {
         if !ZONE {
-            let value = self.read_internal(read_address);
+            let value = self.read_internal_as::<K>(read_address);
             self.data_bus = value;
+            self.trace_dma(read_address, true, value);
         }
+    }
+
+    /// Records one DMA bus access with feature `bus-trace`; nothing at all without it.
+    #[allow(clippy::inline_always, clippy::unused_self, unused_variables)]
+    #[inline(always)]
+    fn trace_dma(&mut self, address: u16, read: bool, value: u8) {
+        #[cfg(feature = "bus-trace")]
+        self.dma_trace.push((self.cycles - 1, address, read, value));
+    }
+
+    /// The DMA accesses recorded since the last call (feature `bus-trace`).
+    #[cfg(feature = "bus-trace")]
+    #[doc(hidden)]
+    pub fn take_dma_trace(&mut self) -> Vec<(i64, u16, bool, u8)> {
+        std::mem::take(&mut self.dma_trace)
     }
 
     /// The cycles of a DMC sample fetch with no OAM transfer beside it: the dummy cycle, an
@@ -862,29 +1041,44 @@ impl NesBus {
     /// The DMC's read keeps going through [`NesBus::dma_read`]: it is one call per fetch, it is
     /// where the 2A03's "two reads in a row" rule lives, and a sample address outside
     /// `$8000`-`$FFFF` (which only a loaded state can produce) must still decode as it did.
-    fn dmc_fetch_cycles<const ZONE: bool>(&mut self, read_address: u16) {
+    fn dmc_fetch_cycles_as<K: BoardKind, const ZONE: bool>(&mut self, read_address: u16) {
         // The dummy cycle. The CPU's address is still on the bus, so its read happens again.
         self.dma &= !DMA_DUMMY;
-        self.tick();
-        self.dma_repeat_read::<ZONE>(read_address);
+        self.tick_as::<K>();
+        self.dma_repeat_read_as::<K, ZONE>(read_address);
 
         // An alignment cycle when the cycle after this one would not be a get cycle.
         if (self.cycles & 1) == 0 {
-            self.tick();
-            self.dma_repeat_read::<ZONE>(read_address);
+            self.tick_as::<K>();
+            self.dma_repeat_read_as::<K, ZONE>(read_address);
         }
 
         // The get cycle: the memory reader has had its halt and its dummy cycle, so it reads.
-        self.tick();
+        self.tick_as::<K>();
         self.dmc_dma_count += 1;
         let address = self.apu.dmc_dma_address();
         let mut decoded_before = read_address;
-        let value = self.dmc_fetch_read(address, false, &mut decoded_before);
+        let value = self.dmc_fetch_read_as::<K>(address, false, &mut decoded_before);
         self.sync_apu();
-        self.apu.supply_dmc_byte(value);
+        let taken_back = self.apu.supply_dmc_byte(value);
         // Cleared last: the `sync_apu` above polls the request, which is still raised until the
         // byte lands.
         self.dma &= !DMA_DMC;
+        if let Some(until_reset) = taken_back {
+            self.arm_implicit_dmc_abort(until_reset);
+        }
+    }
+
+    /// The fetch a one-byte sample asks for and loses (`DmcChannel::supply_byte`): it is raised
+    /// when the bit counter starts over, `until_reset` cycles from this one, and taken back three
+    /// cycles after the byte landed — the window [`DMA_DMC_GHOST`] already describes, so a halt
+    /// that lands exactly then costs the CPU one cycle and a write cycle there costs nothing.
+    #[cold]
+    #[inline(never)]
+    fn arm_implicit_dmc_abort(&mut self, until_reset: u32) {
+        self.dmc_ready_cycle = self.cycles + i64::from(until_reset) + 1;
+        self.dmc_abort_cycle = self.cycles + 3;
+        self.dma |= DMA_DMC_GHOST;
     }
 
     /// How many of the `wanted` byte pairs an OAM transfer still owes may run in
@@ -935,32 +1129,34 @@ impl NesBus {
     ///
     /// What the state machine charged per stolen cycle for all of that is lot MF-4a-ter's subject;
     /// the cycles themselves, their count and their parity are untouched.
-    fn copy_oam_pairs(&mut self, pairs: u16, mut oam_index: u8) -> u8 {
+    fn copy_oam_pairs_as<K: BoardKind>(&mut self, pairs: u16, mut oam_index: u8) -> u8 {
         let page = u16::from(self.dma_oam_page) << 8;
         for _ in 0..pairs {
             // The get cycle: the DMA unit reads the source byte.
-            self.tick();
-            let byte = self.read_internal(page | u16::from(oam_index));
+            self.tick_as::<K>();
+            let byte = self.read_internal_as::<K>(page | u16::from(oam_index));
             self.data_bus = byte;
+            self.trace_dma(page | u16::from(oam_index), true, byte);
             oam_index = oam_index.wrapping_add(1);
 
             // The put cycle: it writes it into OAM.
-            self.tick();
-            self.sync_ppu();
+            self.tick_as::<K>();
+            self.sync_ppu_as::<K>();
             self.ppu.write_oam_dma(byte);
+            self.trace_dma(0x2004, false, byte);
         }
         oam_index
     }
 
     /// Runs one DMA cycle, consuming the halt or the dummy cycle the DMC may still be owed: an
     /// OAM transfer's cycles count as those when both units run at once (nesdev, "DMA").
-    fn dma_cycle(&mut self) {
+    fn dma_cycle_as<K: BoardKind>(&mut self) {
         if (self.dma & DMA_HALT) != 0 {
             self.dma &= !DMA_HALT;
         } else if (self.dma & DMA_DUMMY) != 0 {
             self.dma &= !DMA_DUMMY;
         }
-        self.tick();
+        self.tick_as::<K>();
     }
 
     /// One DMA unit's read of `address`.
@@ -972,7 +1168,12 @@ impl NesBus {
     /// 2A03 alone has the bug; `decoded_before` carries the "two reads of the same input
     /// register in a row" rule, on which the controller does not react at all.
     // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
-    fn dma_read(&mut self, address: u16, internal: bool, decoded_before: &mut u16) -> u8 {
+    fn dma_read_as<K: BoardKind>(
+        &mut self,
+        address: u16,
+        internal: bool,
+        decoded_before: &mut u16,
+    ) -> u8 {
         if !internal {
             // Nothing answers $4000-$401F on the external bus. Written as two returns rather
             // than one `if` expression so that the external bus — a compare and a select — stays
@@ -984,7 +1185,7 @@ impl NesBus {
                 *decoded_before = address;
                 return value;
             }
-            let value = self.read_internal(address);
+            let value = self.read_internal_as::<K>(address);
             self.data_bus = value;
             *decoded_before = address;
             return value;
@@ -994,9 +1195,11 @@ impl NesBus {
         let same = decoded == address;
         let value = match decoded {
             0x4015 => {
-                let value = self.read_internal(decoded);
+                let value = self.read_internal_as::<K>(decoded);
                 if !same {
-                    self.read_internal(address);
+                    // `$4015` answers on the internal bus only, so the pins carry what the
+                    // address itself holds (see `dmc_fetch_read`).
+                    self.dma_pins = self.read_internal_as::<K>(address);
                 }
                 value
             }
@@ -1004,16 +1207,24 @@ impl NesBus {
                 let value = if *decoded_before == decoded {
                     self.data_bus
                 } else {
-                    self.read_internal(decoded)
+                    self.read_internal_as::<K>(decoded)
                 };
                 if same {
                     value
                 } else {
-                    // Two drivers on the data bus at once: the byte is the AND of both.
-                    self.read_internal(address) & value
+                    // Two drivers on the data bus at once, and each wins its own pins: bits 5
+                    // to 7 of a controller port are open bus, so they are the other address's,
+                    // "while the rest of the bits are a standard controller read"
+                    // (`AccuracyCoin`, `DMC DMA Bus Conflicts` 2: `$01` under a sample byte of
+                    // `$00`, `$E1` under `$FF`). The register's answer is on the bus when the
+                    // other address is read, so an address nothing drives gives it back
+                    // unchanged (`APU Register Activation` 6: `$41` from `$5016`).
+                    self.data_bus = value;
+                    let external = self.read_internal_as::<K>(address);
+                    (external & 0xE0) | (value & 0x1F)
                 }
             }
-            _ => self.read_internal(address),
+            _ => self.read_internal_as::<K>(address),
         };
         self.data_bus = value;
         *decoded_before = decoded;
@@ -1026,10 +1237,24 @@ impl NesBus {
     /// so the cycle after a fetch cannot see it in bit 5 of a `$4015` read — which is
     /// `AccuracyCoin`'s `Internal Data Bus` test 2 — while an open-bus read on that cycle does
     /// see it, which is `DMA + Open Bus`. Four instructions, once per fetch.
-    fn dmc_fetch_read(&mut self, address: u16, internal: bool, decoded_before: &mut u16) -> u8 {
+    fn dmc_fetch_read_as<K: BoardKind>(
+        &mut self,
+        address: u16,
+        internal: bool,
+        decoded_before: &mut u16,
+    ) -> u8 {
         let internal_bus = self.data_bus;
-        let value = self.dma_read(address, internal, decoded_before);
-        self.drive_external_bus(value);
+        let value = self.dma_read_as::<K>(address, internal, decoded_before);
+        // A fetch that also reached `$4015` leaves the address's own byte on the pins, not the
+        // status: "reading from $4015 does not update the data bus" (`AccuracyCoin`, `DMC DMA Bus
+        // Conflicts` 2, the `$00` and `$FF` of offset `$15`).
+        let pins = if internal && (address & 0x1F) == 0x15 && address != 0x4015 {
+            self.dma_pins
+        } else {
+            value
+        };
+        self.drive_external_bus(pins);
+        self.trace_dma(address, true, pins);
         self.data_bus = internal_bus;
         value
     }
@@ -1038,7 +1263,12 @@ impl NesBus {
     /// detection included (REQ-CORE-061, REQ-CORE-062); this is the reference's
     /// `InputPorts.Read` with its light probe wired to the PPU.
     pub fn read_input_port(&mut self, port: usize, open_bus: u8) -> u8 {
-        self.sync_ppu();
+        self.read_input_port_as::<AnyBoard>(port, open_bus)
+    }
+
+    /// [`Self::read_input_port`] with the board reached through `K` (lot CORE-2).
+    pub fn read_input_port_as<K: BoardKind>(&mut self, port: usize, open_bus: u8) -> u8 {
+        self.sync_ppu_as::<K>();
         let cycle = self.cycles;
         let ppu = &self.ppu;
         self.input
@@ -1074,7 +1304,7 @@ impl NesBus {
     /// D).
     #[allow(clippy::inline_always)] // Measured: lot PR-1 step 3, -0.84 % over thirteen ROMs.
     #[inline(always)]
-    fn read_internal_body(&mut self, address: u16) -> u8 {
+    fn read_internal_body_as<K: BoardKind>(&mut self, address: u16) -> u8 {
         if address >= 0x8000 {
             if let Some(value) = self
                 .cartridge
@@ -1097,14 +1327,22 @@ impl NesBus {
                     None => self.external_bus(),
                 };
             }
-            self.sync_ppu();
+            self.sync_ppu_as::<K>();
             // The PPU drives its own data-bus latch for the undefined bits, separate from
             // the CPU's open bus (nesdev, "PPU registers"; ppu_open_bus).
-            return self.ppu.read(address & 0x07, self.cartridge.as_mut());
+            let value = self
+                .ppu
+                .read_as::<K>(address & 0x07, self.cartridge.as_mut());
+            // Lot MAPPERS-N: an RC2C05's `$2002` identifier, applied here and not in the PPU.
+            #[cfg(feature = "board-vs-system")]
+            if K::RUNS_VS && self.vs_port & VS_RC2C05 != 0 && address & 0x07 == 2 {
+                return self.vs_status(value);
+            }
+            return value;
         }
 
         if address < 0x4020 {
-            return self.read_io_register(address);
+            return self.read_io_register_as::<K>(address);
         }
 
         if address < 0x8000 {
@@ -1119,7 +1357,7 @@ impl NesBus {
         match self
             .cartridge
             .as_mut()
-            .and_then(|cartridge| cartridge.try_cpu_read(address))
+            .and_then(|cartridge| cartridge.try_cpu_read_as::<K>(address))
         {
             Some(value) => value,
             None => self.external_bus(),
@@ -1133,8 +1371,8 @@ impl NesBus {
     /// instructions: without it the copies multiply, which is the instruction-cache loss Q-119
     /// measured at +8 % of wall clock when the DMA gate itself was pasted at every call site.
     #[inline(never)]
-    fn read_internal(&mut self, address: u16) -> u8 {
-        self.read_internal_body(address)
+    fn read_internal_as<K: BoardKind>(&mut self, address: u16) -> u8 {
+        self.read_internal_body_as::<K>(address)
     }
 
     /// `$4000`-`$401F`, the 2A03's own registers: `$4015` and the two controller ports, a few
@@ -1145,7 +1383,7 @@ impl NesBus {
     /// lot PR-1's set.
     #[cold]
     #[inline(never)]
-    fn read_io_register(&mut self, address: u16) -> u8 {
+    fn read_io_register_as<K: BoardKind>(&mut self, address: u16) -> u8 {
         match address {
             0x4015 => {
                 self.sync_apu();
@@ -1153,15 +1391,30 @@ impl NesBus {
                 // halves of `AccuracyCoin`'s `Internal Data Bus` test, and `Open Bus` 7 and 9
                 // (see [`NesBus::external_bus`]).
                 self.hold_external_bus();
-                self.apu.read_status(self.data_bus)
+                let status = self.apu.read_status(self.data_bus);
+                #[cfg(any(feature = "board-256", feature = "board-436"))]
+                let status = match self.cartridge.as_ref() {
+                    Some(cartridge) if self.vt_bus => cartridge.apu_status(status),
+                    _ => status,
+                };
+                status
             }
             // A controller port answers on the internal bus too, and its three open-bus bits
             // come from there — which is how `Implied Dummy Reads` can take the operands of a
             // `JSR` out of `$4016`/`$4017` and have them "leech off the value read from the
             // opcode" when that opcode came from `$4015`.
-            0x4016 => self.read_input_port(0, self.data_bus),
-            0x4017 => self.read_input_port(1, self.data_bus),
+            0x4016 => self.read_input_port_as::<K>(0, self.data_bus),
+            0x4017 => self.read_input_port_as::<K>(1, self.data_bus),
 
+            #[cfg(feature = "board-682")]
+            0x4011 if self.snoops_cpu_bus => match self
+                .cartridge
+                .as_mut()
+                .and_then(|cartridge| cartridge.snoop_cpu_bus_read(address))
+            {
+                Some(value) => value,
+                None => self.external_bus(),
+            },
             // $4000-$4014 are write-only and $4018-$401F are disabled: open bus.
             _ => self.external_bus(),
         }
@@ -1242,20 +1495,48 @@ impl NesBus {
     /// page", is what made the latch avoidable: the board now reads zero page `$6A`/`$FF` through
     /// the snapshot [`NesBus::read_wide_window`] takes, on its own window's reads alone. Q-172
     /// section 2, `docs/review/Q-XCHECK.md` section CHANGE 8.
-    fn write_internal(&mut self, address: u16, value: u8) {
+    fn write_internal_as<K: BoardKind>(&mut self, address: u16, value: u8) {
         if address < 0x2000 {
             self.ram[usize::from(address) & (RAM_SIZE - 1)] = value;
             return;
         }
 
         if address < 0x4000 {
-            self.sync_ppu();
+            self.sync_ppu_as::<K>();
             if let Some(register) = self.zone_data_address(address) {
                 self.ppu.wide_mut().write(register, value);
                 return;
             }
+            #[cfg(feature = "board-682")]
+            if self.snoops_cpu_bus {
+                if let Some(cartridge) = self.cartridge.as_mut() {
+                    cartridge.snoop_cpu_bus_write(0x2000 | (address & 0x07), value);
+                }
+            }
+            // Lot MAPPERS-P: the OneBus chip decodes `$2008` and up itself; those writes never
+            // reach the PPU as mirrors (puNES `extcl_wr_ppu_reg_OneBus`).
+            #[cfg(any(feature = "board-256", feature = "board-436"))]
+            if self.vt_bus && address >= 0x2008 {
+                if let Some(cartridge) = self.cartridge.as_mut() {
+                    cartridge.cpu_write_as::<K>(address, value);
+                }
+                return;
+            }
+            let register = address & 0x07;
+            // Lot MAPPERS-N: "The RC2C05 swaps the meanings of $2000 and $2001" (nesdev,
+            // "Vs. System"), done on the register number as the chip's pins do.
+            #[cfg(feature = "board-vs-system")]
+            let register = if K::RUNS_VS && self.vs_port & VS_RC2C05 != 0 && register < 2 {
+                register ^ 1
+            } else {
+                register
+            };
             self.ppu
-                .write(address & 0x07, value, self.cartridge.as_mut());
+                .write_as::<K>(register, value, self.cartridge.as_mut());
+            #[cfg(feature = "board-vs-system")]
+            if K::RUNS_VS && self.vs_port & VS_REMAP != 0 && register == 7 {
+                self.reapply_vs_palette();
+            }
             return;
         }
 
@@ -1271,21 +1552,39 @@ impl NesBus {
                 }
                 _ => {
                     self.sync_apu();
+                    #[cfg(any(feature = "board-256", feature = "board-436"))]
+                    let value = if self.vt_bus {
+                        self.cartridge
+                            .as_mut()
+                            .map_or(value, |cartridge| cartridge.snoop_apu_write(address, value))
+                    } else {
+                        value
+                    };
+                    let ghost = if address == 0x4015 {
+                        self.dmc_switch_off_window(value)
+                    } else {
+                        None
+                    };
                     let dmc_load_delay = self.apu.write(address, value);
                     self.after_apu_write(dmc_load_delay);
+                    if let Some((ready, abort)) = ghost {
+                        self.dmc_ready_cycle = ready;
+                        self.dmc_abort_cycle = abort;
+                        self.dma |= DMA_DMC_GHOST;
+                    }
                 }
             }
             return;
         }
 
-        self.sync_ppu();
+        self.sync_ppu_as::<K>();
         if WideExtension::claims(address) && !self.ppu.wide().zone_data() {
             // The window only listens: the cartridge still gets the write.
             self.ppu.wide_mut().write(address, value);
         }
 
         if let Some(cartridge) = self.cartridge.as_mut() {
-            cartridge.cpu_write(address, value);
+            cartridge.cpu_write_as::<K>(address, value);
         }
     }
 
@@ -1313,6 +1612,87 @@ impl NesBus {
     ///
     /// A write that **starts** a sample does not raise the request either: its load fetch waits
     /// two or three cycles, which this turns into the one absolute cycle [`DMA_DMC_WAIT`] holds.
+    /// What a `$4015` write about to be made leaves the DMA unit to do when it switches a playing
+    /// DMC off: the cycle the fetch its memory reader has asked for — or will ask for before the
+    /// switch-off arrives — may halt on, and the cycle the switch-off arrives. `None` when the
+    /// write does not switch the channel off, when nothing is playing, or when no fetch can halt
+    /// before the switch-off (see [`DMA_DMC_GHOST`]). Called with the APU caught up.
+    ///
+    /// The switch-off arrives two cycles after a write on an even CPU cycle and three after one
+    /// on an odd cycle, the same parity and the same figures as a load's start delay
+    /// (`DmcChannel::set_enabled`).
+    // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
+    #[cold]
+    #[inline(never)]
+    fn dmc_switch_off_window(&mut self, value: u8) -> Option<(i64, i64)> {
+        // A write that switches the channel on, or leaves it on, ends any window still open.
+        self.dma &= !DMA_DMC_GHOST;
+        if (value & 0x10) != 0 {
+            return None;
+        }
+
+        let until_fetch = self.apu.cycles_until_dmc_fetch()?;
+        let abort = self.cycles + if self.apu.apu_cycle() { 2 } else { 3 };
+        let ready = if (self.dma & DMA_DMC_WAIT) != 0 {
+            self.dmc_ready_cycle
+        } else if (self.dma & DMA_DMC) != 0 || until_fetch == 0 {
+            self.cycles + 1
+        } else {
+            // The reader runs dry inside the tick of that cycle, and a request raised inside a
+            // tick can halt on the next cycle at the earliest (see `poll_dmc_dma`).
+            self.cycles + i64::from(until_fetch) + 1
+        };
+        (ready <= abort).then_some((ready, abort))
+    }
+
+    /// The cycles a DMC fetch caught by a `$4015` switch-off still takes from the CPU, `late`
+    /// being how many cycles after the halt the switch-off arrives (see [`DMA_DMC_GHOST`]). The
+    /// halt cycle has already run, as in [`NesBus::run_dma`].
+    ///
+    /// * on the halt cycle itself: the DMA is aborted after it, one cycle;
+    /// * on the dummy cycle: the cycle after it still runs — the fetch if it is a get cycle, the
+    ///   alignment cycle otherwise, after which the DMA is gone — three cycles;
+    /// * later: the DMA runs to its fetch, three or four cycles.
+    ///
+    /// The byte a fetch reads is dropped in every case: the channel has no bytes left to play.
+    // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
+    #[cold]
+    #[inline(never)]
+    fn ghost_dmc_dma_as<K: BoardKind>(&mut self, read_address: u16, late: i64) {
+        let input_port = matches!(read_address, 0x4016 | 0x4017);
+        let internal = (read_address & 0xFFE0) == 0x4000;
+        if !(input_port && late == 0) {
+            self.dma_repeat_read_as::<K, false>(read_address);
+        }
+        if late == 0 {
+            return;
+        }
+
+        self.tick_as::<K>();
+        if !input_port {
+            self.dma_repeat_read_as::<K, false>(read_address);
+        }
+        let aligns = (self.cycles & 1) == 0;
+        if aligns && late >= 2 {
+            self.tick_as::<K>();
+            if !input_port {
+                self.dma_repeat_read_as::<K, false>(read_address);
+            }
+        }
+
+        self.tick_as::<K>();
+        if aligns && late == 1 {
+            if !input_port {
+                self.dma_repeat_read_as::<K, false>(read_address);
+            }
+            return;
+        }
+        self.dmc_dma_count += 1;
+        let address = self.apu.dmc_dma_address();
+        let mut decoded_before = read_address;
+        self.dmc_fetch_read_as::<K>(address, internal, &mut decoded_before);
+    }
+
     // Portions adapted from Mesen 2 (c) Sour, GPL-3.0
     fn after_apu_write(&mut self, dmc_load_delay: u32) {
         if dmc_load_delay > 0 {
@@ -1360,7 +1740,7 @@ impl NesBus {
     /// (REQ-CORE-082).
     pub fn poke(&mut self, address: u16, value: u8) {
         self.data_bus = value;
-        self.write_internal(address, value);
+        self.write_internal_as::<AnyBoard>(address, value);
     }
 }
 
@@ -1396,14 +1776,14 @@ impl NesBus {
     /// [`NesBus::read_internal`], which is the call the read site already made.
     // Q-119
     #[inline(never)]
-    fn read_cycle(&mut self, address: u16) -> u8 {
+    fn read_cycle_as<K: BoardKind>(&mut self, address: u16) -> u8 {
         if self.dma == 0 {
             // Its **own copy** of the read (lot PR-1): the gate then ends in the read instead of
             // a `jmp` into it, which is −5.9 instructions a read cycle. See
             // [`NesBus::read_internal_body`] for what that copy costs and why it still wins.
-            self.read_internal_body(address)
+            self.read_internal_body_as::<K>(address)
         } else {
-            self.halted_read_cycle(address)
+            self.halted_read_cycle_as::<K>(address)
         }
     }
 
@@ -1416,35 +1796,52 @@ impl NesBus {
     /// unit may halt: the read then happens as on any other cycle.
     // Q-119
     #[inline(never)]
-    fn halted_read_cycle(&mut self, address: u16) -> u8 {
+    fn halted_read_cycle_as<K: BoardKind>(&mut self, address: u16) -> u8 {
+        if (self.dma & DMA_DMC_GHOST) != 0 {
+            // A fetch a `$4015` switch-off caught. With an OAM transfer beside it the window is
+            // simply dropped: the transfer's cycles would have stood in for the fetch's.
+            let late = self.dmc_abort_cycle - self.cycles;
+            if late < 0 || self.dma != DMA_DMC_GHOST {
+                self.dma &= !DMA_DMC_GHOST;
+            } else if self.cycles >= self.dmc_ready_cycle {
+                self.dma = 0;
+                self.ghost_dmc_dma_as::<K>(address, late);
+                self.tick_as::<K>();
+                self.dma_gave_back = self.cycles;
+                return self.read_internal_as::<K>(address);
+            } else {
+                return self.read_internal_as::<K>(address);
+            }
+        }
+
         // The cycle that has just run is the one a halt would land on.
         self.promote_dmc_wait(self.cycles);
         if (self.dma & (DMA_DMC | DMA_OAM)) == 0 {
-            return self.read_internal(address);
+            return self.read_internal_as::<K>(address);
         }
         if self.dma == (DMA_DMC | DMA_DUMMY | DMA_HALT) && (address & 0xFFE0) != 0x4000 {
             // A lone DMC fetch, which is most of what a game playing DPCM comes here for, and a
             // fixed three or four cycles rather than a state machine (lot MF-4a-ter step 3).
-            self.dmc_only_dma::<false>(address);
+            self.dmc_only_dma_as::<K, false>(address);
         } else {
-            self.run_dma::<false>(address);
+            self.run_dma_as::<K, false>(address);
         }
-        self.tick();
+        self.tick_as::<K>();
         // The cycle the CPU finally reads on, for the five `SH*` stores: they drop the AND with
         // the address high byte when the RDY line went low on their dummy read (see
         // [`CpuBus::dma_gave_back_at`]). One store per halted read cycle, zero on every other.
         self.dma_gave_back = self.cycles;
-        self.read_internal(address)
+        self.read_internal_as::<K>(address)
     }
 
     /// The DMA units' chance to halt a read cycle whose byte does **not** come from the bus: an
     /// instruction fetch inside the widescreen extension's execution zone, which reads a hack
     /// pack's code. It runs the cycle itself, so the fetch site keeps the single call it had.
     #[inline(never)]
-    fn zone_read_cycle(&mut self, address: u16) {
-        self.tick();
+    fn zone_read_cycle_as<K: BoardKind>(&mut self, address: u16) {
+        self.tick_as::<K>();
         if self.dma != 0 {
-            self.halted_zone_read_cycle(address);
+            self.halted_zone_read_cycle_as::<K>(address);
         }
     }
 
@@ -1488,29 +1885,33 @@ impl NesBus {
     /// `halted_read_cycle`'s `$4000`-`$401F` test is answered here once and for all: the halted
     /// address is never one of the 2A03's own registers.
     #[inline(never)]
-    fn halted_zone_read_cycle(&mut self, address: u16) {
+    fn halted_zone_read_cycle_as<K: BoardKind>(&mut self, address: u16) {
+        // The zone has no part in the switch-off window (see `halted_read_cycle`).
+        self.dma &= !DMA_DMC_GHOST;
         // The cycle that has just run is the one a halt would land on.
         self.promote_dmc_wait(self.cycles);
         if (self.dma & (DMA_DMC | DMA_OAM)) == 0 {
             return;
         }
         if self.dma == (DMA_DMC | DMA_DUMMY | DMA_HALT) {
-            self.dmc_only_dma::<true>(address);
+            self.dmc_only_dma_as::<K, true>(address);
         } else {
-            self.run_dma::<true>(address);
+            self.run_dma_as::<K, true>(address);
         }
         // The cycle the CPU finally fetches on; its byte comes from the code buffer.
-        self.tick();
+        self.tick_as::<K>();
     }
 }
 
-impl CpuBus for NesBus {
+/// The CPU's view of the bus, with the board reached through `K` (lot CORE-2): the logic of
+/// [`CpuBus`], written once; [`NesBus`]'s own implementation and [`KindBus`] forward to it.
+impl NesBus {
     /// One **read** cycle: the cycle, then the read it carries — which the DMA units may turn
     /// into a halt (see [`NesBus::read_cycle`]). Two calls and one materialisation of the
     /// address, which is what this was before MF-4a.
-    fn read(&mut self, address: u16) -> u8 {
-        self.tick();
-        let value = self.read_cycle(address);
+    fn cpu_read_as<K: BoardKind>(&mut self, address: u16) -> u8 {
+        self.tick_as::<K>();
+        let value = self.read_cycle_as::<K>(address);
         self.data_bus = value;
         value
     }
@@ -1527,22 +1928,26 @@ impl CpuBus for NesBus {
     /// history says to pin rather than rediscover.
     #[allow(clippy::inline_always)]
     #[inline(always)]
-    fn read_code(&mut self, address: u16) -> u8 {
+    fn cpu_read_code_as<K: BoardKind>(&mut self, address: u16) -> u8 {
         let zone = self.ppu.wide().zone_offset(address);
         self.zone_instruction = zone.is_some();
         if let Some(offset) = zone {
-            self.zone_read_cycle(address);
+            self.zone_read_cycle_as::<K>(address);
             let value = self.ppu.wide().code().get(offset).copied().unwrap_or(0xFF);
             self.data_bus = value;
             return value;
         }
-        self.read(address)
+        self.cpu_read_as::<K>(address)
     }
 
-    fn write(&mut self, address: u16, value: u8) {
-        self.tick();
+    fn cpu_write_as<K: BoardKind>(&mut self, address: u16, value: u8) {
+        self.tick_as::<K>();
+        if (address & 0xE000) == 0x2000 {
+            // What the PPU's data pins see first (`Ppu2C02::control_write_glitch`).
+            self.ppu.note_cpu_open_bus(self.data_bus);
+        }
         self.data_bus = value;
-        self.write_internal(address, value);
+        self.write_internal_as::<K>(address, value);
     }
 
     /// Reads a byte with no side effect and without advancing time (REQ-CORE-080,
@@ -1550,7 +1955,7 @@ impl CpuBus for NesBus {
     ///
     /// $2000-$401F reads back as 0, as REQ-CORE-081 asks, so that a host or a script
     /// peeking at $2002 cannot clear the `VBlank` flag under the game's feet.
-    fn peek(&self, address: u16) -> u8 {
+    fn cpu_peek(&self, address: u16) -> u8 {
         if address < 0x2000 {
             return self.ram[usize::from(address) & (RAM_SIZE - 1)];
         }
@@ -1579,12 +1984,6 @@ impl CpuBus for NesBus {
             .unwrap_or(0)
     }
 
-    /// The CPU sees the /NMI line as it stood near the start of the cycle, not after the
-    /// cycle's own register access (see `Ppu2C02::nmi_line_sample`).
-    fn nmi_asserted(&self) -> bool {
-        self.ppu.nmi_line_sample()
-    }
-
     /// **`#[inline(always)]`, and it has to stay: a `callq` here costs about 170 M instructions
     /// over 300 frames, on every board.** This is MF-3b step 1's regression one level up, and
     /// lot MF-5b met it by adding a thirty-second `Board` variant.
@@ -1604,8 +2003,48 @@ impl CpuBus for NesBus {
     /// and golden-core's. Restoring parity is what the lot's bar asks for.
     #[allow(clippy::inline_always)] // Measured: 170 M instructions, MF-5b step 1.
     #[inline(always)]
+    fn cpu_irq_asserted_as<K: BoardKind>(&self) -> bool {
+        self.apu.irq_asserted()
+            || self
+                .cartridge
+                .as_ref()
+                .is_some_and(Cartridge::irq_asserted_as::<K>)
+    }
+}
+
+impl CpuBus for NesBus {
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
+    fn read(&mut self, address: u16) -> u8 {
+        self.cpu_read_as::<AnyBoard>(address)
+    }
+
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
+    fn read_code(&mut self, address: u16) -> u8 {
+        self.cpu_read_code_as::<AnyBoard>(address)
+    }
+
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
+    fn write(&mut self, address: u16, value: u8) {
+        self.cpu_write_as::<AnyBoard>(address, value);
+    }
+
+    fn peek(&self, address: u16) -> u8 {
+        self.cpu_peek(address)
+    }
+
+    /// The CPU sees the /NMI line as it stood near the start of the cycle, not after the
+    /// cycle's own register access (see `Ppu2C02::nmi_line_sample`).
+    fn nmi_asserted(&self) -> bool {
+        self.ppu.nmi_line_sample()
+    }
+
+    #[allow(clippy::inline_always)] // Measured: 170 M instructions, MF-5b step 1.
+    #[inline(always)]
     fn irq_asserted(&self) -> bool {
-        self.apu.irq_asserted() || self.cartridge.as_ref().is_some_and(Cartridge::irq_asserted)
+        self.cpu_irq_asserted_as::<AnyBoard>()
     }
 
     fn cycle_count(&self) -> i64 {
@@ -1614,6 +2053,125 @@ impl CpuBus for NesBus {
 
     fn dma_gave_back_at(&self) -> i64 {
         self.dma_gave_back
+    }
+}
+
+/// The bus as the CPU steps it for one board kind (lot CORE-2, `docs/design/CORE-TIERS.md`): the
+/// same [`NesBus`], borrowed, with the board reached through `K` so that the compiler knows which
+/// board is behind every cartridge call of the frame. [`NesCore`](crate::NesCore) builds it once
+/// per frame.
+pub struct KindBus<'a, K> {
+    bus: &'a mut NesBus,
+    kind: PhantomData<K>,
+}
+
+impl<'a, K: BoardKind> KindBus<'a, K> {
+    /// Borrows `bus` for a frame on the board kind `K`.
+    #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
+    #[inline(always)]
+    pub fn new(bus: &'a mut NesBus) -> Self {
+        Self {
+            bus,
+            kind: PhantomData,
+        }
+    }
+}
+
+impl<K: BoardKind> CpuBus for KindBus<'_, K> {
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
+    fn read(&mut self, address: u16) -> u8 {
+        self.bus.cpu_read_as::<K>(address)
+    }
+
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
+    fn read_code(&mut self, address: u16) -> u8 {
+        self.bus.cpu_read_code_as::<K>(address)
+    }
+
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
+    fn write(&mut self, address: u16, value: u8) {
+        self.bus.cpu_write_as::<K>(address, value);
+    }
+
+    fn peek(&self, address: u16) -> u8 {
+        self.bus.cpu_peek(address)
+    }
+
+    fn nmi_asserted(&self) -> bool {
+        self.bus.ppu.nmi_line_sample()
+    }
+
+    #[allow(clippy::inline_always)] // As NesBus's: the per-cycle /IRQ sample.
+    #[inline(always)]
+    fn irq_asserted(&self) -> bool {
+        self.bus.cpu_irq_asserted_as::<K>()
+    }
+
+    fn cycle_count(&self) -> i64 {
+        self.bus.cycles
+    }
+
+    fn dma_gave_back_at(&self) -> i64 {
+        self.bus.dma_gave_back
+    }
+}
+
+/// The bus as the Fidélité+ frame loop steps it (`docs/design/HALF-CYCLE.md`, part A): the board
+/// reached through `K` as [`KindBus`], the PPU run on every CPU cycle (the loop does not call
+/// [`NesBus::defer_ppu`]).
+///
+/// Step 1 forwards every access unchanged, so the mode is the standard core exactly; step 2
+/// splits each cycle at its M2 and /CS edges ([`crate::fidplus::MasterClock`]) here, out of the
+/// standard path.
+pub struct FidelityBus<'a, K> {
+    bus: &'a mut NesBus,
+    kind: PhantomData<K>,
+}
+
+impl<'a, K: BoardKind> FidelityBus<'a, K> {
+    /// Borrows `bus` for a Fidélité+ frame on the board kind `K`.
+    pub fn new(bus: &'a mut NesBus) -> Self {
+        Self {
+            bus,
+            kind: PhantomData,
+        }
+    }
+}
+
+impl<K: BoardKind> CpuBus for FidelityBus<'_, K> {
+    fn read(&mut self, address: u16) -> u8 {
+        self.bus.cpu_read_as::<Fid<K>>(address)
+    }
+
+    fn read_code(&mut self, address: u16) -> u8 {
+        self.bus.cpu_read_code_as::<Fid<K>>(address)
+    }
+
+    fn write(&mut self, address: u16, value: u8) {
+        self.bus.cpu_write_as::<Fid<K>>(address, value);
+    }
+
+    fn peek(&self, address: u16) -> u8 {
+        self.bus.cpu_peek(address)
+    }
+
+    fn nmi_asserted(&self) -> bool {
+        self.bus.ppu.nmi_line_sample()
+    }
+
+    fn irq_asserted(&self) -> bool {
+        self.bus.cpu_irq_asserted_as::<Fid<K>>()
+    }
+
+    fn cycle_count(&self) -> i64 {
+        self.bus.cycles
+    }
+
+    fn dma_gave_back_at(&self) -> i64 {
+        self.bus.dma_gave_back
     }
 }
 

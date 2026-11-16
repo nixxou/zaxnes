@@ -16,7 +16,7 @@ use zax_app::input::libretro_input_map::{self, RetroAnalogAxis, RetroPadButton};
 use zax_app::input::menu_navigation::{MenuNavigation, MenuNavigationEvents};
 use zax_app::input::routing;
 use zax_app::input::zapper::RELEASED_BYTE;
-use zax_nes::ControllerPortType::{Controller, Zapper};
+use zax_core_api::ControllerPortType::{Controller, Zapper};
 use zax_platform::input::{calibration, standard_gamepad, GamepadDevice};
 use zax_render::camera::SceneCamera;
 use zax_render::controls::{self, CameraAction};
@@ -49,12 +49,13 @@ fn req_inp_003_the_action_bits_are_those_of_the_table(
     assert_eq!(action.bits(), bit);
 }
 
-/// REQ-INP-001 and REQ-INP-040: exactly 20 actions — the 19 of the table of §4.1 in its
-/// display order, then the soft reset AMD-044 REQ-INP-125 adds to the extended actions — and
-/// exactly two players.
+/// REQ-INP-001 and REQ-INP-040: exactly 23 actions — the 19 of the table of §4.1 in its
+/// display order, then the soft reset AMD-044 REQ-INP-125 adds to the extended actions, then the
+/// VS. System cabinet's two coin slots and service button (lot MAPPERS-N) — and exactly two
+/// players.
 #[test]
 fn req_inp_001_there_are_twenty_actions_in_the_order_of_the_table() {
-    assert_eq!(input_action::COUNT, 20);
+    assert_eq!(input_action::COUNT, 23);
     assert_eq!(input_action::ALL.len(), input_action::COUNT);
     assert_eq!(input_action::PLAYER_COUNT, 2);
     let distinct: std::collections::BTreeSet<u32> = input_action::ALL
@@ -90,6 +91,9 @@ fn req_inp_001_there_are_twenty_actions_in_the_order_of_the_table() {
             "QuickSave",
             "QuickLoad",
             "SoftReset",
+            "Coin1",
+            "Coin2",
+            "Service",
         ]
     );
 

@@ -17,8 +17,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
+use zax_core_api::TileRecord;
 use zax_nes::rom::InesHeader;
-use zax_nes::{NesCore, TileRecord};
+use zax_nes::NesCore;
 
 use crate::HarnessError;
 
@@ -67,7 +68,7 @@ pub fn run(roms_dir: &Path, out_path: &Path, frames: u32) -> Result<Summary, Har
     })
 }
 
-fn collect_roms(dir: &Path, found: &mut Vec<PathBuf>) -> Result<(), HarnessError> {
+pub(crate) fn collect_roms(dir: &Path, found: &mut Vec<PathBuf>) -> Result<(), HarnessError> {
     for entry in fs::read_dir(dir)? {
         let path = entry?.path();
         if path.is_dir() {
@@ -84,7 +85,7 @@ fn collect_roms(dir: &Path, found: &mut Vec<PathBuf>) -> Result<(), HarnessError
 }
 
 /// The path of `file` below `root`, with `/` separators.
-fn relative_name(root: &Path, file: &Path) -> String {
+pub(crate) fn relative_name(root: &Path, file: &Path) -> String {
     file.strip_prefix(root)
         .unwrap_or(file)
         .components()
@@ -111,6 +112,23 @@ pub fn golden_row(rel: &str, image: &[u8], frames: u32) -> Result<Value, Harness
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_default();
     let mut core = NesCore::new();
+    // `ZAXNES_FIDELITY_PLUS=1`: every frame through the Fidelite+ loop (FIDPLUS-A, off by default).
+    core.set_fidelity_plus(std::env::var("ZAXNES_FIDELITY_PLUS").is_ok_and(|value| value != "0"));
+    // The golden rows (`rust/goldens/core-goldens.jsonl`) were taken with the PPU powering on in
+    // vblank, so this command keeps that power-on; `ZAXNES_POWER_ON_TOP=1` measures the one the
+    // app uses by default since lot FIDELITY step 27.
+    core.set_power_on_top(std::env::var("ZAXNES_POWER_ON_TOP").is_ok_and(|value| value != "0"));
+    // `ZAXNES_POWER_ON_PPU_RAM=zero|blargg|random:<seed>`: the PPU memories at power-on
+    // (lot FIDELITY step 36); the core's default otherwise.
+    if let Ok(value) = std::env::var("ZAXNES_POWER_ON_PPU_RAM") {
+        core.set_power_on_ppu_ram(match value.as_str() {
+            "blargg" => zax_nes::PowerOnPpuRam::Blargg,
+            "zero" => zax_nes::PowerOnPpuRam::Zero,
+            other => zax_nes::PowerOnPpuRam::Random(
+                other.trim_start_matches("random:").parse().unwrap_or(1),
+            ),
+        });
+    }
     let load = core.load_rom(image, &name);
     row.insert("load_ok".into(), json!(load.success));
     if !load.success {
@@ -181,6 +199,14 @@ impl Checkpoints {
         // them is a change in the picture rather than in the layout.
         let mut indices = Vec::new();
         core.pixel_frame_indices_into(&mut indices);
+        // `ZAXNES_GOLDEN_DUMP=<dir>`: also writes each checkpoint's index image (256 x 240 bytes,
+        // 0 to 63) as `<dir>/<frame>.idx`, to look at a golden change (lot FIDPLUS-2).
+        if let Ok(dir) = std::env::var("ZAXNES_GOLDEN_DUMP") {
+            let _ = std::fs::write(
+                std::path::Path::new(&dir).join(format!("{key}.idx")),
+                &indices,
+            );
+        }
         self.pixels
             .insert(key.clone(), json!(hex(&Sha256::digest(&indices))));
         self.tiles
@@ -254,7 +280,7 @@ fn tiles_hash(records: &[TileRecord]) -> String {
     format!("{}:{}", records.len(), hex(&hasher.finalize()))
 }
 
-fn hex(digest: &[u8]) -> String {
+pub(crate) fn hex(digest: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
     digest
         .iter()

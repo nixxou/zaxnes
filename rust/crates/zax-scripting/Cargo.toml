@@ -19,4 +19,4 @@ zax-settings = { path = "../zax-settings" }
 
 
 [dev-dependencies]
-zax-nes = { path = "../zax-nes" }
+zax-core-api = { path = "../zax-core-api" }

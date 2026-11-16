@@ -19,6 +19,9 @@ use zax_nes::{NesCore, NesRegion};
 
 fn loaded_core() -> NesCore {
     let mut core = NesCore::new();
+    // A full first frame (about 800 samples): the power-on in vblank these counts were written
+    // against, not the shorter first frame of the power-on at the top of the picture.
+    core.set_power_on_top(false);
     assert!(core.load_rom(&minimal(), "Audio.nes").success);
     core
 }

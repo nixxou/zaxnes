@@ -49,10 +49,16 @@ impl Ppu2C02 {
         writer.write_u16(self.v_row_start);
         writer.write_u16(self.v_row_next);
         writer.write_u8(self.fine_x);
-        writer.write_bool(self.write_toggle);
+        // Bit 1: the reset line's write window (lot FIDELITY step 34), in the byte that held the
+        // toggle alone before, so older states load with the window open.
+        // Bits 2 to 7: the top six bits of the latch's last address (step 39); its two low bits
+        // are bits 1 and 2 of the frame-skip byte below. Older states load with zeros there.
+        writer.write_u8(
+            u8::from(self.write_toggle) | (u8::from(self.after_reset) << 1) | (self.ale_low & 0xFC),
+        );
         writer.write_u8(self.read_buffer);
         writer.write_u8(self.decay);
-        writer.write_bool(self.skip_latch);
+        writer.write_u8(u8::from(self.skip_latch) | ((self.ale_low & 0x03) << 1));
         for stamp in self.decay_stamp {
             writer.write_i64(stamp);
         }
@@ -80,6 +86,8 @@ impl Ppu2C02 {
     /// [`InvalidState`] when the block is truncated or inconsistent.
     pub fn load_machine_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
         self.sprite_line_stale = true;
+        self.last_data_write = (i64::MIN, 0);
+        self.fid.edge_count = 0;
         reader.read_blob_into(&mut self.vram)?;
         reader.read_blob_into(&mut self.oam)?;
         reader.read_blob_into(&mut self.palette_raw)?;
@@ -106,7 +114,10 @@ impl Ppu2C02 {
         self.v_row_start = reader.read_u16()?;
         self.v_row_next = reader.read_u16()?;
         self.fine_x = reader.read_u8()?;
-        self.write_toggle = reader.read_bool()?;
+        let toggle = reader.read_u8()?;
+        self.write_toggle = (toggle & 1) != 0;
+        self.after_reset = (toggle & 2) != 0;
+        let ale_high = toggle & 0xFC;
         self.read_buffer = reader.read_u8()?;
         // Not in the format, and nothing is lost: the window in which a `$2007` read still sees
         // the byte before the last refill is shorter than two CPU cycles, and the only pair of
@@ -115,10 +126,15 @@ impl Ppu2C02 {
         // instructions. `read_buffer_prev` is only looked at inside that window.
         self.read_buffer_clock = 0;
         self.decay = reader.read_u8()?;
-        self.skip_latch = reader.read_bool()?;
+        let skip = reader.read_u8()?;
+        self.skip_latch = (skip & 1) != 0;
+        self.ale_low = ale_high | ((skip >> 1) & 0x03);
         for stamp in &mut self.decay_stamp {
             *stamp = reader.read_i64()?;
         }
+        // Not in the format: the OAM decay stamps (`refresh_oam_row`) restart from the clock
+        // restored, so a row cannot decay before 8 frames after a load.
+        self.restamp_oam_rows();
 
         self.vblank_just_started = reader.read_bool()?;
         self.nmi_line_sample = reader.read_bool()?;

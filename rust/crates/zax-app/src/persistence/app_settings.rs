@@ -1,7 +1,7 @@
 //! The settings the loop and the interface read by name: typed accessors over the model
 //! (SPEC-09 §4). The model itself is the single source of truth (REQ-PERS-007).
 
-use zax_nes::NesRegion;
+use zax_core_api::NesRegion;
 use zax_profiles::library::LibrarySortOption;
 use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
@@ -25,6 +25,10 @@ pub enum TvRegionSetting {
     Multi = 2,
     /// 50 Hz with the Dendy timing.
     Dendy = 3,
+    /// 60 Hz, PAL-M famiclone (Brazil): NTSC geometry, its own clock, swapped duties.
+    PalM = 4,
+    /// 50 Hz, PAL-N famiclone (Argentina): Dendy geometry, its own clock, swapped duties.
+    PalN = 5,
 }
 
 impl TvRegionSetting {
@@ -35,6 +39,8 @@ impl TvRegionSetting {
             1 => Self::Pal,
             2 => Self::Multi,
             3 => Self::Dendy,
+            4 => Self::PalM,
+            5 => Self::PalN,
             _ => Self::Ntsc,
         }
     }
@@ -45,6 +51,8 @@ impl TvRegionSetting {
         match self {
             Self::Pal => NesRegion::Pal,
             Self::Dendy => NesRegion::Dendy,
+            Self::PalM => NesRegion::PalM,
+            Self::PalN => NesRegion::PalN,
             Self::Ntsc | Self::Multi => NesRegion::Ntsc,
         }
     }
@@ -55,6 +63,8 @@ impl TvRegionSetting {
         match region {
             NesRegion::Pal => Self::Pal,
             NesRegion::Dendy => Self::Dendy,
+            NesRegion::PalM => Self::PalM,
+            NesRegion::PalN => Self::PalN,
             NesRegion::Ntsc | NesRegion::Multi => Self::Ntsc,
         }
     }

@@ -831,7 +831,7 @@ pub struct ConversionFrame {
     mask: Cell,
     margin: i32,
     /// The visible range of each band of the batch (`FrameBatch::visible_rows`).
-    visible_rows: zax_nes::VisibleRows,
+    visible_rows: zax_core_api::VisibleRows,
     /// Vertical widescreen margin of the batch, in pixels above and below.
     margin_y: i32,
     counter: i32,
@@ -876,7 +876,7 @@ impl ConversionFrame {
             palette: FramePalette::default(),
             mask: Cell::default(),
             margin: 0,
-            visible_rows: zax_nes::STANDARD_ROWS,
+            visible_rows: zax_core_api::STANDARD_ROWS,
             margin_y: 0,
             counter: 0,
             background_shape_count: 0,
@@ -1034,7 +1034,7 @@ impl ConversionFrame {
     }
 
     /// Sets the visible range of each band of the batch, after [`ConversionFrame::begin_batch`].
-    pub(crate) fn set_visible_rows(&mut self, rows: &zax_nes::VisibleRows) {
+    pub(crate) fn set_visible_rows(&mut self, rows: &zax_core_api::VisibleRows) {
         self.visible_rows = *rows;
     }
 

@@ -60,6 +60,7 @@ fn req_ui_205_the_model_enumerates_every_menu_command() {
         SpeedDown,
         SetRegion,
         ToggleAutoRegion,
+        SetConsoleModel,
         SetPortType,
         ToggleTwoDimensional,
         ResetView,
@@ -99,6 +100,14 @@ fn req_ui_205_the_model_enumerates_every_menu_command() {
         // Rust-only (owner request): stepping frame by frame.
         FrameBack,
         FrameAdvance,
+        // Lot MAPPERS-N: the VS. System cabinet's coin slots and service button.
+        InsertCoin1,
+        InsertCoin2,
+        VsService,
+        // Lot FDS: the Disk System's drive.
+        SwitchDiskSide,
+        InsertNextDisk,
+        EjectDisk,
     ];
     for command in expected {
         assert!(
@@ -300,7 +309,8 @@ fn req_ui_082_the_in_game_notifications_have_their_exact_texts() {
     harness.run(Command::Rollback);
     assert_eq!(("Roll Back".to_owned(), 1.0), latest(&harness));
     harness.run(Command::FastForward);
-    assert_eq!(("Fast Forward".to_owned(), 1.0), latest(&harness));
+    // The speed follows (owner request).
+    assert_eq!(("Fast Forward x1.5".to_owned(), 1.0), latest(&harness));
     harness.run(Command::QuickSave);
     assert_eq!(("Quick Save".to_owned(), DEFAULT_SECONDS), latest(&harness));
     harness.run(Command::QuickLoad);

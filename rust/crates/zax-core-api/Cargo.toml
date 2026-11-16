@@ -1,0 +1,19 @@
+[package]
+name = "zax-core-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# No dependencies, and that is the point: this crate is what both emulation engines agree on, so
+# it must be buildable by either of them without dragging the other's world in. `zax-nes` is a
+# leaf crate too and stays one.
+
+# `zax-nes` only to prove the move: `shared_types_tests.rs` checks that every path a consumer
+# used still resolves and to the very same type. Nothing of the library depends on it.
+[dev-dependencies]
+zax-nes = { path = "../zax-nes" }
+
+[lints]
+workspace = true

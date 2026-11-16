@@ -8,14 +8,20 @@ publish.workspace = true
 
 [features]
 # Mirrors `zax-nes`'s own default, so that `cargo test -p zax-harness` builds the same core the
-# crate's own default builds. **Empty since MF-VS step 7 parked `board-vs-system`**: the `vs`
+# crate's own default builds. **No `vs-system` since MF-VS step 7 parked `board-vs-system`**: the `vs`
 # subcommand is then not in the default build either, which is what a build whose core has no VS
 # layer wants.
-default = []
+# `ppu-2007-render-read` since Q-139 closed (2026-11-12), as in `zax-nes`'s default.
+default = ["ppu-2007-render-read"]
 
 # The configuration that turns the parked boards on, `zax-nes`'s `parked-boards` with this
 # crate's own `vs` subcommand beside it, so that one flag gives the same machine on both sides.
 parked-boards = ["vs-system", "zax-nes/parked-boards"]
+# Lot FIDPLUS-2: the `dot-trace` subcommand (the PPU dot by dot). Diagnostics only.
+dot-trace = ["zax-nes/ppu-dot-trace"]
+# Lot CPU-NETLIST-DIAG: `cpu-bus-trace` prints every cycle of a DMA (halt, dummy, alignment,
+# fetch, OAM get and put) instead of one `DMA <n>` line. Diagnostics only.
+bus-trace = ["zax-nes/bus-trace"]
 
 # The wgpu renderer (`render --backend vulkan|dx12`), desktop only.
 wgpu = ["zax-render/wgpu"]
@@ -25,6 +31,12 @@ wgpu = ["zax-render/wgpu"]
 # command is behind this pass-through: with it off the subcommand does not exist, which is what a
 # build whose core has no VS layer wants. `docs/review/BOARD-FEATURES.md` has the switch.
 vs-system = ["zax-nes/board-vs-system"]
+
+# `zax-harness fceux-run` and `fceux-compare`, the FCEUX engine's two commands (lot FCEUX-1
+# step 4). Off by default like everything of that engine: with it off `zax-fceux` is not a
+# dependency at all, no C is linked, and the binary is the one it always was. On, it needs the
+# fork `cleanroom/fceux-zax` built first - `zax-fceux/build.rs` says how.
+fceux-core = ["dep:zax-fceux", "zax-fceux/fceux-core"]
 
 # The core's exact sprite-evaluation pipeline (lot MF-4e step 3), out of `default` because it is
 # above the owner's tolerance on both runs. A pass-through for the same reason `vs-system` is one:
@@ -41,11 +53,22 @@ ppu-exact-sprite-eval = ["zax-nes/ppu-exact-sprite-eval"]
 # configuration it is scoring, and this feature is worth exactly one row of it.
 ppu-2007-render-read = ["zax-nes/ppu-2007-render-read"]
 
+
 [dependencies]
 serde_json.workspace = true
+zax-core-api = { path = "../zax-core-api" }
 sha2 = "0.10"
+# `.bk2` movies (lot EVAL-SYNC step 4): a zip of text files, whose header states a SHA-1.
+# Both are already `zax-app`'s own dependencies at these versions, so this adds nothing to the
+# lock file and nothing to fetch.
+sha1 = { version = "0.11.0", default-features = false }
+zip = { version = "7.3.0", default-features = false, features = ["deflate"] }
 zax-engine3d = { path = "../zax-engine3d" }
-zax-nes = { path = "../zax-nes" }
+zax-fceux = { path = "../zax-fceux", optional = true }
+zax-nes = { path = "../zax-nes", features = ["bk2"] }
+# `movie-sync --engine neshawk`: the Rust port of BizHawk's own NES core (lot
+# NESHAWK-REWRITE). A leaf crate with no dependencies of its own.
+zax-neshawk = { path = "../zax-neshawk" }
 zax-profiles = { path = "../zax-profiles" }
 zax-render = { path = "../zax-render", features = ["offscreen"] }
 zax-scripting = { path = "../zax-scripting" }

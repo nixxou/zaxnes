@@ -13,13 +13,31 @@ pub const BURST_FRAMES: u32 = 30;
 #[derive(Debug, Clone, Copy, Default)]
 pub struct FastForwardState {
     remaining: u32,
+    /// The factor of the burst: 1.5, or more after a double or triple press (Rust-only).
+    factor: f64,
 }
 
 impl FastForwardState {
     /// Creates the state with no burst running.
     #[must_use]
     pub const fn new() -> Self {
-        Self { remaining: 0 }
+        Self {
+            remaining: 0,
+            factor: 1.5,
+        }
+    }
+
+    /// The factor the running burst forces.
+    #[must_use]
+    pub const fn factor(&self) -> f64 {
+        self.factor
+    }
+
+    /// A request at `factor` (Rust-only, the double and triple press): arms a burst as
+    /// [`request`](Self::request) does, and a burst already running takes the new factor.
+    pub fn request_at(&mut self, factor: f64) -> bool {
+        self.factor = factor;
+        self.request()
     }
 
     /// Whether a burst is running, that is whether `k` is forced to 1.5.

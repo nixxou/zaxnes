@@ -103,7 +103,19 @@ fn smb3_picture(folder: &str, frames: u32) -> Option<(Vec<u8>, usize)> {
 ///
 /// To re-derive it: the `render` command of the lot's brief, then this test's `fnv1a` of the
 /// composed colour indices — or simply read the number this test prints when it fails.
-const SMB3_FRAME_1500: u64 = 1_834_880_705_716_891_653;
+///
+/// **Lot FIDELITY moved it (2026-11-14), and rightly.** The title screen's floor (white line and
+/// checkerboard) now starts one line higher, on line 194 instead of 195, with or without the
+/// widescreen patches and with every fidelity setting off: a non-optional timing change of the lot
+/// (not singled out). The European game moves the same way, and a PAL console video of its title
+/// screen settles it: put through the same scaling and blur, the ratio of the gap hill -> white
+/// line to the gap white line -> first checker row is 0.496 on the console, 0.510 for line 194 and
+/// 0.603 for line 195 (`docs/review/FIDELITY-LEADS.md`, I1). The zone itself is untouched: the
+/// margins are byte-identical before and after. Its number was then
+/// `17_138_034_180_604_517_509`; step 27 (`emu.power_on_top` on by default, the game's timeline
+/// moved by a fraction of a frame) changes a few colour indices for others of the same colour —
+/// the frame-1500 RGB picture is byte-identical — hence the number below.
+const SMB3_FRAME_1500: u64 = 7_538_646_065_652_110_869;
 
 #[test]
 #[ignore = "needs a user ROM: set ZAXNES_ROMS to the folder holding Super Mario Bros. 3 (USA).nes"]

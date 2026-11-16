@@ -50,6 +50,7 @@ flate2 = "1"
 # `tests/amd060_smaa_tests.rs` pins by SHA-256. Already in the tree (zax-nes, zax-profiles,
 # zax-harness), so this adds no dependency to the lock file.
 sha2 = "0.10"
+zax-core-api = { path = "../zax-core-api" }
 zax-nes = { path = "../zax-nes" }
 zax-render = { path = ".", features = ["offscreen"] }
 

@@ -30,18 +30,30 @@ flag_set! {
         /// Soft reset — the RESET button of the console (AMD-044 REQ-INP-125). The next free
         /// code of the extended-action table, with no default keyboard or gamepad binding.
         const SOFT_RESET = 0x80000;
+        // Lot MAPPERS-N: the VS. System cabinet (coin slots 1 and 2, service button).
+        const COIN_1 = 0x10_0000;
+        const COIN_2 = 0x20_0000;
+        const SERVICE = 0x40_0000;
         /// The eight bits the NES controller sees.
         const CONTROLLER_BYTE = 0xFF;
         /// The six camera movements.
         const CAMERA_MASK = 0x100 | 0x200 | 0x400 | 0x800 | 0x1000 | 0x2000;
         /// The six hotkeys (AMD-044 REQ-INP-125 adds the soft reset).
-        const HOTKEY_MASK = 0x4000 | 0x8000 | 0x10000 | 0x20000 | 0x40000 | 0x80000;
+        const HOTKEY_MASK = 0x4000
+            | 0x8000
+            | 0x10000
+            | 0x20000
+            | 0x40000
+            | 0x80000
+            | 0x10_0000
+            | 0x20_0000
+            | 0x40_0000;
     }
 }
 
 /// Number of bindable actions: the 19 of SPEC-08 §4.1 plus the soft reset AMD-044 REQ-INP-125
 /// adds to the extended-action table.
-pub const COUNT: usize = 20;
+pub const COUNT: usize = 23;
 /// Number of players.
 pub const PLAYER_COUNT: usize = 2;
 
@@ -67,6 +79,9 @@ pub const ALL: [InputAction; COUNT] = [
     InputAction::QUICK_SAVE,
     InputAction::QUICK_LOAD,
     InputAction::SOFT_RESET,
+    InputAction::COIN_1,
+    InputAction::COIN_2,
+    InputAction::SERVICE,
 ];
 
 /// The persisted name of a single action, or the empty string for anything else.
@@ -93,6 +108,9 @@ pub fn name_of(action: InputAction) -> &'static str {
         "QuickSave",
         "QuickLoad",
         "SoftReset",
+        "Coin1",
+        "Coin2",
+        "Service",
     ];
     ALL.iter()
         .position(|candidate| *candidate == action)

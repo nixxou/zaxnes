@@ -1,7 +1,7 @@
 use std::fmt;
 
+use zax_core_api::AudioError;
 use zax_engine3d::error::EngineError;
-use zax_nes::apu::AudioError;
 use zax_profiles::format::ProfileLoadError;
 use zax_render::assets::png_image::PngError;
 use zax_render::offscreen::OffscreenError;

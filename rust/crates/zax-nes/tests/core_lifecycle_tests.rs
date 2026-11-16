@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use common::{machine_with, minimal, minimal_rom};
-use zax_nes::{ControllerPortType, NesCore, VideoInfo};
+use zax_nes::{ControllerPortType, NesCore, PowerOnRam, VideoInfo};
 
 fn counting_callback(core: &mut NesCore) -> Arc<AtomicUsize> {
     let callbacks = Arc::new(AtomicUsize::new(0));
@@ -39,12 +39,23 @@ fn req_core_002_core_name_is_a_stable_non_empty_string() {
     assert_eq!("Zaxnes", NesCore::CORE_NAME);
 }
 
+/// REQ-CORE-003's zeroed RAM is now one choice of `PowerOnRam`: the default is FCEUX's and
+/// NesHawk's `00 00 00 00 FF FF FF FF` since the owner's decision of 2026-11-13 (lot CARTDB), and
+/// the zeros are what a host gets by asking for them.
 #[test]
 fn req_core_003_power_on_state_has_zeroed_ram_and_frame_counter() {
-    let core = machine_with(&minimal(), "Minimal.nes");
+    let mut core = NesCore::new();
+    core.set_power_on_ram(PowerOnRam::Zero);
+    assert!(core.load_rom(&minimal(), "Minimal.nes").success);
 
     for address in 0x0000..=0x07FFu16 {
         assert_eq!(0, core.read_memory(address));
+    }
+
+    let default = machine_with(&minimal(), "Minimal.nes");
+    for address in 0x0000..=0x07FFu16 {
+        let expected = if address & 4 != 0 { 0xFF } else { 0x00 };
+        assert_eq!(expected, default.read_memory(address), "${address:04X}");
     }
 
     assert_eq!(0, core.frame_count());

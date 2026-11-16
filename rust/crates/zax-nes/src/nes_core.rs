@@ -1,7 +1,8 @@
 use crate::apu::{Apu2A03, AudioError, AudioReader};
-use crate::cartridges::Cartridge;
+use crate::cartridges::{with_board_kind, AnyBoard, BoardKind, Cartridge};
 use crate::cpu::{Cpu6502, CpuBus};
 use crate::input::{ControllerPortType, InputPorts, InvalidPort, ZapperPosition};
+use crate::nes_bus::{FidelityBus, KindBus};
 use crate::ppu::{Ppu2C02, MAX_TILE_RECORD_STATE_SIZE, OAM_SIZE, PALETTE_SIZE, VRAM_SIZE};
 use crate::rom::{InesHeader, RomImage, RomLoadResult};
 use crate::state::{CoreState, InvalidState, StateLoadFailure, StateReader, StateWriter};
@@ -17,26 +18,10 @@ pub type VideoCallback = Box<dyn FnMut(&FrameBatch<'_>) + Send>;
 /// (REQ-CORE-060).
 pub type ZapperPositionSource = Box<dyn FnMut(usize) -> ZapperPosition + Send>;
 
-/// What a successful "restore state" reports (REQ-CORE-091).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StateLoaded {
-    /// Bytes the block occupied, so the host can read on.
-    pub consumed: usize,
-    /// The ROM name stored in the block.
-    pub rom_name: String,
-}
-
-/// Why a savestate could not be written: no ROM is loaded, so there is no state to save.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NoRomLoaded;
-
-impl std::fmt::Display for NoRomLoaded {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("No ROM is loaded: there is no state to save.")
-    }
-}
-
-impl std::error::Error for NoRomLoaded {}
+// What a restore reports and why a save had nothing to write are on the `Engine` trait, so they
+// live in `zax-core-api` since lot FCEUX-23 step 2; re-exported here at the paths they were at
+// (`zax_nes::StateLoaded`, `zax_nes::NoRomLoaded`) through `lib.rs`.
+pub use zax_core_api::{NoRomLoaded, StateLoaded};
 
 /// One NES machine, seen from the host (REQ-CORE-001, REQ-CORE-002).
 ///
@@ -48,6 +33,8 @@ pub struct NesCore {
     cpu: Cpu6502,
     bus: NesBus,
     region: NesRegion,
+    /// FIDELITY-LEADS G5: the 2A03 netlist's power-on get / put parity and DMC timer.
+    netlist_get_put: bool,
     battery_ram_imported: bool,
     frame_count: i64,
     video_callback: Option<VideoCallback>,
@@ -58,7 +45,26 @@ pub struct NesCore {
     builtin_patch: Option<&'static str>,
     /// Whether the built-in patches apply at all (on by default).
     builtin_patches_enabled: bool,
+    /// Whether the cartridge database corrects iNES 1.0 headers at load (lot CARTDB).
+    cartridge_db: bool,
+    /// What the 2 KiB of work RAM hold at power-on (lot CARTDB step 2); FCEUX's and NesHawk's
+    /// `00 00 00 00 FF FF FF FF` by default since the owner's decision of 2026-11-13.
+    power_on_ram: crate::PowerOnRam,
+    /// What the PPU's palette RAM, OAM and nametable RAM hold at power-on (lot FIDELITY step 36).
+    power_on_ppu_ram: crate::PowerOnPpuRam,
+    /// The console model's MMC3 revision (lot FIDPLUS-C), applied when a ROM is loaded.
+    mmc3_revision: crate::Mmc3Revision,
+    /// What a cartridge's battery-backed PRG-RAM holds at power-on when no save was imported
+    /// (MAPPERS-N, owner 2026-11-15): seeded pseudo-random bytes by default, as a real SRAM's
+    /// contents are undefined and Mesen2's `RamPowerOnState` defaults to `Random`
+    /// (`SettingTypes.h:659`). All zero made *Famicom Jump II* take the empty RAM for a valid
+    /// save and jump into it (FIDELITY-LEADS J14). The seed is fixed, so runs stay reproducible.
+    power_on_battery_ram: crate::PowerOnRam,
     advanced_patches_enabled: bool,
+    /// `emu.rainbow_network`: mapper 682's ESP may use the host's network (off by default).
+    rainbow_network: bool,
+    /// `emu.vs_dip_*`: the VS. System's DIP switches for the next load.
+    vs_dip_switches: u8,
     /// The built-in patch applied to a ROM none is made for (Rust-only, owner request: forced).
     forced_patch: Option<&'static crate::builtin_patches::BuiltinPatch>,
     /// CRC-32 of the data (iNES header excluded) of the ROM loaded as the host gave it, which
@@ -109,6 +115,16 @@ pub struct NesCore {
     /// with [`NesCore::smooth_scroll_on`] and for the same reason — finding it means scanning
     /// `builtin_patches::PATCHES`, and `end_frame` did that once a frame.
     idle_loop: Option<(u16, u16)>,
+    /// Lot CORE-2: every frame through the path of every board, even for a specialised board
+    /// (the equivalence test's reference). Not a setting, not in the state.
+    generic_path: bool,
+    /// Fidélité+ (`docs/design/HALF-CYCLE.md`): every frame through its own loop
+    /// ([`NesCore::run_fidelity_plus_steps`]). Off by default; not in the state (step 4).
+    fidelity_plus: bool,
+    /// The frame a sliced run (`NesCore::run_frame_slice`, lot FIDPLUS-B) has started and not
+    /// finished: its first cycle, margin decoder and idle loop. Not part of the state: a state is
+    /// taken between frames.
+    slice: Option<SliceFrame>,
     /// The margin decoder of the ROM loaded, found by [`NesCore::find_margin_decoder`] when the
     /// ROM, the pack or `emu.builtin_patches` changes, and read by `end_frame` every frame.
     decoder: Option<&'static dyn crate::wide_decode::MarginDecoder>,
@@ -127,6 +143,24 @@ pub struct NesCore {
     real_frame_held: bool,
 }
 
+/// How a slice's instructions stopped.
+enum SliceOutcome {
+    /// The frame ended (vblank began).
+    FrameDone,
+    /// The slice's cycle budget is spent, the frame goes on.
+    Budget,
+    /// The board changed variant: go on through `with_board_kind!` again.
+    KindChanged,
+}
+
+/// A frame a sliced run has started (lot FIDPLUS-B, `docs/design/REALTIME-PACING.md`).
+#[derive(Clone, Copy)]
+struct SliceFrame {
+    start_cycle: i64,
+    decoder: Option<&'static dyn crate::wide_decode::MarginDecoder>,
+    idle_loop: Option<(u16, u16)>,
+}
+
 impl Default for NesCore {
     fn default() -> Self {
         Self::new()
@@ -141,6 +175,7 @@ impl NesCore {
             cpu: Cpu6502::new(),
             bus: NesBus::new(Ppu2C02::new(), Apu2A03::new(), InputPorts::new()),
             region: NesRegion::Ntsc,
+            netlist_get_put: false,
             battery_ram_imported: false,
             frame_count: 0,
             video_callback: None,
@@ -148,7 +183,14 @@ impl NesCore {
             original_image: None,
             builtin_patch: None,
             builtin_patches_enabled: true,
+            cartridge_db: true,
+            power_on_ram: crate::PowerOnRam::Pattern,
+            power_on_ppu_ram: crate::PowerOnPpuRam::Zero,
+            mmc3_revision: crate::Mmc3Revision::Cartridge,
+            power_on_battery_ram: crate::PowerOnRam::Random(Self::BATTERY_RAM_SEED),
             advanced_patches_enabled: false,
+            rainbow_network: false,
+            vs_dip_switches: 0,
             forced_patch: None,
             rom_crc: None,
             pack: None,
@@ -166,6 +208,9 @@ impl NesCore {
             smooth_scroll_on: false,
             smooth_scroll_live: false,
             idle_loop: None,
+            generic_path: false,
+            fidelity_plus: false,
+            slice: None,
             decoder: None,
             steady_sprites: Vec::new(),
             steady_places: Vec::new(),
@@ -182,6 +227,200 @@ impl NesCore {
         self.builtin_patches_enabled = enabled;
         self.refresh_patch_cache();
     }
+
+    /// Turns the cartridge database on or off for the next [`NesCore::load_rom`] (lot CARTDB):
+    /// on, an iNES 1.0 header the database knows is replaced by the NES 2.0 header the dump
+    /// should have carried; off, every header is read as the file has it.
+    pub fn set_cartridge_db(&mut self, enabled: bool) {
+        self.cartridge_db = enabled;
+    }
+
+    /// What the work RAM holds at the next power-on (lot CARTDB step 2). A real console's RAM
+    /// starts with whatever its cells settled to; a few games read it before writing it, and
+    /// FCEUX and NesHawk fill it with `00 00 00 00 FF FF FF FF` for that reason (NesHawk's
+    /// `NES.Core.cs` names *Cybernoid*, *Minna no Taabou* and *Huang Di*). That pattern is the
+    /// default (owner, 2026-11-13); REQ-CORE-004's zeros are one choice among four.
+    pub fn set_power_on_ram(&mut self, pattern: crate::PowerOnRam) {
+        self.power_on_ram = pattern;
+    }
+
+    /// The fixed seed of the default battery-RAM power-on pattern.
+    pub const BATTERY_RAM_SEED: u64 = 0x5A41_584E_4553_5241;
+
+    /// Chooses what a battery-backed PRG-RAM without an imported save holds at power-on; takes
+    /// effect at the next one. Movie tools set [`crate::PowerOnRam::Zero`], FCEUX's convention.
+    pub fn set_power_on_battery_ram(&mut self, pattern: crate::PowerOnRam) {
+        self.power_on_battery_ram = pattern;
+    }
+
+    /// Chooses what the PPU's palette RAM, OAM and nametable RAM hold at power-on; takes effect
+    /// at the next one.
+    pub fn set_power_on_ppu_ram(&mut self, pattern: crate::PowerOnPpuRam) {
+        self.power_on_ppu_ram = pattern;
+    }
+
+    /// The console model's CPU (lot FIDPLUS-C): a letterless RP2A03, whose noise channel has no
+    /// short mode and its own period table. At once.
+    pub fn set_letterless_cpu(&mut self, letterless: bool) {
+        self.bus.apu_mut().set_letterless_cpu(letterless);
+    }
+
+    /// The console model's MMC3 revision (lot FIDPLUS-C): read when the next ROM is loaded.
+    pub fn set_mmc3_revision(&mut self, revision: crate::Mmc3Revision) {
+        self.mmc3_revision = revision;
+    }
+
+    /// Whether the PPU corrupts a row of OAM when the rendering is switched off inside a line and
+    /// comes back (lot FIDELITY step 9; `Ppu2C02::rendering_switched`). Off by default (owner, 2026-11-13) and a setting, because the
+    /// hardware does it and `AccuracyCoin`'s `OAM Corruption` checks it, but the known model is
+    /// incomplete — with it on, blargg's `sprite_overflow_tests/5.Emulator` fails its third test,
+    /// which the console passes.
+    pub fn set_oam_corruption(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_oam_corruption(enabled);
+    }
+
+    /// Whether the 2C02G/H's OAMADDR defect is emulated: with OAMADDR at 8 or more when rendering
+    /// starts, eight bytes of OAM are copied over the first eight (nesdev, "PPU registers"). On by
+    /// default; never on a PAL console, whose 2C07 does not have it.
+    /// Whether the second `$2006` write loads `v` three dots later with the hybrid address
+    /// (measured on the transistor netlists). On by default.
+    pub fn set_address_load_delay(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_address_load_delay(enabled);
+    }
+
+    /// Whether a `$2006` load colliding with an increment of `v` ANDs with it (nesdev; the
+    /// transistor netlists). On by default.
+    pub fn set_glitch_2006(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_glitch_2006(enabled);
+    }
+
+    /// Whether switching rendering off mid-picture, or a `$2006` load leaving palette RAM, can
+    /// corrupt the palettes in alignment 2 (`TriCNES`'s model, D5). On by default.
+    pub fn set_palette_corruption(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_palette_corruption(enabled);
+    }
+
+    /// Whether resets reach the PPU's /RST pin, as on the front-loading NES: until the
+    /// pre-render line after a reset the PPU ignores `$2000`, `$2001`, `$2005` and `$2006`, and
+    /// the Reset button sends it back to its power-on position. Off by default: homebrew that
+    /// writes those registers at once does not start with it (`Duelito`), and `TriCNES` leaves it
+    /// off too, its author "not even 100% certain" of it.
+    pub fn set_ppu_reset_line(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_reset_line(enabled);
+    }
+
+    /// Chooses the PPU revision: `true` for a 2C02 older than G (palette not readable through
+    /// `$2007`, no OAMADDR write corruption), `false` for the 2C02G (default).
+    pub fn set_ppu_pre_g_revision(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_pre_g_revision(enabled);
+    }
+
+    /// Whether a 2C02G's `$2003` writes copy an OAM row over the one they address (D4). Off by
+    /// default: the console-checked OAM tests (blargg `oam_read`, `oam_stress`, `AccuracyCoin`'s
+    /// `$2004` behaviour) pass on consoles that do not show it.
+    pub fn set_oamaddr_write_corruption(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_oamaddr_write_corruption(enabled);
+    }
+
+    /// Whether the PPU's reset line still holds `$2000`, `$2001`, `$2005` and `$2006` (from a
+    /// reset to the pre-render line).
+    #[must_use]
+    pub fn ppu_reset_window_shut(&self) -> bool {
+        self.bus.ppu().reset_window_shut()
+    }
+
+    /// Shuts or opens that window by hand, for host tools that write the PPU's memories through
+    /// its registers (`movie-sync --ppu-ram`) and must put it back as they found it.
+    pub fn set_ppu_reset_window_shut(&mut self, shut: bool) {
+        self.bus.ppu_mut().set_reset_window_shut(shut);
+    }
+
+    /// Whether a `$2000` write starting on dot 257 takes the nametable-X bit of the dot-257 copy
+    /// from the CPU's open bus (nesdev; the transistor netlists). On by default.
+    pub fn set_glitch_2000(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_glitch_2000(enabled);
+    }
+
+    /// Which of the four CPU/PPU clock alignments (0 to 3, `AccuracyCoin`'s numbering) the PPU
+    /// follows: `$2007` read latch, `$2000` glitch, `$2001`/`$2006` delays and the OAM row
+    /// corruption (`docs/review/FIDELITY-LEADS.md`, A4 and D1). 3 by default.
+    pub fn set_cpu_ppu_alignment(&mut self, alignment: u8) {
+        self.bus.ppu_mut().set_cpu_ppu_alignment(alignment);
+    }
+
+    pub fn set_oamaddr_bug(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_oamaddr_bug(enabled);
+    }
+
+    /// Whether a power-on puts the PPU at the top of the picture, as nesdev documents ("PPU power
+    /// up state"), instead of the start of vblank. Off by default: it moves the timeline of every
+    /// game against the frames (recordings, recipes, saved states made at power-on). Takes
+    /// effect at the next power-on.
+    pub fn set_power_on_top(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_power_on_top(enabled);
+    }
+
+    /// Imitates the analog audio path of one measured console: 0 for none (the output as it
+    /// always was), `n` for `apu::console_profile::CONSOLE_AUDIO_PROFILES[n - 1]`. Takes effect
+    /// at once, without a reset.
+    /// Study `study/access-phase`: moves the CPU/PPU alignment by `dots` at power-on.
+    pub fn set_phase_offset(&mut self, dots: i32) {
+        self.bus.ppu_mut().set_phase_offset(dots);
+    }
+
+    pub fn set_console_audio_profile(&mut self, index: usize) {
+        self.bus.apu_mut().set_console_profile(index);
+    }
+
+    /// Whether OAM decays when the rendering stays off: a row nothing accessed for 8 NTSC frames
+    /// loses its bytes (nesdev, "PPU OAM"; `BeesNES`). Off by default: the decay stamps are not in
+    /// the savestate, so a run-ahead or a rewind, which load a state every frame, never let OAM
+    /// decay.
+    pub fn set_oam_decay(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_oam_decay(enabled);
+    }
+
+    /// Whether a `$2007` read or a `$2006` write that collides with a fetch of the PPU disturbs
+    /// that fetch, as on the console (lot FIDELITY step 16; `Ppu2C02::read_buffer_from_fetch`,
+    /// `Ppu2C02::delay_address_load`). On by default: a PAL console video of *Super Mario Bros. 3*
+    /// (Europe) shows the damage it predicts on its split line, same place and same rate
+    /// (`docs/review/FIDELITY-LEADS.md`, I1); a setting because it is a defect of the hardware.
+    pub fn set_bus_conflicts(&mut self, enabled: bool) {
+        self.bus.ppu_mut().set_bus_conflicts(enabled);
+    }
+
+    /// Whether the Rainbow board's ESP (mapper 682) reaches the host's network: off by default,
+    /// so that nothing leaves the emulator unless the player asks (lot MAPPERS-N). Applies to the
+    /// cartridge loaded now and to the next ones.
+    pub fn set_rainbow_network(&mut self, enabled: bool) {
+        self.rainbow_network = enabled;
+        self.apply_rainbow_network();
+    }
+
+    /// The end of a state load: [`Self::forget_real_frame`], and the VS PPU's palette remap put
+    /// back over the palette RAM the state restored (lot MAPPERS-N; `Ppu2C02::remap_palette`).
+    fn forget_real_frame_and_reshow_palette(&mut self) {
+        self.forget_real_frame();
+        self.bus.reapply_vs_palette();
+    }
+
+    /// Attaches a freshly built cartridge with the settings that live on the core.
+    fn attach_cartridge(&mut self, cartridge: Cartridge) {
+        self.bus.attach(Some(cartridge));
+        self.apply_rainbow_network();
+    }
+
+    #[cfg(feature = "board-682")]
+    fn apply_rainbow_network(&mut self) {
+        let enabled = self.rainbow_network;
+        if let Some(cartridge) = self.bus.cartridge_mut() {
+            cartridge.set_network_enabled(enabled);
+        }
+    }
+
+    #[cfg(not(feature = "board-682"))]
+    #[allow(clippy::unused_self)]
+    const fn apply_rainbow_network(&mut self) {}
 
     /// Whether the built-in patches and the advanced ones are on for the next load, as
     /// [`NesCore::set_builtin_patches`] and [`NesCore::set_advanced_patches`] left them.
@@ -273,8 +512,13 @@ impl NesCore {
         // here and the host would stop recognising it, which is the one way bumping the format
         // could have broken a file it still loads.
         match i32::from_le_bytes([header[4], header[5], header[6], header[7]]) {
-            Self::STATE_VERSION | Self::STATE_VERSION_8 => Some(false),
+            Self::STATE_VERSION
+            | Self::STATE_VERSION_8
+            | Self::FIDPLUS_STATE_VERSION
+            | Self::EXTENDED_STATE_VERSION => Some(false),
             Self::WIDE_STATE_VERSION
+            | Self::FIDPLUS_WIDE_STATE_VERSION
+            | Self::EXTENDED_WIDE_STATE_VERSION
             | Self::WIDE_STATE_VERSION_9
             | Self::WIDE_STATE_VERSION_6
             | Self::WIDE_STATE_VERSION_5 => Some(true),
@@ -299,20 +543,25 @@ impl NesCore {
 
     /// Name of the core, recorded at the head of savestate files (REQ-CORE-120). There is
     /// exactly one core.
-    pub const CORE_NAME: &'static str = "Zaxnes";
+    pub const CORE_NAME: &'static str =
+        zax_core_api::state_core_name(zax_core_api::EngineKind::Zaxnes);
 
     /// The name the core carried under the « Sen » working name. Still accepted when reading
     /// a state block, never written: AMD-029 §2 keeps states written before the rename
     /// loadable (Q-070).
     pub const LEGACY_CORE_NAME: &'static str = "Sen";
 
-    /// Message a savestate written by a different core is refused with (REQ-CORE-120).
-    pub const FOREIGN_CORE_MESSAGE: &'static str = "Save state used a different core.";
+    /// Message a savestate written by a different core is refused with (REQ-CORE-120). Defined
+    /// as `zax_core_api`'s since lot FCEUX-23 step 3, because FCEUX's engine returns the same
+    /// one for a block of this core's.
+    pub const FOREIGN_CORE_MESSAGE: &'static str = zax_core_api::FOREIGN_CORE_MESSAGE;
 
     /// Magic that opens a core savestate block, "SEN0". Kept as it is across the rename of
     /// AMD-029: it is a format datum, and changing it would refuse every block written
-    /// before (Q-070).
-    pub const STATE_MAGIC: u32 = 0x304E_4553;
+    /// before (Q-070). It is `zax_core_api::state_magic(EngineKind::Zaxnes)` since lot
+    /// FCEUX-23 step 3, where the first four bytes of a block became how the application tells
+    /// which engine wrote it.
+    pub const STATE_MAGIC: u32 = zax_core_api::state_magic(zax_core_api::EngineKind::Zaxnes);
 
     /// Version of the savestate format. Bumped whenever the block layout changes; L1c added
     /// the APU channel, mixer and resampler state, L1d the mapper bank windows, latches and
@@ -336,6 +585,24 @@ impl NesCore {
     /// The earlier widescreen block, without the flash chip's changed sectors; still read.
     pub const WIDE_STATE_VERSION_9: i32 = 9;
 
+    /// [`Self::STATE_VERSION`] followed by the PPU's pending Fidélité+ edges
+    /// (`Ppu2C02::save_edge_state`): written only when a state is taken with edges pending, so
+    /// every other block keeps the version earlier builds read.
+    pub const FIDPLUS_STATE_VERSION: i32 = 12;
+
+    /// [`Self::STATE_VERSION`] followed by a byte of flags and the optional blocks it names: bit 0
+    /// the PPU's pending Fidélité+ edges, bit 1 the console audio profile's filter memory (lot
+    /// FIDPLUS-D1b). Written only when one of them is present, so every other block keeps the
+    /// version earlier builds read; 12 and 13 stay readable.
+    pub const EXTENDED_STATE_VERSION: i32 = 14;
+
+    /// [`Self::WIDE_STATE_VERSION`] followed by the flags and blocks of
+    /// [`Self::EXTENDED_STATE_VERSION`].
+    pub const EXTENDED_WIDE_STATE_VERSION: i32 = 15;
+
+    /// [`Self::WIDE_STATE_VERSION`] followed by the PPU's pending Fidélité+ edges.
+    pub const FIDPLUS_WIDE_STATE_VERSION: i32 = 13;
+
     /// The earlier widescreen block, without the MMC5's sound registers; still read.
     pub const WIDE_STATE_VERSION_7: i32 = 7;
 
@@ -355,6 +622,8 @@ impl NesCore {
         matches!(
             version,
             Self::WIDE_STATE_VERSION
+                | Self::FIDPLUS_WIDE_STATE_VERSION
+                | Self::EXTENDED_WIDE_STATE_VERSION
                 | Self::WIDE_STATE_VERSION_9
                 | Self::WIDE_STATE_VERSION_7
                 | Self::WIDE_STATE_VERSION_6
@@ -365,6 +634,8 @@ impl NesCore {
     /// Whether `version` is one this build reads at all.
     const fn is_known_state_version(version: i32) -> bool {
         version == Self::STATE_VERSION
+            || version == Self::FIDPLUS_STATE_VERSION
+            || version == Self::EXTENDED_STATE_VERSION
             || version == Self::STATE_VERSION_8
             || version == Self::STATE_VERSION_4
             || Self::is_wide_state_version(version)
@@ -441,7 +712,11 @@ impl NesCore {
         // the whole point — the board is chosen from the corrected header.
         #[cfg(feature = "board-vs-system")]
         let note = {
-            let vs = crate::vs::VsSystem::detect(rom.header(), crc);
+            let mut vs = crate::vs::VsSystem::detect(rom.header(), crc);
+            // Lot MAPPERS-N: the host's DIP switches (`emu.vs_dip_*`), set before the power-on.
+            if let Some(vs) = vs.as_mut() {
+                vs.set_dip_switches(self.vs_dip_switches);
+            }
             let note = vs.as_ref().map(crate::vs::VsSystem::load_note).map(|note| {
                 match rom.correct_vs_board(crc) {
                     Some(correction) => format!("{note}; {correction}"),
@@ -454,13 +729,38 @@ impl NesCore {
         #[cfg(not(feature = "board-vs-system"))]
         let note: Option<String> = None;
 
-        let cartridge = match Cartridge::create(rom) {
+        // Lot CARTDB: what an iNES 1.0 header cannot say (the chip revision, the submapper, the
+        // RAM, the battery, the region), from the cartridge database, before the board is built
+        // from the header. A NES 2.0 header is never touched.
+        let note = if self.cartridge_db {
+            match crate::rom::cartdb::corrected_header(rom.header(), crc) {
+                Some(correction) => {
+                    rom.take_database_header(correction.header);
+                    let fixed = format!("cartridge database: {}", correction.changes.join("; "));
+                    Some(note.map_or(fixed.clone(), |note| format!("{note}; {fixed}")))
+                }
+                None => note,
+            }
+        } else {
+            note
+        };
+
+        let mut cartridge = match Cartridge::create(rom) {
             Ok(cartridge) => cartridge,
             Err(error) => {
                 self.close_rom();
                 return RomLoadResult::fail(error.failure, error.message);
             }
         };
+        match self.mmc3_revision {
+            crate::Mmc3Revision::Cartridge => {}
+            crate::Mmc3Revision::A => {
+                cartridge.set_mmc3_irq_revision_a(true);
+            }
+            crate::Mmc3Revision::B => {
+                cartridge.set_mmc3_irq_revision_a(false);
+            }
+        }
 
         // The header's region, unless the dump is known to be of another one.
         let region =
@@ -477,7 +777,7 @@ impl NesCore {
         self.set_hack_options(options);
         self.original_image = patched.map(|_| image.to_vec());
 
-        self.bus.attach(Some(cartridge));
+        self.attach_cartridge(cartridge);
         self.install_pack(Some(image));
         self.power_on();
         match note {
@@ -526,10 +826,56 @@ impl NesCore {
         self.bus.input_mut().vs_mut()
     }
 
+    /// Whether the image loaded is a VS. System; always `false` in a build without
+    /// `board-vs-system`, so that a host needs no `cfg` (lot MAPPERS-N).
+    #[must_use]
+    pub fn is_vs_system(&self) -> bool {
+        #[cfg(feature = "board-vs-system")]
+        return self.vs_system().is_some();
+        #[cfg(not(feature = "board-vs-system"))]
+        false
+    }
+
+    /// Drops a coin into slot `slot` (1 or 2) of the VS. System loaded; nothing on a NES image.
+    #[allow(unused_variables)]
+    pub fn vs_insert_coin(&mut self, slot: usize) {
+        #[cfg(feature = "board-vs-system")]
+        if let Some(vs) = self.vs_system_mut() {
+            vs.insert_coin(slot);
+        }
+    }
+
+    /// Presses the VS. System's service button for a few frames (a free credit).
+    pub fn vs_press_service(&mut self) {
+        #[cfg(feature = "board-vs-system")]
+        if let Some(vs) = self.vs_system_mut() {
+            vs.press_service();
+        }
+    }
+
+    /// The eight DIP switches of the next VS. System loaded (and of the one loaded now), bit `n`
+    /// being switch `n + 1`; a cabinet reads most of them at power-on.
+    #[allow(unused_variables)]
+    pub fn set_vs_dip_switches(&mut self, switches: u8) {
+        self.vs_dip_switches = switches;
+        #[cfg(feature = "board-vs-system")]
+        if let Some(vs) = self.vs_system_mut() {
+            vs.set_dip_switches(switches);
+        }
+    }
+
     /// Name the ROM was loaded under (REQ-CORE-014).
     #[must_use]
     pub fn rom_name(&self) -> Option<&str> {
         self.bus.cartridge().map(|cartridge| cartridge.rom().name())
+    }
+
+    /// The CPU / APU get-put parity and DMC timer a power-on starts with (FIDELITY-LEADS G5):
+    /// `false` the ones Zaxnes has always started with, `true` the 2A03 netlist's. A console
+    /// takes one or the other at power-on; the reset button keeps them. Takes effect at the next
+    /// power-on.
+    pub fn set_netlist_get_put(&mut self, netlist: bool) {
+        self.netlist_get_put = netlist;
     }
 
     /// Resets the machine, which is equivalent to a power cycle (REQ-CORE-004, DEC-02-Q3).
@@ -542,8 +888,15 @@ impl NesCore {
     /// The **soft** reset of AMD-044 REQ-CORE-122, which imitates a press on the console's
     /// RESET button: the internal RAM, the save RAM and the CHR RAM are **kept**, the CPU keeps
     /// A, X, Y and every flag but `I` while S drops by 3 and PC comes from the reset vector,
-    /// and the PPU, the APU, the mapper and the controller ports go to their documented
-    /// *after reset* state. The frame counter restarts from 0 (REQ-CORE-006 amended).
+    /// and the PPU, the APU and the controller ports go to their documented *after reset*
+    /// state. The frame counter restarts from 0 (REQ-CORE-006 amended).
+    ///
+    /// **The mapper is left alone**, which is the one way this differs from REQ-CORE-122 as
+    /// written ("le PPU, l'APU *et le mapper* suivent leur état documenté *after reset*"): the
+    /// mapper half of that clause has no documented state behind it, because the cartridge
+    /// connector has no `/RESET` pin for a mapper to see. The amendment the clause needs is
+    /// written up in `docs/review/AMD-REQ-CORE-122-mapper-reset.md`; the code implements the
+    /// hardware, on the owner's decision of 2026-11-10.
     ///
     /// The hard reset of [`Self::reset`] is unchanged: it stays a power cycle (DEC-02-Q3),
     /// which is why `cpu_reset/ram_after_reset` fails under it on purpose (REQ-CORE-004) and
@@ -564,12 +917,20 @@ impl NesCore {
         // read again on the next frame (AMD-044 §2).
         self.bus.input_mut().reset();
 
-        // The mapper follows its documented after-reset state; the volatile RAM it owns —
-        // PRG-RAM and CHR-RAM — is deliberately not cleared.
-        // `Cartridge::reset` refreshes the fast ROM windows the bus reads through itself
-        // (performance history §5.1, "plain PRG-ROM windows").
+        // **The mapper is left alone** (lot EVAL-SYNC-3 step 4, owner's decision of 2026-11-10).
+        // The NES cartridge connector has no `/RESET` pin — nesdev's "Cartridge connector" lists
+        // every pin of both edges and there is none — so a mapper cannot see the reset button:
+        // its bank registers, its IRQ unit and its A12 watcher hold whatever the game last wrote
+        // into them, across as many resets as the player presses. The boards that *do* react are
+        // the reset-detecting multicarts, which notice the absence of M2 rather than a wire, and
+        // they say so by overriding `Mapper::soft_reset`; `Cartridge::soft_reset` is the call
+        // that reaches them and that refreshes the bus's fast windows afterwards.
+        //
+        // Until this lot `Cartridge::reset` was called here, which put every board back to
+        // power-on. See `docs/review/AMD-REQ-CORE-122-mapper-reset.md` for the amendment this
+        // asks of REQ-CORE-122, whose current wording covers the mapper.
         if let Some(cartridge) = self.bus.cartridge_mut() {
-            cartridge.reset();
+            cartridge.soft_reset();
         }
 
         self.cpu.soft_reset(&mut self.bus);
@@ -628,7 +989,7 @@ impl NesCore {
     pub fn export_flash_save(&self) -> Vec<u8> {
         self.bus
             .cartridge()
-            .map_or_else(Vec::new, |cartridge| cartridge.memory().export_flash_save())
+            .map_or_else(Vec::new, crate::cartridges::Cartridge::export_flash_save)
     }
 
     /// Loads a file written by [`Self::export_flash_save`] (REQ-CORE-095). Returns `false` when
@@ -641,7 +1002,7 @@ impl NesCore {
     pub fn import_flash_save(&mut self, data: &[u8]) -> bool {
         self.bus
             .cartridge_mut()
-            .is_some_and(|cartridge| cartridge.memory_mut().import_flash_save(data))
+            .is_some_and(|cartridge| cartridge.import_flash_save(data))
     }
 
     fn power_on(&mut self) {
@@ -650,7 +1011,18 @@ impl NesCore {
         self.apply_region();
 
         self.bus.reset();
+        // The bus's power-on zeroed the work RAM; any other pattern goes over it.
+        if self.power_on_ram != crate::PowerOnRam::Zero {
+            self.power_on_ram.fill(self.bus.ram_mut());
+        }
         self.bus.ppu_mut().reset();
+        if let Some((palette, oam, vram)) = self.power_on_ppu_ram.contents() {
+            self.bus
+                .ppu_mut()
+                .fill_power_on_memories(&palette, &oam, &vram);
+        }
+        // Lot MAPPERS-N: the VS PPU's palette remap lives on the bus now (`Ppu2C02::remap_palette`).
+        self.bus.reapply_vs_palette();
         self.boot_patch_window(self.builtin_patch);
         self.boot_pack_zone();
         self.bus.apu_mut().reset();
@@ -658,13 +1030,65 @@ impl NesCore {
         if let Some(cartridge) = self.bus.cartridge_mut() {
             cartridge.reset();
             cartridge.clear_volatile_ram(clear_prg_ram);
+            // Plain SRAM only: on 16, 157, 159 and 164 the battery slice is a serial EEPROM's
+            // array and on 19 it carries the Namco 163's internal RAM, which keep their
+            // all-zero power-on (FIDELITY-LEADS J14).
+            if clear_prg_ram
+                && self.power_on_battery_ram != crate::PowerOnRam::Zero
+                && !matches!(cartridge.board_number(), 16 | 19 | 157 | 159 | 164)
+            {
+                self.power_on_battery_ram.fill(cartridge.battery_ram_mut());
+            }
         }
 
         self.cpu.reset(&mut self.bus);
+        if self.netlist_get_put {
+            // FIDELITY-LEADS G5: the 2A03 netlist's power-on, the other get / put parity and the
+            // DMC output timer at 431 with 8 bits left, as the CPU differential aligns them at
+            // the first opcode.
+            self.bus.diagnostic_flip_get_put();
+            self.bus.apu_mut().diagnostic_set_dmc_phase(431, 8);
+        }
+        self.run_boot_program();
         self.frame_count = 0;
         // REQ-LOOP-066: a reset or a change of game starts the next real frame afresh, with the
         // same N; the state of the machine that is gone is never put back.
         self.forget_real_frame();
+    }
+
+    /// Lot MAPPERS-P: a copier loader's boot (puNES `extcl_cpu_init_pc_561`), at power-on only.
+    /// The data goes to CPU RAM (`$0000-$1FFF`, mirrored every 2 KiB) or to the work RAM (its
+    /// `address & $1FFF`); with an `init` address the CPU starts at `$0700` on `JSR init`,
+    /// `JMP ($FFFC)`, so the game's own reset vector follows.
+    fn run_boot_program(&mut self) {
+        let Some(boot) = self
+            .bus
+            .cartridge()
+            .and_then(crate::cartridges::Cartridge::boot_program)
+        else {
+            return;
+        };
+        let start = usize::from(boot.address & 0x1FFF);
+        if boot.address < 0x2000 {
+            let ram = self.bus.ram_mut();
+            for (index, byte) in boot.data.iter().enumerate() {
+                ram[(start + index) % ram.len()] = *byte;
+            }
+        } else if let Some(cartridge) = self.bus.cartridge_mut() {
+            let ram = cartridge.memory_mut().prg_ram_mut();
+            if !ram.is_empty() {
+                let len = ram.len();
+                for (index, byte) in boot.data.iter().enumerate() {
+                    ram[(start + index) % len] = *byte;
+                }
+            }
+        }
+        if boot.init != 0 {
+            let [init_low, init_high] = boot.init.to_le_bytes();
+            let stub = [0x20, init_low, init_high, 0x6C, 0xFC, 0xFF];
+            self.bus.ram_mut()[0x700..0x706].copy_from_slice(&stub);
+            self.cpu.pc = 0x0700;
+        }
     }
 
     /// TV region in force (REQ-CORE-016).
@@ -709,6 +1133,24 @@ impl NesCore {
     #[must_use]
     pub const fn speed(&self) -> f64 {
         self.bus.apu().speed()
+    }
+
+    /// Lot FIDPLUS-B (`docs/design/REALTIME-PACING.md`): the sound follows the console's own frame
+    /// rate, for a host that chains frames at [`Self::frame_rate`]`(true)`.
+    pub fn set_exact_rate(&mut self, exact: bool) {
+        self.bus.apu_mut().set_exact_rate(exact);
+    }
+
+    /// The frame rate a host chains frames at for this core's region: the console's own with the
+    /// exact rate (lot FIDPLUS-B), else the nominal one (DEC-R2-T3).
+    #[must_use]
+    pub fn frame_rate(&self, exact: bool) -> f64 {
+        let timing = self.bus.ppu().timing();
+        if exact {
+            timing.exact_frames_per_second()
+        } else {
+            f64::from(timing.nominal_frames_per_second)
+        }
     }
 
     /// Sets the speed factor (REQ-CORE-072).
@@ -766,8 +1208,18 @@ impl NesCore {
         if self.bus.cartridge().is_none() {
             return 0;
         }
+        if self.slice.is_some() {
+            // Lot FIDPLUS-B: a frame begun in slices (the host has just stopped slicing) is
+            // finished, rather than a second frame begun on top of it.
+            return self.finish_sliced_frame(input_word);
+        }
 
         self.bus.input_mut().begin_frame(input_word);
+        // Mapper 188's microphone has two buttons of its own (lot MAPPERS-N, `BandaiKaraoke`).
+        #[cfg(feature = "board-188")]
+        if let Some(cartridge) = self.bus.cartridge_mut() {
+            cartridge.set_input_word(input_word);
+        }
 
         // The aimed position is sampled once, at the start of the frame, and stays fixed
         // for its whole duration (REQ-CORE-060).
@@ -810,22 +1262,196 @@ impl NesCore {
         let idle_loop = self.idle_loop.filter(|_| self.bus.ppu().wide().unlocked());
 
         self.bus.ppu_mut().clear_frame_boundary();
+        if self.fidelity_plus || self.bus.ppu().edges_pending() {
+            // Fidélité+: its own loop (one test a frame on the standard path). The PPU is told
+            // every frame: a load builds it afresh. The PPU and the APU are batched as in the
+            // standard frame: every register access still catches the PPU up first, and the
+            // edges count dots, not catch-ups. A Fidélité+ state loaded with the option off runs
+            // this loop too while its edges are pending, posting none.
+            self.bus.ppu_mut().set_fidelity_plus(self.fidelity_plus);
+            self.bus.defer_ppu();
+            loop {
+                let done = match self.bus.cartridge().filter(|_| !self.generic_path) {
+                    Some(cartridge) => with_board_kind!(cartridge.board(), K => {
+                        self.run_fidelity_plus_steps::<K>(idle_loop)
+                    }),
+                    None => self.run_fidelity_plus_steps::<AnyBoard>(idle_loop),
+                };
+                if done {
+                    break;
+                }
+            }
+            self.bus.end_deferred_ppu();
+        } else {
+            self.run_standard_frame(idle_loop);
+        }
+        if let Some(decoder) = decoder {
+            self.decode_margins(decoder);
+        }
+        self.finish_frame(decoder, start_cycle)
+    }
+
+    /// Runs the frame in slices (lot FIDPLUS-B step 2, `docs/design/REALTIME-PACING.md`): from
+    /// where the last slice stopped, or from a new frame, up to the first CPU instruction boundary
+    /// at or after cycle `until` (the bus's cycle count), or to the frame's end. `input_word` is
+    /// the pad's state now: a new frame starts with it, a frame in progress takes it at the next
+    /// `$4016` strobe. Returns the frame's cycles when it ended in this slice (the video callback
+    /// has fired, as after [`Self::run_frame`]), `None` when it goes on. A machine run only by
+    /// whole frames and one run by slices of any size are the same machine.
+    pub fn run_frame_slice(&mut self, input_word: u16, until: i64) -> Option<i64> {
+        if self.bus.cartridge().is_none() {
+            return Some(0);
+        }
+        let frame = if let Some(frame) = self.slice {
+            self.bus.input_mut().set_live_word(input_word);
+            frame
+        } else {
+            self.bus.input_mut().begin_frame(input_word);
+            if let Some(source) = self.zapper_position_source.as_mut() {
+                self.bus.input_mut().aim_zappers(source);
+            }
+            let start_cycle = self.bus.cycle_count();
+            let decoder = self.margin_decoder();
+            self.bus.ppu_mut().wide_mut().set_decoded(decoder.is_some());
+            let idle_loop = self.idle_loop.filter(|_| self.bus.ppu().wide().unlocked());
+            self.bus.ppu_mut().clear_frame_boundary();
+            let frame = SliceFrame {
+                start_cycle,
+                decoder,
+                idle_loop,
+            };
+            self.slice = Some(frame);
+            frame
+        };
+
+        let fidelity = self.fidelity_plus || self.bus.ppu().edges_pending();
+        if fidelity {
+            self.bus.ppu_mut().set_fidelity_plus(self.fidelity_plus);
+        }
         self.bus.defer_ppu();
+        let done = loop {
+            let outcome = match self.bus.cartridge().filter(|_| !self.generic_path) {
+                Some(cartridge) => with_board_kind!(cartridge.board(), K => {
+                    self.run_slice_steps::<K>(frame.idle_loop, until, fidelity)
+                }),
+                None => self.run_slice_steps::<AnyBoard>(frame.idle_loop, until, fidelity),
+            };
+            match outcome {
+                SliceOutcome::FrameDone => break true,
+                SliceOutcome::Budget => break false,
+                SliceOutcome::KindChanged => {}
+            }
+        };
+        self.bus.end_deferred_ppu();
+        if !done {
+            return None;
+        }
+        self.slice = None;
+        if let Some(decoder) = frame.decoder {
+            self.decode_margins(decoder);
+        }
+        Some(self.finish_frame(frame.decoder, frame.start_cycle))
+    }
+
+    /// The rest of a frame begun in slices, in one go; its cycles. Out of line: the whole-frame
+    /// path only tests that a slice is in progress.
+    #[inline(never)]
+    fn finish_sliced_frame(&mut self, input_word: u16) -> i64 {
         loop {
-            self.cpu.step(&mut self.bus);
+            if let Some(cycles) = self.run_frame_slice(input_word, i64::MAX) {
+                return cycles;
+            }
+        }
+    }
+
+    /// Whether a sliced run has a frame in progress ([`Self::run_frame_slice`]).
+    #[must_use]
+    pub const fn frame_in_progress(&self) -> bool {
+        self.slice.is_some()
+    }
+
+    /// The instructions of a slice on the board kind `K`: as [`Self::run_frame_steps`] (or the
+    /// Fidélité+ loop's), and a stop at the first instruction boundary at or after cycle `until`.
+    /// A loop of its own, so that the whole-frame loops carry no budget test.
+    fn run_slice_steps<K: BoardKind>(
+        &mut self,
+        idle_loop: Option<(u16, u16)>,
+        until: i64,
+        fidelity: bool,
+    ) -> SliceOutcome {
+        loop {
+            if fidelity {
+                self.cpu.step(&mut FidelityBus::<K>::new(&mut self.bus));
+            } else {
+                self.cpu.step(&mut KindBus::<K>::new(&mut self.bus));
+            }
             if let Some((first, last)) = idle_loop {
                 if (first..=last).contains(&self.cpu.pc) && self.bus.ppu().wide().stalling() {
                     self.bus.ppu_mut().wide_mut().end_stall();
                 }
             }
             if self.bus.ppu().vblank_just_started() {
+                return SliceOutcome::FrameDone;
+            }
+            if K::SWITCHES
+                && !self
+                    .bus
+                    .cartridge()
+                    .is_some_and(|cartridge| K::matches(cartridge.board()))
+            {
+                return SliceOutcome::KindChanged;
+            }
+            if self.bus.cycle_count() >= until {
+                return SliceOutcome::Budget;
+            }
+        }
+    }
+
+    /// The standard frame: the PPU and the APU batched, the board's path (lot CORE-2).
+    fn run_standard_frame(&mut self, idle_loop: Option<(u16, u16)>) {
+        self.bus.defer_ppu();
+        // Lot MAPPERS-P: mapper 532's overlay reads CPU RAM as it stood at the pre-render line.
+        #[cfg(feature = "board-532")]
+        let ersan2_ram = if self.ersan2_active() {
+            Some(self.run_to_pre_render())
+        } else {
+            None
+        };
+        // The frame's path (lot CORE-2, `docs/design/CORE-TIERS.md`): the board is looked at once
+        // here, and the frame runs through the code compiled for it, or for every board when it
+        // is not in the table. `run_frame` checked that a cartridge is loaded.
+        loop {
+            // Lot MAPPERS-N: a VS. System image always takes the generic path, the one kind that
+            // carries the bus's VS quirks (`BoardKind::RUNS_VS`).
+            let generic = self.generic_path || self.bus.is_vs_image();
+            let done = match self.bus.cartridge().filter(|_| !generic) {
+                Some(cartridge) => {
+                    with_board_kind!(cartridge.board(), K => self.run_frame_steps::<K>(idle_loop))
+                }
+                None => self.run_frame_steps::<AnyBoard>(idle_loop),
+            };
+            if done {
                 break;
             }
         }
         self.bus.end_deferred_ppu();
-        if let Some(decoder) = decoder {
-            self.decode_margins(decoder);
+        #[cfg(feature = "board-532")]
+        if let Some(ram) = ersan2_ram {
+            self.paint_ersan2(&ram);
         }
+    }
+
+    /// What follows a frame's instructions on every path: smooth scrolling, the frame count, the
+    /// video callback. Returns the cycles the frame took.
+    fn finish_frame(
+        &mut self,
+        decoder: Option<&'static dyn crate::wide_decode::MarginDecoder>,
+        start_cycle: i64,
+    ) -> i64 {
+        // Lot FDS: the drive's automatic disk changes, on every frame path (standard,
+        // Fidelity+, sliced). Nothing for a cartridge without a drive.
+        #[cfg(feature = "board-fds")]
+        self.fds_end_frame();
         // **One `or` of three booleans per frame for every game that wants none of this**, and
         // the whole of the smooth scrolling behind it (lot KIRBY-MERGE step 4). The branch asked
         // the question per frame instead, and the question was expensive: `hack_option_on`
@@ -847,6 +1473,233 @@ impl NesCore {
         }
 
         self.bus.cycle_count() - start_cycle
+    }
+
+    /// Lot FDS: the drive's once-a-frame work — the BIOS's disk search resolved from what it
+    /// looks for (the ten bytes `$00`/`$01` point at, Mesen `Fds::ReadRam`), and the delayed and
+    /// automatic disk changes. Nothing for a cartridge without a drive.
+    #[cfg(feature = "board-fds")]
+    #[cold]
+    #[inline(never)]
+    fn fds_end_frame(&mut self) {
+        let Some(cartridge) = self.bus.cartridge() else {
+            return;
+        };
+        if cartridge.disk_sides() == 0 {
+            return;
+        }
+        let header = cartridge.disk_wanted().then(|| {
+            let ram = self.bus.ram();
+            let pointer = u16::from_le_bytes([ram[0], ram[1]]);
+            std::array::from_fn(|index| {
+                let address = pointer.wrapping_add(u16::try_from(index).unwrap_or(0));
+                if address == 0xE445 {
+                    0
+                } else {
+                    self.read_memory(address)
+                }
+            })
+        });
+        if let Some(cartridge) = self.bus.cartridge_mut() {
+            cartridge.disk_end_frame(header);
+        }
+    }
+
+    /// Lot FDS: the disk sides of the loaded image's drive, 0 without one.
+    #[must_use]
+    pub fn disk_sides(&self) -> usize {
+        self.bus
+            .cartridge()
+            .map_or(0, crate::cartridges::Cartridge::disk_sides)
+    }
+
+    /// The side in the drive (0 for disk 1 side A, 1 for side B, …), `None` when it is empty.
+    #[must_use]
+    pub fn disk_side(&self) -> Option<usize> {
+        self.bus
+            .cartridge()
+            .and_then(crate::cartridges::Cartridge::disk_side)
+    }
+
+    /// Puts `side` in the drive; a disk in it comes out first and the new one goes in about two
+    /// seconds later, as a player would do it.
+    pub fn insert_disk(&mut self, side: usize) {
+        if let Some(cartridge) = self.bus.cartridge_mut() {
+            cartridge.insert_disk(side);
+        }
+    }
+
+    /// Takes the disk out of the drive.
+    pub fn eject_disk(&mut self) {
+        if let Some(cartridge) = self.bus.cartridge_mut() {
+            cartridge.eject_disk();
+        }
+    }
+
+    /// Turns the other side of the disk in the drive over (side A to B, B to A).
+    pub fn switch_disk_side(&mut self) {
+        if let Some(side) = self.disk_side() {
+            let sides = self.disk_sides();
+            self.insert_disk((side ^ 1) % sides.max(1));
+        }
+    }
+
+    /// Puts the next disk in (side A of the following disk, back to the first after the last).
+    pub fn insert_next_disk(&mut self) {
+        let sides = self.disk_sides();
+        if sides > 0 {
+            let side = self.disk_side().unwrap_or(sides - 1);
+            self.insert_disk(((side & !1) + 2) % sides);
+        }
+    }
+
+    /// Turns the drive's automatic disk changes on or off (on by default).
+    pub fn set_disk_auto_insert(&mut self, enabled: bool) {
+        if let Some(cartridge) = self.bus.cartridge_mut() {
+            cartridge.set_disk_auto_insert(enabled);
+        }
+    }
+
+    /// Lot MAPPERS-P: whether the loaded image is mapper 532 with a font (*China Ersan 2*).
+    #[cfg(feature = "board-532")]
+    fn ersan2_active(&self) -> bool {
+        self.bus.cartridge().is_some_and(|cartridge| {
+            cartridge.mapper_number() == 532 && !Self::misc_rom(cartridge).is_empty()
+        })
+    }
+
+    /// The NES 2.0 misc ROM of the loaded image (the bytes past its announced ROMs).
+    #[cfg(feature = "board-532")]
+    fn misc_rom(cartridge: &crate::cartridges::Cartridge) -> &[u8] {
+        let rom = cartridge.rom();
+        rom.raw()
+            .get(rom.header().announced_size()..)
+            .unwrap_or_default()
+    }
+
+    /// Steps the CPU, the PPU in step, until the PPU reaches the pre-render line (puNES copies
+    /// RAM there, `ppu.c`), and returns CPU RAM `$00-$FF`. Only a 532 image runs this.
+    #[cfg(feature = "board-532")]
+    #[cold]
+    #[inline(never)]
+    fn run_to_pre_render(&mut self) -> Box<[u8; 256]> {
+        loop {
+            self.bus.sync_ppu();
+            let ppu = self.bus.ppu();
+            if ppu.scanline() == ppu.pre_render_scanline() || ppu.vblank_just_started() {
+                break;
+            }
+            self.cpu
+                .step(&mut KindBus::<crate::cartridges::AnyBoard>::new(
+                    &mut self.bus,
+                ));
+        }
+        let mut ram = Box::new([0u8; 256]);
+        ram.copy_from_slice(&self.bus.ram()[..256]);
+        ram
+    }
+
+    /// Paints mapper 532's glyphs on the finished picture ([`crate::ersan2_overlay`]).
+    #[cfg(feature = "board-532")]
+    #[cold]
+    #[inline(never)]
+    fn paint_ersan2(&mut self, ram: &[u8; 256]) {
+        let mut pixels = self.bus.ppu_mut().take_pixels();
+        if let Some(cartridge) = self.bus.cartridge() {
+            let ppu = self.bus.ppu();
+            let (palette, palette_raw) = ppu.palette_colors();
+            let read = |address: u16| {
+                let address = address & 0x3FFF;
+                if address < 0x2000 {
+                    cartridge.ppu_peek(address, crate::cartridges::ChrFetch::Background)
+                } else if address < 0x3F00 {
+                    ppu.read_nametable_byte(0x2000 | (address & 0x0FFF), Some(cartridge))
+                } else {
+                    palette_raw[usize::from(address & 0x1F)]
+                }
+            };
+            crate::ersan2_overlay::apply(
+                ram,
+                Self::misc_rom(cartridge),
+                &read,
+                &palette,
+                &mut pixels,
+            );
+        }
+        self.bus.ppu_mut().restore_pixels(pixels);
+    }
+
+    /// Runs every frame through the path of every board, specialised board or not (lot CORE-2):
+    /// the reference [`with_board_kind!`]'s paths are checked against. Off by default.
+    #[doc(hidden)]
+    pub const fn set_generic_path(&mut self, generic: bool) {
+        self.generic_path = generic;
+    }
+
+    /// Runs every frame through the Fidélité+ loop (`docs/design/HALF-CYCLE.md`), off by
+    /// default. Takes effect at the next frame.
+    pub fn set_fidelity_plus(&mut self, enabled: bool) {
+        self.fidelity_plus = enabled;
+        if !enabled {
+            self.bus.ppu_mut().set_fidelity_plus(false);
+        }
+    }
+
+    /// Whether the Fidélité+ loop runs the frames.
+    #[must_use]
+    pub const fn fidelity_plus(&self) -> bool {
+        self.fidelity_plus
+    }
+
+    /// The instructions of one Fidélité+ frame on the board kind `K`: the CPU steps a
+    /// [`FidelityBus`], the PPU runs on every cycle. Same returns as
+    /// [`NesCore::run_frame_steps`].
+    fn run_fidelity_plus_steps<K: BoardKind>(&mut self, idle_loop: Option<(u16, u16)>) -> bool {
+        loop {
+            self.cpu.step(&mut FidelityBus::<K>::new(&mut self.bus));
+            if let Some((first, last)) = idle_loop {
+                if (first..=last).contains(&self.cpu.pc) && self.bus.ppu().wide().stalling() {
+                    self.bus.ppu_mut().wide_mut().end_stall();
+                }
+            }
+            if self.bus.ppu().vblank_just_started() {
+                return true;
+            }
+            if K::SWITCHES
+                && !self
+                    .bus
+                    .cartridge()
+                    .is_some_and(|cartridge| K::matches(cartridge.board()))
+            {
+                return false;
+            }
+        }
+    }
+
+    /// The instructions of one frame, on the board kind `K` (lot CORE-2): the bus is lent to the
+    /// CPU as a [`KindBus`] so that every cartridge call of the frame reaches `K`'s board.
+    /// Returns `false` when the board changed variant (see [`BoardKind::SWITCHES`]) before the
+    /// frame was over, for `run_frame` to go on with the right kind.
+    fn run_frame_steps<K: BoardKind>(&mut self, idle_loop: Option<(u16, u16)>) -> bool {
+        loop {
+            self.cpu.step(&mut KindBus::<K>::new(&mut self.bus));
+            if let Some((first, last)) = idle_loop {
+                if (first..=last).contains(&self.cpu.pc) && self.bus.ppu().wide().stalling() {
+                    self.bus.ppu_mut().wide_mut().end_stall();
+                }
+            }
+            if self.bus.ppu().vblank_just_started() {
+                return true;
+            }
+            if K::SWITCHES
+                && !self
+                    .bus
+                    .cartridge()
+                    .is_some_and(|cartridge| K::matches(cartridge.board()))
+            {
+                return false;
+            }
+        }
     }
 
     // ----------------------------------------------------------------- run-ahead
@@ -881,7 +1734,8 @@ impl NesCore {
     /// # Panics
     /// Never: the capture can only fail with no ROM loaded, which is checked first.
     pub fn run_frame_ahead(&mut self, input_word: u16, ahead: u8) -> i64 {
-        if ahead == 0 {
+        // A frame begun in slices (lot FIDPLUS-B) is finished first, without run-ahead.
+        if ahead == 0 || self.slice.is_some() {
             return self.run_frame(input_word);
         }
 
@@ -953,6 +1807,8 @@ impl NesCore {
     /// next real frame then starts a sequence of its own (REQ-LOOP-066).
     fn forget_real_frame(&mut self) {
         self.real_frame_held = false;
+        // A sliced frame in progress belongs to the machine that was replaced (lot FIDPLUS-B).
+        self.slice = None;
     }
 
     /// Whether a frame has any smooth scrolling to do: the game's own aid, the host's option for
@@ -1522,6 +2378,20 @@ impl NesCore {
         self.bus.ppu().wide_picture_into(out)
     }
 
+    /// The colour subcarrier's phase at the start of the frame just drawn (0 to 11), for the
+    /// composite decoder ([`crate::composite::RowDecoder`], lot FIDPLUS-D2b).
+    #[must_use]
+    pub fn video_phase(&self) -> usize {
+        self.bus.ppu().video_phase()
+    }
+
+    /// The colour emphasis of each pixel of [`NesCore::wide_picture_into`]'s picture (PPUMASK
+    /// bits 5-7 as 0 to 7), into `out`; `false` and empty `out` for a frame without emphasis
+    /// (lot FIDPLUS-D2b).
+    pub fn wide_emphasis_into(&self, out: &mut Vec<u8>) -> bool {
+        self.bus.ppu().wide_emphasis_into(out)
+    }
+
     /// Whether the margin decoder of the frame just run asks the screen's top and bottom 8 lines
     /// hidden with a vertical margin as without one, when the host hides them
     /// ([`crate::wide_decode::MarginDecoder::hides_overscan`]; false for a game without one).
@@ -1764,12 +2634,15 @@ impl NesCore {
         let rom = cartridge.rom();
 
         let wide = self.bus.ppu().wide();
+        let edges = self.bus.ppu().edges_pending();
+        let filter = self.bus.apu().has_profile_filter();
         let mut writer = StateWriter::reusing(std::mem::take(buffer));
         writer.write_u32(Self::STATE_MAGIC);
-        writer.write_i32(if wide.unlocked() {
-            Self::WIDE_STATE_VERSION
-        } else {
-            Self::STATE_VERSION
+        writer.write_i32(match (wide.unlocked(), edges || filter) {
+            (true, false) => Self::WIDE_STATE_VERSION,
+            (false, false) => Self::STATE_VERSION,
+            (true, true) => Self::EXTENDED_WIDE_STATE_VERSION,
+            (false, true) => Self::EXTENDED_STATE_VERSION,
         });
         writer.write_string(Self::CORE_NAME);
         writer.write_bool(include_rom_image);
@@ -1787,6 +2660,15 @@ impl NesCore {
         cartridge.save_state(&mut writer);
         if wide.unlocked() {
             wide.save_state(&mut writer);
+        }
+        if edges || filter {
+            writer.write_u8(u8::from(edges) | (u8::from(filter) << 1));
+            if edges {
+                self.bus.ppu().save_edge_state(&mut writer);
+            }
+            if filter {
+                self.bus.apu().save_profile_filter(&mut writer);
+            }
         }
 
         *buffer = writer.into_vec();
@@ -1812,6 +2694,7 @@ impl NesCore {
             + 1024 // MMC5 ExRAM.
             + MAX_TILE_RECORD_STATE_SIZE
             + Apu2A03::MAX_STATE_SIZE
+            + Apu2A03::PROFILE_FILTER_STATE_SIZE
             + 4096; // headers, registers, counters and the length prefixes
 
         rom_bytes + fixed_bytes + 256 + name_bytes
@@ -1859,6 +2742,14 @@ impl NesCore {
         self.bus.input().save_state(&mut writer);
         cartridge.save_state(&mut writer);
         self.bus.ppu().wide().save_state(&mut writer);
+        // Fidélité+: the edges pending (an empty block otherwise); run-ahead must stay exact.
+        self.bus.ppu().save_edge_state(&mut writer);
+        // A console profile's filters and expansion signal (lot FIDPLUS-D1e), likewise.
+        let filter = self.bus.apu().has_profile_filter();
+        writer.write_u8(u8::from(filter));
+        if filter {
+            self.bus.apu().save_profile_filter(&mut writer);
+        }
 
         state.end(writer);
         Ok(())
@@ -1911,6 +2802,10 @@ impl NesCore {
             .ppu_mut()
             .wide_mut()
             .load_state(&mut reader, true, true)?;
+        self.bus.ppu_mut().load_edge_state(&mut reader)?;
+        if reader.read_u8()? != 0 {
+            self.bus.apu_mut().load_profile_filter(&mut reader)?;
+        }
 
         self.frame_count = frame_count;
         if region != self.region {
@@ -1940,6 +2835,45 @@ impl NesCore {
         }
 
         loaded
+    }
+
+    /// The widescreen block of a state and, after it, the Fidélité+ edges. When the widescreen
+    /// block is skipped (a hack's state restored without the hack) the edges cannot be found and
+    /// are dropped with it.
+    fn restore_wide_and_edges(
+        &mut self,
+        reader: &mut StateReader,
+        version: i32,
+        unpatched_hack: bool,
+    ) -> Result<(), InvalidState> {
+        let wide = self.bus.ppu_mut().wide_mut();
+        let wide_read = Self::is_wide_state_version(version) && !unpatched_hack;
+        if wide_read {
+            wide.load_state(
+                reader,
+                version != Self::WIDE_STATE_VERSION_5,
+                version >= Self::WIDE_STATE_VERSION_7,
+            )?;
+        } else {
+            wide.reset();
+        }
+        if version == Self::FIDPLUS_STATE_VERSION
+            || (version == Self::FIDPLUS_WIDE_STATE_VERSION && wide_read)
+        {
+            self.bus.ppu_mut().load_edge_state(reader)?;
+        }
+        if version == Self::EXTENDED_STATE_VERSION
+            || (version == Self::EXTENDED_WIDE_STATE_VERSION && wide_read)
+        {
+            let flags = reader.read_u8()?;
+            if flags & 1 != 0 {
+                self.bus.ppu_mut().load_edge_state(reader)?;
+            }
+            if flags & 2 != 0 {
+                self.bus.apu_mut().load_profile_filter(reader)?;
+            }
+        }
+        Ok(())
     }
 
     fn restore_state(&mut self, data: &[u8], offset: usize) -> Result<StateLoaded, InvalidState> {
@@ -2034,16 +2968,7 @@ impl NesCore {
         // A state of the hack restored without it: the original ROM never unlocks the
         // extension, which must not stay as the hack left it (four nametables, margins).
         let unpatched_hack = patch.1.is_none() && patchable;
-        let wide = self.bus.ppu_mut().wide_mut();
-        if Self::is_wide_state_version(version) && !unpatched_hack {
-            wide.load_state(
-                &mut reader,
-                version != Self::WIDE_STATE_VERSION_5,
-                version >= Self::WIDE_STATE_VERSION_7,
-            )?;
-        } else {
-            wide.reset();
-        }
+        self.restore_wide_and_edges(&mut reader, version, unpatched_hack)?;
 
         // A state made the other way (the patch ran and does not now, or the reverse).
         let made_with_patch = Self::is_wide_state_version(version);
@@ -2058,7 +2983,7 @@ impl NesCore {
         self.battery_ram_imported = false;
         self.rom_crc = has_rom_image.then_some(rom_crc).or(self.rom_crc);
         (self.original_image, self.builtin_patch) = patch;
-        self.bus.attach(Some(cartridge));
+        self.attach_cartridge(cartridge);
         self.install_pack(pack_image.as_deref());
         self.region = region;
         self.apply_region();
@@ -2066,7 +2991,7 @@ impl NesCore {
         self.bus.apu_mut().drop_pending_samples(); // REQ-CORE-074, Q-006.
                                                    // REQ-LOOP-066: loading a state resumes at the next real frame with the same N. The
                                                    // state of a real frame of the machine that was replaced is dropped, not put back.
-        self.forget_real_frame();
+        self.forget_real_frame_and_reshow_palette();
 
         Ok(StateLoaded {
             consumed: reader.consumed(),

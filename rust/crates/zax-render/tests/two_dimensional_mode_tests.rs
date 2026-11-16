@@ -39,6 +39,8 @@ fn amd_009_the_pixel_frame_replaces_the_tile_list_with_a_single_quad() {
         draw_list: Some(&built.draw_list),
         nes_picture: &picture,
         nes_picture_height: 0,
+        nes_picture_emphasis: &[],
+        nes_picture_rgb: &[],
     };
     gl.render(&mut renderer, &built.scene, &frame);
 
@@ -63,6 +65,30 @@ fn amd_009_a_white_picture_comes_out_at_the_lit_srgb_of_section_5_2() {
     assert!((223 - r).abs() <= 3, "r {r}");
     assert!((219 - g).abs() <= 3, "g {g}");
     assert!((223 - b).abs() <= 3, "b {b}");
+}
+
+#[test]
+fn fidplus_d2b_a_picture_with_red_emphasis_loses_green_and_blue() {
+    let gl = GlFixture::create(320, 300);
+    let mut renderer = gl.renderer();
+
+    let picture = picture(0x30);
+    let plain = gl.render(&mut renderer, &scene(), &frame(&picture));
+    let emphasis = vec![1u8; WIDTH * HEIGHT];
+    let tinted = SceneFrame {
+        nes_picture_emphasis: &emphasis,
+        nes_picture_rgb: &[],
+        ..frame(&picture)
+    };
+    let red = gl.render(&mut renderer, &scene(), &tinted);
+
+    let (r0, g0, b0) = plain.at(plain.width / 2, plain.height / 2);
+    let (r1, g1, b1) = red.at(red.width / 2, red.height / 2);
+    assert!(
+        g1 < g0 - 10 && b1 < b0 - 10,
+        "({r1}, {g1}, {b1}) against ({r0}, {g0}, {b0})"
+    );
+    assert!(r1 > g1 && r1 > b1, "({r1}, {g1}, {b1})");
 }
 
 #[test]
@@ -155,6 +181,8 @@ fn amd_009_a_picture_of_the_wrong_size_falls_back_to_the_tile_list() {
         draw_list: Some(&built.draw_list),
         nes_picture: &short,
         nes_picture_height: 0,
+        nes_picture_emphasis: &[],
+        nes_picture_rgb: &[],
     };
     gl.render(&mut renderer, &built.scene, &frame);
 
@@ -213,6 +241,8 @@ fn frame(picture: &[u8]) -> SceneFrame<'_> {
         draw_list: None,
         nes_picture: picture,
         nes_picture_height: 0,
+        nes_picture_emphasis: &[],
+        nes_picture_rgb: &[],
     }
 }
 

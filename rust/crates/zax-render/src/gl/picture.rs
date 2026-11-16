@@ -42,6 +42,17 @@ impl NesPictureTexture {
     /// Uploads `indices` (NES colour indices, row 0 first, `height` rows of 256 or of a
     /// widescreen width) and returns the texture, or `None` when the frame has no such size.
     pub fn upload(&mut self, indices: &[u8], height: usize) -> Result<Option<Texture>, GlError> {
+        self.upload_with_colours(indices, crate::scene::PictureColours::default(), height)
+    }
+
+    /// [`Self::upload`] with the picture's emphasis or decoded colours (lot FIDPLUS-D2b); both
+    /// empty is the palette alone.
+    pub fn upload_with_colours(
+        &mut self,
+        indices: &[u8],
+        colours: crate::scene::PictureColours<'_>,
+        height: usize,
+    ) -> Result<Option<Texture>, GlError> {
         let Some(size) = crate::interop::picture_size(indices.len(), height) else {
             return Ok(None);
         };
@@ -76,6 +87,17 @@ impl NesPictureTexture {
                 255
             };
             pixel.copy_from_slice(&[color.r, color.g, color.b, alpha]);
+        }
+        if !colours.plain() {
+            // Only a frame with emphasis or decoded colours gets here; the loop above stays the
+            // plain one.
+            for (at, (pixel, &byte)) in self.pixels.chunks_exact_mut(4).zip(indices).enumerate() {
+                if byte == crate::interop::HIDDEN_PIXEL {
+                    continue;
+                }
+                let color = colours.color(at, byte);
+                pixel[..3].copy_from_slice(&[color.r, color.g, color.b]);
+            }
         }
 
         let gl = &self.gl;

@@ -81,6 +81,21 @@ impl CatchUp {
     }
 }
 
+/// Most emulated frames a displayed frame runs at a high speed factor.
+pub const MAX_SPEED_FRAMES: u32 = 16;
+
+/// The emulated frames one displayed frame needs at the speed factor `speed` (Rust-only): a
+/// fast forward at x5 or a boost at x10 must not be held down to the catch-up limit, which is
+/// there for late frames, not for speed. 1 at x1 and below.
+#[must_use]
+pub fn frames_for_speed(speed: f64) -> u32 {
+    let mut frames = 1;
+    while f64::from(frames) + 0.01 < speed && frames < MAX_SPEED_FRAMES {
+        frames += 1;
+    }
+    frames
+}
+
 /// A clock that starts at zero now and follows the system's monotonic time.
 pub fn system_clock() -> Clock {
     let start = Instant::now();
@@ -101,6 +116,8 @@ pub struct FramePacer {
     frame_count: u64,
     dropped_frames: u64,
     clock_resets: u64,
+    /// Lot FIDPLUS-B (B3): the clock's time when [`FramePacer::slice_frames`] last measured.
+    slice_mark: f64,
 }
 
 impl FramePacer {
@@ -119,6 +136,7 @@ impl FramePacer {
             // Not a reset: the counter of REQ-LOOP-013 counts what the running program does,
             // and starting the clock is not one of them.
             clock_resets: 0,
+            slice_mark: next_due,
         }
     }
 
@@ -160,7 +178,21 @@ impl FramePacer {
     /// deliberately do **not**.
     pub fn reset(&mut self) {
         self.next_due = (self.clock)();
+        self.slice_mark = self.next_due;
         self.clock_resets += 1;
+    }
+
+    /// Lot FIDPLUS-B (B3, the machine run in slices of real time): how many frames' worth of real
+    /// time went by since the last call or reset, at most `max_backlog` (the rest is dropped, as
+    /// [`FramePacer::due_frames`] drops it). The frame clock follows, so going back to whole
+    /// frames catches nothing up.
+    pub fn slice_frames(&mut self) -> f64 {
+        let now = (self.clock)();
+        let frames = ((now - self.slice_mark) * self.effective_rate())
+            .clamp(0.0, f64::from(self.max_backlog.max(1)));
+        self.slice_mark = now;
+        self.next_due = now;
+        frames
     }
 
     /// How far into the frame period the last emulated frame began the clock was at `time` (on
@@ -182,6 +214,7 @@ impl FramePacer {
     /// abandoned, so the game slows down instead of suddenly speeding up.
     pub fn due_frames(&mut self) -> u32 {
         let now = (self.clock)();
+        self.slice_mark = now;
         let period = 1.0 / self.effective_rate();
         let mut due = 0;
         while now + EARLY_START_SECONDS >= self.next_due {

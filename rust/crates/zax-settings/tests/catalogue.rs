@@ -62,6 +62,7 @@ fn every_setting_of_the_tables_is_present_with_its_kind_default_scope_and_effect
 /// REQ-PERS-001: the enumeration returns at least the keys of §4.1. Anything beyond them is a
 /// setting of this reimplementation, which must carry a new key.
 #[test]
+#[allow(clippy::too_many_lines)] // One line a key of the catalogue.
 fn the_enumeration_covers_the_tables_and_names_its_additions() {
     let specified: HashSet<String> = rows().into_iter().map(|row| row.key).collect();
     let model: HashSet<String> = catalogue::descriptors()
@@ -78,6 +79,9 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
     // video.overscan_*, video.nes_palette, input.touch_pad and achievements.*:
     // Rust-only settings (owner request). audio.latency_ms: the output latency of AUDIO-1
     // (Q-153 §2). audio.classic_output: AUDIO-2's fallback to the output of v0.4.2.
+    // emu.engine: the per-game engine choice of lot FCEUX-23 step 5 (`docs/review/FCEUX-ENGINE.md`
+    // §4), which only a build with the `fceux-core` feature offers but every build carries the key
+    // of, so a `games.json` crosses between them. emu.cartridge_db and emu.power_on_ram: lot CARTDB.
     assert_eq!(
         additions,
         [
@@ -89,21 +93,59 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "achievements.unofficial",
             "achievements.username",
             "audio.classic_output",
+            "audio.console_profile",
             "audio.latency_ms",
             "audio.mute",
             "emu.builtin_patches",
+            "emu.cartridge_db",
             "emu.catch_up",
             "emu.catch_up_last_3d",
+            "emu.cpu_apu_parity",
+            "emu.cpu_ppu_alignment",
+            "emu.cpu_revision",
+            "emu.engine",
+            "emu.exact_rate",
+            "emu.fidelity_plus",
             "emu.forced_patch",
             "emu.hack_options",
+            "emu.late_present",
             "emu.lua_experimental",
             "emu.lua_optimized",
             "emu.lua_smooth_gc",
+            "emu.mmc3_revision",
+            "emu.oam_corruption",
+            "emu.oam_decay",
+            "emu.oamaddr_bug",
+            "emu.oamaddr_write_corruption",
+            "emu.palette_corruption",
             "emu.pause_3d_in_2d",
             "emu.pipeline",
+            "emu.power_on_ppu_ram",
+            "emu.power_on_ram",
+            "emu.power_on_top",
+            "emu.ppu_2000_glitch",
+            "emu.ppu_2006_delay",
+            "emu.ppu_2006_glitch",
+            "emu.ppu_bus_conflicts",
+            "emu.ppu_reset_line",
+            "emu.ppu_revision",
+            "emu.rainbow_network",
+            "emu.realtime_input",
             "emu.smooth_scroll_ahead",
             "emu.smooth_scroll_view",
+            "emu.vs_dip_1",
+            "emu.vs_dip_2",
+            "emu.vs_dip_3",
+            "emu.vs_dip_4",
+            "emu.vs_dip_5",
+            "emu.vs_dip_6",
+            "emu.vs_dip_7",
+            "emu.vs_dip_8",
+            "input.touch_extra",
+            "input.touch_haptic_buttons",
+            "input.touch_haptic_dpad",
             "input.touch_pad",
+            "input.touch_scale",
             // AMD-049 REQ-SCN-075: a setting of Zaxnes's own (divergence D) — the original
             // always lights the backdrop with the almost-matt model, so it has no such key.
             "render.backdrop_lighting",
@@ -135,11 +177,14 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             // EDITOR-1 (owner request): the editor mode, Zaxnes's own as well.
             "ui.editor_mode",
             "ui.language",
+            "ui.orientation",
             "ui.profiler",
             "ui.roms_folder",
             "ui.show_fps",
             "video.backend",
+            "video.composite_signal",
             "video.dynamic_resolution",
+            "video.emphasis_3d",
             "video.half_rate_3d",
             "video.nes_palette",
             "video.overscan_bottom",

@@ -17,6 +17,9 @@ flag_set! {
         const QUICK_LOAD = 1 << 5;
         /// AMD-044 REQ-INP-125: the soft reset, bindable but bound to nothing by default.
         const SOFT_RESET = 1 << 6;
+        const COIN_1 = 1 << 7;
+        const COIN_2 = 1 << 8;
+        const SERVICE = 1 << 9;
     }
 }
 
@@ -33,9 +36,50 @@ pub struct HotkeyTracker {
     quick_save: EdgeDetector,
     quick_load: EdgeDetector,
     soft_reset: EdgeDetector,
+    /// Lot MAPPERS-N: the VS. System's two coin slots and service button, on the press.
+    cabinet: [EdgeDetector; 3],
+    fast_forward: EdgeDetector,
+    /// Presses of fast forward in a row, 1 to [`MAX_FAST_FORWARD_PRESSES`] (0 before the first).
+    fast_forward_presses: u8,
+    /// Real seconds since fast forward was let go.
+    fast_forward_released: f32,
 }
 
+/// The longest pause between two presses of fast forward that still makes them a double or a
+/// triple press, in real seconds (Rust-only, owner request).
+pub const FAST_FORWARD_REPEAT_SECONDS: f32 = 0.35;
+/// The most presses in a row that count: the triple press.
+pub const MAX_FAST_FORWARD_PRESSES: u8 = 3;
+
 impl HotkeyTracker {
+    /// How many times fast forward was pressed in a row to make the hold in progress: 1, 2
+    /// (x2.5) or 3 (x5).
+    #[must_use]
+    pub const fn fast_forward_presses(&self) -> u8 {
+        if self.fast_forward_presses == 0 {
+            1
+        } else {
+            self.fast_forward_presses
+        }
+    }
+
+    fn count_fast_forward(&mut self, held: bool, real_seconds: f32) {
+        if self.fast_forward.rising(held) {
+            self.fast_forward_presses = if self.fast_forward_presses > 0
+                && self.fast_forward_released <= FAST_FORWARD_REPEAT_SECONDS
+            {
+                (self.fast_forward_presses + 1).min(MAX_FAST_FORWARD_PRESSES)
+            } else {
+                1
+            };
+        }
+        self.fast_forward_released = if held {
+            0.0
+        } else {
+            self.fast_forward_released + real_seconds
+        };
+    }
+
     /// Creates a tracker with nothing held.
     #[must_use]
     pub fn new() -> Self {
@@ -69,6 +113,7 @@ impl HotkeyTracker {
             events |= HotkeyEvents::ROLLBACK;
         }
         // REQ-INP-103: a request per displayed frame while the key is held.
+        self.count_fast_forward(mask.contains(InputAction::FAST_FORWARD), real_seconds);
         if mask.contains(InputAction::FAST_FORWARD) {
             events |= HotkeyEvents::FAST_FORWARD;
         }
@@ -90,6 +135,15 @@ impl HotkeyTracker {
             .rising(mask.contains(InputAction::SOFT_RESET))
         {
             events |= HotkeyEvents::SOFT_RESET;
+        }
+        for (detector, (action, event)) in self.cabinet.iter_mut().zip([
+            (InputAction::COIN_1, HotkeyEvents::COIN_1),
+            (InputAction::COIN_2, HotkeyEvents::COIN_2),
+            (InputAction::SERVICE, HotkeyEvents::SERVICE),
+        ]) {
+            if detector.rising(mask.contains(action)) {
+                events |= event;
+            }
         }
         events |= self.combinations[0].update(player_one, real_seconds);
         events |= self.combinations[1].update(player_two, real_seconds);

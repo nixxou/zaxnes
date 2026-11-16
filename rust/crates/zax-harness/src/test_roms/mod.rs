@@ -24,6 +24,7 @@
 
 pub mod blargg;
 pub mod coin;
+pub mod machine;
 pub mod mapperel;
 pub mod report;
 pub mod screen;
@@ -33,8 +34,9 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use serde_json::{json, Map, Value};
+use zax_core_api::NesRegion;
 use zax_nes::rom::InesHeader;
-use zax_nes::{NesCore, NesRegion};
+use zax_nes::NesCore;
 
 use crate::HarnessError;
 
@@ -48,7 +50,17 @@ pub const USAGE: &str = "zax-harness test-roms <roms dir> <out.json> [options]
   --merge <file.json>   start from that campaign's rows; the ROMs run now replace theirs
                         (with --filter, re-measures one suite without re-running the rest)
   --frames <n>          cap the frame budget of every ROM at n (default: per suite)
-  --quiet               do not print one line per ROM";
+  --quiet               do not print one line per ROM
+  --engine <name>       which core: zaxnes|neshawk (default zaxnes). `neshawk` is
+                        `zax-neshawk`, the Rust port of BizHawk's own core, so that a verdict
+                        can be held against NesHawk's by the same readers on the same ROMs
+  --neshawk-gamedb <d>  BizHawk's gamedb directory, which `--engine neshawk` needs to pick the
+                        board BizHawk picks; defaults to $ZAXNES_BIZHAWK_GAMEDB
+  --coin-run-all <f>    AccuracyCoin only: drive it as `scripts/coin_bizhawk.lua` drives BizHawk
+                        (press Start at frame 120, wait for every result byte, give up at frame
+                        100000) and write the Lua's own lines to <f>, so that the run can be
+                        diffed against `bizhawk-runs/coin-neshawk.txt`. A DIFFERENT instrument
+                        from the menu walk, which is why it is a separate flag";
 
 /// The environment variable the gated `cargo test` subset reads.
 pub const ROMS_DIR_VARIABLE: &str = "ZAXNES_TEST_ROMS";
@@ -66,6 +78,12 @@ pub struct Options {
     merge: Option<PathBuf>,
     frame_cap: Option<u32>,
     quiet: bool,
+    /// Which core runs the collection.
+    engine: TestEngine,
+    /// BizHawk's `gamedb` directory, for `--engine neshawk`.
+    neshawk_gamedb: Option<PathBuf>,
+    /// Where `--coin-run-all` writes the Lua-shaped lines.
+    coin_run_all: Option<PathBuf>,
 }
 
 impl Options {
@@ -92,6 +110,9 @@ impl Options {
             merge: None,
             frame_cap: None,
             quiet: false,
+            engine: TestEngine::Zaxnes,
+            neshawk_gamedb: None,
+            coin_run_all: None,
         };
         while let Some((name, tail)) = rest.split_first() {
             if matches!(name.as_str(), "--no-shots" | "--quiet" | "--reuse") {
@@ -107,6 +128,19 @@ impl Options {
                 "--shots" => options.shots = Some(PathBuf::from(value)),
                 "--markdown" => options.markdown = Some(PathBuf::from(value)),
                 "--merge" => options.merge = Some(PathBuf::from(value)),
+                "--engine" => {
+                    options.engine = match value.as_str() {
+                        "zaxnes" => TestEngine::Zaxnes,
+                        "neshawk" => TestEngine::Neshawk,
+                        other => {
+                            return Err(HarnessError::Usage(format!(
+                                "--engine {other:?} is not zaxnes or neshawk\n{USAGE}"
+                            )))
+                        }
+                    };
+                }
+                "--neshawk-gamedb" => options.neshawk_gamedb = Some(PathBuf::from(value)),
+                "--coin-run-all" => options.coin_run_all = Some(PathBuf::from(value)),
                 "--frames" => {
                     options.frame_cap = Some(
                         value
@@ -426,10 +460,35 @@ pub fn collect(options: &Options) -> Result<Vec<RomResult>, HarnessError> {
     named.sort_by(|left, right| left.0.cmp(&right.0));
 
     let shots = options.shots_dir();
+    // One database load for the whole collection: `NesCarts.xml` is 2 MB and parsing it per ROM
+    // would dominate a 290-ROM run.
+    let neshawk_db = match options.engine {
+        TestEngine::Zaxnes => None,
+        TestEngine::Neshawk => Some(
+            match options
+                .neshawk_gamedb
+                .clone()
+                .or_else(|| std::env::var_os("ZAXNES_BIZHAWK_GAMEDB").map(PathBuf::from))
+            {
+                Some(dir) => zax_neshawk::gamedb::GameDb::load_from_dir(&dir),
+                None => zax_neshawk::gamedb::GameDb::empty(),
+            },
+        ),
+    };
+    let run_all = options.coin_run_all.as_deref();
     let mut results = Vec::with_capacity(named.len());
     for (name, file) in named {
         let image = fs::read(&file)?;
-        let mut result = run_one(&name, &image, options.frame_cap);
+        let mut result = match options.engine {
+            TestEngine::Zaxnes => run_one_zaxnes(&name, &image, options.frame_cap, run_all),
+            TestEngine::Neshawk => run_one_neshawk(
+                &name,
+                &image,
+                options.frame_cap,
+                run_all,
+                neshawk_db.as_ref(),
+            ),
+        };
         if let Some(dir) = &shots {
             result.result.shot = write_shot(dir, &name, &result.frame)?;
         }
@@ -447,6 +506,28 @@ pub fn collect(options: &Options) -> Result<Vec<RomResult>, HarnessError> {
     Ok(results)
 }
 
+/// `zax-neshawk`'s region as the harness's own enumeration.
+fn neshawk_region(nes: &zax_neshawk::Nes) -> NesRegion {
+    match nes.region() {
+        zax_neshawk::DisplayType::Pal => NesRegion::Pal,
+        zax_neshawk::DisplayType::Dendy => NesRegion::Dendy,
+        zax_neshawk::DisplayType::Ntsc => NesRegion::Ntsc,
+    }
+}
+
+/// The database a `--engine neshawk` run with no `gamedb` directory uses: empty, so every lookup
+/// misses and detection falls through to the iNES header.
+static EMPTY_DB: std::sync::OnceLock<zax_neshawk::gamedb::GameDb> = std::sync::OnceLock::new();
+
+/// Which core `--engine` names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TestEngine {
+    /// Zaxnes's own core.
+    Zaxnes,
+    /// `zax-neshawk`, the Rust port of BizHawk's NesHawk (lot NESHAWK-REWRITE).
+    Neshawk,
+}
+
 /// A finished run: the row and the final frame, kept so the caller can write the PNG.
 struct Finished {
     result: RomResult,
@@ -454,8 +535,34 @@ struct Finished {
     frame: Vec<u8>,
 }
 
+/// Lot FIDPLUS-C, the console model each test ROM was written for (`docs/design/CONSOLE-MODEL.md`):
+/// with `ZAXNES_CONSOLE_MODEL=rom` the campaign runs these under their own console. Their author's
+/// console or chip: blargg's palette at power-on (his readme: the values "are probably unique to my
+/// NES"), and the MMC3 revision A counter, which the MMC6 shares, for the rows of that revision
+/// (they and `5-MMC3` / `6.MMC3_rev_B` exclude each other).
+fn console_model_of(
+    name: &str,
+) -> (
+    Option<zax_nes::PowerOnPpuRam>,
+    Option<zax_nes::Mmc3Revision>,
+) {
+    let lower = name.to_ascii_lowercase();
+    let palette = lower
+        .contains("power_up_palette")
+        .then_some(zax_nes::PowerOnPpuRam::Blargg);
+    let revision_a = ["5.mmc3_rev_a", "6-mmc6", "6-mmc3_alt"]
+        .iter()
+        .any(|row| lower.contains(row));
+    (palette, revision_a.then_some(zax_nes::Mmc3Revision::A))
+}
+
 /// Loads `image`, runs it with the reader its suite documents and returns the row.
-fn run_one(name: &str, image: &[u8], frame_cap: Option<u32>) -> Finished {
+fn run_one_zaxnes(
+    name: &str,
+    image: &[u8],
+    frame_cap: Option<u32>,
+    run_all: Option<&Path>,
+) -> Finished {
     let started = Instant::now();
     let header = InesHeader::try_parse(image).ok();
     let mut result = RomResult {
@@ -477,6 +584,78 @@ fn run_one(name: &str, image: &[u8], frame_cap: Option<u32>) -> Finished {
     };
 
     let mut core = NesCore::new();
+    // `ZAXNES_OAM_CORRUPTION=0` runs the campaign without the core's on-by-default OAM row
+    // corruption (lot FIDELITY step 9), which `AccuracyCoin`'s `OAM Corruption` row needs.
+    core.set_oam_corruption(
+        std::env::var("ZAXNES_OAM_CORRUPTION").map_or(true, |value| value != "0"),
+    );
+    // `ZAXNES_PPU_BUS_CONFLICTS=0` turns the on-by-default `$2007` read model off (steps 15 and
+    // 25): `$2007 Stress Test` and `ALE + Read` need it.
+    core.set_bus_conflicts(
+        std::env::var("ZAXNES_PPU_BUS_CONFLICTS").map_or(true, |value| value != "0"),
+    );
+    // And `ZAXNES_OAM_DECAY=1` for the off-by-default decay of OAM with the rendering off (step
+    // 20): blargg's `oam_stress` and `sprdma_and_dmc_dma` must still pass with it.
+    core.set_oam_decay(std::env::var("ZAXNES_OAM_DECAY").is_ok_and(|value| value != "0"));
+    // `ZAXNES_PPU_RESET_LINE=1`: the PPU ignores register writes until the pre-render line after a
+    // reset (step 34, off by default).
+    core.set_ppu_reset_line(std::env::var("ZAXNES_PPU_RESET_LINE").is_ok_and(|value| value != "0"));
+    // `ZAXNES_FIDELITY_PLUS=1`: every frame through the Fidelite+ loop (FIDPLUS-A, off by default).
+    core.set_fidelity_plus(std::env::var("ZAXNES_FIDELITY_PLUS").is_ok_and(|value| value != "0"));
+    // `ZAXNES_ALIGNMENT=0..3`: the CPU/PPU alignment of the read-side timings (step 28, 3 by
+    // default).
+    core.set_cpu_ppu_alignment(
+        std::env::var("ZAXNES_ALIGNMENT")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(3),
+    );
+    // `ZAXNES_POWER_ON_TOP=0`: the PPU starts in vblank as before step 27.
+    core.set_power_on_top(std::env::var("ZAXNES_POWER_ON_TOP").map_or(true, |value| value != "0"));
+    // `ZAXNES_POWER_ON_PPU_RAM=zero|blargg|random:<seed>`: the PPU memories at power-on
+    // (lot FIDELITY step 36); the core's default otherwise.
+    if let Ok(value) = std::env::var("ZAXNES_POWER_ON_PPU_RAM") {
+        core.set_power_on_ppu_ram(match value.as_str() {
+            "blargg" => zax_nes::PowerOnPpuRam::Blargg,
+            "zero" => zax_nes::PowerOnPpuRam::Zero,
+            other => zax_nes::PowerOnPpuRam::Random(
+                other.trim_start_matches("random:").parse().unwrap_or(1),
+            ),
+        });
+    }
+    // `ZAXNES_LETTERLESS_CPU=1`: the letterless RP2A03 (lot FIDPLUS-C).
+    core.set_letterless_cpu(std::env::var("ZAXNES_LETTERLESS_CPU").is_ok_and(|value| value != "0"));
+    // `ZAXNES_MMC3_REVISION=a|b`: the console model's MMC3 (lot FIDPLUS-C); the cartridge's
+    // otherwise.
+    if let Ok(value) = std::env::var("ZAXNES_MMC3_REVISION") {
+        core.set_mmc3_revision(match value.as_str() {
+            "a" | "A" => zax_nes::Mmc3Revision::A,
+            "b" | "B" => zax_nes::Mmc3Revision::B,
+            _ => zax_nes::Mmc3Revision::Cartridge,
+        });
+    }
+    if std::env::var("ZAXNES_CONSOLE_MODEL").is_ok_and(|value| value == "rom") {
+        let (palette, revision) = console_model_of(name);
+        if let Some(palette) = palette {
+            core.set_power_on_ppu_ram(palette);
+        }
+        if let Some(revision) = revision {
+            core.set_mmc3_revision(revision);
+        }
+    }
+    // Study `study/access-phase`: `ZAXNES_PHASE=0..2` moves the CPU/PPU alignment.
+    core.set_phase_offset(
+        std::env::var("ZAXNES_PHASE")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0),
+    );
+    // `ZAXNES_PPU_GLITCHES=0` turns the on-by-default PPU write timings and palette corruption off together.
+    let glitches = std::env::var("ZAXNES_PPU_GLITCHES").map_or(true, |value| value != "0");
+    core.set_address_load_delay(glitches);
+    core.set_glitch_2006(glitches);
+    core.set_glitch_2000(glitches);
+    core.set_palette_corruption(glitches);
     // The built-in widescreen patches rewrite game code; a test ROM must run as it is.
     core.set_builtin_patches(false);
     core.set_advanced_patches(false);
@@ -503,16 +682,127 @@ fn run_one(name: &str, image: &[u8], frame_cap: Option<u32>) -> Finished {
         .insert("region".into(), json!(format!("{region:?}")));
 
     core.reset();
+    read_verdict(name, frame_cap, run_all, &mut core, result, started)
+}
+
+/// The same for `zax-neshawk`. Loading is all that differs: the port detects its board from
+/// BizHawk's own databases and powers on inside `Nes::load`, where `NesCore` separates the two.
+fn run_one_neshawk(
+    name: &str,
+    image: &[u8],
+    frame_cap: Option<u32>,
+    run_all: Option<&Path>,
+    db: Option<&zax_neshawk::gamedb::GameDb>,
+) -> Finished {
+    let started = Instant::now();
+    let header = InesHeader::try_parse(image).ok();
+    let mut result = RomResult {
+        rom: name.to_owned(),
+        suite: suite_of(name),
+        mapper: header.as_ref().map(|header| header.mapper),
+        submapper: header
+            .as_ref()
+            .filter(|header| header.is_nes20)
+            .map(|header| header.submapper),
+        outcome: Outcome::Unsupported,
+        code: None,
+        message: String::new(),
+        protocol: "none",
+        frames: 0,
+        milliseconds: 0,
+        detail: Map::new(),
+        shot: None,
+    };
+    result.detail.insert("engine".into(), json!("neshawk"));
+
+    let db = db.unwrap_or_else(|| EMPTY_DB.get_or_init(zax_neshawk::gamedb::GameDb::empty));
+    let nes = match zax_neshawk::Nes::load(
+        image,
+        db,
+        zax_neshawk::controllers::PortDevice::ControllerNes,
+        zax_neshawk::controllers::PortDevice::ControllerNes,
+    ) {
+        Ok(nes) => nes,
+        Err(why) => {
+            result.message = why.to_string();
+            result.milliseconds = elapsed_ms(started);
+            return Finished {
+                result,
+                frame: Vec::new(),
+            };
+        }
+    };
+    // The owner's marker: a mapper with no ported NesHawk board runs on Zaxnes's board, and the
+    // row has to say so or a verdict from it would read as NesHawk's (owner, 2026-11-12).
+    let from_zaxnes = nes
+        .load_report
+        .as_ref()
+        .is_some_and(|report| report.board_from_zaxnes);
+    let board = nes
+        .load_report
+        .as_ref()
+        .map_or("?", |report| report.board_name)
+        .to_owned();
+    // `neshawk_board`, not `board`: `mapperel.rs` already writes `board` with the name the ROM
+    // prints on its own screen, and the two would overwrite each other.
+    result.detail.insert("neshawk_board".into(), json!(board));
+    result
+        .detail
+        .insert("board_from_zaxnes".into(), json!(from_zaxnes));
+
+    let mut core = machine::NeshawkTestMachine::new(nes);
+    // `Nes::load` applied the region off the header, which is the port's own contract — but a ROM
+    // made for one console has to be *run* on that console or its result means nothing, and
+    // `pal_apu_tests`'s ROMs state nothing in their iNES v1 headers. `region_of` is the harness's
+    // own rule, so the port follows it too; `_display_type` is read by `HardReset`, so the
+    // machine is powered on again after the change.
+    let wanted = region_of(name, neshawk_region(&core.nes));
+    if wanted != neshawk_region(&core.nes) {
+        core.nes.set_display_type(match wanted {
+            NesRegion::Pal => zax_neshawk::DisplayType::Pal,
+            NesRegion::Dendy => zax_neshawk::DisplayType::Dendy,
+            _ => zax_neshawk::DisplayType::Ntsc,
+        });
+        core.nes.hard_reset();
+    }
+    result
+        .detail
+        .insert("region".into(), json!(format!("{wanted:?}")));
+
+    let mut finished = read_verdict(name, frame_cap, run_all, &mut core, result, started);
+    if from_zaxnes {
+        // In the message as well as in `detail`, because the message is what the markdown report
+        // and the one-line-per-ROM output print.
+        if !finished.result.message.is_empty() {
+            finished.result.message.push_str(" / ");
+        }
+        finished
+            .result
+            .message
+            .push_str("board from Zaxnes, not NesHawk-exact");
+    }
+    finished
+}
+
+/// The half that does not care which core it is: the plan, the reader, the row.
+fn read_verdict<M: machine::TestMachine>(
+    name: &str,
+    frame_cap: Option<u32>,
+    run_all: Option<&Path>,
+    core: &mut M,
+    mut result: RomResult,
+    started: Instant,
+) -> Finished {
     let plan = Plan::of(name, frame_cap);
     let verdict = match plan.protocol {
-        Protocol::BlarggThenScreen => match blargg::run(&mut core, plan.frames) {
+        Protocol::BlarggThenScreen => match blargg::run(core, plan.frames) {
             blargg::Read::Verdict(verdict) => verdict,
             // The ROM never armed the protocol, so it is one of the suites that only draws its
             // result. The frames already spent probing count towards the budget, and the rest
             // is capped: a result screen appears in seconds, while the demos of
             // `nes-test-roms/other/` never settle at all and would each eat the full budget.
             blargg::Read::NoProtocol { frames } => screen::run(
-                &mut core,
+                core,
                 plan.frames
                     .saturating_sub(frames)
                     .min(screen::FALLBACK_BUDGET),
@@ -520,9 +810,35 @@ fn run_one(name: &str, image: &[u8], frame_cap: Option<u32>) -> Finished {
             )
             .after(frames),
         },
-        Protocol::Screen => screen::run(&mut core, plan.frames, plan.screen),
-        Protocol::Mapperel => mapperel::run(&mut core, result.mapper, plan.frames),
-        Protocol::AccuracyCoin => coin::run(&mut core, plan.frames),
+        Protocol::Screen => screen::run(core, plan.frames, plan.screen),
+        Protocol::Mapperel => mapperel::run(core, result.mapper, plan.frames),
+        Protocol::AccuracyCoin => match run_all {
+            Some(path) => {
+                let (lines, passed, frames) = coin::run_all(core, 100_000);
+                let text = format!(
+                    "{}
+pass {passed}/{} frames {frames}
+",
+                    lines.join(
+                        "
+"
+                    ),
+                    lines.len()
+                );
+                if let Err(why) = fs::write(path, text) {
+                    eprintln!("test-roms: --coin-run-all: {why}");
+                }
+                let mut verdict = coin::run(core, plan.frames);
+                verdict
+                    .detail
+                    .insert("coin_run_all_passed".into(), json!(passed));
+                verdict
+                    .detail
+                    .insert("coin_run_all_frames".into(), json!(frames));
+                verdict
+            }
+            None => coin::run(core, plan.frames),
+        },
     };
 
     result.protocol = verdict.protocol;
@@ -534,7 +850,7 @@ fn run_one(name: &str, image: &[u8], frame_cap: Option<u32>) -> Finished {
     result.milliseconds = elapsed_ms(started);
 
     let mut frame = Vec::new();
-    core.pixel_frame_indices_into(&mut frame);
+    core.picture_into(&mut frame);
     Finished { result, frame }
 }
 

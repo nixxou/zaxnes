@@ -54,6 +54,12 @@ impl RomImage {
     ///
     /// The typed cause and its message (REQ-CORE-011).
     pub fn try_load(image: &[u8], name: &str) -> Result<Self, RomLoadError> {
+        // Lot MAPPERS-P: a UNIF image is rewritten as the NES 2.0 image it describes, and that
+        // image is what the core keeps (savestates included).
+        if super::unif::is_unif(image) {
+            let converted = super::unif::to_nes20(image)?;
+            return Self::try_load(&converted, name);
+        }
         let header = InesHeader::try_parse(image)
             .map_err(|message| RomLoadError::new(RomLoadFailure::CorruptHeader, message))?;
 
@@ -120,6 +126,14 @@ impl RomImage {
         Some(note)
     }
 
+    /// Takes the header the cartridge database gives for this dump (lot CARTDB): the same PRG
+    /// and CHR sizes — `cartdb::corrected_header` refuses an entry whose sizes differ — so the
+    /// banks already split stay where they are, and only what the iNES 1.0 header could not say
+    /// changes before [`crate::cartridges::Cartridge::create`] reads it.
+    pub(crate) fn take_database_header(&mut self, header: InesHeader) {
+        self.header = header;
+    }
+
     /// The parsed header.
     #[must_use]
     pub const fn header(&self) -> &InesHeader {
@@ -143,6 +157,12 @@ impl RomImage {
     /// [`crate::hack_pack`]).
     pub(crate) fn prg_rom_mut(&mut self) -> &mut [u8] {
         &mut self.prg_rom
+    }
+
+    /// CHR-ROM bytes to write: mapper 682's flash (lot MAPPERS-N).
+    #[cfg(feature = "board-682")]
+    pub(crate) fn chr_rom_mut(&mut self) -> &mut [u8] {
+        &mut self.chr_rom
     }
 
     /// CHR-ROM bytes. Empty when the cartridge uses CHR-RAM.

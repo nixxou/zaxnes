@@ -45,6 +45,9 @@ fn req_ui_202_every_user_preference_is_shown() {
                 && (cfg!(feature = "wgpu") || descriptor.id() != SettingId::VideoBackend)
                 // The slang shader slots have a section of their own, not one row per key.
                 && !descriptor.key().starts_with("shader.")
+                // And the emulation engine only where there is a second one (lot FCEUX-23
+                // step 5): a build without `fceux-core` would offer a choice of one.
+                && (cfg!(feature = "fceux-core") || descriptor.id() != SettingId::EmuEngine)
                 && !matches!(
                     descriptor.theme(),
                     SettingTheme::Vr

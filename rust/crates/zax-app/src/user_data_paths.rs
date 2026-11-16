@@ -34,6 +34,11 @@ pub enum UserDataRootKind {
     Explicit,
 }
 
+/// The extension of a battery RAM file.
+pub const BATTERY_EXTENSION: &str = "srm";
+/// The extension of a flash save file (lot MAPPERS-P).
+pub const FLASH_EXTENSION: &str = "flash";
+
 /// The folders and files of the user data.
 #[derive(Debug, Clone)]
 pub struct UserDataPaths {
@@ -146,7 +151,20 @@ impl UserDataPaths {
     /// request), or, as the files were named before, the ROM's fingerprint.
     #[must_use]
     pub fn battery_file(&self, name: &str) -> PathBuf {
-        self.battery_directory.join(format!("{name}.srm"))
+        self.save_file(name, BATTERY_EXTENSION)
+    }
+
+    /// The flash save of the ROM `name` (lot MAPPERS-P): `<name>.flash` beside its RAM file,
+    /// the changed sectors of a board whose save medium is its flash chip.
+    #[must_use]
+    pub fn flash_file(&self, name: &str) -> PathBuf {
+        self.save_file(name, FLASH_EXTENSION)
+    }
+
+    /// `<name>.<extension>` in the cartridge saves' folder.
+    #[must_use]
+    pub fn save_file(&self, name: &str, extension: &str) -> PathBuf {
+        self.battery_directory.join(format!("{name}.{extension}"))
     }
 
     /// Movie `number` of the ROM `rom`: `<rom>.mv<number>` (owner request).
@@ -186,19 +204,15 @@ impl UserDataPaths {
         let mut paths = match explicit_root {
             Some(root) => Self::new(absolute(root), UserDataRootKind::Explicit, base),
             None if base.join(PORTABLE_MARKER_NAME).is_file() => {
-                // Owner request: the Windows package is portable by default. Its first start
-                // takes along what the per-user folder holds, so that the saves of a version
-                // that was not portable are still there; a folder that takes no writes (Program
-                // Files) leaves the data in the per-user folder.
+                // Owner request: the Windows package is portable by default, and a portable
+                // folder starts on its own: nothing is read from the per-user folder (owner
+                // request, 2026-11-12). A folder that takes no writes (Program Files) leaves the
+                // data in the per-user folder.
                 let mut paths = Self::new(
                     base.join(PORTABLE_FOLDER_NAME),
                     UserDataRootKind::Portable,
                     base.clone(),
                 );
-                let per_user = local().join(PRODUCT_NAME);
-                if try_copy_legacy_root(&per_user, &paths.root) {
-                    paths.migrated_from = Some(per_user);
-                }
                 paths.ensure_directories();
                 if paths.is_writable {
                     return paths;

@@ -32,7 +32,7 @@ use crate::ui::text;
 ///
 /// Adding a setting to the desktop window therefore does not add a console row: a console row is
 /// an owner decision, written down here and placed by a page table.
-pub const ROW_SETTINGS: [SettingId; 59] = [
+pub const ROW_SETTINGS: [SettingId; 95] = [
     SettingId::VideoVSync,
     SettingId::VideoFrameRate,
     SettingId::VideoSkipFrame,
@@ -74,6 +74,8 @@ pub const ROW_SETTINGS: [SettingId; 59] = [
     SettingId::VideoOverscanPalRight,
     SettingId::VideoOverscanMode,
     SettingId::VideoNesPalette,
+    SettingId::VideoCompositeSignal,
+    SettingId::VideoEmphasis3d,
     SettingId::CameraFov,
     SettingId::RenderShadow,
     SettingId::RenderBackdropLighting,
@@ -81,6 +83,42 @@ pub const ROW_SETTINGS: [SettingId; 59] = [
     SettingId::EmuGameSpeed,
     SettingId::EmuTvMode,
     SettingId::EmuAutoTvMode,
+    // The engine of a game (owner request, 2026-11-12: the choice on the console as in the
+    // window). A game's option like the run-ahead, so offered globally too (RO-3).
+    SettingId::EmuEngine,
+    // Lot CARTDB: offered on the console as in the window.
+    SettingId::EmuCartridgeDb,
+    SettingId::EmuPowerOnRam,
+    SettingId::EmuPowerOnPpuRam,
+    SettingId::EmuPpuRevision,
+    SettingId::EmuMmc3Revision,
+    SettingId::EmuCpuRevision,
+    SettingId::EmuOamaddrWriteCorruption,
+    SettingId::EmuOamCorruption,
+    SettingId::EmuPpuBusConflicts,
+    SettingId::EmuOamaddrBug,
+    SettingId::EmuOamDecay,
+    SettingId::EmuRainbowNetwork,
+    SettingId::EmuVsDip1,
+    SettingId::EmuVsDip2,
+    SettingId::EmuVsDip3,
+    SettingId::EmuVsDip4,
+    SettingId::EmuVsDip5,
+    SettingId::EmuVsDip6,
+    SettingId::EmuVsDip7,
+    SettingId::EmuVsDip8,
+    SettingId::EmuPowerOnTop,
+    SettingId::EmuPpu2006Delay,
+    SettingId::EmuPpu2006Glitch,
+    SettingId::EmuPpu2000Glitch,
+    SettingId::EmuPaletteCorruption,
+    SettingId::EmuPpuResetLine,
+    SettingId::EmuCpuPpuAlignment,
+    SettingId::EmuCpuApuParity,
+    SettingId::EmuFidelityPlus,
+    SettingId::EmuExactRate,
+    SettingId::EmuRealtimeInput,
+    SettingId::EmuLatePresent,
     SettingId::EmuRunAhead,
     // KIRBY-MERGE: the experimental smooth scrolling from the run-ahead. A console row because
     // RO-3's trees are one tree — `ro_3_every_setting_a_game_can_set_has_a_global_value_to_point_at`
@@ -99,6 +137,7 @@ pub const ROW_SETTINGS: [SettingId; 59] = [
     // screen as well as in the desktop window, and this is the device the new output is most
     // likely to misbehave on.
     SettingId::AudioClassicOutput,
+    SettingId::AudioConsoleProfile,
 ];
 
 /// Whether the setting is a whole number the page has to step as a **list** rather than as a

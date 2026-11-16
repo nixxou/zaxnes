@@ -1,5 +1,20 @@
 //! `.fm2` movies played through the loop (EDITOR-1): the game is powered on, the movie's pads
 //! reach the core frame by frame, the run-ahead is held at 0 while it plays and comes back after.
+//!
+//! **This is the `.fm2`-on-Zaxnes path**, which is the one the default build has: Zaxnes's own
+//! clean-room importer turns the movie into a `MovieRun` and the loop feeds its words. With
+//! `fceux-core` on, the application deliberately sends an `.fm2` to FCEUX's own movie mode
+//! instead (lot FCEUX-48 step 4), so three of the four tests below are about a path that build
+//! does not take and are compiled only without the feature; `fceux_movie_app_tests.rs` and
+//! `fceux_movie_end_to_end_tests.rs` cover the same ground there — the power-on, the pads
+//! reaching the core, the seek landing where it was asked to, and the movie holding paused on its
+//! last frame.
+//!
+//! `a_refused_fm2_leaves_the_game_alone` is **not** one of them: it holds in both builds, and
+//! deliberately so. It is the contract that a file the application will not play must not cost
+//! the player the game they were playing, and step 7 of lot FCEUX-48 found the FCEUX path
+//! breaking it — the engine switch re-powers the machine, so the refusal has to be decided
+//! before the switch rather than after.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)] // test code
 
@@ -11,12 +26,15 @@ mod run_ahead_rom;
 
 use common::LoopHarness;
 use zax_app::emulation::commands::{Command, CommandArgs};
+#[cfg(not(feature = "fceux-core"))]
 use zax_settings::catalogue::SettingId;
+#[cfg(not(feature = "fceux-core"))]
 use zax_settings::values::SettingValue;
 
 use run_ahead_rom as rom;
 
 /// An `.fm2` of 60 frames, A held on frames 20 to 39.
+#[cfg(not(feature = "fceux-core"))] // used by the Zaxnes-path tests; see the module docs
 fn movie_text() -> String {
     let mut text =
         String::from("version 3\nemuVersion 22020\npalFlag 0\nport0 1\nport1 0\nport2 0\n");
@@ -33,6 +51,7 @@ fn movie_text() -> String {
     text
 }
 
+#[cfg(not(feature = "fceux-core"))] // used by the Zaxnes-path tests; see the module docs
 fn button_a(harness: &LoopHarness) -> u8 {
     harness
         .host
@@ -43,6 +62,7 @@ fn button_a(harness: &LoopHarness) -> u8 {
 }
 
 #[test]
+#[cfg(not(feature = "fceux-core"))] // the Zaxnes importer path; see the module docs
 fn an_fm2_plays_from_power_on_at_run_ahead_zero() {
     let mut harness = LoopHarness::create();
     harness
@@ -121,6 +141,7 @@ fn a_refused_fm2_leaves_the_game_alone() {
 }
 
 /// An `.fm2` of `frames` frames, A held on and off every 7 frames.
+#[cfg(not(feature = "fceux-core"))] // used by the Zaxnes-path tests; see the module docs
 fn long_movie_text(frames: u32) -> String {
     let mut text = String::from("version 3\nport0 1\nport1 0\nport2 0\n");
     for frame in 0..frames {
@@ -133,6 +154,7 @@ fn long_movie_text(frames: u32) -> String {
     text
 }
 
+#[cfg(not(feature = "fceux-core"))] // used by the Zaxnes-path tests; see the module docs
 fn ram(harness: &LoopHarness) -> (i64, Vec<u8>) {
     let core = harness.host.session().expect("a session").core();
     (
@@ -143,6 +165,7 @@ fn ram(harness: &LoopHarness) -> (i64, Vec<u8>) {
     )
 }
 
+#[cfg(not(feature = "fceux-core"))] // used by the Zaxnes-path tests; see the module docs
 fn play_long_movie(harness: &mut LoopHarness, frames: u32) -> std::path::PathBuf {
     harness.launch_rom_with_script("vector", &rom::build(), None);
     for _ in 0..5 {
@@ -161,6 +184,7 @@ fn play_long_movie(harness: &mut LoopHarness, frames: u32) -> std::path::PathBuf
     path
 }
 
+#[cfg(not(feature = "fceux-core"))] // used by the Zaxnes-path tests; see the module docs
 fn seek(harness: &mut LoopHarness, frame: i32) {
     harness
         .host
@@ -175,6 +199,7 @@ fn seek(harness: &mut LoopHarness, frame: i32) {
 }
 
 #[test]
+#[cfg(not(feature = "fceux-core"))] // the Zaxnes importer path; see the module docs
 fn a_seek_lands_on_the_same_state_as_playing_there() {
     // The reference: the movie played straight, the RAM of every frame kept.
     let mut reference = LoopHarness::create();
@@ -233,6 +258,7 @@ fn a_seek_lands_on_the_same_state_as_playing_there() {
 }
 
 #[test]
+#[cfg(not(feature = "fceux-core"))] // the Zaxnes importer path; see the module docs
 fn a_movie_with_a_timeline_stops_paused_on_its_last_frame() {
     let mut harness = LoopHarness::create();
     let path = play_long_movie(&mut harness, 120);

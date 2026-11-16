@@ -6,6 +6,7 @@
 //! interface drives the host through [`Command`]s and reads it through [`HostEvent`]s.
 
 mod achievements;
+mod bk2_movies;
 mod commands;
 mod game_options;
 mod games;
@@ -14,6 +15,7 @@ mod hack_switch;
 mod hacks;
 mod jobs;
 mod movies;
+mod own_movies;
 mod resume;
 mod save_states;
 mod script_reload;
@@ -22,7 +24,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use time::OffsetDateTime;
-use zax_nes::NesRegion;
+use zax_core_api::NesRegion;
 use zax_nes::RegionTiming;
 use zax_scripting::{HookTime, NullScriptLog, ScriptLog};
 use zax_settings::catalogue::SettingId;
@@ -31,12 +33,11 @@ use zax_settings::model::SettingsModel;
 use super::commands::{Command, CommandArgs};
 use super::emulation_state::EmulationState;
 use super::fast_forward_state::FastForwardState;
-use super::frame_pacer::{system_clock, CatchUp, Clock, FramePacer};
+use super::frame_pacer::{self, system_clock, CatchUp, Clock, FramePacer};
 use super::game_catalog::{GameCatalog, ResolvedGame};
 use super::hotkey_tracker::{HotkeyEvents, HotkeyTracker};
 use super::notification_center::NotificationCenter;
 use super::rollback_history::{RollbackHistory, SnapshotExtras};
-use super::speed_setting;
 use crate::achievements::AchievementSystem;
 use crate::audio::rate_control::RateControl;
 use crate::audio::stream::{self as stream, AudioLink};
@@ -192,6 +193,20 @@ impl<C: GameCatalog, V: GameView> EmulationHostOptions<C, V> {
     }
 }
 
+/// What the slot lists read from each slot's state file, kept so a menu drawn every frame does
+/// not read the files every frame.
+#[derive(Default)]
+struct SlotCaches {
+    /// Whether each slot's state fits the built-in ROM patches, by slot, save time and setting.
+    patch:
+        std::cell::RefCell<std::collections::HashMap<(String, i64, bool), jobs::SlotPatchStatus>>,
+    /// The engine that wrote each slot's state, by slot and save time (`None`: not one this
+    /// build knows, or no readable state).
+    engine: std::cell::RefCell<
+        std::collections::HashMap<(String, i64), Option<zax_core_api::EngineKind>>,
+    >,
+}
+
 /// The emulation host.
 #[allow(clippy::struct_excessive_bools)] // independent flags of the loop, as the C# class
 pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
@@ -220,6 +235,8 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     pending: VecDeque<(Command, CommandArgs)>,
     hotkeys: HotkeyTracker,
     battery: BatteryRamStore,
+    /// The flash save of a board whose save medium is its flash chip (lot MAPPERS-P).
+    flash: BatteryRamStore,
     /// The resolved tiles of the "3dh" profiles, kept between runs (AMD-062 REQ-PROF-082).
     tile_cache: TileCacheStore,
     session: Option<GameSession>,
@@ -236,12 +253,20 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     movie_after_launch: Option<String>,
     /// The thread exploring the movie being played, while it runs (EDITOR-1).
     movie_explorer: Option<super::movie_explorer::MovieExplorer>,
+    /// The engine a `.fm2` playback forced on this session (lot FCEUX-48 step 4), `None`
+    /// otherwise. It is **not** the game's stored `emu.engine`: a movie only replays on the
+    /// engine that recorded it, so opening one forces that engine for the session and leaves the
+    /// user's choice alone. `ensure_session` reads it in place of the game's own.
+    movie_engine: Option<zax_core_api::EngineKind>,
     /// The drawings over the view and the editor's pens (EDITOR-1).
     annotations: super::annotations::Annotations,
     /// What the editor mode is asked to do, for the application (`editor_mode.rs`).
     editor_request: Option<EditorRequest>,
     job: Option<jobs::LoadJob>,
     loading: bool,
+    /// The widescreen held off whatever the settings say, the screen too narrow for it (portrait,
+    /// owner request); nothing is written to the settings.
+    widescreen_held_off: bool,
     confirmation: Option<ConfirmationRequest>,
     events: Vec<HostEvent>,
     state: EmulationState,
@@ -259,6 +284,9 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     stage_clock: StageClock,
     /// The frame clock.
     pub pacer: FramePacer,
+    /// Lot FIDPLUS-B (B3): the core cycle the sliced run has to reach, real time turned into
+    /// cycles (fractional, so no cycle is lost to rounding).
+    slice_target: f64,
     /// The frames the display shows a second (its refresh over the swap interval, or the frame
     /// cap), told by the application each frame: the smooth scrolling from the run-ahead does
     /// nothing at 60 or less.
@@ -286,6 +314,9 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     pub core_ahead: bool,
     /// The fast-forward burst.
     pub fast_forward: FastForwardState,
+    /// The multiplier of the speed the console's in-game menu sets, x1 to x10 (Rust-only, owner
+    /// request); see [`EmulationHost::set_speed_boost`].
+    speed_boost: f64,
     /// The notification area.
     pub notifications: NotificationCenter,
     /// What the renderer does with the slang shaders, for the shaders window (Rust-only).
@@ -295,9 +326,8 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     /// The slots shared by every game before the files were named after the ROM: a game's
     /// states move to its files when it is chosen.
     pub legacy_slots: SaveSlotIndex,
-    /// Whether each slot's state fits the built-in ROM patches, by slot, save time and setting.
-    slot_patch_cache:
-        std::cell::RefCell<std::collections::HashMap<(String, i64, bool), jobs::SlotPatchStatus>>,
+    /// What the slot lists read from the slots' state files.
+    slot_caches: SlotCaches,
     /// The CRC of the data of the ROM files, which tells the games a hack is made for.
     rom_crcs: std::cell::RefCell<crate::persistence::rom_crc_cache::RomCrcCache>,
     /// What the study of each ROM file found: whether a widescreen hack fits it.
@@ -396,6 +426,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let mut legacy_slots = SaveSlotIndex::load(&paths, now());
         legacy_slots.reconcile(&paths, |game_id| games.exists(game_id));
         let mut host = Self {
+            slice_target: 0.0,
             pacer: FramePacer::new(
                 f64::from(RegionTiming::for_region(NesRegion::Ntsc).nominal_frames_per_second),
                 clock.unwrap_or_else(system_clock),
@@ -420,6 +451,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             pending: VecDeque::new(),
             hotkeys: HotkeyTracker::new(),
             battery: BatteryRamStore::new(),
+            flash: BatteryRamStore::for_flash(),
             tile_cache: TileCacheStore::new(tile_cache),
             session: None,
             current_game: None,
@@ -429,10 +461,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             movie_timeline: None,
             movie_after_launch: None,
             movie_explorer: None,
+            movie_engine: None,
             annotations: super::annotations::Annotations::default(),
             editor_request: None,
             job: None,
             loading: false,
+            widescreen_held_off: false,
             confirmation: None,
             events: Vec::new(),
             state: EmulationState::Stopped,
@@ -453,11 +487,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             console_interface: false,
             core_ahead: true,
             fast_forward: FastForwardState::new(),
+            speed_boost: 1.0,
             notifications: NotificationCenter::new(),
             shader_report: crate::ui::shader_panel::ShaderReport::default(),
             slots: SaveSlotIndex::new(),
             legacy_slots,
-            slot_patch_cache: std::cell::RefCell::default(),
+            slot_caches: SlotCaches::default(),
             rom_crcs: std::cell::RefCell::new(rom_crcs),
             hack_compat: std::cell::RefCell::new(hack_compat),
             zapper: ZapperState::new(),
@@ -624,27 +659,26 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// handle, which survives that reset; filtering on `has_rom` here left the output with no
     /// console at all and every game silent.
     fn attach_console(&mut self) {
-        let Some(reader) = self
-            .session
-            .as_ref()
-            .map(|session| session.core().audio_reader())
-        else {
+        let Some(session) = self.session.as_ref() else {
             return;
         };
         if self.classic_audio {
-            // `v0.4.2`'s source, byte for byte: the mixer reads the ring on the main thread and
-            // the read is all or nothing.
+            // `v0.4.2`'s source, byte for byte on Zaxnes: the mixer reads the APU's ring on the
+            // main thread and the read is all or nothing. Lot FCEUX-23 step 5: on an engine whose
+            // samples are behind a `!Sync` handle the source reads the handle's shared ring,
+            // which the session fills once a frame.
+            let Some(source) = session.core().audio_source() else {
+                return;
+            };
             if let Some(mixer) = self.mixer.as_mut() {
-                let source: crate::audio::audio_mixer::AudioSampleSource =
-                    Box::new(move |destination| {
-                        // A mono read cannot be refused; an empty buffer reads as silence.
-                        reader.read_samples(destination, false).unwrap_or(0)
-                    });
                 mixer.set_emulation_source(Some(source));
             }
         } else if let Some(audio) = &self.audio {
-            // The audio thread reads the core's ring itself from here on (Q-153).
-            audio.set_console(Some(Box::new(stream::ApuSamples::new(reader))));
+            // The audio thread reads the engine's ring itself from here on (Q-153).
+            let Some(samples) = session.core().console_samples() else {
+                return;
+            };
+            audio.set_console(Some(samples));
         }
     }
 
@@ -848,10 +882,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
 
     /// The device plugged into `port` of the game being played.
     #[must_use]
-    pub fn port_type(&self, port: usize) -> zax_nes::ControllerPortType {
+    pub fn port_type(&self, port: usize) -> zax_core_api::ControllerPortType {
         self.session
             .as_ref()
-            .map_or(zax_nes::ControllerPortType::Controller, |session| {
+            .map_or(zax_core_api::ControllerPortType::Controller, |session| {
                 session.port_type(port)
             })
     }
@@ -1106,7 +1140,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         );
         self.pacer.max_backlog = self
             .effective_catch_up()
-            .frames_per_display(self.pacer.effective_rate(), displayed_rate);
+            .frames_per_display(self.pacer.effective_rate(), displayed_rate)
+            .max(frame_pacer::frames_for_speed(self.pacer.speed));
+        if self.slices_on() {
+            return self.run_due_slices(player_one, player_two);
+        }
         let due = self.pacer.due_frames();
         let ahead = self.runs_ahead();
         let last_3d =
@@ -1118,64 +1156,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             }
             // The frame of the previous round comes back first.
             self.take_core_back();
-            self.evaluate_achievements();
-            // AMD-041 REQ-LOOP-064: the setting is read again here, so a change made during the
-            // game applies at the next real frame and never in the middle of one. One `i32` read
-            // of the model per emulated frame, which is what the catch-up limit and the speed
-            // already cost above.
-            let run_ahead = self.settings.run_ahead();
-            let Some(session) = self.session.as_mut() else {
+            if !self.begin_emulated_frame(player_one, player_two) {
                 break;
-            };
-            // Q-103: and the guard-rail is applied here rather than in the setter — a profile
-            // whose scripts change the core from a frame hook runs at 0, the setting untouched
-            // for the next game. One `bool` test, the detection having been done at load.
-            session.apply_run_ahead_setting(run_ahead);
-            // REQ-LOOP-030: the snapshot is taken at the start of a frame whose core frame
-            // counter is a multiple of 60, so before that frame executes. AMD-042 REQ-LOOP-069:
-            // it carries the 64 `PData` values and the camera state as well, read as they stand
-            // at that instant and with no script hook involved.
-            // EDITOR-1: a movie being played keeps a checkpoint on those frames as well: one more
-            // `bool` read beside `rollback_enabled`, and nothing more unless the frame is one.
-            if (self.rollback_enabled || self.movie_timeline.is_some())
-                && RollbackHistory::is_snapshot_frame(session.core().frame_count())
-            {
-                if let Some(timeline) = self.movie_timeline.as_mut() {
-                    let frame_count = session.core().frame_count();
-                    if timeline.wants(frame_count) {
-                        if let Ok(state) = session.core().save_state(false) {
-                            let digest = super::movie_timeline::machine_digest(session.core());
-                            let verdict = timeline.record(frame_count, state, digest);
-                            if movies::explorer_verdict(verdict) {
-                                self.movie_explorer = None;
-                            }
-                        }
-                    }
-                }
-                if self.rollback_enabled {
-                    let started = self.stage_clock.start();
-                    let extras = SnapshotExtras {
-                        persistent_data: session.capture_rollback_data(),
-                        camera: Some(self.scene.camera.capture()),
-                        // AMD-063 REQ-LUA-119, the fourth element of REQ-LOOP-069.
-                        rot_override: self.scene.camera.rot_override(),
-                    };
-                    let core = session.core();
-                    // A failure (no ROM) leaves the history as it was, as before.
-                    let _ = self
-                        .rollback
-                        .capture_with(extras, |buffer| core.save_state_to(false, buffer));
-                    self.stage_clock.stop(Stage::Rollback, started);
-                }
-            }
-            let core = session.core();
-            // Every frame, for stepping back one at a time (J).
-            if self.rollback_enabled {
-                let _ = self.frame_steps.capture_with(
-                    |buffer| core.save_state_to(false, buffer),
-                    player_one,
-                    player_two,
-                );
             }
             if ahead {
                 // The accounting touches the core: it comes before the frame leaves. The frame
@@ -1204,6 +1186,191 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             self.dispatch_setting_changes();
         }
         due
+    }
+
+    /// The work that comes before an emulated frame, on its first instant: the achievements, the
+    /// run-ahead setting, the rollback and movie checkpoints and the step-back copy. `false`
+    /// without a session.
+    fn begin_emulated_frame(
+        &mut self,
+        player_one: crate::input::InputAction,
+        player_two: crate::input::InputAction,
+    ) -> bool {
+        self.evaluate_achievements();
+        // AMD-041 REQ-LOOP-064: the setting is read again here, so a change made during the
+        // game applies at the next real frame and never in the middle of one. One `i32` read
+        // of the model per emulated frame, which is what the catch-up limit and the speed
+        // already cost above.
+        let run_ahead = self.settings.run_ahead();
+        let Some(session) = self.session.as_mut() else {
+            return false;
+        };
+        // Q-103: and the guard-rail is applied here rather than in the setter — a profile
+        // whose scripts change the core from a frame hook runs at 0, the setting untouched
+        // for the next game. One `bool` test, the detection having been done at load.
+        session.apply_run_ahead_setting(run_ahead);
+        // REQ-LOOP-030: the snapshot is taken at the start of a frame whose core frame
+        // counter is a multiple of 60, so before that frame executes. AMD-042 REQ-LOOP-069:
+        // it carries the 64 `PData` values and the camera state as well, read as they stand
+        // at that instant and with no script hook involved.
+        // EDITOR-1: a movie being played keeps a checkpoint on those frames as well: one more
+        // `bool` read beside `rollback_enabled`, and nothing more unless the frame is one.
+        if (self.rollback_enabled || self.movie_timeline.is_some())
+            && RollbackHistory::is_snapshot_frame(session.core().frame_count())
+        {
+            if let Some(timeline) = self.movie_timeline.as_mut() {
+                let frame_count = session.core().frame_count();
+                if timeline.wants(frame_count) {
+                    if let Ok(state) = session.core().save_state(false) {
+                        let digest = super::movie_timeline::machine_digest(session.core());
+                        let verdict = timeline.record(frame_count, state, digest);
+                        if movies::explorer_verdict(verdict) {
+                            self.movie_explorer = None;
+                        }
+                    }
+                }
+            }
+            if self.rollback_enabled {
+                let started = self.stage_clock.start();
+                let extras = SnapshotExtras {
+                    persistent_data: session.capture_rollback_data(),
+                    camera: Some(self.scene.camera.capture()),
+                    // AMD-063 REQ-LUA-119, the fourth element of REQ-LOOP-069.
+                    rot_override: self.scene.camera.rot_override(),
+                };
+                let core = session.core();
+                // A failure (no ROM) leaves the history as it was, as before.
+                let _ = self
+                    .rollback
+                    .capture_with(extras, |buffer| core.save_state_to(false, buffer));
+                self.stage_clock.stop(Stage::Rollback, started);
+            }
+        }
+        let core = session.core();
+        // Every frame, for stepping back one at a time (J).
+        if self.rollback_enabled {
+            let _ = self.frame_steps.capture_with(
+                |buffer| core.save_state_to(false, buffer),
+                player_one,
+                player_two,
+            );
+        }
+        true
+    }
+
+    /// Lot FIDPLUS-B step 5 (`docs/design/REALTIME-PACING.md`): a slice of real time run between
+    /// two displayed frames, with the pads as they stand now, so that the machine follows the
+    /// clock about every millisecond and the game reads a pad at most a millisecond old. Only when
+    /// [`Self::slices_on`] holds and the game runs; returns how many frames ended, which the
+    /// caller hands to the next displayed frame.
+    pub fn realtime_slice(
+        &mut self,
+        player_one: crate::input::InputAction,
+        player_two: crate::input::InputAction,
+    ) -> u32 {
+        if self.loading
+            || self.state != EmulationState::Running
+            || !self.session.as_ref().is_some_and(GameSession::has_rom)
+            || !self.slices_on()
+        {
+            return 0;
+        }
+        // The hotkey bits of the displayed frame's sample stay with it.
+        let keep = |fresh: crate::input::InputAction, frame: crate::input::InputAction| {
+            (fresh & crate::input::InputAction::CONTROLLER_BYTE)
+                | crate::input::InputAction::from_bits(
+                    frame.bits() & !crate::input::InputAction::CONTROLLER_BYTE.bits(),
+                )
+        };
+        let player_one = keep(player_one, self.step_input.0);
+        let player_two = keep(player_two, self.step_input.1);
+        self.step_input = (player_one, player_two);
+        self.run_due_slices(player_one, player_two)
+    }
+
+    /// Whether the real-time pad runs between displayed frames now ([`Self::realtime_slice`]).
+    #[must_use]
+    pub fn realtime_slices_active(&self) -> bool {
+        !self.loading && self.state == EmulationState::Running && self.slices_on()
+    }
+
+    /// Whether this tick runs the machine in slices of real time (lot FIDPLUS-B step 3,
+    /// `emu.realtime_input`): on a Zaxnes core, with run-ahead off and no movie recorded or played,
+    /// which keep whole frames.
+    fn slices_on(&self) -> bool {
+        self.settings.get(SettingId::EmuRealtimeInput).as_bool()
+            && !self.runs_ahead()
+            && self.settings.run_ahead() == 0
+            && self.movie_timeline.is_none()
+            && self.session.as_ref().is_some_and(|session| {
+                session.core().kind() == zax_core_api::EngineKind::Zaxnes && !session.has_movie()
+            })
+    }
+
+    /// Lot FIDPLUS-B step 3 (`docs/design/REALTIME-PACING.md`): the real time since the last tick
+    /// turned into CPU cycles and run in one slice, the pads as they stand now; the frames that end
+    /// in it are finished (converted, their hooks run) as whole frames are. A frame not yet ended
+    /// goes on at the next tick with that tick's pads, which the game reads at its next strobe.
+    /// Returns how many frames ended.
+    fn run_due_slices(
+        &mut self,
+        player_one: crate::input::InputAction,
+        player_two: crate::input::InputAction,
+    ) -> u32 {
+        let frames = self.pacer.slice_frames();
+        let Some(session) = self.session.as_ref() else {
+            return 0;
+        };
+        #[allow(clippy::cast_precision_loss)] // Cycle counts stay far below 2^52.
+        let now = session.core().cycle_count() as f64;
+        let per_frame = session.core().timing().cycles_per_frame();
+        // Never behind the machine (a load, a reset, a restored state), and never more than the
+        // pacer's backlog ahead of it.
+        self.slice_target = self.slice_target.max(now) + frames * per_frame;
+        #[allow(clippy::cast_possible_truncation)] // Same.
+        let until = self.slice_target as i64;
+        let limit = self.pacer.max_backlog.max(1);
+        let mut ended = 0;
+        while ended < limit {
+            let starts = !self
+                .session
+                .as_ref()
+                .is_some_and(GameSession::frame_in_progress);
+            if starts && !self.begin_emulated_frame(player_one, player_two) {
+                break;
+            }
+            let begin = self.emu_stats.is_some().then(std::time::Instant::now);
+            let frame = SessionFrame {
+                player_one,
+                player_two,
+                zapper_byte: self.zapper.port_byte(),
+                zapper_position: self.zapper.position(),
+            };
+            let Some(session) = self.session.as_mut() else {
+                break;
+            };
+            if !session.run_frame_slice_timed(
+                &mut self.settings,
+                &mut self.scene,
+                frame,
+                until,
+                &mut self.stage_clock,
+            ) {
+                break;
+            }
+            ended += 1;
+            self.count_emulated_frame(begin);
+        }
+        if ended == limit {
+            // The backlog limit: the rest of the time is dropped, as whole frames drop it.
+            if let Some(session) = self.session.as_ref() {
+                #[allow(clippy::cast_precision_loss)]
+                let now = session.core().cycle_count() as f64;
+                self.slice_target = now;
+            }
+        }
+        self.dispatch_setting_changes();
+        ended
     }
 
     /// The accounting of one emulated frame: the count, the `-emustats` line, and the
@@ -1406,11 +1573,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             return;
         };
         if let Some(session) = self.session.as_mut().filter(|session| session.has_rom()) {
-            session
-                .core_mut()
-                .bus_mut()
-                .apu_mut()
-                .drop_pending_samples();
+            session.core_mut().drop_pending_samples();
         }
         control.request_resync();
         self.audio_rate.restart();
@@ -1457,17 +1620,39 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         audio.control.set_console_active(producing);
     }
 
+    /// The multiplier of the game speed the console's in-game menu sets.
+    #[must_use]
+    pub const fn speed_boost(&self) -> f64 {
+        self.speed_boost
+    }
+
+    /// Multiplies the game speed by `boost`, 1 to 10 (Rust-only, owner request): on top of
+    /// `emu.game_speed` and fast forward, kept until it is changed again. The clock is reset as
+    /// for a change of the speed setting (REQ-LOOP-075).
+    pub fn set_speed_boost(&mut self, boost: f64) {
+        let boost = boost.clamp(1.0, 10.0);
+        if (boost - self.speed_boost).abs() < f64::EPSILON {
+            return;
+        }
+        self.speed_boost = boost;
+        self.apply_speed();
+        self.pacer.reset();
+    }
+
     fn apply_speed(&mut self) {
         // REQ-LOOP-016: during a burst the factor is 1.5 whatever the setting says, which means
         // a setting above +2 is slowed down by fast forward. That is faithful (DEC-07-Q2).
+        // The console's in-game menu multiplies the speed (Rust-only, owner request).
         let factor = if self.fast_forward.is_active() {
-            speed_setting::fast_forward_factor()
+            self.fast_forward.factor()
         } else {
             self.settings.speed_factor()
-        };
+        } * self.speed_boost;
         self.pacer.speed = factor;
+        let exact_rate = self.settings.get(SettingId::EmuExactRate).as_bool();
         if let Some(session) = &mut self.session {
-            self.pacer.nominal_rate = f64::from(session.nominal_frame_rate());
+            self.pacer.nominal_rate = session.frame_rate(exact_rate);
+            session.core_mut().set_exact_rate(exact_rate);
             // REQ-AUD-011: the audio follows k by time compression with a proportional pitch
             // change; the core retimes its resampler, it never drops samples for that.
             if session.core_mut().set_speed(factor).is_err() {
@@ -1565,6 +1750,13 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 self.publish_state();
             }
             SettingId::AudioLatencyMs => self.apply_audio_latency(),
+            // Lot FIDELITY step 3: the profile changes the sound at once, game running or not.
+            SettingId::AudioConsoleProfile => {
+                let profile = self.console_audio_profile();
+                if let Some(session) = self.session.as_mut().filter(|session| session.has_rom()) {
+                    session.core_mut().set_console_audio_profile(profile);
+                }
+            }
             // AUDIO-2: the choice of output takes effect when the device is (re)opened, and only
             // the application can reopen an SDL device, so the change is recorded here and
             // drained by the loop ([`Self::take_audio_reopen`]).
@@ -1679,9 +1871,18 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             (HotkeyEvents::QUICK_SAVE, Command::QuickSave),
             (HotkeyEvents::QUICK_LOAD, Command::QuickLoad),
             (HotkeyEvents::SOFT_RESET, Command::SoftReset),
+            (HotkeyEvents::COIN_1, Command::InsertCoin1),
+            (HotkeyEvents::COIN_2, Command::InsertCoin2),
+            (HotkeyEvents::SERVICE, Command::VsService),
         ] {
             if events.contains(flag) {
-                self.enqueue(command, CommandArgs::default());
+                // Fast forward carries how many times it was pressed in a row (Rust-only).
+                let args = if command == Command::FastForward {
+                    CommandArgs::of_number(i32::from(self.hotkeys.fast_forward_presses()))
+                } else {
+                    CommandArgs::default()
+                };
+                self.enqueue(command, args);
             }
         }
     }
@@ -1705,7 +1906,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let Some(audio) = self.audio.clone() else {
             return;
         };
-        let cap = zax_nes::apu::Apu2A03::MAX_RATIO_ADJUSTMENT;
+        let cap = zax_core_api::MAX_RATIO_ADJUSTMENT;
         // REQ-AUD-011: at any speed other than 100 % the core is retiming its own resampler, so
         // there is nothing to correct; and a recorded movie must not depend on the drift of
         // this machine's sound card.
@@ -1759,12 +1960,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let Some(session) = self.session.as_mut().filter(|session| session.has_rom()) else {
             return;
         };
-        let available = session.core().apu().available_samples();
+        let available = session.core().audio_available();
         #[allow(clippy::cast_precision_loss)] // sample counts are far below 2^52
         let error = (available as f64 - TARGET as f64) / TARGET as f64;
         // A proportional correction that saturates at the cap: a full buffer slows the
         // production down, an empty one speeds it up.
-        let cap = zax_nes::apu::Apu2A03::MAX_RATIO_ADJUSTMENT;
+        let cap = zax_core_api::MAX_RATIO_ADJUSTMENT;
         let adjustment = (-error * 0.002).clamp(-cap, cap);
         if session
             .core_mut()
@@ -1805,7 +2006,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         // REQ-PERS-060: written at most every 30 s, and only when the content changed.
         let core = session.core();
         self.battery
-            .advance(&self.paths, real_seconds, core.export_battery_ram());
+            .advance(&self.paths, real_seconds, &core.battery_ram());
+        self.flash
+            .advance_with(&self.paths, real_seconds, || core.export_flash_save());
     }
 
     /// Stops the game being played: the cartridge RAM is written (REQ-PERS-060), the `End`
@@ -1816,7 +2019,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         if let Some(mut session) = self.session.take() {
             {
                 let core = session.core();
-                self.battery.flush(&self.paths, core.export_battery_ram());
+                self.battery.flush(&self.paths, &core.battery_ram());
+                self.flash.flush(&self.paths, &core.export_flash_save());
             }
             // AMD-062 REQ-PROF-082: what the game resolved is kept for the next launch, and the
             // catalogue keeps it for a relaunch of the same game (REQ-PROF-080).
@@ -1826,6 +2030,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             if dispose_session {
                 session.dispose(&mut self.settings, &mut self.scene);
                 self.battery.detach();
+                self.flash.detach();
                 if let Some(audio) = &self.audio {
                     audio.set_console(None);
                 }

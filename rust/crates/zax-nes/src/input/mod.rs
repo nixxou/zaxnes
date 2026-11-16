@@ -4,15 +4,11 @@
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::RegionTiming;
 
-/// What is plugged into a controller port (REQ-CORE-024).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum ControllerPortType {
-    /// A standard pad.
-    #[default]
-    Controller = 0,
-    /// A Zapper light gun.
-    Zapper = 1,
-}
+// What is plugged into a port, and a port number out of range, are on the `Engine` trait
+// (`port_type`/`set_port_type`), so they live in `zax-core-api` since lot FCEUX-23 step 2 beside
+// the input word; re-exported here at the paths they were at. The ports *themselves* below — the
+// shift registers, the strobe, the Zapper — are Zaxnes's machine and stay here.
+pub use zax_core_api::{ControllerPortType, InvalidPort};
 
 /// Where a Zapper is aimed, in image pixels; outside the image means "pointing off screen"
 /// (REQ-CORE-060).
@@ -40,18 +36,6 @@ impl ZapperPosition {
         self.x >= 0 && self.x < 256 && self.y >= 0 && self.y < RegionTiming::VISIBLE_SCANLINES
     }
 }
-
-/// A port number outside 0 to 1 (REQ-CORE-024).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct InvalidPort(pub usize);
-
-impl std::fmt::Display for InvalidPort {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "port {} is out of range (0 or 1)", self.0)
-    }
-}
-
-impl std::error::Error for InvalidPort {}
 
 /// The two controller ports at $4016 and $4017 (REQ-CORE-022).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -183,6 +167,26 @@ impl InputPorts {
         if self.strobe {
             self.reload();
             self.reload_at = 0;
+        }
+    }
+
+    /// Replaces the input word inside a frame (lot FIDPLUS-B step 2): the shift registers take it
+    /// when the game next strobes `$4016`, or at once while the strobe is held. The VS. System's
+    /// cabinet keeps its once-a-frame word.
+    pub fn set_live_word(&mut self, input_word: u16) {
+        #[cfg(feature = "board-vs-system")]
+        if self.vs.is_some() {
+            return;
+        }
+        if self.input_word == input_word {
+            // The same word: nothing to take (a slice that only goes on with the frame).
+            return;
+        }
+        self.input_word = input_word;
+        if self.strobe {
+            // The strobe held high reloads the registers continuously: they show the new word
+            // now. A reload already scheduled for the strobe's fall stays as it was.
+            self.reload();
         }
     }
 

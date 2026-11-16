@@ -50,8 +50,8 @@ fn filter(label_key: &str, extensions: &[&'static str]) -> FileFilter {
 #[must_use]
 pub fn rom_filters() -> Vec<FileFilter> {
     vec![
-        filter(keys::BROWSER_FILTER_NES_ROMS, &["nes", "zip"]),
-        filter(keys::BROWSER_FILTER_NES_FILES, &["nes"]),
+        filter(keys::BROWSER_FILTER_NES_ROMS, &["nes", "unf", "unif", "studybox", "fds", "qd", "zip"]),
+        filter(keys::BROWSER_FILTER_NES_FILES, &["nes", "unf", "unif", "studybox", "fds", "qd"]),
         filter(keys::BROWSER_FILTER_ZIP, &["zip"]),
         filter(keys::BROWSER_FILTER_ALL, &[]),
     ]
@@ -66,7 +66,7 @@ pub fn movie_filters() -> Vec<FileFilter> {
         filter(
             keys::BROWSER_FILTER_MOVIES,
             &[
-                "fm2", "fcm", "mv1", "mv2", "mv3", "mv4", "mv5", "mv6", "mv7", "mv8", "mv9",
+                "fm2", "fcm", "bk2", "mv1", "mv2", "mv3", "mv4", "mv5", "mv6", "mv7", "mv8", "mv9",
             ],
         ),
         filter(keys::BROWSER_FILTER_ALL, &[]),

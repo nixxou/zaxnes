@@ -4,11 +4,11 @@
 
 use std::sync::Arc;
 
+use zax_core_api::{FrameBatch, TileRecord};
 use zax_engine3d::draw_list::FrameDrawList;
 use zax_engine3d::engine::ConversionEngine;
 use zax_engine3d::palette::Rgb24;
 use zax_engine3d::settings::{ConversionSettings, RenderAlgorithm, ZLayer};
-use zax_nes::{FrameBatch, TileRecord};
 use zax_profiles::enums::{ProfileLayer, TileFlip, VariantRenderStyle};
 use zax_profiles::pattern::ProfilePattern;
 use zax_profiles::profile::GameProfile;
@@ -52,6 +52,10 @@ pub struct SyntheticScene {
     pub nes_picture: Vec<u8>,
     /// Its rows (0 reads as 240).
     pub nes_picture_height: usize,
+    /// The colour emphasis of `nes_picture`, empty without any (lot FIDPLUS-D2b).
+    pub nes_picture_emphasis: Vec<u8>,
+    /// The subcarrier phase of its frame, for the composite decoder (lot FIDPLUS-D2b).
+    pub nes_video_phase: usize,
 }
 
 impl SyntheticScene {
@@ -61,6 +65,8 @@ impl SyntheticScene {
         SceneFrame {
             nes_picture: &self.nes_picture,
             nes_picture_height: self.nes_picture_height,
+            nes_picture_emphasis: &self.nes_picture_emphasis,
+            nes_picture_rgb: &[],
             ..SceneFrame::with_draw_list(&self.draw_list)
         }
     }
@@ -463,7 +469,7 @@ impl Builder {
             mask_x: 0,
             mask_y: 0,
             margin: 0,
-            visible_rows: zax_nes::STANDARD_ROWS,
+            visible_rows: zax_core_api::STANDARD_ROWS,
             margin_y: 0,
         };
         engine.convert(&batch, 0);
@@ -486,6 +492,8 @@ impl Builder {
             draw_list,
             nes_picture: Vec::new(),
             nes_picture_height: 0,
+            nes_picture_emphasis: Vec::new(),
+            nes_video_phase: 0,
         })
     }
 }

@@ -8,6 +8,13 @@ const NTSC_PERIODS: [i32; 16] = [
     4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068,
 ];
 
+/// The letterless RP2A03's periods (lot FIDPLUS-C, FIDELITY-LEADS G4): its last entry is 2046,
+/// not 4068, in every region (`BeesNES` `m_ui16NoisePeriodsOld`, MIT, from Kevin Horton's
+/// measurements of the early chip).
+const LETTERLESS_PERIODS: [i32; 16] = [
+    4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 2046,
+];
+
 /// Timer periods in CPU cycles, PAL (nesdev, REQ-CORE-015).
 const PAL_PERIODS: [i32; 16] = [
     4, 8, 14, 30, 60, 88, 118, 148, 188, 236, 354, 472, 708, 944, 1890, 3778,
@@ -21,6 +28,12 @@ pub(crate) struct NoiseChannel {
     period_index: usize,
     timer: i32,
     short_mode: bool,
+    /// A letterless RP2A03 has no short mode: bit 7 of `$400E` does nothing, and its own period
+    /// table (`BeesNES` `SetModeFlag` and `OldNoiseTable`, its `bRp2A02` profiles). A setting of
+    /// the console model, not state.
+    letterless: bool,
+    /// The region's table, kept to go back to when the letterless chip is left.
+    region_periods: &'static [i32; 16],
     // The shift register is seeded with 1 at power-on; seeded with 0 it would never leave 0.
     shift_register: i32,
     pub envelope: Envelope,
@@ -34,6 +47,8 @@ impl Default for NoiseChannel {
             period_index: 0,
             timer: 0,
             short_mode: false,
+            letterless: false,
+            region_periods: &NTSC_PERIODS,
             shift_register: 1,
             envelope: Envelope::default(),
             length: LengthCounter::default(),
@@ -53,11 +68,29 @@ impl NoiseChannel {
 
     /// Selects the NTSC or the PAL period table (REQ-CORE-015).
     pub fn set_timing(&mut self, timing: &RegionTiming) {
-        self.periods = if timing.uses_pal_noise_and_dmc_periods {
+        self.region_periods = if timing.uses_pal_noise_and_dmc_periods {
             &PAL_PERIODS
         } else {
             &NTSC_PERIODS
         };
+        self.select_periods();
+    }
+
+    fn select_periods(&mut self) {
+        self.periods = if self.letterless {
+            &LETTERLESS_PERIODS
+        } else {
+            self.region_periods
+        };
+    }
+
+    /// Makes the channel a letterless RP2A03's, which has no short mode.
+    pub fn set_letterless(&mut self, letterless: bool) {
+        self.letterless = letterless;
+        if letterless {
+            self.short_mode = false;
+        }
+        self.select_periods();
     }
 
     /// Writes register `index` (0 to 3) at APU cycle `cycle`.
@@ -70,7 +103,7 @@ impl NoiseChannel {
                 self.envelope.period = value & 0x0F;
             }
             2 => {
-                self.short_mode = (value & 0x80) != 0;
+                self.short_mode = (value & 0x80) != 0 && !self.letterless;
                 self.period_index = usize::from(value & 0x0F);
             }
             3 => {
@@ -116,11 +149,15 @@ impl NoiseChannel {
         }
     }
 
-    /// Back to the power-on state; the period table stays with the region.
+    /// Back to the power-on state; the period tables and the chip (letterless or not) stay: they
+    /// are the console's, not state.
     pub fn reset(&mut self) {
-        let periods = self.periods;
+        let (periods, region_periods, letterless) =
+            (self.periods, self.region_periods, self.letterless);
         *self = Self::default();
         self.periods = periods;
+        self.region_periods = region_periods;
+        self.letterless = letterless;
     }
 }
 
@@ -149,5 +186,28 @@ impl NoiseChannel {
         self.short_mode = reader.read_bool()?;
         self.shift_register = reader.read_i32()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::NesRegion;
+
+    #[test]
+    fn fidplus_c_the_letterless_chip_has_its_own_last_period() {
+        let mut noise = NoiseChannel::default();
+        noise.set_timing(&RegionTiming::for_region(NesRegion::Pal));
+        noise.write(2, 0x8F, 0);
+        assert!(noise.short_mode);
+        assert_eq!(3778, noise.periods[15]);
+        noise.set_letterless(true);
+        assert_eq!(2046, noise.periods[15]);
+        noise.reset();
+        assert_eq!(2046, noise.periods[15], "a reset keeps the chip");
+        noise.write(2, 0x8F, 0);
+        assert!(!noise.short_mode);
+        noise.set_letterless(false);
+        assert_eq!(3778, noise.periods[15], "back to the region's table");
     }
 }

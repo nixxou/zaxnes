@@ -7,7 +7,7 @@
 use std::fmt::Write as _;
 
 use serde_json::Value;
-use zax_nes::TileRecord;
+use zax_core_api::TileRecord;
 
 use crate::HarnessError;
 

@@ -2,46 +2,10 @@
 //! little-endian format, so that a block is reproducible byte for byte from the same machine
 //! state (REQ-ARCH-012, REQ-CORE-090).
 
-use std::fmt;
-
-/// Typed cause of a failed "restore state" (REQ-CORE-091, AREQ-CORE-120; AMD-002 answer to
-/// Q-001). The host picks the text it shows from it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StateLoadFailure {
-    /// The block is invalid or truncated ("savestate corrompu").
-    CorruptState,
-    /// The block was written by another core, which REQ-CORE-120 refuses with the literal
-    /// message `Save state used a different core.`
-    ForeignCore,
-}
-
-/// A savestate block that is invalid or truncated, or written by another core.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InvalidState {
-    /// Typed cause of the failure.
-    pub failure: StateLoadFailure,
-    /// Technical message naming the cause.
-    pub message: String,
-}
-
-impl InvalidState {
-    /// A corrupt or truncated block, described by `message`.
-    #[must_use]
-    pub fn corrupt(message: impl Into<String>) -> Self {
-        Self {
-            failure: StateLoadFailure::CorruptState,
-            message: message.into(),
-        }
-    }
-}
-
-impl fmt::Display for InvalidState {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for InvalidState {}
+// The two typed causes a restore can fail with are on the `Engine` trait, so they live in
+// `zax-core-api` since lot FCEUX-23 step 2; re-exported here at the path they were at. The
+// *format* below — the writer, the reader and the in-memory `CoreState` — stays Zaxnes's own.
+pub use zax_core_api::{InvalidState, StateLoadFailure};
 
 /// The in-memory state of a core (AMD-041 REQ-CORE-121): the buffer
 /// [`NesCore::capture_core_state`] fills and [`NesCore::restore_core_state`] reads back.
