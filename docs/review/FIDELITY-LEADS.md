@@ -1330,6 +1330,28 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   netlist loads `v` in the middle of W+3 and W+4's ALE already carries the new address, where
   Zaxnes fetches W+4 with the old one (`211 netlist bus=2BF0 | zaxnes bus=2BEF`), invisible
   to `dotcmp.py` (`v`/`t` only); to measure with a dedicated program.
+- I2 (2026-11-16) **PPU address bus against the 2C02 netlist** (`visualnes-bench/buscmp.py`:
+  every ALE address of the netlist on fetching lines against the Zaxnes trace's bus, by fetch
+  phase and dot % 8; the netlist's power-on `$2000`, never written by these programs, has the
+  background table bit and 8x16 sprites set, so bit 12 differences and the sprite phase are
+  power-on artifacts). **Fixed**: a `$2006` load landing just before a nametable or attribute
+  fetch (W+4 = 8k+1 / 8k+3, also dot 1 and 321) now makes that fetch with the new `v`, as the
+  netlist (`delay_address_load`); this core reads the byte on that first dot, so the tile or
+  attribute came from the old address. `g2006x`: 1 232 background mismatches -> 0; `g2006w`
+  (four targets, every dot), `g2000`, `g2005px`: 0 but dot 1. golden-core: RasterTest1/2 only,
+  2 pixels at x 254-255 of line 210 (rows updated). **Left as leads** (boards watching the bus
+  only): the first nametable fetch of a line (dots 1-2) is not put on the bus (its byte comes
+  from dot 340's read, same address), and the line end reads at 337/338/340 where the chip
+  fetches at 337/339 then dot 1; Zaxnes's MMC5 line detection (`nt_read_counter`, three
+  identical reads) is tuned to the current sequence, so the two must change together (adding
+  the dot-1 read alone would move MMC5 detection by two dots). Both MMC5 boards depend on it:
+  the light `Mmc5` (line detection) and `Mmc5Ext` (`board-mmc5-exattr-split`, on by default),
+  whose split column counts nametable fetches with a new address and finds the line start by
+  the run of pattern reads before it (`chr_reads_since_nt`, i.e. the sprite phase's reads), so
+  a faithful line end or sprite-phase NT fetches must be checked on both, with the split games.
+  The W+4 fix itself changes no fetch count, only the address one fetch carries after a
+  mid-line `$2006` write (MMC5 tests green, light/full pixel comparison included); the sprite phase's garbage
+  nametable fetches (257-320) are not put on the bus either.
 - I1. SMB3 Japan line 193 shapes (C1): console video shows "2 px + gap + 8 px" 36 %, 8 px 31 %,
   16 px 22 %, holes 12 %, never empty; BeesNES/puNES/NesHawk/Zaxnes default: 8 or 16 px; Mesen: empty
   75 %. Same `$2006`/`$2007` timing in Mesen and Zaxnes (W 212, R 224, v=$0B02). Branch
