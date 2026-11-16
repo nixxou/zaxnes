@@ -35,5 +35,5 @@ fournir le bios)" — then "go" on the plan.
 | core tests (`tests/fds_tests.rs`: load, RAM/BIOS, timer IRQ, drive bytes, audio, saves, auto-insert) | done |
 | app: loading with `disksys.rom`, filters, commands, tests | done (c8e7de75) |
 | docs: FIDELITY-LEADS J38, BOARD-FEATURES, MF-6 inventory | done |
-| perf against `e4596884` | see below |
+| perf against `e4596884` (clean builds, 9202e28d) | done: core mm2 +0.003 %, zelda2 +0.002 %, smb3 +0.002 %; totals within ±0.002 % |
 | real BIOS + `fdsirqtests` | waits for the owner's `disksys.rom` |
