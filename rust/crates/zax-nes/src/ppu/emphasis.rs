@@ -43,10 +43,16 @@ impl Ppu2C02 {
 
     /// The colour subcarrier's phase at the start of the frame just drawn (0 to 11), for
     /// [`crate::composite::RowDecoder`]: picture row `r` starts at `phase + 4 r` (mod 12) plus a
-    /// constant, a constant that does not change the decoded colours.
+    /// constant, a constant that does not change the decoded colours. On the PAL 2C07,
+    /// [`crate::composite::PAL_VIDEO`]: its phases depend on the line alone
+    /// ([`crate::composite::RowDecoder::decode_row_pal`]).
     #[must_use]
     pub const fn video_phase(&self) -> usize {
-        self.video_phase as usize
+        if matches!(self.timing.region, crate::NesRegion::Pal) {
+            crate::composite::PAL_VIDEO
+        } else {
+            self.video_phase as usize
+        }
     }
 
     /// Whether the frame just drawn showed any emphasis.

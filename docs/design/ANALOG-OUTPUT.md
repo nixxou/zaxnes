@@ -81,3 +81,32 @@ D1a's cost on the standard path (callgrind, clean builds against 6c9cb163, PR-1 
 +0.417 % with that branch out of line, and **-0.057 %** at 7edd528e, where the setter is back to
 its pre-profile form and the profile's expansion step is made on the mix's cache miss the move
 forces (every other ROM of the set -0.09 % to -0.19 %).
+
+D2c (2026-11-16): the PAL 2C07's composite signal, measured on the Visual 2C07 netlist
+(`ext-tools/visual2c07-tools/benchvid.cpp`: rendering off, each palette colour and emphasis value
+put on screen by register writes on the pins, the video DAC's level select read every master
+half-clock; 64 colours x 8 emphases x 2 lines; `vidmodel.py` reproduces all 1 024 records):
+
+* colour `h` is high for six of the 12 subcarrier phases from `h` on odd lines and from `5 - h` on
+  even ones (the phase mirrored every other line, PAL's V switch); the burst six phases from 10 on
+  odd lines, 7 on even (90 degrees apart, the PAL swinging burst);
+* emphasis bit 0 attenuates six phases from 5 on odd lines and 1 on even, bit 1 the reverse, bit 2
+  from 9 on both; `$xE` / `$xF` output the blanking level and take no emphasis;
+* a pixel is 10 half-clocks, a line 3 410 (2 phases more than whole cycles), a frame of 312 lines a
+  whole number of cycles: the colour pattern stands still from frame to frame (no dot crawl);
+* the picture starts with two border pixels at the blanking level on each side (252 coloured).
+
+`composite::pal_signal`, `RowDecoder::decode_row_pal` (the set's decoder: U and V against the
+burst's mean axis, V switched every other line, then the PAL-D delay line averaging each line's
+chroma with the one above), selected by `NesCore::video_phase` returning `PAL_VIDEO` on the 2C07;
+application and harness (`ZAXNES_COMPOSITE=1`, and `ZAXNES_REGION=pal` to force the region of a
+dump whose header says NTSC). Same option and cost as D2b (`video.composite_signal`, off).
+
+Choices and limits: the netlist gives the DAC's select, not the ladder's voltages, so the 2C02's
+measured levels are used; which line the set takes as V-inverted is read from the burst's swing,
+and only one of the two readings gives sensible hues (the other mirrors every hue about the U
+axis), recorded as such; the resulting hues relative to the burst are the 2C02's turned by -15
+degrees. The same bench on the 2C02 netlist puts colour `$x8` in phase with the burst, as nesdev
+says, which fixes the bench's direction of rotation. The two border pixels are not drawn by the
+core's picture (it keeps 256 columns). Dendy keeps the NTSC generator (its PPU is not measured).
+

@@ -2773,7 +2773,16 @@ fn decode_composite(state: &mut RunState, width: usize, video_phase: Option<usiz
             &[]
         };
         let out = &mut state.picture_rgb[row * width * 3..(row + 1) * width * 3];
-        state.composite.decode_row(pixels, emphasis, phase, out);
+        if video_phase & zax_nes::composite::PAL_VIDEO != 0 {
+            // The 2C07 (lot FIDPLUS-D2c): the phase follows the picture line and column.
+            #[allow(clippy::cast_possible_wrap)] // a picture is far below i64::MAX rows
+            let (line, first_x) = (row as i64 - margin_y as i64, -(margin as i64));
+            state
+                .composite
+                .decode_row_pal(pixels, emphasis, line, first_x, out);
+        } else {
+            state.composite.decode_row(pixels, emphasis, phase, out);
+        }
     }
 }
 

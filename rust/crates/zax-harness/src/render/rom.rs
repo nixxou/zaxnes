@@ -586,7 +586,14 @@ impl Host {
             )));
         }
 
-        core.set_region(load.region);
+        // `ZAXNES_REGION=pal` / `ntsc`: the region forced over the header's (the 2C07's composite
+        // picture of a dump whose iNES header says NTSC, lot FIDPLUS-D2c).
+        let region = match std::env::var("ZAXNES_REGION").as_deref() {
+            Ok("pal") => zax_nes::NesRegion::Pal,
+            Ok("ntsc") => zax_nes::NesRegion::Ntsc,
+            _ => load.region,
+        };
+        core.set_region(region);
         if let Some(battery) = startup.battery {
             // REQ-CORE-095: the battery RAM is imported before the reset, as the application
             // does, so the run starts from the player's saved game.

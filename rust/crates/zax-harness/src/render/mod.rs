@@ -1114,12 +1114,14 @@ fn write_composite_picture(
             .map(|&pixel| pixel & 0x3F)
             .collect();
         let bits = emphasis.get(row * width..(row + 1) * width).unwrap_or(&[]);
-        decoder.decode_row(
-            &pixels,
-            bits,
-            phase,
-            &mut rgb[row * width * 3..(row + 1) * width * 3],
-        );
+        let out = &mut rgb[row * width * 3..(row + 1) * width * 3];
+        if video_phase & zax_nes::composite::PAL_VIDEO != 0 {
+            #[allow(clippy::cast_possible_wrap)] // a picture is far below i64::MAX rows
+            let (line, first_x) = (row as i64 - margin_y as i64, -(margin as i64));
+            decoder.decode_row_pal(&pixels, bits, line, first_x, out);
+        } else {
+            decoder.decode_row(&pixels, bits, phase, out);
+        }
     }
     let pixels: Vec<u8> = rgb
         .chunks_exact(3)

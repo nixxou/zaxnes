@@ -173,9 +173,91 @@ pub struct RowDecoder {
     luma: Vec<f32>,
     in_phase: Vec<f32>,
     quadrature: Vec<f32>,
+    /// PAL: the previous line's U and V per pixel and its number, for the delay line.
+    previous_u: Vec<f32>,
+    previous_v: Vec<f32>,
+    previous_line: Option<i64>,
 }
 
 impl RowDecoder {
+    /// Decodes one row of the picture as a PAL television sees the 2C07's signal (lot
+    /// FIDPLUS-D2c): `line` the picture line (0 the first; the rows of a widescreen margin above
+    /// are negative), `first_x` the screen column of `pixels[0]` (negative in a left margin).
+    /// Luma over one subcarrier cycle, U and V over two against the burst's axis, V's sign
+    /// switched every other line, then the set's delay line: U and V averaged with the line above
+    /// when it was decoded just before (PAL-D). Writes R, G, B (0 to 255) per pixel.
+    pub fn decode_row_pal(
+        &mut self,
+        pixels: &[u8],
+        emphasis: &[u8],
+        line: i64,
+        first_x: i64,
+        out: &mut [u8],
+    ) {
+        let samples = pixels.len() * PAL_SAMPLES_PER_PIXEL;
+        for sums in [&mut self.luma, &mut self.in_phase, &mut self.quadrature] {
+            sums.clear();
+            sums.resize(samples + 1, 0.0);
+        }
+        let tables = pal_decode_tables();
+        let odd = line.rem_euclid(2) == 1;
+        let sign = pal_v_sign(odd);
+        let (mut y, mut u, mut v) = (0.0_f32, 0.0_f32, 0.0_f32);
+        let mut at = pal_pixel_phase(line, first_x);
+        let mut index = 1;
+        for (x, &pixel) in pixels.iter().enumerate() {
+            let bits = emphasis.get(x).copied().unwrap_or(0) & 7;
+            let base = ((usize::from(pixel & 0x3F) << 3 | usize::from(bits)) * 2
+                + usize::from(odd))
+                * PHASES;
+            let levels = &tables.levels[base..base + PHASES];
+            for _ in 0..PAL_SAMPLES_PER_PIXEL {
+                let level = levels[at];
+                y += level;
+                u += level * tables.cos[at];
+                v += sign * level * tables.sin[at];
+                self.luma[index] = y;
+                self.in_phase[index] = u;
+                self.quadrature[index] = v;
+                index += 1;
+                at += 1;
+                if at == PHASES {
+                    at = 0;
+                }
+            }
+        }
+        let window = |sums: &[f32], centre: usize, width: usize| -> f32 {
+            let from = centre.saturating_sub(width / 2);
+            let to = (from + width).min(samples);
+            let from = to.saturating_sub(width);
+            #[allow(clippy::cast_precision_loss)] // at most 24
+            let count = (to - from) as f32;
+            (sums[to] - sums[from]) / count
+        };
+        let delayed = self.previous_line == Some(line - 1) && self.previous_u.len() == pixels.len();
+        self.previous_u.resize(pixels.len(), 0.0);
+        self.previous_v.resize(pixels.len(), 0.0);
+        for (x, rgb) in out.chunks_exact_mut(3).take(pixels.len()).enumerate() {
+            let centre = x * PAL_SAMPLES_PER_PIXEL + PAL_SAMPLES_PER_PIXEL / 2;
+            let y = window(&self.luma, centre, LUMA_WINDOW);
+            let mut u = 2.0 * window(&self.in_phase, centre, CHROMA_WINDOW);
+            let mut v = 2.0 * window(&self.quadrature, centre, CHROMA_WINDOW);
+            let (here_u, here_v) = (u, v);
+            if delayed {
+                u = f32::midpoint(u, self.previous_u[x]);
+                v = f32::midpoint(v, self.previous_v[x]);
+            }
+            self.previous_u[x] = here_u;
+            self.previous_v[x] = here_v;
+            for (byte, value) in rgb.iter_mut().zip(yuv_to_rgb(y, u, v)) {
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0 to 255
+                let value = (value * 255.0).round() as u8;
+                *byte = value;
+            }
+        }
+        self.previous_line = Some(line);
+    }
+
     /// Decodes one row of the picture as a television would see the 2C02's signal (lot
     /// FIDPLUS-D2b step 2): `pixels` colour indices (6 bits used), `emphasis` the emphasis of
     /// each (0 to 7; empty for none), `phase` the subcarrier phase of the row's first sample.
@@ -254,6 +336,192 @@ impl RowDecoder {
 pub const fn next_frame_phase(frame_phase: usize, skipped_dot: bool) -> usize {
     let advance = if skipped_dot { PHASES - 4 } else { 4 };
     (frame_phase + advance) % PHASES
+}
+
+// ----- Lot FIDPLUS-D2c: the PAL 2C07 -----------------------------------------------------------
+//
+// Measured on the Visual 2C07 netlist (`ext-tools/visual2c07-tools/benchvid.cpp`, every colour and
+// emphasis on two consecutive lines, the DAC's level select read every master half-clock;
+// `vidmodel.py` reproduces all 1 024 records). The 2C07's subcarrier (4.43 MHz) is also the
+// master clock / 6, 12 half-clock phases a cycle; a pixel lasts 5 master clocks, 10 phases; a line
+// of 341 dots is 3 410 half-clocks, 2 more than a whole number of cycles; a frame of 312 lines is
+// a whole number of cycles, so the pattern does not crawl from frame to frame. The phases below
+// count from the netlist bench's half-clock counter; only their differences reach a television,
+// which locks on the burst.
+//
+// * colour `h` (1 to 12) is at its row's high level for six phases from `h` on odd lines and from
+//   `5 - h` on even lines: the 2C07 mirrors the phase every other line, as PAL's V switch wants;
+// * the burst is high for six phases from 10 on odd lines, 7 on even ones (90 degrees apart);
+// * emphasis bit 0 attenuates six phases from 5 on odd lines, 1 on even; bit 1 from 1 on odd, 5 on
+//   even (the two bits trade places with the line); bit 2 from 9 on both;
+// * colours `$xE` / `$xF` output the blanking level and no emphasis touches them;
+// * the first pixel of a picture line starts at phase `4 + 2 line` (pixel `x` at `+ 10 x`).
+//
+// The levels are the 2C02's (`LEVELS`, `ATTENUATED`): the netlist gives the select, not the
+// resistor ladder's voltages (FIDELITY-LEADS H2).
+
+/// Half-clock samples a 2C07 pixel lasts.
+pub const PAL_SAMPLES_PER_PIXEL: usize = 10;
+
+/// What [`crate::NesCore::video_phase`] returns on the 2C07: the PAL decoder's marker (its phases
+/// depend on the line alone).
+pub const PAL_VIDEO: usize = 1 << 8;
+
+/// Whether `phase` falls in the six phases from `start`.
+const fn in_half_cycle(start: usize, phase: usize) -> bool {
+    (phase + PHASES - start % PHASES) % PHASES < 6
+}
+
+/// The 2C07's emphasis windows: per bit, the first phase on even and on odd lines.
+const PAL_EMPHASIS_START: [[usize; 2]; 3] = [[1, 5], [5, 1], [9, 9]];
+
+/// The 2C07's signal, in volts, of palette entry `pixel` with emphasis `emphasis` (`$2001` bits
+/// 5-7 as 0-7) at phase `phase` of a line of parity `odd`.
+#[must_use]
+pub fn pal_signal(pixel: u8, emphasis: u8, phase: usize, odd: bool) -> f32 {
+    let hue = usize::from(pixel & 0x0F);
+    if hue >= 14 {
+        return BLACK;
+    }
+    let row = usize::from((pixel >> 4) & 3);
+    let phase = phase % PHASES;
+    let index = match hue {
+        0 => row + 4,
+        13 => row,
+        _ => {
+            let start = if odd { hue } else { (PHASES + 5 - hue) % PHASES };
+            if in_half_cycle(start, phase) {
+                row + 4
+            } else {
+                row
+            }
+        }
+    };
+    let attenuated = (0..3).any(|bit| {
+        emphasis >> bit & 1 != 0 && in_half_cycle(PAL_EMPHASIS_START[bit][usize::from(odd)], phase)
+    });
+    if attenuated {
+        ATTENUATED[index]
+    } else {
+        LEVELS[index]
+    }
+}
+
+/// The phase of the first sample of pixel `x` of picture line `line` (negative values: the
+/// widescreen margins before the picture).
+#[must_use]
+pub const fn pal_pixel_phase(line: i64, x: i64) -> usize {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..12
+    let phase = (4 + 2 * line + 10 * x).rem_euclid(12) as usize;
+    phase
+}
+
+/// The burst's first high phase on a line of parity `odd`.
+#[must_use]
+pub const fn pal_burst_start(odd: bool) -> usize {
+    if odd {
+        10
+    } else {
+        7
+    }
+}
+
+/// The real subcarrier angle of phase `phase`, in degrees: the subcarrier runs backwards against
+/// the phase count (on the 2C02 the same bench puts colour `$x8` in phase with the burst and the
+/// hues then go round as a television decodes them only this way).
+fn pal_phase_angle(phase: f32) -> f32 {
+    -30.0 * (phase + 0.5)
+}
+
+/// The U axis, in degrees: opposite the mean of the two lines' burst angles, as a PAL set locks.
+fn pal_u_axis() -> f32 {
+    // A six-phase square wave's fundamental points at its centre, 2.5 phases past its start.
+    let odd = pal_phase_angle(f32::from(u8::try_from(pal_burst_start(true)).unwrap_or(0)) + 2.5);
+    let even = pal_phase_angle(f32::from(u8::try_from(pal_burst_start(false)).unwrap_or(0)) + 2.5);
+    let (sin, cos) = (
+        odd.to_radians().sin() + even.to_radians().sin(),
+        odd.to_radians().cos() + even.to_radians().cos(),
+    );
+    sin.atan2(cos).to_degrees() + 180.0
+}
+
+/// The sign of V on a line of parity `odd`. The set reads the V switch from the burst's swing;
+/// with this chip's two bursts, taking the line whose burst lies 45 degrees after the U axis' back
+/// as the inverted one gives the hues of the 2C02 turned by -15 degrees (the PAL console's known
+/// tint), the other choice every hue mirrored about the U axis.
+const fn pal_v_sign(odd: bool) -> f32 {
+    if odd {
+        -1.0
+    } else {
+        1.0
+    }
+}
+
+/// What [`RowDecoder::decode_row_pal`] reads per sample: the level (0 black, 1 white) of every
+/// colour, emphasis, line parity and phase, and the demodulation's cosine and sine against the U
+/// axis.
+struct PalDecodeTables {
+    levels: Vec<f32>,
+    cos: [f32; PHASES],
+    sin: [f32; PHASES],
+}
+
+fn pal_decode_tables() -> &'static PalDecodeTables {
+    static TABLES: std::sync::OnceLock<PalDecodeTables> = std::sync::OnceLock::new();
+    TABLES.get_or_init(|| {
+        let span = WHITE - BLACK;
+        let mut levels = Vec::with_capacity(64 * 8 * 2 * PHASES);
+        for pixel in 0..64u8 {
+            for emphasis in 0..8u8 {
+                for odd in [false, true] {
+                    for phase in 0..PHASES {
+                        levels.push((pal_signal(pixel, emphasis, phase, odd) - BLACK) / span);
+                    }
+                }
+            }
+        }
+        let axis = pal_u_axis();
+        let mut cos = [0.0; PHASES];
+        let mut sin = [0.0; PHASES];
+        for phase in 0..PHASES {
+            #[allow(clippy::cast_precision_loss)] // phase < 12
+            let angle = (pal_phase_angle(phase as f32) - axis).to_radians();
+            cos[phase] = angle.cos();
+            sin[phase] = angle.sin();
+        }
+        PalDecodeTables { levels, cos, sin }
+    })
+}
+
+/// A flat field of one colour on a PAL set: Y, U and V over a whole subcarrier cycle of each line
+/// parity, the two lines averaged by the set's delay line, then the PAL YUV matrix. 0 to 1.
+#[must_use]
+pub fn pal_decode_uniform(pixel: u8, emphasis: u8) -> [f32; 3] {
+    let tables = pal_decode_tables();
+    let (mut y, mut u, mut v) = (0.0_f32, 0.0_f32, 0.0_f32);
+    for odd in [false, true] {
+        let base = ((usize::from(pixel & 0x3F) << 3 | usize::from(emphasis & 7)) * 2
+            + usize::from(odd))
+            * PHASES;
+        for phase in 0..PHASES {
+            let level = tables.levels[base + phase];
+            y += level;
+            u += level * tables.cos[phase];
+            v += pal_v_sign(odd) * level * tables.sin[phase];
+        }
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let count = (2 * PHASES) as f32;
+    yuv_to_rgb(y / count, 2.0 * u / count, 2.0 * v / count)
+}
+
+/// The PAL YUV matrix, clamped to 0..1.
+fn yuv_to_rgb(y: f32, u: f32, v: f32) -> [f32; 3] {
+    [
+        (y + 1.140 * v).clamp(0.0, 1.0),
+        (y - 0.395 * u - 0.581 * v).clamp(0.0, 1.0),
+        (y + 2.032 * u).clamp(0.0, 1.0),
+    ]
 }
 
 #[cfg(test)]
@@ -384,6 +652,54 @@ mod tests {
         assert!(red.iter().sum::<f32>() < plain.iter().sum::<f32>());
         // Red emphasis keeps red the strongest of the three.
         assert!(red[0] >= red[1] && red[0] >= red[2], "{red:?}");
+    }
+
+    #[test]
+    fn fidplus_d2c_pal_hues_are_the_ntsc_ones_turned_and_flat_rows_decode_uniformly() {
+        // The PAL console's colours: red still red, green green, blue blue, white and black.
+        let [r, g, b] = pal_decode_uniform(0x16, 0);
+        assert!(r > g && r > b, "red {r} {g} {b}");
+        let [r, g, b] = pal_decode_uniform(0x1A, 0);
+        assert!(g > r && g > b, "green {r} {g} {b}");
+        let [r, g, b] = pal_decode_uniform(0x12, 0);
+        assert!(b > r && b > g, "blue {r} {g} {b}");
+        assert!(pal_decode_uniform(0x30, 0).iter().all(|&c| c > 0.95));
+        assert!(pal_decode_uniform(0x0F, 0).iter().all(|&c| c < 0.01));
+        // A flat field: a row after its predecessor decodes as the uniform colour.
+        let mut decoder = RowDecoder::default();
+        let mut out = [0u8; 64 * 3];
+        for pixel in [0x16_u8, 0x2A, 0x21, 0x37] {
+            for line in 10..12 {
+                decoder.decode_row_pal(&[pixel; 64], &[], line, 0, &mut out);
+            }
+            let expected = pal_decode_uniform(pixel, 0);
+            for (channel, &value) in expected.iter().enumerate() {
+                let got = f32::from(out[32 * 3 + channel]) / 255.0;
+                assert!((got - value).abs() < 0.02, "{pixel:#x}: {got} {value}");
+            }
+        }
+    }
+
+    #[test]
+    fn fidplus_d2c_pal_signal_follows_the_netlist() {
+        // Records of `benchvid` (Visual 2C07): $16 high for six phases from 6 on odd lines and
+        // from 11 on even ones; red emphasis on white attenuates phases 5-10 on odd lines; $0E
+        // stays at the blanking level whatever the emphasis.
+        for phase in 0..PHASES {
+            let odd = signal_high(0x16, phase, true);
+            let even = signal_high(0x16, phase, false);
+            assert_eq!((6..12).contains(&phase), odd, "odd {phase}");
+            assert_eq!(phase == 11 || phase < 5, even, "even {phase}");
+            let attenuated = pal_signal(0x30, 1, phase, true) < LEVELS[7];
+            assert_eq!((5..11).contains(&phase), attenuated, "emphasis {phase}");
+            assert!((pal_signal(0x0E, 7, phase, true) - BLACK).abs() < 1e-6);
+        }
+        // Line 21 of the bench started its first pixel at phase 10; a pixel later, 8.
+        assert_eq!((10, 8), (pal_pixel_phase(21, 0), pal_pixel_phase(21, 1)));
+    }
+
+    fn signal_high(pixel: u8, phase: usize, odd: bool) -> bool {
+        pal_signal(pixel, 0, phase, odd) > LEVELS[usize::from(pixel >> 4)] + 0.01
     }
 
     #[test]

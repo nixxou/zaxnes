@@ -736,6 +736,16 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   `$2004`-based decay measurement, ours included, needs a G-or-later PPU; FireSide's figures come
   from such a console.
 
+### D2c. PAL composite and the colour/emphasis leads it found (2026-11-16)
+- Done: the 2C07's signal from its netlist (ANALOG-OUTPUT D2c). Leads left: (1) the DAC voltages of
+  the 2C07 are the 2C02's (no measurement); (2) the 2C07's 2-pixel left/right border at the
+  blanking level is not in the core's picture; (3) on the 2C07 emphasis leaves `$xE`/`$xF` alone;
+  the 2C02 generator (`composite::signal`) attenuates them: to check against the 2C02 netlist with
+  the same bench (`benchvid <visualnes-src/Core>`); (4) Dendy's PPU (UA6538) keeps the NTSC model.
+- The bench's line parity is the netlist's `vpos` bit 0; the phase origin is the bench's
+  half-clock counter. Whether a real 2C07 powers up with another relation between its /5 dot
+  divider and its /6 subcarrier divider (which would move the pixel's phase) is not known.
+
 ### D2b. Performance lead found on the way (lot FIDELITY, not fidelity) — tried and dropped (FIDPLUS-1)
 - Callgrind `f4185fa8` vs `27e2c3e2`: the APU stage costs +0.8 to +0.9 % on every game (+17 to
   +21 M instructions per 600 frames) while the PPU stage gains 0.24 %; totals are -0.03 to
