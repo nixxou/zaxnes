@@ -2904,7 +2904,7 @@ impl Ppu2C02 {
             self.address_load_collision();
         }
         let next = self.dot + 1;
-        if self.fetching() && matches!(next, 2..=256 | 322..=336) {
+        if self.fetching() && matches!(next, 1..=256 | 321..=336) {
             let hybrid = |address: u16, old: u16| (address & 0xFF00) | (old & 0x00FF);
             match (next - 1) & 0x07 {
                 1 => {
@@ -2919,6 +2919,16 @@ impl Ppu2C02 {
                         (self.peek_vram::<K>(address, ChrFetch::Background, cart.as_deref())
                             >> shift)
                             & 0x03;
+                }
+                0 | 2 => {
+                    // The next dot starts a nametable or attribute fetch (8k+1, 8k+3): the
+                    // netlist loads `v` in the middle of this dot, so that fetch's ALE already
+                    // carries the new address (transistor netlist, `g2006x` e4, bus comparison
+                    // 2026-11-16: a write on dot 95 puts `$2BED` on the bus on dot 99, not the
+                    // old `$23D3`). This core reads the byte on that first dot, so the tile or
+                    // attribute of that fetch came from the old address too. No increment falls
+                    // on these dots.
+                    self.v = self.t;
                 }
                 _ => {}
             }
