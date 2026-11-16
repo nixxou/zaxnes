@@ -30,8 +30,11 @@ android = ["zax-platform/android"]
 wgpu = ["dep:wgpu", "zax-render/wgpu", "zax-platform/wgpu"]
 # RetroArch slang shaders on the game picture (prototype: `ZAXNES_SHADER=<preset.slangp>`).
 shaders = ["wgpu", "zax-platform/shaders"]
-# FCEUX as a second emulation engine, chosen per game (`emu.engine`); lot FCEUX-23. **Off by
-# default**: with it off `zax-fceux` is not a dependency at all, no C is linked, the engine row is
+# FCEUX as a second emulation engine, chosen per game (`emu.engine`); lot FCEUX-23. **Every
+# released build has it**: the four packaging scripts of `rust/build/` (Windows, Linux x64 and
+# aarch64, Android) turn it on. It is off only for a bare `cargo build`/`cargo test`, because
+# FCEUX's C sources live in the fork, not in this repository, and must be built first (owner's
+# choice, 2026-11-16). With it off `zax-fceux` is not a dependency at all, no C is linked, the engine row is
 # not shown and the per-game value is read and written without error but ignored — the binary is
 # the one it always was. On, it needs the fork `cleanroom/fceux-zax` built first
 # (`zax-fceux/build.rs` says how), and shipping it carries the licence duty of §10 of
