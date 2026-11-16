@@ -2942,10 +2942,19 @@ impl Ppu2C02 {
         if !increments || !self.fetching() {
             return;
         }
+        // The 2C07 (Visual 2C07, `g2006w`, 193 collisions at reset phases e0/e3/e6/e9, lot
+        // FIDPLUS-C C3c-collision): a coarse-X collision ANDs nametable X as well as coarse X,
+        // and `t` keeps the written nametable bits (put back by the `$2006` write after `v`
+        // takes this value, [`Self::write`]).
+        let x_fields = if matches!(self.timing.region, NesRegion::Pal) {
+            0x041F
+        } else {
+            0x001F
+        };
         self.t = if dot == 256 {
             self.t & self.v
         } else {
-            (self.t & !0x001F) | (self.t & self.v & 0x001F)
+            (self.t & !x_fields) | (self.t & self.v & x_fields)
         };
     }
 
@@ -3271,6 +3280,7 @@ impl Ppu2C02 {
                     {
                         self.address_write_on_copy();
                     }
+                    let written = self.t;
                     if (self.address_load_delay || self.bus_conflicts) && self.fetching() {
                         self.delay_address_load(&mut cartridge);
                     } else if self.address_load_delay
@@ -3284,6 +3294,10 @@ impl Ppu2C02 {
                     let delayed = self.prepaid_dots == 4
                         || (self.prepaid_dots == 3 && matches!(self.timing.region, NesRegion::Pal));
                     self.v = self.t;
+                    if self.t != written && matches!(self.timing.region, NesRegion::Pal) {
+                        // C3c-collision: the 2C07's `t` keeps the written nametable bits.
+                        self.t |= written & 0x0C00;
+                    }
                     if delayed {
                         self.increment_after_delayed_load();
                     }

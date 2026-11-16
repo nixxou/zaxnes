@@ -799,7 +799,7 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   half-clock counter. Whether a real 2C07 powers up with another relation between its /5 dot
   divider and its /6 subcarrier divider (which would move the pixel's phase) is not known.
 
-### C3c-collision. PAL `$2006` load colliding with dot 256 (2026-11-16, open)
+### C3c-collision. PAL `$2006` load colliding with an increment of `v` (2026-11-16, rule done)
 - Visual 2C07, `g2006x` at reset phases e0/e3/e6, line 54 (and 148, 223): `v` = `$210C`,
   `t` = `$2A08`; second `$2006` write `$D7` on dot 253. Netlist: the load lands on dot 256 and
   leaves `v` = `$2005`, `t` = `$2805` (dots 256-281). Zaxnes: the load lands on dot 257 (one dot
@@ -810,6 +810,25 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   cycle phase. One value pattern only: a dedicated program (several written values, nametable
   bits set and clear, writes on dots 248-256 at every cycle phase) is needed before a rule.
   Cost today: 14 long runs over five frames at each reset phase, about 4 900 dots a frame.
+- **Dedicated program `g2006w` (2026-11-16)**: second `$2006` writes looping over `$2108`,
+  `$2AD7`, `$2D5A`, `$25A5` (the four nametable cases), 51-cycle loop sliding over every dot;
+  Visual 2C07 at reset phases e0, e3, e6, e9 (`ext-tools/visual2c07-tools`: `c3ccoll.py`
+  extracts each write near dot 256, `c3crule.py` checks the rule). **All 193 collisions fit**:
+  * on the dot-256 increment (X and Y): `v` = written AND incremented, every field;
+  * on a coarse-X increment: coarse X **and nametable X** (`$041F`) written AND incremented,
+    the rest written (the 2C02 rule of A3c ANDs coarse X only, `$001F`);
+  * `t` = `v` with the **written nametable bits** (`$0C00`) kept; on the 2C02 `t` = `v`.
+- **Done in the standard core** (`Ppu2C02::address_load_collision` and the `$2006` write, PAL
+  only): judge `c3cjudge.py` at e3 (dot phase 2, phase -14), long runs (> 2 dots) on rendered
+  lines per aligned frame **55-60 before, 3-6 after**; golden-core 98 games x 1800 frames
+  identical; zax-nes tests green.
+- **Two leads left**, seen in those 3-6 runs:
+  * the load lands a dot late on some cycle phases: a write on dot 254 loads on dot 256 in the
+    netlist (collision, then the dot-257 copy completes `v`), on 257 in Zaxnes (copy first,
+    then the load). The PAL load delay (2 dots on accumulator phase 0, 3 otherwise, from
+    `g2006x`) needs refining per phase;
+  * a **first** `$2006` write on dot 257: the netlist's horizontal copy already takes the new
+    nametable-X bit from `t`, Zaxnes copies the old one (22 dots, until the next copy).
 
 ### D2b. Performance lead found on the way (lot FIDELITY, not fidelity) — tried and dropped (FIDPLUS-1)
 - Callgrind `f4185fa8` vs `27e2c3e2`: the APU stage costs +0.8 to +0.9 % on every game (+17 to
