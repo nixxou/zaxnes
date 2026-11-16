@@ -827,7 +827,8 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
     netlist (collision, then the dot-257 copy completes `v`), on 257 in Zaxnes (copy first,
     then the load). The PAL load delay (2 dots on accumulator phase 0, 3 otherwise, from
     `g2006x`) needs refining per phase;
-  * a **first** `$2006` write on dot 257: the netlist's horizontal copy already takes the new
+  * (done 2026-11-16, `Ppu2C02::first_address_write_on_copy`, judge 3-6 -> 1-2 long runs a
+    frame, golden-core identical) a **first** `$2006` write on dot 257: the netlist's horizontal copy already takes the new
     nametable-X bit from `t`, Zaxnes copies the old one (22 dots, until the next copy).
 
 ### D2b. Performance lead found on the way (lot FIDELITY, not fidelity) — tried and dropped (FIDPLUS-1)
