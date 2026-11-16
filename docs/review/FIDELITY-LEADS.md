@@ -888,7 +888,13 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
     (alignments 0/1) `g2000`, `g2005`, `g2006x`, `r2007` are clean; `g3e01px` and `oam` hit
     step 33's switch-on race on every switch on (`A 0 86 W2001=0A`: `v` `$0006` -> `$0000`, a
     horizontal copy from `t`, then fetches), present or not with the bench's hold time: not
-    trusted, not ported, as before;
+    trusted, not ported, as before. **Settled at half-step resolution** (adversarial review
+    point 7, `visualnes-bench/benchdbg.cpp`, `g3e01px` e0): `v` takes `t` in the very
+    half-step where /CS rises and `rendering_1`/`rendering_2` go high, and the copy node
+    `copy_vramaddr_hscroll` is never seen high; on a normal dot 257 the same node is high for
+    four half-steps (`v` `$1C01` -> `$1800`). The switch-on copy is a pulse inside one
+    zero-delay settling step, an evaluation-order race of the switch-level simulation, not a
+    timing the chip holds;
   * dedicated programs for the value patterns the corpus measures once (`$2001` values other
     than `$0A`/`$1E`/`$00`, a read on the copy dots with `t` having more vertical bits set).
 
