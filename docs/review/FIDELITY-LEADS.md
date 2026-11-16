@@ -895,6 +895,18 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
     four half-steps (`v` `$1C01` -> `$1800`). The switch-on copy is a pulse inside one
     zero-delay settling step, an evaluation-order race of the switch-level simulation, not a
     timing the chip holds;
+  * (2026-11-16, review point 6) **the benches' CHR memory**: `handleChrBus` latches the low
+    address on ALE's rising edge and drives the data on /RD's falling edge, where a 74LS373 is
+    transparent while ALE is high and the memory answers the level. A level-sensitive variant
+    (`visualnes-bench/macros_hold_lvl.cpp`, `benchdot2lvl.exe`), NTSC `r2007` e4 against the
+    same run on the edge bench: **`v` and `t` identical on all 851 968 dots** (no C3c rule
+    depends on it); 1 806 dots differ in `inbuf`, 114 in the ALE address, mostly the ALE +
+    Read case (edge bench: refetch at `$20CA` with the residue byte; level variant: `$2000`).
+    The variant does not model the contention of PPU and memory on AD0-7 when ALE and /RD
+    overlap, so neither bench is authoritative on bus values; AccuracyCoin (`ALE + Read`,
+    `$2007 Stress Test`, written against a console) passes with the current model. Bus and
+    buffer values stay judged by hardware tests, not by the netlist; C1's open question is
+    still the SMB3 Japan line 193 video (I1);
   * dedicated programs for the value patterns the corpus measures once (`$2001` values other
     than `$0A`/`$1E`/`$00`, a read on the copy dots with `t` having more vertical bits set).
 
