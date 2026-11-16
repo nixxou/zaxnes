@@ -838,6 +838,43 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
     frame, golden-core identical) a **first** `$2006` write on dot 257: the netlist's horizontal copy already takes the new
     nametable-X bit from `t`, Zaxnes copies the old one (22 dots, until the next copy).
 
+### C3c-corpus. The PAL corpus at the four reset phases (2026-11-16)
+- All eleven programs (`g2000`, `g2001px`, `g2005`, `g2005px`, `g2006px`, `g2006w`, `g2006x`,
+  `g3e01px`, `oam`, `r2007`, `rmw`) traced on Visual 2C07 + the 2A03 netlist at reset phases e0,
+  e3, e6, e9 (`runcorpus.ps1`) and judged with `c3cphases.py` (Zaxnes dot phase / offset searched
+  per trace, then runs longer than 2 dots on rendered lines of the aligned frames).
+- **`$2007` read on a pre-render vertical copy dot** (`r2007` e0, 240 lines off): a read whose
+  X+Y increment latches on dot 278, the first PAL vertical copy dot, turns `v` = `$7040`,
+  `t` = `$2000` into `v` = `$0001`, `t` = `$0000`. The increment of `$7040` is `$0061`; the copy
+  and the increment meet on the vertical bits and **both registers keep the AND** (`$0061 &
+  $2000`), as in the `$2006` load collision (low side wins); the horizontal bits keep the
+  increment. At e3/e6/e9 the same read latches on 277, before the copy, and `t` stays. A read
+  latching on dot 300 fits the same rule at every phase (`$2000 & $3002` keeps `t`). Done:
+  `Ppu2C02::read_increment_meets_vertical_copy`, PAL. **Odd latch dots alike**: `g2007v`,
+  aimed at the window (four `t` patterns from `$2000` / `$2005`, six reads latching on dots
+  268-291), at e3: a read latching on 289 turns `$7BC2` / `$7BC0` into `$0BC3` / `$0BC0`, one
+  on 285 `$5A81` / `$5A80` into `$4A82` / `$4A80`; `g2007v` matches at the four phases.
+- **`$2001` switch delay by dot phase** (`oam` e0, `g2001px` e9, `g3e01px` e9): each program
+  switches at one dot accumulator per reset phase, so the four phases of `oam` and `g2001px`
+  cover switch on and off at every accumulator. Measured by sweeping the delay table
+  (`c3csweep.py`, harness override `ZAX_PAL_2001`, dot-trace build only): **3 dots on
+  accumulators 0-2, 4 on 3-4**, the split of the `$2007` read latch (5 / 6). The previous
+  {0, 2} -> 3 table left 58 311 dots in long runs at `oam` e0 and 371 915 at `g2001px` e9;
+  the new one 0 on all eight traces. Done in `switch_rendering`.
+- **Final state**: the eleven programs and `g2007v` at every phase, 0 runs longer than 2 dots in
+  the aligned frames, with the dot phase each reset phase takes (e0 0, e3 2, e6 1, e9 0): a
+  search from dot phase 0 (`corpus-phases-final.txt`) can align the accesses of `g2001px`,
+  `g3e01px` and `oam` at e3/e6 on dot phase 0 too and then shows false runs. `g2005` e0 and
+  `rmw` e0 align on dot phases 1 and 3 and pair one frame each (the sliding programs' access
+  sequences differ in the others). golden-core: the
+  291 test ROMs identical to `core-goldens.jsonl`, the 18 games of `demo/roms` x 1800 frames
+  identical to the previous build; zax-nes tests green.
+- **Leads left**:
+  * the NTSC 2C02: same mechanism expected for the read on a vertical copy dot, unmeasured (the
+    NTSC traces have two reset phases only); worth a run at e0/e2 as well;
+  * dedicated programs for the value patterns the corpus measures once (`$2001` values other
+    than `$0A`/`$1E`/`$00`, a read on the copy dots with `t` having more vertical bits set).
+
 ### D2b. Performance lead found on the way (lot FIDELITY, not fidelity) — tried and dropped (FIDPLUS-1)
 - Callgrind `f4185fa8` vs `27e2c3e2`: the APU stage costs +0.8 to +0.9 % on every game (+17 to
   +21 M instructions per 600 frames) while the PPU stage gains 0.24 %; totals are -0.03 to
