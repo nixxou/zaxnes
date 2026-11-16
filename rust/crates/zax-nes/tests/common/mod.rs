@@ -425,7 +425,26 @@ pub fn run_shell_rom_kind(
     press_reset: bool,
     soft_reset: bool,
 ) -> RomRun {
+    run_shell_core(machine_with(image, "shell"), max_frames, press_reset, soft_reset)
+}
+
+/// [`run_shell_rom`] on a core the caller has configured (an option on, say).
+pub fn run_shell_rom_configured(
+    image: &[u8],
+    max_frames: i64,
+    configure: impl FnOnce(&mut NesCore),
+) -> RomRun {
     let mut core = machine_with(image, "shell");
+    configure(&mut core);
+    run_shell_core(core, max_frames, true, false)
+}
+
+fn run_shell_core(
+    mut core: NesCore,
+    max_frames: i64,
+    press_reset: bool,
+    soft_reset: bool,
+) -> RomRun {
     let mut frames = 0;
     let mut started = false;
     let mut reset_delay = 0;
@@ -507,7 +526,22 @@ pub fn run_shell_rom_kind(
 /// Runs a ROM of the 2005-era suites: it parks in a one-instruction endless loop once it has
 /// reported, and the result code, 1 meaning "passed", stays in `result_address`.
 pub fn run_legacy_rom(image: &[u8], max_frames: i64, result_address: u16) -> RomRun {
+    run_legacy_core(machine_with(image, "legacy"), max_frames, result_address)
+}
+
+/// [`run_legacy_rom`] on a core the caller has configured after the load.
+pub fn run_legacy_rom_configured(
+    image: &[u8],
+    max_frames: i64,
+    result_address: u16,
+    configure: impl FnOnce(&mut NesCore),
+) -> RomRun {
     let mut core = machine_with(image, "legacy");
+    configure(&mut core);
+    run_legacy_core(core, max_frames, result_address)
+}
+
+fn run_legacy_core(mut core: NesCore, max_frames: i64, result_address: u16) -> RomRun {
     let mut frames = 0;
     let mut parked_at = 0u16;
     let mut parked_frames = 0;

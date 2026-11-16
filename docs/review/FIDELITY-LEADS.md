@@ -746,8 +746,39 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
     0 bits lost for 1-7 frames, 6 at 8, 25 at 9, 69 at 10, 257 at 12, 816 at 15, 1 453 at 20,
     1 798 from 30 frames (878 to 0, 920 to 1; the other bits already sat at their resting value);
     the OAMADDR row (ROW31 in the ROM) keeps its bytes.
-  - Not measured: the law, its median and spread, the share of 0 and 1 resting values, temperature
+  - (Superseded below.) Not measured: the law, its median and spread, the share of 0 and 1 resting values, temperature
     (one internal scale, no option, owner 2026-11-16). One plausible console, not a measured one.
+- **Measured on hardware, model recalibrated (2026-11-16)**: FireSide ran our `oamdecay.nes` on
+  their NES (a G-or-later PPU, NTSC; NESdev Discord, a video of the result screen). Bits lost, TO 0
+  (after an all-`$FF` fill) / TO 1 (after an all-`$00` fill), out of 1800 measurable bits outside
+  row 31:
+
+  | frames | 1-6 | 7 | 8 | 9 | 10 | 12 | 15 | 20 | 30 | 45 | 60 | 90 | 120 |
+  |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+  | TO 0 | 0 | 0 | 4 | 9 | 11 | 39 | 90 | 110 | 230 | 510 | 839 | 1405 | 1406 |
+  | TO 1 | 0 | 2 | 4 | 5 | 6 | 9 | 21 | 29 | 86 | 205 | 350 | 433 | 432 |
+  | ROW31 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+  - **ROW31 = 0 throughout**: the row OAMADDR is parked on is held refreshed with rendering off.
+    The hypothesis above, and the model's held row, are confirmed.
+  - **Much slower than our guess**: half the losses by ~50 frames (0.85 s), all by 90 (1.5 s);
+    the guess had a 266 ms median and 566 ms maximum. The curve is not log-normal: a slow tail
+    from 7 frames, then most bits between 30 and 90 frames.
+  - **Resting values are lopsided**: 1406 to 0 against 432 to 1 (76 % / 24 %), not 50/50.
+  - **1406 + 432 = 1838 > 1800**: 38 bits (2 %) were lost in both passes, i.e. they end at the
+    complement of what was written rather than at a fixed level (or are noisy near the threshold).
+  - Model now (`OAM_RETENTION_US`, `oam_bit_rest`): the retention table is the pooled empirical
+    quantiles of this run, linear between the sampled frame counts (the 60-90 stretch is
+    unsampled); resting classes 0 / 1 / flips in proportions 1368 / 394 / 38 of 1800. A flipping
+    bit flips each time it outlives its retention unrefreshed (a refresh between two blanks starts
+    it over); repeated flips are a guess.
+  - **125 ms floor kept**: the measurement has 2 bits lost at 7 frames (~116 ms), but blargg's
+    `oam_stress` (passes on hardware) leaves rows 2-31 unrefreshed ~6.7 frames on average between
+    its refreshes and **fails with the raw quantiles** (code 1, 5 bytes). With the floor it
+    passes, decay on and off: test `fidplus_oam_stress_passes_with_the_oam_decay`. Either
+    FireSide's console is at the fast edge (it may not pass `oam_stress` itself, worth asking) or
+    the 7-frame point includes the ROM's own fill/read overhead.
+  - Still one console at one (unknown) temperature. Other consoles' runs would give the spread.
 - **Reading OAM on old PPUs (NESdev Discord, 2026-11-16)**: a tester ran a decay ROM on a
   letterless and an E-revision PPU and read all `$00`; reply on the thread: PPU revisions before G
   do not support reading OAMDATA (`$2004`). Zaxnes already models it (`pre_g_revision`). So any
