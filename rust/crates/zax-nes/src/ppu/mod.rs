@@ -2900,6 +2900,42 @@ impl Ppu2C02 {
         self.prepaid_dots = delay + 1;
     }
 
+    /// A second `$2006` write on a copy dot: the copy reads `t` while the write's low byte reaches
+    /// it, and `v` keeps what the copy took until the delayed load (FIDELITY-LEADS A8, C3c).
+    ///
+    /// * 2C02 (netlist, `g2006x`, `$08` and `$D7` written on dots 257 and 304): the horizontal copy
+    ///   of dot 257 and the pre-render line's last vertical copy (304) take, for the bits the low
+    ///   byte drives, the written byte in alignment 2 and the CPU data bus as it stood before the
+    ///   write in alignment 3 (`$20`, the address's high byte), the open bus of the `$2005` write
+    ///   on these dots and of the `$2000` glitch, under the same switch. Alignments 0 and 1 take
+    ///   the written byte. Fidelite+ has had it since FIDPLUS-A (`post_address_load`); the
+    ///   standard core since 2026-11-16, a rule on a cold write path.
+    /// * 2C07 (Visual 2C07, `g2006x` at reset phases e0, e3, e6): dot 257 the same, the open bus on
+    ///   the cycle whose dot accumulator is 4 ([`Self::open_bus_on_copies`]); its vertical copy
+    ///   ends on dot 302, where no program wrote: left alone.
+    #[cold]
+    #[inline(never)]
+    fn address_write_on_copy(&mut self) {
+        let pal = matches!(self.timing.region, NesRegion::Pal);
+        if !(pal || self.netlist_measured_region()) {
+            return;
+        }
+        let vertical = self.dot != 257;
+        if vertical && (pal || self.scanline != self.pre_render_scanline()) {
+            return;
+        }
+        let source = if self.open_bus_on_copies() {
+            self.cpu_open_bus
+        } else {
+            self.t.to_le_bytes()[0]
+        };
+        self.v = if vertical {
+            (self.v & !0x00E0) | u16::from(source & 0xE0)
+        } else {
+            (self.v & !0x041F) | (self.t & 0x0400) | u16::from(source & 0x1F)
+        };
+    }
+
     /// The netlist loads `v` in the middle of dot D+3 (`delay_address_load`), so the increment of
     /// dot D+4, which this core has already run with the old `v`, belongs to the new one (lot
     /// FIDPLUS-2, A5, `g2006x`): on a coarse-X increment dot the loaded address is incremented,
@@ -3281,22 +3317,10 @@ impl Ppu2C02 {
                     self.post_address_load();
                 } else if self.write_toggle {
                     self.t = (self.t & 0xFF00) | u16::from(value);
-                    if self.dot == 257
-                        && matches!(self.timing.region, NesRegion::Pal)
+                    if (self.dot == 257 || self.dot == *self.vertical_copy_dots().end())
                         && self.fetching()
                     {
-                        // The 2C07's horizontal copy of dot 257 takes the byte this write puts in
-                        // `t` (Visual 2C07, lot FIDPLUS-C C3c, `g2006x`: `v` holds the written
-                        // coarse X from dot 258 until the load), as `post_address_load` does
-                        // for the 2C02 in Fidelite+. On the cycle whose dot accumulator is 4 it
-                        // takes the CPU's open bus instead, as the `$2005` write on this dot
-                        // (`open_bus_on_copies`): `$08` written there leaves coarse X 0.
-                        let source = if self.dot_accumulator == 4 {
-                            self.cpu_open_bus
-                        } else {
-                            self.t.to_le_bytes()[0]
-                        };
-                        self.v = (self.v & !0x041F) | (self.t & 0x0400) | u16::from(source & 0x1F);
+                        self.address_write_on_copy();
                     }
                     if (self.address_load_delay || self.bus_conflicts) && self.fetching() {
                         self.delay_address_load(&mut cartridge);
