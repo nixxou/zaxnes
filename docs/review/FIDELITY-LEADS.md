@@ -870,8 +870,14 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   291 test ROMs identical to `core-goldens.jsonl`, the 18 games of `demo/roms` x 1800 frames
   identical to the previous build; zax-nes tests green.
 - **Leads left**:
-  * the NTSC 2C02: same mechanism expected for the read on a vertical copy dot, unmeasured (the
-    NTSC traces have two reset phases only); worth a run at e0/e2 as well;
+  * (done 2026-11-16) the NTSC 2C02 does the same: `g2007n` (`g2007v` timed for 262 lines) on
+    the transistor netlist at reset phases e0/e2/e4/e6, nine events of e0 and e4 on dots
+    280-292 all fit the AND rule (`andrule.py`), dot 280 (the first copy dot, `v` taken before
+    the copy) included; Zaxnes matches at the four phases (alignment 0 at e0/e2, 2 or 3 with
+    the power-on in vblank at e4/e6). The old NTSC `r2007` traces now show one frame of long
+    runs, a pairing artifact: the aligned frame's preceding pre-render line is not aligned
+    (offsets -1/-2), so Zaxnes's read latches on 280 where the netlist's latches on 286;
+    golden-core identical;
   * dedicated programs for the value patterns the corpus measures once (`$2001` values other
     than `$0A`/`$1E`/`$00`, a read on the copy dots with `t` having more vertical bits set).
 

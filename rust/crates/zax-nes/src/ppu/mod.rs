@@ -2694,7 +2694,7 @@ impl Ppu2C02 {
             self.run_dots(1, cart);
             self.prepaid_dots = latch_dots;
             self.read_buffer = self.fetch_bus_value(cart.as_deref());
-            if self.timing.region == NesRegion::Pal
+            if (self.netlist_measured_region() || self.timing.region == NesRegion::Pal)
                 && self.scanline == self.pre_render_scanline()
                 && self.vertical_copy_dots().contains(&latch_dot)
             {
@@ -2725,7 +2725,7 @@ impl Ppu2C02 {
         self.read_buffer = residue;
         let before_latch = self.v;
         self.run_dots(1, cart);
-        if self.timing.region == NesRegion::Pal
+        if (self.netlist_measured_region() || self.timing.region == NesRegion::Pal)
             && self.scanline == self.pre_render_scanline()
             && self.vertical_copy_dots().contains(&latch_dot)
         {
@@ -2749,7 +2749,7 @@ impl Ppu2C02 {
     }
 
     /// A `$2007` read whose X+Y increment lands on one of the pre-render line's vertical copy dots
-    /// on the PAL 2C07: the incremented `v` and `t` meet on the vertical bits and **both keep
+    /// (2C07 and 2C02 alike): the incremented `v` and `t` meet on the vertical bits and **both keep
     /// their AND** (the low side wins, as in the `$2006` load collision), while the horizontal
     /// bits keep the increment. Visual 2C07 netlist, lot FIDPLUS-C C3c, `r2007` at reset phase
     /// e0: a read latching on dot 278 turns `v` = `$7040`, `t` = `$2000` into `v` = `$0001`,
@@ -2758,7 +2758,9 @@ impl Ppu2C02 {
     /// (every phase) fits too: `$2000` AND `$3002` keeps `t`. Odd latch dots alike (`g2007v`, a
     /// program aimed at the window: at e3 a read latching on 289 turns `$7BC2` / `$7BC0` into
     /// `$0BC3` / `$0BC0`, one on 285 `$5A81` / `$5A80` into `$4A82` / `$4A80`). `before_latch` is
-    /// `v` before the copy of that dot.
+    /// `v` before the copy of that dot. The NTSC 2C02 does the same (transistor netlist, `g2007n`
+    /// at reset phases e0/e2/e4/e6: the nine events of e0 and e4 fit, dots 280-292, the first
+    /// copy dot included).
     #[cold]
     #[inline(never)]
     fn read_increment_meets_vertical_copy(&mut self, before_latch: u16) {
