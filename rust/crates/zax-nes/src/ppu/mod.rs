@@ -938,20 +938,22 @@ impl Ppu2C02 {
         // (Visual 2C07 netlist, lot FIDPLUS-C C3c, `g2001px`: a switch on written on dot 12 leaves
         // dot 16's increment undone and fetches again from dot 17; 8 170 differing dots a frame
         // with four, 54 000 to 97 000 with two, three or five).
-        // On PAL three on the cycle whose dot accumulator is 0, as the `$2006` load comes a dot
-        // early there (`oam`, `g2001px`, `g3e01px`: 24 321 differing dots against 107 089 with
-        // four everywhere). Phase 2 three as well: at reset phase e3 the five programs `r2007`,
-        // `g2000`, `g2001px`, `oam` and `g2006x` all fit dot phase 2 only, and `g2001px` / `oam`
-        // then match the netlist with three dots there, not four; phase 1 four (`g2001px` at e6).
+        // On PAL three on the cycles whose dot accumulator is 0, 1 or 2, four on 3 and 4: the
+        // split of the `$2007` read's latch (Visual 2C07 netlist, `oam` and `g2001px` at the four
+        // reset phases e0/e3/e6/e9, which between them switch on and off on every accumulator:
+        // no differing run longer than 2 dots in any aligned frame; the earlier {0, 2} -> 3 left
+        // 58 311 at e0, switch on with accumulator 1, and 371 915 at e9, switch off with 1).
         let delay = if self.timing.region == NesRegion::Pal {
-            if self.dot_accumulator == 0 || self.dot_accumulator == 2 {
-                3
-            } else {
+            if self.dot_accumulator >= 3 {
                 4
+            } else {
+                3
             }
         } else {
             2
         };
+        #[cfg(feature = "ppu-dot-trace")]
+        let delay = pal_switch_override(self.timing.region, self.dot_accumulator, value, delay);
         let corrupts = (value & 0x18) == 0 && self.switch_off_corrupts_palettes();
         if renders && self.prepaid_dots == 0 {
             if corrupts {
@@ -2688,9 +2690,18 @@ impl Ppu2C02 {
         }
         if (latch_dot & 1) == 0 {
             // An even dot: its own fetch is the byte.
+            let before_latch = self.v;
             self.run_dots(1, cart);
             self.prepaid_dots = latch_dots;
             self.read_buffer = self.fetch_bus_value(cart.as_deref());
+            if self.timing.region == NesRegion::Pal
+                && self.scanline == self.pre_render_scanline()
+                && self.vertical_copy_dots().contains(&latch_dot)
+            {
+                self.read_increment_meets_vertical_copy(before_latch);
+                self.notify_address_bus(self.v & 0x3FFF, cart);
+                return true;
+            }
             // Lot FIDPLUS-2 (A5, netlist): the read's X and Y increments are the pipeline's own
             // signals, so on a dot that increments coarse X anyway (every eighth, 328, 336) they
             // merge with it: one X increment, plus Y; on dot 256, which makes both, nothing more.
@@ -2728,6 +2739,28 @@ impl Ppu2C02 {
             self.refetch_with_low_byte(residue, cart.as_deref());
         }
         true
+    }
+
+    /// A `$2007` read whose X+Y increment lands on one of the pre-render line's vertical copy dots
+    /// on the PAL 2C07: the incremented `v` and `t` meet on the vertical bits and **both keep
+    /// their AND** (the low side wins, as in the `$2006` load collision), while the horizontal
+    /// bits keep the increment. Visual 2C07 netlist, lot FIDPLUS-C C3c, `r2007` at reset phase
+    /// e0: a read latching on dot 278 turns `v` = `$7040`, `t` = `$2000` into `v` = `$0001`,
+    /// `t` = `$0000` (the increment of `$7040` is `$0061`); at the other phases the same read
+    /// latches on 277, before the copy, and `t` is left alone. A read latching on dot 300
+    /// (every phase) fits too: `$2000` AND `$3002` keeps `t`. Even latch dots only, the measured
+    /// case; `before_latch` is `v` before the copy of that dot.
+    #[cold]
+    #[inline(never)]
+    fn read_increment_meets_vertical_copy(&mut self, before_latch: u16) {
+        const VERTICAL: u16 = 0x7BE0;
+        self.v = before_latch;
+        self.increment_coarse_x();
+        self.increment_y();
+        let kept = self.t & self.v & VERTICAL;
+        self.t = (self.t & !VERTICAL) | kept;
+        self.v = (self.v & !VERTICAL) | kept;
+        self.v_row_next = self.v;
     }
 
     /// The byte the fetch of the dot just run (an even one, where the fetches read) put on the
@@ -3874,6 +3907,15 @@ impl Ppu2C02 {
         }
     }
 
+    /// Overrides the PAL `$2001` switch delays (feature `ppu-dot-trace`, measurement only): ten
+    /// values, switch on for dot accumulators 0-4 then switch off for 0-4; 0 keeps the model.
+    #[cfg(feature = "ppu-dot-trace")]
+    pub fn set_pal_switch_override(delays: [i32; 10]) {
+        for (slot, value) in PAL_SWITCH_OVERRIDE.iter().zip(delays) {
+            slot.store(value, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
     /// Starts a per-dot trace (feature `ppu-dot-trace`), dropping any previous one.
     #[cfg(feature = "ppu-dot-trace")]
     pub fn start_dot_trace(&mut self) {
@@ -3883,8 +3925,11 @@ impl Ppu2C02 {
     /// Marks the last traced dot with a CPU register access (feature `ppu-dot-trace`).
     #[cfg(feature = "ppu-dot-trace")]
     fn trace_access(&mut self, access: u32) {
+        // Bits 24-27: the dot accumulator at the access, plus one (PAL dot-phase studies).
+        #[allow(clippy::cast_sign_loss)] // 0..5.
+        let phase = ((self.dot_accumulator + 1) as u32 & 0x0F) << 24;
         if let Some(last) = self.dot_trace.as_mut().and_then(|trace| trace.last_mut()) {
-            last.access = access;
+            last.access = access | phase;
         }
     }
 
@@ -4250,4 +4295,22 @@ const fn oam_bit_draw(bit: usize) -> u64 {
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
     z ^ (z >> 31)
+}
+
+#[cfg(feature = "ppu-dot-trace")]
+static PAL_SWITCH_OVERRIDE: [std::sync::atomic::AtomicI32; 10] =
+    [const { std::sync::atomic::AtomicI32::new(0) }; 10];
+
+/// The measurement override of [`Ppu2C02::set_pal_switch_override`].
+#[cfg(feature = "ppu-dot-trace")]
+fn pal_switch_override(region: NesRegion, accumulator: i32, value: u8, delay: i32) -> i32 {
+    if region != NesRegion::Pal {
+        return delay;
+    }
+    #[allow(clippy::cast_sign_loss)] // 0..5.
+    let slot = accumulator as usize + if (value & 0x18) == 0 { 5 } else { 0 };
+    match PAL_SWITCH_OVERRIDE[slot].load(std::sync::atomic::Ordering::Relaxed) {
+        0 => delay,
+        forced => forced,
+    }
 }
