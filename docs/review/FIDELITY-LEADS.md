@@ -380,8 +380,10 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   `g2006x` one per register access (the recording instant, after A8); `g2006px` 740, the two-dot
   recording instants of its `$2006` loads (Zaxnes records `v` at the write, the netlist at the
   load); `r2007` with `--bus-conflicts` ~11 000 a frame on its two first frames (83 000 without),
-  its third netlist frame pairing with none (already so on 2026-11-15). Not judged: `g2005` (no
-  phase in +-60 with either parity), `rmw` (its traces do not pair with this bench).
+  its third netlist frame pairing with none (already so on 2026-11-15). `g2005` at phase 17: 1
+  differing dot on its paired frame (the judge rejected it as `r2007`: the third netlist frame of
+  both pairs with Zaxnes frame 4, not 3, likely an odd-frame dot skip around that frame). Not
+  judged: `rmw` (its traces do not pair with this bench).
 
 ### A6. M2 duty and edge placement outside NTSC — open, Fidélité+ (2026-11-15)
 - Fidélité+ places every access on the M2 and /CS edges (`fidplus::MasterClock`): M2 low for 9/24
