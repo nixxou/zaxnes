@@ -2345,6 +2345,22 @@ fn fidelity_plus(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("Real-time pad"),
     );
+    // Lot FIDPLUS-D step D3a (docs/design/ANALOG-OUTPUT.md): with the real-time pad, the wait
+    // before the refresh is spent before the picture is drawn, not after, so the refresh shows
+    // the machine as it stands just before it rather than a refresh earlier. Off by default: the
+    // draw then has to fit between the end of the wait and the refresh.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuLatePresent,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Late present"),
+    );
 }
 
 fn video_rust_only(out: &mut Vec<SettingDescriptor>) {

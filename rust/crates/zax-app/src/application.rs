@@ -79,6 +79,10 @@ pub type AppHost = EmulationHost<LibraryGameCatalog, SceneView>;
 /// The folder of the user data where the linked shader programs are kept.
 const SHADER_CACHE_FOLDER: &str = "shader-cache";
 
+/// How long before the refresh the real-time pad stops running the machine, so the swap is not
+/// missed (lot FIDPLUS-B step 5).
+const REALTIME_MARGIN: Duration = Duration::from_micros(2500);
+
 /// The window of AMD-051 REQ-E3D-646, as the diagnostic line states it: a late object has not
 /// been drawable for this many emulated frames.
 #[allow(clippy::cast_sign_loss)] // A positive constant of the specification.
@@ -533,7 +537,8 @@ impl Running {
         self.host.defer_conversion = pipelined;
         let mark = self.clock.start();
         // The frames the real-time pad finished during the last wait are this frame's too.
-        let emulated = self.host.tick(real, &snapshot) + std::mem::take(&mut self.state.carried_frames);
+        let mut emulated =
+            self.host.tick(real, &snapshot) + std::mem::take(&mut self.state.carried_frames);
         self.log_rates(emulated);
         self.state.emulated_now = emulated;
         self.source.end_sample();
@@ -546,6 +551,16 @@ impl Running {
             );
             self.clock.merge(&inner);
         }
+        // Lot FIDPLUS-D3a (`emu.late_present`): the wait before the refresh comes first, so the
+        // picture drawn below is the machine as it stands just before the refresh.
+        let late = self.late_present();
+        if late {
+            let margin = self.late_margin();
+            self.run_the_realtime_pad(margin);
+            emulated += std::mem::take(&mut self.state.carried_frames);
+            self.state.emulated_now = emulated;
+        }
+        let render_begin = Instant::now();
         let mark = self.clock.start();
         update_scene(&mut self.host, &mut self.state);
         {
@@ -568,6 +583,7 @@ impl Running {
             Duration::ZERO
         };
         self.close_the_gpu_queue(bounded);
+        self.state.last_render = render_begin.elapsed();
         self.serve_the_editor();
         self.carry_out_ui_effects();
         let mark = self.clock.start();
@@ -592,7 +608,9 @@ impl Running {
             }
             return Ok(false);
         }
-        self.run_the_realtime_pad();
+        if !late {
+            self.run_the_realtime_pad(REALTIME_MARGIN);
+        }
         let mark = self.clock.start();
         self.window.swap();
         self.clock.stop(Stage::Swap, mark);
@@ -653,16 +671,15 @@ impl Running {
     /// (9.3 ms on average, 16 at worst, measured with `padbench`). Stops 2.5 ms before the
     /// refresh is due, so the swap is not missed; nothing to do without a refresh to wait for
     /// (no vsync and no frame cap), when the setting is off or the game is not running.
-    fn run_the_realtime_pad(&mut self) {
+    fn run_the_realtime_pad(&mut self, margin: Duration) {
         const STEP: Duration = Duration::from_millis(1);
-        const MARGIN: Duration = Duration::from_micros(2500);
         if !self.host.realtime_slices_active() {
             return;
         }
         let (Some(period), Some(last_swap)) = (self.paced_budget(), self.state.last_swap) else {
             return;
         };
-        let Some(deadline) = (last_swap + period).checked_sub(MARGIN) else {
+        let Some(deadline) = (last_swap + period).checked_sub(margin) else {
             return;
         };
         while Instant::now() + STEP < deadline {
@@ -673,10 +690,33 @@ impl Running {
             }
             let keyboard = (!self.ui.wants_keyboard())
                 .then_some(&self.input.keyboard as &dyn zax_platform::input::KeyboardDevice);
-            let (player_one, player_two) =
-                self.source.sample_players(keyboard, &mut self.input.gamepads);
+            let (player_one, player_two) = self
+                .source
+                .sample_players(keyboard, &mut self.input.gamepads);
             self.state.carried_frames += self.host.realtime_slice(player_one, player_two);
         }
+    }
+
+    /// Whether `emu.late_present` applies to this frame: on, with the real-time pad running and a
+    /// refresh to wait for (lot FIDPLUS-D3a).
+    fn late_present(&self) -> bool {
+        self.host
+            .settings()
+            .get(SettingId::EmuLatePresent)
+            .as_bool()
+            && self.host.realtime_slices_active()
+            && self.paced_budget().is_some()
+    }
+
+    /// How long before the refresh the late wait ends: the last frame's scene and draw time plus
+    /// 2 ms, at least the real-time pad's own margin, at most three quarters of the refresh (a
+    /// draw that slow gains nothing from waiting).
+    fn late_margin(&self) -> Duration {
+        let ceiling = self
+            .paced_budget()
+            .map_or(Duration::from_millis(12), |period| period.mul_f32(0.75));
+        (self.state.last_render + Duration::from_millis(2))
+            .clamp(REALTIME_MARGIN, ceiling.max(REALTIME_MARGIN))
     }
 
     /// Feeds the window's events to the interface and the input layer. Returns whether the
@@ -2184,6 +2224,8 @@ struct RunState {
     /// When the last swap returned: the display's refresh, the start of the wait the real-time
     /// pad fills.
     last_swap: Option<Instant>,
+    /// How long the last frame's scene and draw took (`emu.late_present`'s margin).
+    last_render: Duration,
 }
 
 impl RunState {
@@ -2213,6 +2255,7 @@ impl RunState {
             carried_frames: 0,
             close_requested: false,
             last_swap: None,
+            last_render: Duration::ZERO,
         }
     }
 }

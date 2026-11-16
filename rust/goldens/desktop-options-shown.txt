@@ -46,6 +46,7 @@ emu.cpu_ppu_alignment
 emu.fidelity_plus
 emu.exact_rate
 emu.realtime_input
+emu.late_present
 emu.pause_3d_in_2d
 emu.pipeline
 emu.power_on_ram

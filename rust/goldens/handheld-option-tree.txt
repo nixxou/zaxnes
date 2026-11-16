@@ -120,6 +120,7 @@ options
       emu.fidelity_plus
       emu.exact_rate
       emu.realtime_input
+      emu.late_present
       emu.run_ahead
       emu.smooth_scroll_ahead
       emu.game_speed

@@ -538,6 +538,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.fidelity_plus", "Fidélité+"),
     ("setting.emu.exact_rate", "Cadence de la console"),
     ("setting.emu.realtime_input", "Manette en temps réel"),
+    ("setting.emu.late_present", "Présentation tardive"),
     ("option.Alignment 0", "Alignement 0"),
     ("option.Alignment 1", "Alignement 1"),
     ("option.Alignment 2", "Alignement 2"),
@@ -1232,6 +1233,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (
         "detail.emu.exact_rate",
         "Fait tourner les jeux à la cadence propre de la console, 60,0988 images par seconde sur une console NTSC et 50,0070 sur une PAL, au lieu de 60 ou 50 tout rond, et le son avec, à sa vraie hauteur. Sur un écran 60 Hz, une image est montrée deux fois environ toutes les dix secondes ; un écran à fréquence variable les montre toutes. Prend effet tout de suite. Par défaut : désactivé.",
+    ),
+    (
+        "detail.emu.late_present",
+        "Avec la manette en temps réel, le temps qui reste avant le rafraîchissement de l'écran sert d'abord à faire avancer la console, et l'image est dessinée juste avant le rafraîchissement, d'après la console à cet instant. Sans elle, l'image est dessinée d'abord et montrée au rafraîchissement suivant, presque un rafraîchissement plus vieille que la console. Un appui apparaît à l'écran jusqu'à un rafraîchissement plus tôt (environ 10 ms à 60 Hz). Demande un ordinateur qui dessine une image bien en deçà d'un rafraîchissement ; si le dessin est en retard, un rafraîchissement est manqué. Seulement avec la manette en temps réel activée et un rafraîchissement à attendre. Prend effet tout de suite. Par défaut : désactivé.",
     ),
     (
         "detail.emu.realtime_input",

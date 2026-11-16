@@ -153,3 +153,15 @@ without: white). With the real-time pad on, a press lands mid-frame and the spli
 line it was read on; a camera or light sensor against padbench's timestamps gives the
 button-to-photon latency, before and after D3, and on a console.
 
+D3a (2026-11-16), the step before beam racing, without tearing: `emu.late_present` ("Late
+present", off). With the real-time pad, `Application::frame` used to draw the picture first and
+then spend the wait before the refresh running the machine, so the refresh showed a machine
+nearly one refresh old. With the option the wait comes first (`run_the_realtime_pad(margin)`) and
+the scene and draw follow, so the refresh shows the machine as it stood just before it, as
+RetroArch's frame delay does. The margin is the last frame's scene-and-draw time plus 2 ms, at
+least the pad's 2.5 ms, at most three quarters of the refresh. Expected gain: up to one refresh
+(~10 ms at 60 Hz on average less the margin), no tear line; risk: a draw that overruns the margin
+misses a refresh, hence off by default. The frames finished during the wait count for this
+displayed frame (3D interpolation, rate log). Judge: `lagtest.nes` with the camera, as for D3;
+not measured yet (needs the owner's pad and screen).
+

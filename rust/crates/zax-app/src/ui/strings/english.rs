@@ -524,6 +524,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.fidelity_plus", "Fidelity+"),
     ("setting.emu.exact_rate", "Console frame rate"),
     ("setting.emu.realtime_input", "Real-time pad"),
+    ("setting.emu.late_present", "Late present"),
     ("option.Alignment 0", "Alignment 0"),
     ("option.Alignment 1", "Alignment 1"),
     ("option.Alignment 2", "Alignment 2"),
@@ -1258,6 +1259,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         "detail.emu.exact_rate",
         "Runs the games at the console's own frame rate, 60.0988 images a second on an NTSC console and 50.0070 on a PAL one, instead of a round 60 or 50, and the sound with it, at its true pitch. On a 60 Hz screen an image is shown twice about every ten seconds; a variable refresh rate screen shows every one. Takes effect at once. Default: off.",
+    ),
+    (
+        "detail.emu.late_present",
+        "With the real-time pad, the time left before the screen's refresh is spent running the console first, and the picture is drawn just before the refresh, from the console as it stands then. Without it the picture is drawn first and shown at the next refresh, nearly one refresh older than the console. A press shows on screen up to one refresh sooner (about 10 ms at 60 Hz). Needs a computer that draws a frame well within a refresh; if the drawing is late a refresh is missed. Only with the real-time pad on and a refresh to wait for. Takes effect at once. Default: off.",
     ),
     (
         "detail.emu.realtime_input",

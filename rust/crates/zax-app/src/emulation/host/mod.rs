@@ -1274,7 +1274,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
         // The hotkey bits of the displayed frame's sample stay with it.
         let keep = |fresh: crate::input::InputAction, frame: crate::input::InputAction| {
-            (fresh & crate::input::InputAction::CONTROLLER_BYTE) | crate::input::InputAction::from_bits(frame.bits() & !crate::input::InputAction::CONTROLLER_BYTE.bits())
+            (fresh & crate::input::InputAction::CONTROLLER_BYTE)
+                | crate::input::InputAction::from_bits(
+                    frame.bits() & !crate::input::InputAction::CONTROLLER_BYTE.bits(),
+                )
         };
         let player_one = keep(player_one, self.step_input.0);
         let player_two = keep(player_two, self.step_input.1);

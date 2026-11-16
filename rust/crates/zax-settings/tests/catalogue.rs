@@ -108,6 +108,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "emu.fidelity_plus",
             "emu.forced_patch",
             "emu.hack_options",
+            "emu.late_present",
             "emu.lua_experimental",
             "emu.lua_optimized",
             "emu.lua_smooth_gc",
