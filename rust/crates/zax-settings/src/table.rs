@@ -2276,6 +2276,25 @@ fn ppu_write_timings(out: &mut Vec<SettingDescriptor>) {
         ]))
         .with_label("CPU/PPU alignment"),
     );
+    // Lot FIDPLUS-E (FIDELITY-LEADS G5): the CPU / APU get-put parity and the DMC output timer a
+    // power-on starts with. 0 the one Zaxnes has always started with; 1 the 2A03 netlist's (the
+    // CPU differential is identical cycle for cycle with it); 2 drawn at each load.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuCpuApuParity,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Zaxnes"),
+            opt(1, "2A03 netlist"),
+            opt(2, "Random"),
+        ]))
+        .with_label("CPU/APU parity"),
+    );
 }
 
 /// The Fidélité+ options (lots FIDPLUS-A and FIDPLUS-B), each its own switch (owner,

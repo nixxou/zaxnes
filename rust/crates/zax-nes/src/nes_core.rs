@@ -33,6 +33,8 @@ pub struct NesCore {
     cpu: Cpu6502,
     bus: NesBus,
     region: NesRegion,
+    /// FIDELITY-LEADS G5: the 2A03 netlist's power-on get / put parity and DMC timer.
+    netlist_get_put: bool,
     battery_ram_imported: bool,
     frame_count: i64,
     video_callback: Option<VideoCallback>,
@@ -163,6 +165,7 @@ impl NesCore {
             cpu: Cpu6502::new(),
             bus: NesBus::new(Ppu2C02::new(), Apu2A03::new(), InputPorts::new()),
             region: NesRegion::Ntsc,
+            netlist_get_put: false,
             battery_ram_imported: false,
             frame_count: 0,
             video_callback: None,
@@ -770,6 +773,14 @@ impl NesCore {
         self.bus.cartridge().map(|cartridge| cartridge.rom().name())
     }
 
+    /// The CPU / APU get-put parity and DMC timer a power-on starts with (FIDELITY-LEADS G5):
+    /// `false` the ones Zaxnes has always started with, `true` the 2A03 netlist's. A console
+    /// takes one or the other at power-on; the reset button keeps them. Takes effect at the next
+    /// power-on.
+    pub fn set_netlist_get_put(&mut self, netlist: bool) {
+        self.netlist_get_put = netlist;
+    }
+
     /// Resets the machine, which is equivalent to a power cycle (REQ-CORE-004, DEC-02-Q3).
     pub fn reset(&mut self) {
         if self.bus.cartridge().is_some() {
@@ -923,6 +934,13 @@ impl NesCore {
         }
 
         self.cpu.reset(&mut self.bus);
+        if self.netlist_get_put {
+            // FIDELITY-LEADS G5: the 2A03 netlist's power-on, the other get / put parity and the
+            // DMC output timer at 431 with 8 bits left, as the CPU differential aligns them at
+            // the first opcode.
+            self.bus.diagnostic_flip_get_put();
+            self.bus.apu_mut().diagnostic_set_dmc_phase(431, 8);
+        }
         self.frame_count = 0;
         // REQ-LOOP-066: a reset or a change of game starts the next real frame afresh, with the
         // same N; the state of the machine that is gone is never put back.

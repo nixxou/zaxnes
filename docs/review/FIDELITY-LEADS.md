@@ -1058,7 +1058,7 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   console-model choice of its own (with the other RP2A03 letter differences, DMA timings) is part
   of C3.
 
-### G5. CPU / APU get-put parity and the DMC timer at power-on — open (2026-11-15)
+### G5. CPU / APU get-put parity and the DMC timer at power-on — done as a choice (2026-11-16)
 
 - The 2A03 netlist differential (`docs/progress/CPU-NETLIST-DIAG.md`) finds the CPU identical
   cycle for cycle once two power-on values are set as the netlist's: the get / put parity (Zaxnes
@@ -1070,6 +1070,13 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   "CPU / APU alignment" choice (random, either) would treat the APU the same way. No test ROM in
   the campaign tells the two apart (all pass either way); a game that depends on it would be one
   timing an OAM DMA's length or a DMC halt's repeated read without syncing first.
+
+- Done 2026-11-16 as a choice, default unchanged: `emu.cpu_apu_parity` ("CPU/APU parity":
+  Zaxnes, 2A03 netlist, Random drawn at each load), `NesCore::set_netlist_get_put`, applied at
+  power-on only (the reset button keeps the running parity): the other get / put parity and the
+  DMC output timer at 431 with 8 bits left, as the CPU differential aligns them. Test
+  `fidplus_cpu_apu_parity_tests` (an OAM DMA started on the same cycle takes one cycle more or
+  less). Whether a console fixes it or draws it stays open; the choice covers both.
 
 ### G6. Open-bus bits of a controller read just after a DMC fetch — open (2026-11-15)
 

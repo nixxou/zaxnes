@@ -532,6 +532,9 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.palette_corruption", "Corruption de palette"),
     ("setting.emu.ppu_reset_line", "Reset du PPU"),
     ("setting.emu.cpu_ppu_alignment", "Alignement CPU/PPU"),
+    ("setting.emu.cpu_apu_parity", "Parité CPU/APU"),
+    ("option.Zaxnes", "Zaxnes"),
+    ("option.2A03 netlist", "Netlist du 2A03"),
     ("setting.emu.fidelity_plus", "Fidélité+"),
     ("setting.emu.exact_rate", "Cadence de la console"),
     ("setting.emu.realtime_input", "Manette en temps réel"),
@@ -1217,6 +1220,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (
         "detail.emu.cpu_ppu_alignment",
         "À l'allumage, le processeur et la puce vidéo de la console calent leurs horloges de l'une de quatre façons (numérotées de 0 à 3, comme la cartouche de test AccuracyCoin), qui change d'un allumage à l'autre. Quelques défauts en dépendent : le moment où arrive une lecture de la mémoire vidéo faite pendant l'image, le glitch de bus ouvert des écritures $2000 et $2005 (alignement 3), le pixel de bord d'une image coupée en milieu de ligne, et l'altération de la mémoire des sprites, qu'une console en alignement 1 ou 2 ne montre pas quand l'image est rallumée en cours d'écran. Les jeux écrits pour la console fonctionnent dans les quatre. L'alignement 3 est celui que Zaxnes a toujours suivi ; Aléatoire en tire un à chaque chargement, comme une console à chaque allumage. Prend effet au prochain chargement. Par défaut : Alignement 3.",
+    ),
+    (
+        "detail.emu.cpu_apu_parity",
+        "À l'allumage, le processeur de la console et son unité sonore commencent leur rythme à deux cycles sur l'un ou l'autre cycle, et la minuterie du canal d'échantillons démarre quelque part dans son compte. Cela décide si un transfert de sprites dure 513 ou 514 cycles et où la lecture du canal d'échantillons interrompt une lecture. Zaxnes est le départ qu'il a toujours pris ; Netlist du 2A03 celui du modèle au transistor près de la puce (avec lui le processeur suit ce modèle cycle pour cycle) ; Aléatoire en tire un à chaque chargement, comme une console à chaque allumage. Les jeux écrits pour la console fonctionnent avec tous. Prend effet au prochain chargement. Par défaut : Zaxnes.",
     ),
     (
         "detail.emu.ppu_2000_glitch",

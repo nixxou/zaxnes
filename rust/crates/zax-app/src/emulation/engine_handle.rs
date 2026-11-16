@@ -913,6 +913,13 @@ impl EngineHandle {
         }
     }
 
+    /// `emu.cpu_apu_parity` (FIDELITY-LEADS G5); Zaxnes only.
+    pub fn set_netlist_get_put(&mut self, netlist: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_netlist_get_put(netlist);
+        }
+    }
+
     /// `emu.exact_rate` (lot FIDPLUS-B): the sound at the console's own frame rate; Zaxnes only.
     pub fn set_exact_rate(&mut self, exact: bool) {
         if let Some(core) = self.zaxnes_mut() {

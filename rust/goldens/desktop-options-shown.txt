@@ -41,6 +41,7 @@ emu.ppu_2006_glitch
 emu.ppu_2000_glitch
 emu.palette_corruption
 emu.ppu_reset_line
+emu.cpu_apu_parity
 emu.cpu_ppu_alignment
 emu.fidelity_plus
 emu.exact_rate

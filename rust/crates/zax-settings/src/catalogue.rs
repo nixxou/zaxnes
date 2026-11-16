@@ -160,6 +160,7 @@ setting_ids! {
     EmuPpuRevision => "emu.ppu_revision",
     EmuOamaddrWriteCorruption => "emu.oamaddr_write_corruption",
     EmuCpuPpuAlignment => "emu.cpu_ppu_alignment",
+    EmuCpuApuParity => "emu.cpu_apu_parity",
     EmuFidelityPlus => "emu.fidelity_plus",
     EmuExactRate => "emu.exact_rate",
     EmuRealtimeInput => "emu.realtime_input",

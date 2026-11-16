@@ -518,6 +518,9 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.palette_corruption", "Palette corruption"),
     ("setting.emu.ppu_reset_line", "PPU reset line"),
     ("setting.emu.cpu_ppu_alignment", "CPU/PPU alignment"),
+    ("setting.emu.cpu_apu_parity", "CPU/APU parity"),
+    ("option.Zaxnes", "Zaxnes"),
+    ("option.2A03 netlist", "2A03 netlist"),
     ("setting.emu.fidelity_plus", "Fidelity+"),
     ("setting.emu.exact_rate", "Console frame rate"),
     ("setting.emu.realtime_input", "Real-time pad"),
@@ -1243,6 +1246,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         "detail.emu.cpu_ppu_alignment",
         "When it is switched on, the console's processor and video chip settle into one of four ways their clocks line up (numbered 0 to 3, as the AccuracyCoin test cartridge numbers them), a different one from one power-on to the next. A few defects depend on it: when a read of video memory made during the picture lands, the open-bus glitch of the $2000 and $2005 writes (alignment 3), the edge pixel of a picture switched off mid-line, and the sprite-memory damage, which a console in alignment 1 or 2 does not show when the picture is switched back on mid-screen. Games written for the console work in all four. Alignment 3 is the one Zaxnes has always followed; Random draws one at each load, as a console does at each power-on. Takes effect at the next load. Default: Alignment 3.",
+    ),
+    (
+        "detail.emu.cpu_apu_parity",
+        "At power-on the console's processor and its sound unit start their two-cycle rhythm on one cycle or the other, and the sample channel's timer starts somewhere in its count. It decides whether a sprite transfer takes 513 or 514 cycles and where the sample channel's fetch pauses a read. Zaxnes is the start it has always used; 2A03 netlist the one the transistor-level model of the chip starts with (with it the processor matches that model cycle for cycle); Random draws one at each load, as a console does at each power-on. Games written for the console work with any. Takes effect at the next load. Default: Zaxnes.",
     ),
     (
         "detail.emu.ppu_2000_glitch",
