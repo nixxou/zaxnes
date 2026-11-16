@@ -374,6 +374,15 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 
 ---
 
+- **Standard core against the 2C02 corpus, 2026-11-16** (`ext-tools/visualnes-bench/ntscjudge.py`,
+  harness `dot-trace --power-on-vblank`, the netlist's first frame left out, two frames paired,
+  alignments 2 and 3 alike): `g2001px`, `g3e01px` 0 differing dots; `oam` 1; `g2000`, `g2005px` 2;
+  `g2006x` one per register access (the recording instant, after A8); `g2006px` 740, the two-dot
+  recording instants of its `$2006` loads (Zaxnes records `v` at the write, the netlist at the
+  load); `r2007` with `--bus-conflicts` ~11 000 a frame on its two first frames (83 000 without),
+  its third netlist frame pairing with none (already so on 2026-11-15). Not judged: `g2005` (no
+  phase in +-60 with either parity), `rmw` (its traces do not pair with this bench).
+
 ### A6. M2 duty and edge placement outside NTSC — open, Fidélité+ (2026-11-15)
 - Fidélité+ places every access on the M2 and /CS edges (`fidplus::MasterClock`): M2 low for 9/24
   of the CPU cycle, high for 15/24 (2A03G, nesdev "CPU pin out"; BeesNES's phi1/phi2 slots use the
