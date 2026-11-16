@@ -30,7 +30,8 @@ pub const USAGE: &str = "zax-harness bench-core <rom.nes> [options]
   --load-state <file>      restore a state block (with its ROM image) before the run
   --advanced               apply the built-in patches of an advanced widescreen mode too
   --run-ahead <n>          run-ahead frames, 0 to 10 (default 0, so benches stay comparable)
-  --hack-options <bits>    the built-in patch's option bits ($500A)";
+  --hack-options <bits>    the built-in patch's option bits ($500A)
+  --fidelity-plus          run the frames through the Fidelite+ loop (emu.fidelity_plus)";
 
 /// What `bench-core` runs.
 #[derive(Debug, Clone)]
@@ -50,6 +51,8 @@ pub struct Options {
     /// Run-ahead frames (AMD-041 REQ-LOOP-064), **0 by default** so that a bench taken before
     /// this lot and one taken after it measure the same work (REQ-ARCH-012 amended).
     run_ahead: u8,
+    /// The Fidelite+ loop (`emu.fidelity_plus`), off by default as in the application.
+    fidelity_plus: bool,
 }
 
 impl Options {
@@ -76,11 +79,13 @@ impl Options {
             advanced: false,
             patch_bits: None,
             run_ahead: 0,
+            fidelity_plus: false,
         };
         while let Some((name, tail)) = rest.split_first() {
-            if name == "--3d" || name == "--advanced" {
+            if name == "--3d" || name == "--advanced" || name == "--fidelity-plus" {
                 options.three_dimensional |= name == "--3d";
                 options.advanced |= name == "--advanced";
+                options.fidelity_plus |= name == "--fidelity-plus";
                 rest = tail;
                 continue;
             }
@@ -345,6 +350,7 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
 
 /// The widescreen margins, the patch's options and the state the options ask for.
 fn widen(host: &mut Host, options: &Options) -> Result<(), HarnessError> {
+    host.core.set_fidelity_plus(options.fidelity_plus);
     host.core.set_widescreen_margin(options.widescreen);
     host.core
         .set_widescreen_vertical_margin(options.widescreen_y);
