@@ -1338,7 +1338,8 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   fetch (W+4 = 8k+1 / 8k+3, also dot 1 and 321) now makes that fetch with the new `v`, as the
   netlist (`delay_address_load`); this core reads the byte on that first dot, so the tile or
   attribute came from the old address. `g2006x`: 1 232 background mismatches -> 0; `g2006w`
-  (four targets, every dot), `g2000`, `g2005px`: 0 but dot 1. golden-core: RasterTest1/2 only,
+  (four targets, every dot), `g2000`, `g2005px`: 0 but dot 1 (`g2006px` and the other
+  rendering-off programs have no fetch to compare once their first frame starts). golden-core: RasterTest1/2 only,
   2 pixels at x 254-255 of line 210 (rows updated). **Left as leads** (boards watching the bus
   only): the first nametable fetch of a line (dots 1-2) is not put on the bus (its byte comes
   from dot 340's read, same address), and the line end reads at 337/338/340 where the chip
