@@ -9,6 +9,8 @@ pub mod composite;
 pub mod cpu;
 mod engine_impl;
 pub mod fidplus;
+#[cfg(feature = "board-532")]
+mod ersan2_overlay;
 pub mod hack_pack;
 pub mod input;
 pub mod movie;

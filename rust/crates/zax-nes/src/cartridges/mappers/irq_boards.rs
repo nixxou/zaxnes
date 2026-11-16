@@ -1,5 +1,7 @@
 #[cfg(feature = "board-530")]
 use super::Ax5705;
+#[cfg(feature = "board-chip-switch")]
+use super::ChipSwitch;
 #[cfg(feature = "board-266")]
 use super::CityFighter;
 #[cfg(feature = "board-cony")]
@@ -12,6 +14,8 @@ use super::Fk23c;
 use super::Huang1;
 #[cfg(feature = "board-irq-latch")]
 use super::IrqLatch;
+#[cfg(feature = "board-irq-p")]
+use super::IrqP;
 #[cfg(feature = "board-jy-asic")]
 use super::JyCompany;
 #[cfg(feature = "board-303")]
@@ -34,6 +38,8 @@ use super::Mmc3Kof97;
 use super::Mmc3Multicart;
 #[cfg(feature = "board-268")]
 use super::Mmc3Outer;
+#[cfg(feature = "board-mmc3-p")]
+use super::Mmc3P;
 #[cfg(feature = "board-mmc3-scramble")]
 use super::Mmc3Scramble;
 #[cfg(feature = "board-262")]
@@ -56,6 +62,8 @@ use super::Sunsoft4;
 use super::Tengen800037;
 #[cfg(feature = "board-119")]
 use super::Tqrom;
+#[cfg(feature = "board-vrc-p")]
+use super::VrcP;
 #[cfg(feature = "board-252")]
 use super::Waixing252;
 #[cfg(feature = "board-253")]
@@ -358,6 +366,9 @@ pub enum IrqBoard {
     /// for [`IrqBoard::Mmc3Outer`]'s reason: it holds a whole [`super::Mmc3`].
     #[cfg(feature = "board-mmc3-clones")]
     Mmc3Clone(Box<Mmc3Clone>),
+    /// Lot MAPPERS-P's MMC3 multicarts ([`Mmc3P`]), boxed for [`IrqBoard::Mmc3Clone`]'s reason.
+    #[cfg(feature = "board-mmc3-p")]
+    Mmc3P(Box<Mmc3P>),
     /// Mapper 253, the Waixing VRC4-like board with 2 KiB of CHR-RAM (lot MAPPERS-N).
     /// Mapper 252, the Waixing VRC4 clone with CHR-RAM chosen by mask/compare (lot MAPPERS-N).
     /// Mapper 168, RacerMate Challenge II (lot MAPPERS-N).
@@ -369,6 +380,15 @@ pub enum IrqBoard {
     /// Mapper 530, the AX5705 VRC4 board (lot MAPPERS-N).
     #[cfg(feature = "board-530")]
     Ax5705(Box<Ax5705>),
+    /// Lot MAPPERS-P's chip-switching boards ([`ChipSwitch`]), boxed for [`IrqBoard::Ax5705`]'s reason.
+    #[cfg(feature = "board-chip-switch")]
+    ChipSwitch(Box<ChipSwitch>),
+    /// Lot MAPPERS-P's CPU-cycle IRQ boards ([`IrqP`]), boxed for [`IrqBoard::Ax5705`]'s reason.
+    #[cfg(feature = "board-irq-p")]
+    IrqP(Box<IrqP>),
+    /// Lot MAPPERS-P's VRC2/VRC4 boards ([`VrcP`]), boxed for [`IrqBoard::Ax5705`]'s reason.
+    #[cfg(feature = "board-vrc-p")]
+    VrcP(Box<VrcP>),
     /// Mapper 529, the T-230 VRC4e board (lot MAPPERS-N).
     #[cfg(feature = "board-529")]
     T230(Box<T230>),
@@ -444,12 +464,20 @@ macro_rules! inner {
             IrqBoard::Mapper091($b) => $body,
             #[cfg(feature = "board-mmc3-clones")]
             IrqBoard::Mmc3Clone($b) => $body,
+            #[cfg(feature = "board-mmc3-p")]
+            IrqBoard::Mmc3P($b) => $body,
             #[cfg(feature = "board-168")]
             IrqBoard::Racermate($b) => $body,
             #[cfg(feature = "board-303")]
             IrqBoard::Kaiser7017($b) => $body,
             #[cfg(feature = "board-530")]
             IrqBoard::Ax5705($b) => $body,
+            #[cfg(feature = "board-chip-switch")]
+            IrqBoard::ChipSwitch($b) => $body,
+            #[cfg(feature = "board-irq-p")]
+            IrqBoard::IrqP($b) => $body,
+            #[cfg(feature = "board-vrc-p")]
+            IrqBoard::VrcP($b) => $body,
             #[cfg(feature = "board-529")]
             IrqBoard::T230($b) => $body,
             #[cfg(feature = "board-266")]
@@ -524,6 +552,23 @@ impl Mapper for IrqBoard {
         inner!(self, b => b.soft_reset(memory));
     }
 
+    /// Forwarded since lot MAPPERS-P, for the boards of this enum whose `$8000-$FFFF` reads are
+    /// not always ROM: [`super::Mmc3P`]'s DIP / solder-pad reads (344, 432) and [`super::VrcP`]'s
+    /// PRG banks that follow the CHR fetches (362, 398). Without it `Mapper`'s default answered
+    /// from the windows and the CPU's cached path read ROM where those boards answer otherwise.
+    /// Asked after a CPU write to the cartridge, not per read; out of line for the reason
+    /// [`IrqBoard::on_ppu_address_bus`] gives.
+    #[cfg(any(
+        feature = "board-mmc3-p",
+        feature = "board-vrc-p",
+        feature = "board-413",
+        feature = "board-446"
+    ))]
+    #[inline(never)]
+    fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {
+        inner!(self, b => b.rom_windows(memory))
+    }
+
     /// **`#[inline(never)]`, and it is the whole performance story of this lot.**
     ///
     /// Inlined, this one body is the thirteenth in the dispatch `Cpu6502::branch` folds
@@ -559,6 +604,7 @@ impl Mapper for IrqBoard {
         feature = "board-119",
         feature = "board-268",
         feature = "board-mmc3-clones",
+        feature = "board-mmc3-p",
         feature = "board-68",
         feature = "board-91",
         feature = "board-cony",
@@ -567,6 +613,7 @@ impl Mapper for IrqBoard {
         feature = "board-irq-latch",
         feature = "board-176",
         feature = "board-682",
+        feature = "board-irq-p"
     ))]
     fn prg_ram_enabled(&self) -> bool {
         inner!(self, b => b.prg_ram_enabled())
@@ -610,6 +657,7 @@ impl Mapper for IrqBoard {
         feature = "board-268",
         feature = "board-huang1",
         feature = "board-mmc3-clones",
+        feature = "board-mmc3-p",
         feature = "board-176",
         feature = "board-284",
     ))]
@@ -627,6 +675,10 @@ impl Mapper for IrqBoard {
         feature = "board-mmc3-multicart",
         feature = "board-268",
         feature = "board-mmc3-clones",
+        feature = "board-mmc3-p",
+        feature = "board-vrc-p",
+        feature = "board-irq-p",
+        feature = "board-chip-switch",
         feature = "board-irq-latch",
         feature = "board-176",
         feature = "board-682",
@@ -657,7 +709,11 @@ impl Mapper for IrqBoard {
         feature = "board-68",
         feature = "board-jy-asic",
         feature = "board-284",
-        feature = "board-682"
+        feature = "board-682",
+        feature = "board-irq-p",
+        feature = "board-chip-switch",
+        feature = "board-mmc3-p",
+        feature = "board-vrc-p"
     ))]
     #[inline(never)]
     fn nametable_page(&self, table: i32) -> i32 {
@@ -689,7 +745,13 @@ impl Mapper for IrqBoard {
     /// **Behaviour-neutral for the other boards of this variant**: none of them overrides it, and
     /// none answers `SERVED_BY_CARTRIDGE` from `nametable_page`, so this body is never reached for
     /// them.
-    #[cfg(any(feature = "board-68-chr-nametables", feature = "board-jy-asic"))]
+    #[cfg(any(
+        feature = "board-68-chr-nametables",
+        feature = "board-jy-asic",
+        feature = "board-512",
+        feature = "board-560",
+        feature = "board-547"
+    ))]
     fn read_nametable(&self, memory: &CartridgeMemory, address: u16) -> u8 {
         inner!(self, b => b.read_nametable(memory, address))
     }
@@ -725,8 +787,10 @@ impl Mapper for IrqBoard {
         feature = "board-huang1",
         feature = "board-jy-asic",
         feature = "board-mmc3-clones",
+        feature = "board-mmc3-p",
         feature = "board-irq-latch",
         feature = "board-176",
+        feature = "board-irq-p"
     ))]
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
         inner!(self, b => b.try_read_prg(memory, address))
@@ -750,7 +814,10 @@ impl Mapper for IrqBoard {
         feature = "board-303",
         feature = "board-529",
         feature = "board-284",
-        feature = "board-682"
+        feature = "board-682",
+        feature = "board-413",
+        feature = "board-342",
+        feature = "board-186"
     ))]
     #[inline(never)]
     fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
@@ -764,7 +831,10 @@ impl Mapper for IrqBoard {
         feature = "board-303",
         feature = "board-529",
         feature = "board-284",
-        feature = "board-682"
+        feature = "board-682",
+        feature = "board-413",
+        feature = "board-342",
+        feature = "board-186"
     ))]
     #[inline(never)]
     fn cpu_peek_override(&self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
@@ -775,6 +845,39 @@ impl Mapper for IrqBoard {
         inner!(self, b => b.write_register(memory, address, value));
     }
 
+    /// The `OneBus` hooks (lot MAPPERS-P), asked by the bus for mappers 256 and 436 alone.
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    fn snoop_apu_write(&mut self, address: u16, value: u8) -> u8 {
+        inner!(self, b => b.snoop_apu_write(address, value))
+    }
+
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    fn apu_status(&self, status: u8) -> u8 {
+        inner!(self, b => b.apu_status(status))
+    }
+
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    fn take_dac_write(&mut self) -> Option<u8> {
+        inner!(self, b => b.take_dac_write())
+    }
+
+    /// Forwarded for the COOLGIRL's save area (lot MAPPERS-P), asked when a host saves.
+    #[cfg(feature = "board-342")]
+    fn export_save_area(&self) -> Option<Vec<u8>> {
+        inner!(self, b => b.export_save_area())
+    }
+
+    #[cfg(feature = "board-342")]
+    fn import_save_area(&mut self, data: &[u8]) -> bool {
+        inner!(self, b => b.import_save_area(data))
+    }
+
+    /// Forwarded for the copier loaders (lot MAPPERS-P), asked once at power-on.
+    #[cfg(any(feature = "board-561", feature = "board-562"))]
+    fn boot_program(&self, memory: &CartridgeMemory) -> Option<super::BootProgram> {
+        inner!(self, b => b.boot_program(memory))
+    }
+
     /// Forwarded for mapper 682 alone (lot MAPPERS-N): the Rainbow's sprite extended mode reads
     /// the sprite size from `$2000`.
     #[cfg(feature = "board-682")]
@@ -783,7 +886,12 @@ impl Mapper for IrqBoard {
     }
 
     /// Forwarded for mapper 682 alone: its nametables in CHR-RAM and FPGA RAM take `$2007` writes.
-    #[cfg(feature = "board-682")]
+    #[cfg(any(
+        feature = "board-682",
+        feature = "board-512",
+        feature = "board-560",
+        feature = "board-547"
+    ))]
     fn write_nametable(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         inner!(self, b => b.write_nametable(memory, address, value));
     }
@@ -802,7 +910,12 @@ impl Mapper for IrqBoard {
     /// Forwarded for mapper 284 alone (lot MAPPERS-N), the one board of this enum with expansion
     /// audio: every other one keeps `Mapper`'s `None`, which `Cartridge::has_expansion_audio`
     /// reads once at attach, so their bus never asks again.
-    #[cfg(any(feature = "board-284", feature = "board-682"))]
+    #[cfg(any(
+        feature = "board-284",
+        feature = "board-682",
+        feature = "board-446",
+        feature = "board-186"
+    ))]
     fn expansion_audio_output(&self) -> Option<i32> {
         inner!(self, b => b.expansion_audio_output())
     }

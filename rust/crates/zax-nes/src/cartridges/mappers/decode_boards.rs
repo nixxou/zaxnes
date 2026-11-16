@@ -31,6 +31,8 @@
     feature = "board-misc-n",
     feature = "board-323",
     feature = "board-latch-multi",
+    feature = "board-mmc1-outer",
+    feature = "board-multi-p",
     feature = "board-nina03",
     feature = "board-sachen-8reg",
     feature = "board-sachen8259",
@@ -64,8 +66,12 @@ use super::Mapper;
 use super::Maxi15;
 #[cfg(feature = "board-misc-n")]
 use super::MiscN;
+#[cfg(feature = "board-mmc1-outer")]
+use super::Mmc1Outer;
 #[cfg(feature = "board-111")]
 use super::Mmc1Parallel;
+#[cfg(feature = "board-multi-p")]
+use super::MultiP;
 #[cfg(feature = "board-nina03")]
 use super::Nina03;
 #[cfg(feature = "board-96")]
@@ -259,6 +265,12 @@ pub enum DecodeBoard {
     /// Lot MAPPERS-N's Kaiser boards with 2 KiB PRG pages ([`FineRom`]).
     #[cfg(feature = "board-fine-rom")]
     FineRom(FineRom),
+    /// Lot MAPPERS-P's discrete boards ([`MultiP`]).
+    #[cfg(feature = "board-multi-p")]
+    MultiP(MultiP),
+    /// Lot MAPPERS-P's MMC1 multicarts ([`Mmc1Outer`]).
+    #[cfg(feature = "board-mmc1-outer")]
+    Mmc1Outer(Box<Mmc1Outer>),
 }
 
 /// Expands `$body` once per board with it bound to `$b`, as [`SmallBoard`]'s own `inner!` does.
@@ -324,6 +336,10 @@ macro_rules! inner {
             DecodeBoard::LatchMulti($b) => $body,
             #[cfg(feature = "board-fine-rom")]
             DecodeBoard::FineRom($b) => $body,
+            #[cfg(feature = "board-mmc1-outer")]
+            DecodeBoard::Mmc1Outer($b) => $body,
+            #[cfg(feature = "board-multi-p")]
+            DecodeBoard::MultiP($b) => $body,
         }
     };
 }
@@ -423,6 +439,8 @@ impl Mapper for DecodeBoard {
         feature = "board-164",
         feature = "board-178",
         feature = "board-latch-multi",
+        feature = "board-mmc1-outer",
+        feature = "board-multi-p",
         feature = "board-323"
     ))]
     fn prg_ram_window(&self, memory: &CartridgeMemory) -> (usize, usize) {
@@ -449,6 +467,8 @@ impl Mapper for DecodeBoard {
     #[cfg(any(
         feature = "board-111",
         feature = "board-latch-multi",
+        feature = "board-mmc1-outer",
+        feature = "board-multi-p",
         feature = "board-fine-rom",
         feature = "board-323"
     ))]
@@ -463,7 +483,8 @@ impl Mapper for DecodeBoard {
     #[cfg(any(
         feature = "board-234",
         feature = "board-188",
-        feature = "board-fine-rom"
+        feature = "board-fine-rom",
+        feature = "board-multi-p"
     ))]
     #[inline(never)]
     fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
@@ -473,7 +494,8 @@ impl Mapper for DecodeBoard {
     #[cfg(any(
         feature = "board-234",
         feature = "board-188",
-        feature = "board-fine-rom"
+        feature = "board-fine-rom",
+        feature = "board-multi-p"
     ))]
     fn cpu_peek_override(&self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
         inner!(self, b => b.cpu_peek_override(memory, address))
@@ -484,7 +506,9 @@ impl Mapper for DecodeBoard {
         feature = "board-188",
         feature = "board-misc-n",
         feature = "board-246",
-        feature = "board-latch-multi"
+        feature = "board-latch-multi",
+        feature = "board-mmc1-outer",
+        feature = "board-multi-p"
     ))]
     fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {
         inner!(self, b => b.rom_windows(memory))
@@ -509,6 +533,8 @@ impl Mapper for DecodeBoard {
     #[cfg(any(
         feature = "board-246",
         feature = "board-latch-multi",
+        feature = "board-mmc1-outer",
+        feature = "board-multi-p",
         feature = "board-fine-rom",
         feature = "board-323"
     ))]
@@ -557,6 +583,8 @@ impl Mapper for DecodeBoard {
         feature = "board-246",
         feature = "board-jv001",
         feature = "board-latch-multi",
+        feature = "board-mmc1-outer",
+        feature = "board-multi-p",
         feature = "board-sachen-8reg",
         feature = "board-fine-rom",
         feature = "board-fine-rom",

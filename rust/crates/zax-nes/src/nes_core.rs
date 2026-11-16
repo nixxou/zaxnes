@@ -989,7 +989,7 @@ impl NesCore {
     pub fn export_flash_save(&self) -> Vec<u8> {
         self.bus
             .cartridge()
-            .map_or_else(Vec::new, |cartridge| cartridge.memory().export_flash_save())
+            .map_or_else(Vec::new, crate::cartridges::Cartridge::export_flash_save)
     }
 
     /// Loads a file written by [`Self::export_flash_save`] (REQ-CORE-095). Returns `false` when
@@ -1002,7 +1002,7 @@ impl NesCore {
     pub fn import_flash_save(&mut self, data: &[u8]) -> bool {
         self.bus
             .cartridge_mut()
-            .is_some_and(|cartridge| cartridge.memory_mut().import_flash_save(data))
+            .is_some_and(|cartridge| cartridge.import_flash_save(data))
     }
 
     fn power_on(&mut self) {
@@ -1035,7 +1035,7 @@ impl NesCore {
             // all-zero power-on (FIDELITY-LEADS J14).
             if clear_prg_ram
                 && self.power_on_battery_ram != crate::PowerOnRam::Zero
-                && !matches!(cartridge.mapper_number(), 16 | 19 | 157 | 159 | 164)
+                && !matches!(cartridge.board_number(), 16 | 19 | 157 | 159 | 164)
             {
                 self.power_on_battery_ram.fill(cartridge.battery_ram_mut());
             }
@@ -1049,10 +1049,46 @@ impl NesCore {
             self.bus.diagnostic_flip_get_put();
             self.bus.apu_mut().diagnostic_set_dmc_phase(431, 8);
         }
+        self.run_boot_program();
         self.frame_count = 0;
         // REQ-LOOP-066: a reset or a change of game starts the next real frame afresh, with the
         // same N; the state of the machine that is gone is never put back.
         self.forget_real_frame();
+    }
+
+    /// Lot MAPPERS-P: a copier loader's boot (puNES `extcl_cpu_init_pc_561`), at power-on only.
+    /// The data goes to CPU RAM (`$0000-$1FFF`, mirrored every 2 KiB) or to the work RAM (its
+    /// `address & $1FFF`); with an `init` address the CPU starts at `$0700` on `JSR init`,
+    /// `JMP ($FFFC)`, so the game's own reset vector follows.
+    fn run_boot_program(&mut self) {
+        let Some(boot) = self
+            .bus
+            .cartridge()
+            .and_then(crate::cartridges::Cartridge::boot_program)
+        else {
+            return;
+        };
+        let start = usize::from(boot.address & 0x1FFF);
+        if boot.address < 0x2000 {
+            let ram = self.bus.ram_mut();
+            for (index, byte) in boot.data.iter().enumerate() {
+                ram[(start + index) % ram.len()] = *byte;
+            }
+        } else if let Some(cartridge) = self.bus.cartridge_mut() {
+            let ram = cartridge.memory_mut().prg_ram_mut();
+            if !ram.is_empty() {
+                let len = ram.len();
+                for (index, byte) in boot.data.iter().enumerate() {
+                    ram[(start + index) % len] = *byte;
+                }
+            }
+        }
+        if boot.init != 0 {
+            let [init_low, init_high] = boot.init.to_le_bytes();
+            let stub = [0x20, init_low, init_high, 0x6C, 0xFC, 0xFF];
+            self.bus.ram_mut()[0x700..0x706].copy_from_slice(&stub);
+            self.cpu.pc = 0x0700;
+        }
     }
 
     /// TV region in force (REQ-CORE-016).
@@ -1374,6 +1410,13 @@ impl NesCore {
     /// The standard frame: the PPU and the APU batched, the board's path (lot CORE-2).
     fn run_standard_frame(&mut self, idle_loop: Option<(u16, u16)>) {
         self.bus.defer_ppu();
+        // Lot MAPPERS-P: mapper 532's overlay reads CPU RAM as it stood at the pre-render line.
+        #[cfg(feature = "board-532")]
+        let ersan2_ram = if self.ersan2_active() {
+            Some(self.run_to_pre_render())
+        } else {
+            None
+        };
         // The frame's path (lot CORE-2, `docs/design/CORE-TIERS.md`): the board is looked at once
         // here, and the frame runs through the code compiled for it, or for every board when it
         // is not in the table. `run_frame` checked that a cartridge is loaded.
@@ -1392,6 +1435,10 @@ impl NesCore {
             }
         }
         self.bus.end_deferred_ppu();
+        #[cfg(feature = "board-532")]
+        if let Some(ram) = ersan2_ram {
+            self.paint_ersan2(&ram);
+        }
     }
 
     /// What follows a frame's instructions on every path: smooth scrolling, the frame count, the
@@ -1422,6 +1469,75 @@ impl NesCore {
         }
 
         self.bus.cycle_count() - start_cycle
+    }
+
+    /// Lot MAPPERS-P: whether the loaded image is mapper 532 with a font (*China Ersan 2*).
+    #[cfg(feature = "board-532")]
+    fn ersan2_active(&self) -> bool {
+        self.bus.cartridge().is_some_and(|cartridge| {
+            cartridge.mapper_number() == 532 && !Self::misc_rom(cartridge).is_empty()
+        })
+    }
+
+    /// The NES 2.0 misc ROM of the loaded image (the bytes past its announced ROMs).
+    #[cfg(feature = "board-532")]
+    fn misc_rom(cartridge: &crate::cartridges::Cartridge) -> &[u8] {
+        let rom = cartridge.rom();
+        rom.raw()
+            .get(rom.header().announced_size()..)
+            .unwrap_or_default()
+    }
+
+    /// Steps the CPU, the PPU in step, until the PPU reaches the pre-render line (puNES copies
+    /// RAM there, `ppu.c`), and returns CPU RAM `$00-$FF`. Only a 532 image runs this.
+    #[cfg(feature = "board-532")]
+    #[cold]
+    #[inline(never)]
+    fn run_to_pre_render(&mut self) -> Box<[u8; 256]> {
+        loop {
+            self.bus.sync_ppu();
+            let ppu = self.bus.ppu();
+            if ppu.scanline() == ppu.pre_render_scanline() || ppu.vblank_just_started() {
+                break;
+            }
+            self.cpu
+                .step(&mut KindBus::<crate::cartridges::AnyBoard>::new(
+                    &mut self.bus,
+                ));
+        }
+        let mut ram = Box::new([0u8; 256]);
+        ram.copy_from_slice(&self.bus.ram()[..256]);
+        ram
+    }
+
+    /// Paints mapper 532's glyphs on the finished picture ([`crate::ersan2_overlay`]).
+    #[cfg(feature = "board-532")]
+    #[cold]
+    #[inline(never)]
+    fn paint_ersan2(&mut self, ram: &[u8; 256]) {
+        let mut pixels = self.bus.ppu_mut().take_pixels();
+        if let Some(cartridge) = self.bus.cartridge() {
+            let ppu = self.bus.ppu();
+            let (palette, palette_raw) = ppu.palette_colors();
+            let read = |address: u16| {
+                let address = address & 0x3FFF;
+                if address < 0x2000 {
+                    cartridge.ppu_peek(address, crate::cartridges::ChrFetch::Background)
+                } else if address < 0x3F00 {
+                    ppu.read_nametable_byte(0x2000 | (address & 0x0FFF), Some(cartridge))
+                } else {
+                    palette_raw[usize::from(address & 0x1F)]
+                }
+            };
+            crate::ersan2_overlay::apply(
+                ram,
+                Self::misc_rom(cartridge),
+                &read,
+                &palette,
+                &mut pixels,
+            );
+        }
+        self.bus.ppu_mut().restore_pixels(pixels);
     }
 
     /// Runs every frame through the path of every board, specialised board or not (lot CORE-2):

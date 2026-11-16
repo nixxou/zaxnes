@@ -1,3 +1,5 @@
+#[cfg(feature = "board-394")]
+use super::Mmc3;
 use super::{windows_for, Mapper};
 use crate::cartridges::{BankWindows, CartridgeMemory};
 use crate::state::{InvalidState, StateReader, StateWriter};
@@ -121,6 +123,16 @@ pub struct JyCompany {
     outer_prg_bank: u8,
     /// `$D003` bit 0, `C`: the 256 KiB outer CHR bank, CHR A18. Ignored when `L` is set.
     outer_chr_a18: bool,
+    /// Lot MAPPERS-P: the multicart that reuses `$D003` as a wider outer bank (281, 282 or 295),
+    /// or `None` for the four single-game numbers. puNES (`mapper_281.c`, `mapper_282.c`,
+    /// `mapper_295.c`) keeps the ASIC as it is and replaces only the two bank functions that
+    /// place an 8 KiB PRG bank and a 1 KiB CHR bank in the outer bank; so does this board.
+    multicart: Option<JyMulticart>,
+    /// `$D003` as written, for [`JyCompany::multicart`]'s decodes, which use all eight bits.
+    outer_raw: u8,
+    /// Lot MAPPERS-P: mapper 394's board around the ASIC, `None` for every other number.
+    #[cfg(feature = "board-394")]
+    ext_394: Option<Box<Jy394>>,
 
     /// The two MMC4-like latches, one per pattern table, each 0 or 1.
     chr_latch: [u8; 2],
@@ -179,7 +191,7 @@ impl JyCompany {
         let mut board = Self {
             banks: windows_for(memory),
             mapper_number,
-            jumper_inhibits_nametables: mapper_number == 90,
+            jumper_inhibits_nametables: mapper_number == 90 || mapper_number == 388,
             prg: [0; 4],
             chr_low: [0; 8],
             chr_high: [0; 8],
@@ -200,6 +212,10 @@ impl JyCompany {
             outer_chr_bank: 0,
             outer_prg_bank: 0,
             outer_chr_a18: false,
+            multicart: JyMulticart::of(mapper_number),
+            outer_raw: 0,
+            #[cfg(feature = "board-394")]
+            ext_394: (mapper_number == 394).then(|| Box::new(Jy394::new(memory))),
             chr_latch: [0; 2],
             irq_enabled: false,
             irq_source: 0,
@@ -219,6 +235,8 @@ impl JyCompany {
             nametable_pages: [super::super::Cartridge::FOLLOW_MIRRORING; 4],
         };
         board.update_banks();
+        #[cfg(feature = "board-394")]
+        board.apply_394();
         board
     }
 
@@ -251,6 +269,12 @@ impl JyCompany {
     /// "The PRG-ROM bank selected via $8000-$8003 is always masked to the outer bank size …
     /// Accessing more than that requires manipulating the Outer Bank register at $D003."
     fn prg_bank(&self, bank_8k: i32) -> i32 {
+        if let Some((prg_base, _)) = self.base_394() {
+            return prg_base | (bank_8k & 0x1F);
+        }
+        if let Some(multicart) = self.multicart {
+            return multicart.prg_bank(self.outer_raw, bank_8k);
+        }
         (bank_8k & (Self::OUTER_PRG_BANKS - 1))
             | (i32::from(self.outer_prg_bank) * Self::OUTER_PRG_BANKS)
     }
@@ -276,6 +300,12 @@ impl JyCompany {
     fn chr_bank(&self, index: usize) -> i32 {
         let register = i32::from(self.chr_low[index]) | (i32::from(self.chr_high[index]) << 8);
         let bank_1k = register * Self::CHR_UNIT_1K[usize::from(self.chr_mode) & 3];
+        if let Some((_, chr_base)) = self.base_394() {
+            return chr_base | (bank_1k & 0xFF);
+        }
+        if let Some(multicart) = self.multicart {
+            return multicart.chr_bank(self.outer_raw, bank_1k);
+        }
         let outer = i32::from(self.outer_chr_bank) * Self::OUTER_CHR_BANKS_512K;
         if self.outer_chr_512k {
             (bank_1k & (Self::OUTER_CHR_BANKS_512K - 1)) | outer
@@ -302,6 +332,102 @@ impl JyCompany {
             } else {
                 0
             }
+    }
+
+    /// `$D001`'s arrangement as this core's mirroring. The page's arrangements are this core's
+    /// mirrorings reversed: "0: Horizontal (A10)" puts $2000 and $2400 on different pages, which
+    /// is `Vertical` here.
+    const fn arrangement_mirroring(&self) -> NametableMirroring {
+        match self.arrangement {
+            0 => NametableMirroring::Vertical,
+            1 => NametableMirroring::Horizontal,
+            2 => NametableMirroring::SingleScreenA,
+            _ => NametableMirroring::SingleScreenB,
+        }
+    }
+
+    /// `prg_base()`/`chr_base()` of `mapper_394.c`, `None` for every other number.
+    #[allow(clippy::unused_self)]
+    fn base_394(&self) -> Option<(i32, i32)> {
+        #[cfg(feature = "board-394")]
+        if let Some(ext) = &self.ext_394 {
+            return Some(ext.bases());
+        }
+        None
+    }
+
+    /// 394's MMC3 while `$5001` D4 is clear (`m394.reg[1] & $10`), `None` while the ASIC runs.
+    #[cfg(feature = "board-394")]
+    fn mmc3_394(&self) -> Option<&Mmc3> {
+        self.ext_394
+            .as_deref()
+            .filter(|ext| ext.regs[1] & 0x10 == 0)
+            .map(|ext| &ext.mmc3)
+    }
+
+    #[cfg(feature = "board-394")]
+    fn mmc3_394_mut(&mut self) -> Option<&mut Mmc3> {
+        self.ext_394
+            .as_deref_mut()
+            .filter(|ext| ext.regs[1] & 0x10 == 0)
+            .map(|ext| &mut ext.mmc3)
+    }
+
+    /// `prg_swap_mmc3_394`/`chr_swap_mmc3_394`: the MMC3's windows through the outer bank;
+    /// `$5001` D3 clear is the NROM mode, a 32 KiB bank from `$5003` D0-D2.
+    #[cfg(feature = "board-394")]
+    fn apply_394(&mut self) {
+        let Some(ext) = self.ext_394.as_deref_mut() else {
+            return;
+        };
+        let (prg_base, chr_base) = ext.bases();
+        let r = ext.regs.map(i32::from);
+        ext.mmc3.refresh_banks();
+        let Some(b) = ext.mmc3.banks_mut() else {
+            return;
+        };
+        if r[1] & 0x08 == 0 {
+            let base = (prg_base | ((r[3] & 0x07) << 1)) & 0xFC;
+            for slot in 0..4 {
+                b.map_prg_8k(slot, base | i32::try_from(slot).unwrap_or(0));
+            }
+        } else {
+            let mask = 0x1F >> i32::from(r[3] & 0x10 == 0);
+            b.remap_prg_banks(mask, prg_base & !mask);
+        }
+        b.remap_chr_banks(0xFF >> i32::from(r[3] & 0x80 == 0), chr_base);
+    }
+
+    /// `extcl_cpu_wr_mem_394`: `$5000-$5FFF` the board's four registers (A0-A1), after which the
+    /// chip in use re-fixes its windows and mirroring (`extcl_after_mapper_init_394`); every write
+    /// then goes to that chip.
+    #[cfg(feature = "board-394")]
+    fn write_394(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        if (0x5000..=0x5FFF).contains(&address) {
+            if let Some(ext) = self.ext_394.as_deref_mut() {
+                ext.regs[usize::from(address & 0x03)] = value;
+            }
+            self.update_banks();
+            self.apply_394();
+            match self.ext_394.as_deref_mut() {
+                Some(ext) if ext.regs[1] & 0x10 == 0 => {
+                    ext.mmc3.write_register(memory, 0xA000, ext.a000);
+                    self.apply_394();
+                }
+                _ => memory.set_mirroring(self.arrangement_mirroring()),
+            }
+        }
+        if let Some(ext) = self.ext_394.as_deref_mut() {
+            if ext.regs[1] & 0x10 == 0 {
+                if address & 0xE001 == 0xA000 {
+                    ext.a000 = value;
+                }
+                ext.mmc3.write_register(memory, address, value);
+                self.apply_394();
+                return;
+            }
+        }
+        self.write_jy(memory, address, value);
     }
 
     /// What [`Mapper::nametable_page`] answers for logical table `table`.
@@ -495,12 +621,7 @@ impl JyCompany {
                 // The page's arrangements are this core's mirrorings reversed: "0:
                 // Horizontal (A10)" puts $2000 and $2400 on different pages, which is
                 // `Vertical` here.
-                memory.set_mirroring(match self.arrangement {
-                    0 => NametableMirroring::Vertical,
-                    1 => NametableMirroring::Horizontal,
-                    2 => NametableMirroring::SingleScreenA,
-                    _ => NametableMirroring::SingleScreenB,
-                });
+                memory.set_mirroring(self.arrangement_mirroring());
             }
             2 => {
                 self.chr_write_enabled = value & 0x40 != 0;
@@ -513,6 +634,7 @@ impl JyCompany {
                 self.outer_chr_bank = (value >> 3) & 0x03;
                 self.outer_prg_bank = (value >> 1) & 0x03;
                 self.outer_chr_a18 = value & 0x01 != 0;
+                self.outer_raw = value;
             }
         }
     }
@@ -641,7 +763,21 @@ impl JyCompany {
 }
 
 impl Mapper for JyCompany {
-    banked!();
+    fn banks(&self) -> Option<&BankWindows> {
+        #[cfg(feature = "board-394")]
+        if let Some(mmc3) = self.mmc3_394() {
+            return mmc3.banks();
+        }
+        Some(&self.banks)
+    }
+
+    fn banks_mut(&mut self) -> Option<&mut BankWindows> {
+        #[cfg(feature = "board-394")]
+        if self.mmc3_394().is_some() {
+            return self.mmc3_394_mut().and_then(Mmc3::banks_mut);
+        }
+        Some(&mut self.banks)
+    }
 
     fn mapper_number(&self) -> i32 {
         self.mapper_number
@@ -668,6 +804,10 @@ impl Mapper for JyCompany {
         writer.write_u8(self.outer_chr_bank);
         writer.write_u8(self.outer_prg_bank);
         writer.write_bool(self.outer_chr_a18);
+        // Only the multicarts write it, so a single-game state keeps its old layout.
+        if self.multicart.is_some() {
+            writer.write_u8(self.outer_raw);
+        }
         writer.write_raw(&self.chr_latch);
         writer.write_bool(self.irq_enabled);
         writer.write_u8(self.irq_source);
@@ -684,6 +824,12 @@ impl Mapper for JyCompany {
         writer.write_u8(self.multiplier);
         writer.write_u8(self.accumulator);
         writer.write_u8(self.test_register);
+        #[cfg(feature = "board-394")]
+        if let Some(ext) = &self.ext_394 {
+            writer.write_raw(&ext.regs);
+            writer.write_u8(ext.a000);
+            ext.mmc3.save_registers(writer);
+        }
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -707,6 +853,9 @@ impl Mapper for JyCompany {
         self.outer_chr_bank = reader.read_u8()?;
         self.outer_prg_bank = reader.read_u8()?;
         self.outer_chr_a18 = reader.read_bool()?;
+        if self.multicart.is_some() {
+            self.outer_raw = reader.read_u8()?;
+        }
         reader.read_into(&mut self.chr_latch)?;
         // Validated and not masked: a latch of 2 or more would index `chr_low` out of its eight
         // registers through `chr_4k_register`, so a corrupt block has to be refused rather than
@@ -733,6 +882,16 @@ impl Mapper for JyCompany {
         self.multiplier = reader.read_u8()?;
         self.accumulator = reader.read_u8()?;
         self.test_register = reader.read_u8()?;
+        // 394: both chips' windows are rebuilt from their registers, whichever the block above
+        // the registers was read into.
+        #[cfg(feature = "board-394")]
+        if let Some(ext) = self.ext_394.as_deref_mut() {
+            reader.read_into(&mut ext.regs)?;
+            ext.a000 = reader.read_u8()?;
+            ext.mmc3.load_registers(reader)?;
+            self.update_banks();
+            self.apply_394();
+        }
         // Derived, and therefore not in the block: MF-5a step 3's `level` lesson.
         self.refresh_nametable_pages();
         Ok(())
@@ -749,7 +908,19 @@ impl Mapper for JyCompany {
     /// 8 KiB PRG-ROM bank, so the RAM is not readable there and [`Mapper::try_read_prg`] answers
     /// instead.
     fn prg_ram_enabled(&self) -> bool {
+        #[cfg(feature = "board-394")]
+        if let Some(mmc3) = self.mmc3_394() {
+            return mmc3.prg_ram_enabled();
+        }
         !self.prg_rom_at_6000
+    }
+
+    fn prg_ram_writable(&self) -> bool {
+        #[cfg(feature = "board-394")]
+        if let Some(mmc3) = self.mmc3_394() {
+            return mmc3.prg_ram_writable();
+        }
+        self.prg_ram_enabled()
     }
 
     /// `$8000`-`$FFFF` through the window table, `$5000`-`$5FFF`'s readable registers, and
@@ -772,6 +943,10 @@ impl Mapper for JyCompany {
     /// on multicarts", a dump carries no record of how the pads were cut, and 0 is the setting
     /// Mesen 2 reports too.
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
+        #[cfg(feature = "board-394")]
+        if let Some(mmc3) = self.mmc3_394() {
+            return mmc3.try_read_prg(memory, address);
+        }
         if address >= 0x8000 {
             return self
                 .banks
@@ -814,6 +989,10 @@ impl Mapper for JyCompany {
     }
 
     fn irq_asserted(&self) -> bool {
+        #[cfg(feature = "board-394")]
+        if let Some(mmc3) = self.mmc3_394() {
+            return mmc3.irq_asserted();
+        }
         self.irq_pending
     }
 
@@ -834,7 +1013,13 @@ impl Mapper for JyCompany {
 
     /// IRQ source 0, "CPU M2 rise" — the power-on setting of `$C001`, and the one the census
     /// calls "a CPU-cycle IRQ".
-    fn on_cpu_cycle(&mut self, _memory: &mut CartridgeMemory) {
+    fn on_cpu_cycle(&mut self, memory: &mut CartridgeMemory) {
+        #[cfg(feature = "board-394")]
+        if let Some(mmc3) = self.mmc3_394_mut() {
+            mmc3.on_cpu_cycle(memory);
+            return;
+        }
+        let _ = memory;
         if self.irq_source == Self::SOURCE_CPU_M2 {
             self.tick_irq();
         }
@@ -851,7 +1036,13 @@ impl Mapper for JyCompany {
     /// `last_ppu_address` is kept whatever the source is, so that selecting source 1 mid-frame
     /// does not read a stale edge — which is why all four numbers appear in
     /// `mf_3b_every_board_that_moves_on_the_ppu_address_bus_is_latched`'s expected list.
-    fn on_ppu_address_bus(&mut self, _memory: &mut CartridgeMemory, address: u16, _clock: i64) {
+    fn on_ppu_address_bus(&mut self, memory: &mut CartridgeMemory, address: u16, clock: i64) {
+        #[cfg(feature = "board-394")]
+        if let Some(mmc3) = self.mmc3_394_mut() {
+            mmc3.on_ppu_address_bus(memory, address, clock);
+            return;
+        }
+        let _ = (memory, clock);
         let clock = match self.irq_source {
             // "2: PPU reads (170 per scanline)" — every fetch, whatever the address.
             Self::SOURCE_PPU_READ => true,
@@ -901,6 +1092,10 @@ impl Mapper for JyCompany {
     }
 
     fn nametable_page(&self, table: i32) -> i32 {
+        #[cfg(feature = "board-394")]
+        if let Some(mmc3) = self.mmc3_394() {
+            return mmc3.nametable_page(table);
+        }
         self.nametable_pages[usize::try_from(table).unwrap_or(0) & 3]
     }
 
@@ -928,8 +1123,17 @@ impl Mapper for JyCompany {
     /// VRAM. The write is dropped, which is right for the write and loses the byte underneath.
     fn read_nametable(&self, memory: &CartridgeMemory, address: u16) -> u8 {
         let table = usize::from(address >> 10) & 3;
-        let bank =
+        let mut bank =
             usize::from(self.nametable_low[table]) | (usize::from(self.nametable_high[table]) << 8);
+        // puNES's `mirroring_swap_jyasic_28x` passes ROM nametables through the same outer bank.
+        if let Some(multicart) = self.multicart {
+            let placed = multicart.chr_bank(self.outer_raw, i32::try_from(bank).unwrap_or(0));
+            bank = usize::try_from(placed).unwrap_or(0);
+        }
+        // `mirroring_swap_jyasic_394`: 394's outer CHR bank too.
+        if let Some((_, chr_base)) = self.base_394() {
+            bank = usize::try_from(chr_base).unwrap_or(0) | (bank & 0xFF);
+        }
         memory.read_chr_direct(bank * Self::CHR_BANK_SIZE + (usize::from(address) & 0x03FF))
     }
 
@@ -941,12 +1145,29 @@ impl Mapper for JyCompany {
     /// of one of these numbers has to ask for the RAM before it can fill it, which is what the
     /// register means. Mesen 2 does not decode this bit at all.
     fn ppu_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        #[cfg(feature = "board-394")]
+        if let Some(mmc3) = self.mmc3_394_mut() {
+            mmc3.ppu_write(memory, address, value);
+            return;
+        }
         if memory.rom().chr_rom().is_empty() && self.chr_write_enabled {
             self.banks.write_chr(address, value, memory.chr_ram_mut());
         }
     }
 
     fn write_register(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
+        #[cfg(feature = "board-394")]
+        if self.ext_394.is_some() {
+            self.write_394(memory, address, value);
+            return;
+        }
+        self.write_jy(memory, address, value);
+    }
+}
+
+impl JyCompany {
+    /// The ASIC's own register decode.
+    fn write_jy(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         if address < 0x8000 {
             self.write_arithmetic_register(address, value);
             return;
@@ -999,5 +1220,144 @@ impl Mapper for JyCompany {
         }
 
         self.update_banks();
+    }
+}
+
+/// The three J.Y. multicarts of lot MAPPERS-P: the ASIC of mappers 209/211 with `$D003` read as
+/// a wider outer bank. Each decode is puNES's `prg_bank`/`chr_bank` of its file; nesdev has a
+/// page for none of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum JyMulticart {
+    /// `mapper_281.c`: 256 KiB outer PRG banks (`$D003` from A18 up), 256 KiB outer CHR banks.
+    M281,
+    /// `mapper_282.c`: PRG `$D003` bits 1-7 from A18 up; CHR bit 0 at A18 and bits 3-4 at
+    /// A19-A20, widened to 512 KiB (bits 3-4 only) when bit 5 is set.
+    M282,
+    /// `mapper_295.c`: 128 KiB outer PRG and CHR banks.
+    M295,
+    /// `mapper_358.c`: 282's PRG decode; CHR bit 0 at A18 and bits 2-3 at A19-A20, widened to
+    /// 512 KiB when bit 5 is set.
+    M358,
+    /// `mapper_386.c`: PRG A18 from `$D003` bit 1 and A19 from bit 3; 358's CHR decode.
+    M386,
+    /// `mapper_387.c`: 386 with 128 KiB inner PRG banks.
+    M387,
+    /// `mapper_388.c`: PRG A18-A19 from `$D003` bits 2-3; CHR A18-A19 from bits 0-1, A18 alone
+    /// in the 512 KiB mode. The board's jumper inhibits ROM nametables and Extended Mirroring
+    /// (`init_JYASIC(FALSE, ...)`), as on mapper 90.
+    M388,
+    /// `mapper_397.c`: 282's PRG decode and 295's CHR decode.
+    M397,
+    /// `mapper_421.c`: PRG from `$D003` A18 up with a 512 KiB inner mask when bit 6 is set; CHR
+    /// A18-A19 from bits 0-1 over a 512 KiB inner bank.
+    M421,
+}
+
+impl JyMulticart {
+    fn of(mapper: i32) -> Option<Self> {
+        match mapper {
+            281 => Some(Self::M281),
+            282 => Some(Self::M282),
+            295 => Some(Self::M295),
+            358 => Some(Self::M358),
+            386 => Some(Self::M386),
+            387 => Some(Self::M387),
+            388 => Some(Self::M388),
+            397 => Some(Self::M397),
+            421 => Some(Self::M421),
+            _ => None,
+        }
+    }
+
+    /// An 8 KiB PRG bank placed in the outer bank `outer` (`$D003`).
+    fn prg_bank(self, outer: u8, bank_8k: i32) -> i32 {
+        let outer = i32::from(outer);
+        match self {
+            Self::M281 => (outer << 5) | (bank_8k & 0x1F),
+            Self::M282 | Self::M358 | Self::M397 => ((outer << 4) & !0x1F) | (bank_8k & 0x1F),
+            Self::M295 => (outer << 4) | (bank_8k & 0x0F),
+            Self::M386 => ((outer & 0x02) << 4) | ((outer & 0x08) << 3) | (bank_8k & 0x1F),
+            Self::M387 => ((outer & 0x02) << 3) | ((outer & 0x08) << 2) | (bank_8k & 0x0F),
+            Self::M388 => ((outer & 0x0C) << 3) | (bank_8k & 0x1F),
+            Self::M421 => {
+                let mask = if outer & 0x40 != 0 { 0x3F } else { 0x1F };
+                ((outer << 4) & !mask) | (bank_8k & mask)
+            }
+        }
+    }
+
+    /// A 1 KiB CHR bank placed in the outer bank `outer` (`$D003`).
+    fn chr_bank(self, outer: u8, bank_1k: i32) -> i32 {
+        let outer = i32::from(outer);
+        match self {
+            Self::M281 => (outer << 8) | (bank_1k & 0xFF),
+            Self::M388 => {
+                let base = ((outer & 0x01) << 8) | ((outer & 0x02) << 8);
+                if outer & 0x20 == 0 {
+                    base | (bank_1k & 0xFF)
+                } else {
+                    (base & 0x0200) | (bank_1k & 0x1FF)
+                }
+            }
+            Self::M282 | Self::M358 | Self::M386 | Self::M387 => {
+                let base = if self == Self::M282 {
+                    ((outer & 0x01) << 8) | ((outer & 0x18) << 6)
+                } else {
+                    ((outer & 0x01) << 8) | ((outer & 0x0C) << 7)
+                };
+                if outer & 0x20 == 0 {
+                    base | (bank_1k & 0xFF)
+                } else {
+                    (base & 0x0600) | (bank_1k & 0x1FF)
+                }
+            }
+            Self::M295 | Self::M397 => (outer << 7) | (bank_1k & 0x7F),
+            Self::M421 => ((outer & 0x03) << 8) | (bank_1k & 0x1FF),
+        }
+    }
+}
+
+/// Lot MAPPERS-P: mapper 394's board (`mapper_394.c`), which wires the J.Y. ASIC and an MMC3
+/// to the same ROMs and picks one with `$5001` D4; both see the outer bank of its four
+/// registers.
+#[cfg(feature = "board-394")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Jy394 {
+    /// `m394.reg`, `$5000-$5003` by A0-A1; power-on `$5001` = `$0F`, `$5003` = `$90`.
+    regs: [u8; 4],
+    /// The last value written to the MMC3's `$A000`, which a switch back to the MMC3 re-applies
+    /// (the chip keeps no copy here).
+    a000: u8,
+    submapper: u8,
+    mmc3: Mmc3,
+}
+
+#[cfg(feature = "board-394")]
+impl Jy394 {
+    fn new(memory: &CartridgeMemory) -> Self {
+        let header = memory.rom().header();
+        Self {
+            regs: [0, 0x0F, 0, 0x90],
+            a000: 0,
+            submapper: if header.is_nes20 {
+                u8::try_from(header.submapper & 0x0F).unwrap_or(0)
+            } else {
+                0
+            },
+            mmc3: Mmc3::new(memory, 394),
+        }
+    }
+
+    /// `prg_base()` (8 KiB banks) and `chr_base()` (1 KiB banks): submapper 1 takes CHR A17-A18
+    /// from `$5001` D1-D2.
+    fn bases(&self) -> (i32, i32) {
+        let r = self.regs.map(i32::from);
+        let prg = ((r[3] & 0x08) << 1) | ((r[1] & 0x03) << 5);
+        let chr = if self.submapper == 1 {
+            ((r[3] & 0x40) << 1) | ((r[1] & 0x02) << 8) | ((r[1] & 0x04) << 6)
+        } else {
+            ((r[3] & 0x40) << 1) | ((r[1] & 0x01) << 8)
+        };
+        (prg, chr)
     }
 }

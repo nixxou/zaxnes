@@ -778,7 +778,8 @@ fn req_inp_049_a_set_can_be_reset_to_its_defaults() {
         .set_action(InputAction::A, key(Key::Q));
     bindings.reset_keyboard(0);
     assert_eq!(bindings.keyboard(0).get_action(InputAction::A), key(Key::X));
-    assert_eq!(bindings.keyboard(0).count(), 17);
+    // The 17 of §4.2 and the VS. System cabinet's coin slots and service button (lot MAPPERS-N).
+    assert_eq!(bindings.keyboard(0).count(), 20);
 
     bindings
         .keyboard_mut(1)

@@ -1328,6 +1328,192 @@ CHR-RAM) and puNES (`mapper_198.c`, banks from `$50` folding onto `$40-$4F`). Th
 password screen cleanly; the later `[T+ChSFIX2]` and `[T+ChTFIX2]` patches show stray glyphs on
 the password screen, not investigated (translation hacks; their CHR use may differ).
 
+### J37. MAPPERS-P batch 1 (55, 81, 122, 237, 389, 517): puNES readings kept as they are
+Every board of `multicart_p.rs` follows its puNES file; nesdev has no page for most of them. Three
+places where puNES itself is incomplete are copied, not invented around:
+* 517 (`mapper_517.c`): the ADC behind `$6000` is the microphone of a karaoke cartridge. puNES
+  feeds it no sample (its TODO); Zaxnes runs the same state machine on a silent input, so the start
+  bits read 0, 1, 1 and the data bits read 0. A real microphone input would need a host source.
+* 237 (`mapper_237.c`): with A0 set the board reads its DIP switches instead of ROM; puNES has no
+  DIP setting and returns 0, so the menu always shows the first variant. Same here.
+* 55 (`mapper_055.c`): `$6000-$6FFF` shows PRG-ROM from offset `$8000` and `$7000-$7FFF` is 4 KiB of
+  RAM, which is puNES's reading of the BTL-MARIO1-MALEE2 board; nesdev describes 2 KiB of RAM
+  mirrored. Unverified on a dump (none in the Hackset).
+* 122 runs puNES's `mapper_184.c` with the `$6000-$7FFF` decode puNES gives it.
+* Batch 2 adds two DIP-switch boards with the switches at 0, as puNES's default: 360 (the switch
+  *is* the game selector, so only the first game runs) and 338's two DIP reads. 352 and 381 pick
+  the game by counting resets: `Mapper::soft_reset` is the hook, and its default doc already
+  allows the reset-detecting multicarts; a power cycle starts again at 0.
+* 380 (submapper 0) reads `(A0-A7) | DIP` with A8 latched; the DIP is 0, so a menu that offers
+  a choice by switch shows its first one.
+* 400's `$8000-$BFFF` register drives an LED on the cartridge; puNES stores it and draws nothing,
+  Zaxnes does not store it.
+* 428 reads `(open bus & $FC) | DIP` at `$6000-$7FFF`; this core's open bus is a whole byte, so
+  the read is plain open bus and its two low bits are the bus's rather than the switches' 0.
+* 414 disables `$C000-$FFFF` when the latched address ANDs with the DIP value; at 0 it never does.
+* 327 and 372 have a CHR-RAM mode that puNES maps over CHR-ROM on images that carry both; this
+  core has one CHR memory per cartridge, so the mode is honoured on CHR-RAM images only.
+* 334's DIP read at `$6002` is `(open bus & $FE) | 0`; the high address byte stands in for the bus
+  (J33's convention).
+* 401's DIP switches choose which register bits drive PRG A19-A20 and can disable PRG; at 0 the
+  `reg[1]` D5-D6 lines are used and nothing is disabled.
+* 416: `extcl_cpu_every_cycle_416` resets the counter on every cycle that does not reach `$1000`
+  (`if (enable && ++counter == 0x1000) {...; return;} counter = 0;`), so as written its IRQ never
+  fires. `IrqP` counts while enabled, asserts at `$1000` and clears when disabled; no dump in the
+  Hackset to settle it.
+* 357 runs its *SMB2J* layout only (DIP switch 0); the other three games are selected by the DIP.
+* 422/534 (puNES `mapper_126.c`): the DIP read over `$8000-$FFFF` (`$6001` D0, low two bits
+  from the switches) is not modelled, since the switches are 0 and the ROM windows stay cached;
+  534's two-cycle A12 IRQ delay (`irqA12_delay = 2`) is not either; the "old dumps" CHR XOR is
+  read the non-old way. No dump in the Hackset.
+* 432: puNES's NROM mode reads `mmc3.reg[5 + (bank & 1)]`, R5 (a CHR register) for `$8000`;
+  nesdev ("NES 2.0 Mapper 432") gives R6 for `$8000`/`$C000` and R7 for `$A000`/`$E000`, which
+  this board follows. puNES also leaves out `$6001` D5 as PRG/CHR A19 on images of 1 MiB and more
+  (nesdev, submapper 0); it is applied here. Only submapper 0 is decoded.
+* 344: puNES picks a second chip order for one dump by its PRG CRC (`0xAB2ACA46`); this board
+  keeps order 0 for all.
+* 344 and 432 read 0 for the DIP switches / solder pad.
+* 353, game 0: puNES picks the two-table or four-table CIRAM layout from **R0** D7
+  (`mmc3.reg[0] & 0x80`), where its 370 and the `TxSROM` use the `$8000` CHR-inversion bit; this
+  board follows the `TxSROM` convention. R0 D7 is kept where puNES uses it for PRG A17 and the
+  CHR-RAM mode of game 2. No dump in the Hackset.
+* 281/282/295 apply puNES's outer bank to ROM nametables too (`mirroring_swap_jyasic_28x`); with
+  no dump in the Hackset this is untested on a real image.
+* 100 (`mapper_100.c`): puNES's `irqA12_delay = 1` for this board and its jump to a trainer's
+  `$7000` on power-up are not modelled; the chip's IRQ is the standard MMC3's and the trainer is
+  loaded where the core loads it. puNES's select value `$47` loads `prg[1]`, as written.
+* 559 (`mapper_559.c`): puNES maps its four nametable registers with `memmap_nmt_1k`, whose
+  values (`$E0`/`$E1` at power-on) are read here as a CIRAM page from D0; what the upper bits
+  select on the board is not documented anywhere this lot can read.
+* 555 (`mapper_555.c`): the timer's length is `(DIP | $10) << 25` CPU cycles and the DIP is 0,
+  so a round lasts about five minutes (puNES's default); puNES's on-screen countdown is a host
+  overlay and is not reproduced. `$5000-$57FF` is the work RAM's 4 KiB bank 2, so an image whose
+  header gives 8 KiB or less has it alias `$6000-$6FFF`; nesdev's page gives no RAM size and the
+  header's is used as it is. The 8 KiB CHR-RAM beside the CHR-ROM is assumed, as for the TQROM.
+* 471 (`mapper_471.c`): puNES asserts when the pattern address it tracks through the line goes
+  from the `$0000` half to the `$1000` half (background vs sprite tables, plus `$2006`); here the
+  same edge is the MMC3's filtered A12 rise, which agrees for the one-rise-per-line layouts and
+  may differ for a game rendering 8x16 sprites from both halves.
+* 558 (`mapper_558.c`): the EEPROM is mounted only when the NES 2.0 header declares 512 bytes of
+  PRG-NVRAM, as puNES decides; an iNES 1.0 dump of an EEPROM cartridge gets the bare port
+  (`$5200` D2 read back) and cannot save.
+* 272 (`mapper_272.c`): puNES steps the counter on every eighth dot of a rendered line, from
+  dot 5 (42 steps a line, 84 = two lines). Zaxnes has no per-dot hook for a board, so a step is
+  a low-plane pattern fetch, of which a rendered line has the same 42 (34 background slots and 8
+  sprite slots). The phase inside the line differs by a few dots; the pre-render line's fetches,
+  which puNES's line test excludes, and `$2007` reads of the low planes also step it here.
+* 359/540 (`mapper_359.c`): the A12 mode counts raw rises of the address the PPU drives, behind
+  puNES's five-CPU-cycle filter; puNES derives the rise from the background and sprite pattern
+  addresses at fixed dots instead, which agrees on ordinary layouts.
+* 528 (`mapper_528.c`): the IRQ is Zaxnes's `VrcIrq` (the VRC4/VRC6/VRC7 counter); puNES's VRC7
+  asserts one CPU cycle after the overflow (`irq_delay = 1`), Zaxnes on the overflow itself.
+* 556 (`mapper_556.c`): on a switch of chip puNES re-runs the new chip's whole fix, mirroring
+  included; here the windows are rebuilt but the mirroring stays the last one either chip wrote
+  until the new chip writes its own.
+* 351 (`mapper_351.c`): puNES appends the CHR-ROM to the PRG-ROM at load and, in the CHR-RAM
+  mode (`$5002` D0), lets the PRG banks reach it (a multicart keeps an UNROM game there) while
+  the PPU sees CHR-RAM. This core's PRG windows wrap on the PRG-ROM alone and its CHR memory is
+  one chip, so that mode maps the image's own CHR and PRG banks past the PRG-ROM wrap. The DIP
+  switches read 0 (J33 for the open-bus bits).
+* 560 (`mapper_560.c`): in bank 0 puNES's read is `chrrom_byte(((address & $3FF) << 13) &
+  $10000) | base`, the closing parenthesis putting `| base` outside the read; the evident
+  intent, the byte at `(A3 as A16) | base`, is what this board reads. The nametables are the
+  board's own copy of the console's 2 KiB, mirrored as the header says.
+* 406, 451 (`SST39SF040.c`): puNES's program command stores the byte (`data[address] = value`);
+  a flash cell can only go from 1 to 0, so this board `AND`s it, as `FlashRom` does for 111 and
+  682. The erase busy time is puNES's, one CPU cycle per erased byte (65 536 for a sector, the
+  chip size for a chip erase), not the datasheets' milliseconds; the toggle bit and `& $77` read
+  are puNES's too. Any command byte other than those listed falls back to the first unlock step
+  (puNES's `default:` arm), and the chip address is the PRG-ROM offset through the MMC3 banks,
+  so a game that unlocks through a window not mapped as puNES maps it would differ only if the
+  two cores' bank maps differed.
+* 547 (`mapper_547.c`): puNES turns a pattern fetch to the QT byte's bank when its address
+  equals the PPU's current background address (`bck_adr`); this board does it for every fetch
+  the core tags `ChrFetch::Background`, which also covers `$2007` CHR reads and host peeks, so a
+  `$2007` read of CHR-RAM after a tile fetch whose QT byte has D6 set reads the kanji ROM here
+  where puNES would read the CHR-RAM. The QT byte is latched by every nametable read below
+  `$x3C0` the PPU bus carries, `$2007` reads included, as `extcl_rd_nmt_547` does. The work RAM
+  is the header's, wrapped (puNES sizes it the same way).
+* 561 (`mapper_561.c`, `extcl_cpu_init_pc_561`): puNES runs the copier's trainer by writing
+  `JSR init` / `JMP ($FFFC)` at `$0700` and starting the CPU there; this board does the same
+  through `Mapper::boot_program`, after the CPU's reset sequence, so the seven reset cycles
+  happen before the stub instead of being skipped. puNES also clears `$4015` D6 and the APU IRQ
+  line at that point; the APU here has just been reset and both are already clear. The FDS-style
+  timer is puNES's signed 16-bit counter, which wraps while `irq.reg` D7 is clear exactly as
+  puNES's does. A soft reset keeps the copier RAM (puNES reloads it on power-up only).
+* 562 (`mapper_562.c`): the Venus Turbo Game Doctor's BIOS is embedded as puNES carries it, by
+  the owner's decision (2026-11-15): the 2 KiB of `bios[]` (declared 4 KiB, read through
+  `& $7FF`) in `data/vtgd_bios.bin`, a firmware dump and not emulator code. The boot follows
+  561's notes above. The `$4420` read-back tracks the last pattern fetch on the board's bus and
+  the last CHR write, as `extcl_rd_chr_562`/`extcl_wr_chr_562` do; a CHR write takes the
+  permission mapped before it changes the lock, as puNES's `chr_wr` does. The copier DRAM is the
+  image's PRG (wrapped to its size) and is saved in the state, not persisted.
+* 355 (`mapper_355.c`): the PIC16C54 is MAME's core as puNES runs it: configuration word 0 (no
+  watchdog), T0CKI never driven, one instruction cycle per four CPU cycles (a 1.79 MHz / 4 =
+  447 kHz instruction clock, where the board's real oscillator is not documented). The PIC sees
+  the CPU's address on reads and writes of `$4020-$FFFF` only, as puNES's `extcl_cpu_*_mem_355`
+  hooks; the board's real address bus also carries `$0000-$401F`. Port B reads take the address
+  as it was at the PIC's instruction, not at a precise cycle inside it.
+* 532 (`mapper_532.c`, UNIF `CHINA_ER_SAN2`): an emulator convention (Nintendulator, VirtuaNES;
+  Mesen 2 knows no such board), ported as puNES runs it: the RAM snapshot at the pre-render line
+  (`ppu.c`) and the glyphs painted when the frame is done (`gfx.c`). Kept as written: the
+  attribute colour is read at PPU `$03C0 + …`, in the pattern table, where an attribute table
+  was evidently meant; unsigned wraps of the row arithmetic. Not kept: puNES writes glyph rows
+  that fall before the picture before its buffer; they are not drawn here. The overlay is on the
+  2D picture only; the 3D conversion's tiles do not carry it. The RAM snapshot is taken at the
+  first CPU instruction boundary once the PPU is on the pre-render line, puNES's at dot 0.
+* UNIF (`rom/unif.rs`): puNES compares the image's board name as a prefix of its table's names
+  (`strncasecmp(table, board, strlen(board))`); this loader compares the whole name. Single-
+  screen `MIRR` values (2, 3) have no NES 2.0 header bit and are left to the board. ROM chunks
+  that are not whole 16/8 KiB banks are padded by repeating them, as a smaller chip mirrors.
+* 186 (Study Box, Mesen 2 `StudyBox.h`): Mesen's model, itself a reconstruction (its own
+  comments mark several `$4201`/`$4202` bits as guesses): command `$86` past the last page goes
+  back to the first page, command 0 walks back from page 255 when at page 0, `$5000-$7FFF` are
+  mapped from power-on by `$4200` = 0 where Mesen maps `$5000` only once `$4200` is written. The
+  tape's timings use the NTSC CPU clock whatever the region. The tape's audio is mixed at full
+  scale (a WAV sample as the mixer's `M`) and advances at the WAV's rate against the CPU clock,
+  where Mesen resamples it to the host's output; 8-bit and 16-bit PCM, channels averaged. The
+  whole tape (audio included) is in the image a savestate carries when it includes the ROM.
+* 256, 436 (`OneBus.c`): as puNES, the VT02/VT03 are modelled in the console's ordinary 2 bpp
+  rendering. In the 4 bpp modes (`$2010` D1/D2) the banks select the de-interleaved low planes
+  puNES selects, but the PPU still draws two planes, so those games show what puNES shows, not
+  what the chip shows. puNES clocks the IRQ counter at dot 256 of each visible line when `$410B`
+  D7 or `$2010` D1 is set and on A12 rises otherwise; this board counts A12 rises in both modes
+  (no board hook sees dot 256). The PCM channel reads its bytes through the cartridge only: an
+  address below `$6000` (`$4030` D0-D1 = 3 or 2) reads 0 where puNES reads the console's RAM or
+  registers. Its byte reaches the APU's `$4011` on the cycle it is fetched, the APU being kept in
+  step with the cartridge as for expansion audio. The VT09/VT369 extras (GPIO at `$4140`, the
+  `$3000` window, the relative bank of `$4160`) and the iNES-only VT09 detection are absent;
+  submapper 2 and 4 detection by PRG CRC on iNES 1.0 images is puNES's.
+* 394 (`mapper_394.c`): the MMC3 is this core's `Mmc3`, whose power-on banks (R6 = R7 = 0) are
+  not puNES's; a switch from the ASIC back to the MMC3 re-applies the last `$A000` value written
+  to it for the mirroring, where puNES's `extcl_after_mapper_init_MMC3` re-applies its own
+  `mmc3.mirroring`, which is the same value. The outer CHR bank is ORed over the chip's bank as
+  puNES does (`base | (value & mask)`), not masked into it.
+* 446 (`mapper_446.c`): the chips are this core's (`Mmc1`, `Mmc3`, `Vrc2Vrc4` wired as 22, 23 and
+  25, `Vrc6` wired as 24), reset on the `$5000` lock as puNES's `init_*(…, HARD)`; their windows go
+  through the outer bank by `BankWindows::remap_*_banks` over the chip's already-wrapped banks,
+  which equals puNES's `base | (value & mask)` on the bank before wrapping whenever the image
+  holds the whole outer bank. puNES's TLSROM personality is a plain MMC3 with a 7-bit CHR mask,
+  and so is this one (no TxSROM nametable control). SUROM, PNROM, HNROM and VRC1 have no
+  `fix_all` arm in puNES and leave the windows as they were here too. The VRC2's `$6000` latch
+  read (puNES `extcl_cpu_rd_mem_VRC2and4`) is whatever `Vrc2Vrc4` answers for mapper 22. The board
+  reports expansion audio always (0 unless the VRC6 runs), so the APU is stepped every cycle for
+  every 446 image. The flash chip uses the shared `JedecFlash` (`SST39SF040.c`, 128 KiB sectors).
+* 342 (`mapper_342.c`, COOLGIRL): puNES runs the scanline work (the MMC3 counter, the MMC5 line
+  compare, mapper 163's latch at lines 127 and 239) at dot 260 of each rendered line. No hook
+  sees PPU dots here, so `CoolGirl` finds the lines on its own bus as the MMC5 does (three
+  identical nametable reads end a line) and runs that work on the first fetch at or past 259
+  dots into a line; a gap of two lines leaves the frame. With rendering off nothing counts,
+  which matches the hardware's view of the bus but not puNES's. The `$5204` in-frame bit uses
+  the same tracker. The save area (the top 8 MiB of the 1 GiB bank space, puNES's
+  `SAVE_FLASH_SIZE`) is in the savestate and, since the flash-save batch, in the host's
+  `<rom>.flash` file as puNES keeps it in the game's save file (`Mapper::export_save_area`; only
+  the written 8 KiB pages are stored). Unwritten save pages read 0, as puNES's
+  zeroed buffer does, not `$FF` like an erased chip. The PRG flash outside the save area is
+  read-only here, as puNES's ROM is. Mapper 75's `$9000` write sets `chr.e` from `chr.a`'s other
+  bits, a reading of puNES's code kept as written.
+
 ### J36. Mapper 682 (Rainbow): the ESP is modelled from the protocol document
 The ESP (`rainbow_esp.rs`) follows Broke Studio's `rainbow-net.md` and `mapper-doc.md`; no
 emulator's ESP was read (the Broke Studio Mesen fork that has one is not local, and fetching it

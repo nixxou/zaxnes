@@ -728,6 +728,141 @@ dispatch is the generic path of the exotic ones only.
 | `board-266` | 266 | `CityFighter` (IrqBoard): a `Vrc2Vrc4` (VRC4e) behind CPU A13/A14 crossed, `$900C` PRG A16-A15 over the chip's inner banks; the `$980C` DAC not emulated (nesdev; J31) | ~100 | — (no dump) | **on** |
 | `board-284` | 284 | `Drip` (IrqBoard): 16 KiB PRG, 2 KiB CHR banks, 15-bit CPU IRQ, two FIFO PCM channels as expansion audio, extended attributes on the MMC5's `board-mmc5-exattr-split` path (one more arm in each of `Board`'s six MMC5 methods) (Mesen2; J34). Requires `board-mmc5-exattr-split` | ~300 | — (no dump) | **on** |
 | `board-682` | 682 | `Rainbow` (IrqBoard): Broke Studio's FPGA board, 16-bit PRG/CHR banks over ROM, RAM and 8 KiB FPGA RAM, four nametable sources with fill / attribute / background extended modes and a window on the MMC5's `board-mmc5-exattr-split` path (two more `Board` arms), scanline and CPU IRQs, vector override, OAM code generator, VRC6 audio (`Vrc6Audio`); S29 flash, ESP Wi-Fi model with the host network behind `emu.rainbow_network` (off by default; J36) (Mesen2, mapper doc; J35). Requires `board-mmc5-exattr-split` | ~1100 | — (no dump) | **on** |
+| `board-452` | 452 | `MultiP` kind M452 (DecodeBoard): DS-9-27, address latch, RAM over a ROM window (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-347` | 347 | `MultiP` kind M347 (DecodeBoard): Kaiser KS-7030 FDS conversion, 1 KiB pieces (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-539` | 539 | `MultiP` kind M539 (DecodeBoard): Kid Icarus FDS conversion, RAM pieces over ROM (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-557` | 557 | `MultiP` kind M557 (DecodeBoard): Namcot 118 clone, fixed CHR, R5 mirroring (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-543` | 543 | `Mmc1Outer` kind M543 (DecodeBoard): CH-501 5-in-1, serial outer register, banked WRAM (puNES; MAPPERS-P). Requires `board-mmc1-outer` | — | — (unit test) | **on** |
+| `board-340` | 340 | `MultiP` kind M340 (DecodeBoard): K-3036, address latch, CHR-RAM protect (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-550` | 550 | `Mmc1Outer` kind M550 (DecodeBoard): JY-215, outer bank at $7000, MMC1 or latch mode (puNES; MAPPERS-P). Requires `board-mmc1-outer` | — | — (unit test) | **on** |
+| `board-404` | 404 | `Mmc1Outer` kind M404 (DecodeBoard): JY012005, outer bank at $6000 (puNES; MAPPERS-P). Requires `board-mmc1-outer` | — | — (unit test) | **on** |
+| `board-374` | 374 | `Mmc1Outer` kind M374 (DecodeBoard): reset-based MMC1 4-in-1 (puNES; MAPPERS-P). Requires `board-mmc1-outer` | — | — (unit test) | **on** |
+| `board-297` | 297 | `Mmc1Outer` kind M297 (DecodeBoard): TXC 01-22110-000, MMC1 or latch mode (puNES; MAPPERS-P). Requires `board-mmc1-outer` | — | — (unit test) | **on** |
+| `board-554` | 554 | `MultiP` kind M554 (DecodeBoard): Kaiser KS-7010, read-triggered latch (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-525` | 525 | `MultiP` kind M525 (DecodeBoard): Kaiser KS-7021A, eight 1 KiB CHR banks (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-564` | 564 | `MultiP` kind M564 (DecodeBoard): shrinking data latch, four mirrorings (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-541` | 541 | `MultiP` kind M541 (DecodeBoard): LittleCom 160-in-1, address latch (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-538` | 538 | `MultiP` kind M538 (DecodeBoard): 60-1064-16L FDS conversion, PRG-ROM at $6000 (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-481` | 481 | `MultiP` kind M481 (DecodeBoard): 045N, UNROM with outer bank (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-438` | 438 | `MultiP` kind M438 (DecodeBoard): K-3071 address and data latch (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-437` | 437 | `MultiP` kind M437 (DecodeBoard): NTDEC TH2348, outer bank at $5000, bus conflicts (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-434` | 434 | `MultiP` kind M434 (DecodeBoard): S-009, outer bank at $6000, bus conflicts (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-433` | 433 | `MultiP` kind M433 (DecodeBoard): NC-20MB, CHR-RAM write enable (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-431` | 431 | `MultiP` kind M431 (DecodeBoard): Realtec GN-91B, bus conflicts (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-429` | 429 | `MultiP` kind M429 (DecodeBoard): LIKO BBG-235-8-1B (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-428` | 428 | `MultiP` kind M428 (DecodeBoard): TU-01, registers at $6000 (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-415` | 415 | `MultiP` kind M415 (DecodeBoard): Lucky Rabbit 0353, 8 KiB at $6000 (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-414` | 414 | `MultiP` kind M414 (DecodeBoard): 9999999-in-1, bus conflicts (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-409` | 409 | `MultiP` kind M409 (DecodeBoard): retroUSB DPCMcart (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-403` | 403 | `MultiP` kind M403 (DecodeBoard): 89433, registers at $4100 (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-400` | 400 | `MultiP` kind M400 (DecodeBoard): 8-BIT XMAS 2017, bus conflicts (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-396` | 396 | `MultiP` kind M396 (DecodeBoard): YY850437C, outer bank at $A000 (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-390` | 390 | `MultiP` kind M390 (DecodeBoard): Realtec 8031, two address registers (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-382` | 382 | `MultiP` kind M382 (DecodeBoard): 830928C, lockable latch, bus conflicts (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-380` | 380 | `MultiP` kind M380 (DecodeBoard): 970630C / KN-35A, DIP read, CHR-RAM protect (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-354` | 354 | `MultiP` kind M354 (DecodeBoard): FAM250 / 810139C, seven PRG modes, CHR-RAM protect (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-375` | 375 | `MultiP` kind M375 (DecodeBoard): 135-in-1, lockable latch, CHR-RAM protect (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-350` | 350 | `MultiP` kind M350 (DecodeBoard): Super 15-in-1, PRG-ROM at $6000 (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-337` | 337 | `MultiP` kind M337 (DecodeBoard): CTC-12IN1, PRG-ROM at $6000 (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-381` | 381 | `MultiP` kind M381 (DecodeBoard): KN-42, UNROM latch, outer bank by reset count (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-360` | 360 | `MultiP` kind M360 (DecodeBoard): Bit Corp 31-in-1, game by DIP switch (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-352` | 352 | `MultiP` kind M352 (DecodeBoard): Kaiser KS-106C, game by reset count (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-343` | 343 | `MultiP` kind M343 (DecodeBoard): reset-based 4-in-1, inverted latch (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-341` | 341 | `MultiP` kind M341 (DecodeBoard): TJ-03 address latch (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-338` | 338 | `MultiP` kind M338 (DecodeBoard): SA005-A address latch, DIP reads (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-335` | 335 | `MultiP` kind M335 (DecodeBoard): CTC-09 (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-271` | 271 | `MultiP` kind M271 (DecodeBoard): TXC 22026 data latch (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-517` | 517 | `MultiP` kind M517 (DecodeBoard): Kkachi-wa Norae Chingu, microphone ADC at `$6000` (silent) (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-389` | 389 | `MultiP` kind M389 (DecodeBoard): Caltron 9-in-1, three address registers (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-237` | 237 | `MultiP` kind M237 (DecodeBoard): Teletubbies 420-in-1, lock bit and DIP read (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-122` | 122 | `MultiP` kind M122 (DecodeBoard): two 4 KiB CHR banks at `$6000` (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-81` | 81 | `MultiP` kind M81 (DecodeBoard): NTDEC N715021, address latch (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-55` | 55 | `MultiP` kind M55 (DecodeBoard): NROM-256, PRG-ROM at `$6000`, RAM at `$7000` (puNES; MAPPERS-P). Requires `board-multi-p` | — | — (unit test) | **on** |
+| `board-281` | 281 | `JyCompany` with `JyMulticart::M281`: J.Y. ASIC multicart, 256 KiB outer banks (puNES; MAPPERS-P). Requires `board-jy-asic` | — | — (unit test) | **on** |
+| `board-282` | 282 | `JyCompany` with `JyMulticart::M282`: J.Y. ASIC multicart, outer CHR 256/512 KiB (puNES; MAPPERS-P). Requires `board-jy-asic` | — | — (unit test) | **on** |
+| `board-295` | 295 | `JyCompany` with `JyMulticart::M295`: J.Y. ASIC multicart, 128 KiB outer banks (puNES; MAPPERS-P). Requires `board-jy-asic` | — | — (unit test) | **on** |
+| `board-358` | 358 | `JyCompany` with `JyMulticart::M358`: J.Y. ASIC multicart (puNES; MAPPERS-P). Requires `board-jy-asic` | — | — (unit test) | **on** |
+| `board-386` | 386 | `JyCompany` with `JyMulticart::M386`: J.Y. ASIC multicart (puNES; MAPPERS-P). Requires `board-jy-asic` | — | — (unit test) | **on** |
+| `board-387` | 387 | `JyCompany` with `JyMulticart::M387`: J.Y. ASIC multicart, 128 KiB inner PRG (puNES; MAPPERS-P). Requires `board-jy-asic` | — | — (unit test) | **on** |
+| `board-388` | 388 | `JyCompany` with `JyMulticart::M388`: J.Y. ASIC multicart, nametable jumper as 90 (puNES; MAPPERS-P). Requires `board-jy-asic` | — | — (unit test) | **on** |
+| `board-397` | 397 | `JyCompany` with `JyMulticart::M397`: J.Y. ASIC multicart (puNES; MAPPERS-P). Requires `board-jy-asic` | — | — (unit test) | **on** |
+| `board-421` | 421 | `JyCompany` with `JyMulticart::M421`: J.Y. ASIC multicart, 512 KiB inner CHR (puNES; MAPPERS-P). Requires `board-jy-asic` | — | — (unit test) | **on** |
+| `board-394` | 394 | `JyCompany` with a `Jy394` board: the J.Y. ASIC or an MMC3 by `$5001` D4, both through its outer bank (puNES; MAPPERS-P). Requires `board-jy-asic` | — | — (unit test) | **on** |
+| `board-267` | 267 | `Mmc3P` kind M267 (IrqBoard): JY-119, lockable outer bank at $6000 (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-291` | 291 | `Mmc3P` kind M291 (IrqBoard): Kasheng 2-in-1, NROM mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-315` | 315 | `Mmc3P` kind M315 (IrqBoard): 820732C, GNROM mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-322` | 322 | `Mmc3P` kind M322 (IrqBoard): K-3033, address outer bank, NROM mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-327` | 327 | `Mmc3P` kind M327 (IrqBoard): 10-24-C-A1, lockable outer bank, CHR-RAM mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-334` | 334 | `Mmc3P` kind M334 (IrqBoard): 5/20-in-1, 32 KiB banks, DIP read (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-339` | 339 | `Mmc3P` kind M339 (IrqBoard): K-3006, NROM modes (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-345` | 345 | `Mmc3P` kind M345 (IrqBoard): L6IN1, AxROM mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-361` | 361 | `Mmc3P` kind M361 (IrqBoard): YY841101C, outer bank at $7000 (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-372` | 372 | `Mmc3P` kind M372 (IrqBoard): SFC-12, four outer registers (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-377` | 377 | `Mmc3P` kind M377 (IrqBoard): JY-111/112 (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-395` | 395 | `Mmc3P` kind M395 (IrqBoard): Realtec 8210, two outer registers (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-399` | 399 | `Mmc3P` kind M399 (IrqBoard): BATMAP-000, own PRG/CHR banks (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-401` | 401 | `Mmc3P` kind M401 (IrqBoard): KC885, four registers in turn (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-410` | 410 | `Mmc3P` kind M410 (IrqBoard): JC-016-2 variant, CHR-RAM mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-411` | 411 | `Mmc3P` kind M411 (IrqBoard): A88S-1, registers at $5000 (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-420` | 420 | `Mmc3P` kind M420 (IrqBoard): A971210, NROM mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-455` | 455 | `Mmc3P` kind M455 (IrqBoard): N625836, outer registers at $4100, NROM mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-456` | 456 | `Mmc3P` kind M456 (IrqBoard): K6C3001A, outer bank at $4100 (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-457` | 457 | `Mmc3P` kind M457 (IrqBoard): 810431C, outer bank at $6000 (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-516` | 516 | `Mmc3P` kind M516 (IrqBoard): Cocoma Pack, A4-latched outer bank (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-393` | 393 | `Mmc3P` kind M393 (IrqBoard): 820720C, NROM-like modes, CHR-RAM mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-412` | 412 | `Mmc3P` kind M412 (IrqBoard): Intellivision 10-in-1 PVP, NROM/CNROM mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-308` | 308 | `VrcP` kind M308 (IrqBoard): TH2131-1, VRC2b with its own CPU-cycle IRQ (puNES; MAPPERS-P). Requires `board-vrc-p` | — | — (unit test) | **on** |
+| `board-384` | 384 | `VrcP` kind M384 (IrqBoard): L1A16, VRC4e with a lockable outer bank (puNES; MAPPERS-P). Requires `board-vrc-p` | — | — (unit test) | **on** |
+| `board-447` | 447 | `VrcP` kind M447 (IrqBoard): KL-06, VRC4e with an address-latched outer bank and NROM mode (puNES; MAPPERS-P). Requires `board-vrc-p` | — | — (unit test) | **on** |
+| `board-524` | 524 | `VrcP` kind M524 (IrqBoard): BTL-900218, VRC2b with its own CPU-cycle IRQ (puNES; MAPPERS-P). Requires `board-vrc-p` | — | — (unit test) | **on** |
+| `board-311` | 311 | `IrqP` kind M311 (IrqBoard): SMB2J conversion, $4022/$4122, PRG-ROM at $5000/$6000 (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-357` | 357 | `IrqP` kind M357 (IrqBoard): Bit Corp 4-in-1, SMB2J layout with the DIP at 0 (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-368` | 368 | `IrqP` kind M368 (IrqBoard): YUNG-08 SMB2J, readable IRQ status (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-416` | 416 | `IrqP` kind M416 (IrqBoard): 4-in-1 N-32, SMB2J layout and NROM latch (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-417` | 417 | `IrqP` kind M417 (IrqBoard): Batman pirate, CIRAM page per table (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-551` | 551 | `WaixingFs305` with `chr_banked`: puNES's mapper-178 code with `$4803` an 8 KiB CHR bank (puNES; MAPPERS-P). Requires `board-178` | — | — (unit test) | **on** |
+| `board-248` | 248 | alias of 115 (`registry::board_number`): puNES `map_init_115` (puNES; MAPPERS-P). Requires `board-mmc3-scramble` | — | — (unit test) | **on** |
+| `board-532` | 532 | alias of 19 (`registry::board_number`) with the font overlay of `ersan2_overlay.rs` (UNIF `CHINA_ER_SAN2`): puNES `mapper_532.c` (puNES; MAPPERS-P) | — | — (unit test) | **on** |
+| `board-186` | 186 | `IrqP` kind M186 (IrqBoard): the Fukutake Study Box, loaded only from a `.studybox` tape packaged with the user's `StudyBox.bin` (`zax_nes::rom::package_study_box`); a bare iNES 186 stays refused (Mesen 2 `StudyBox.h`; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-536` | 536 | alias of 195 (`registry::board_number`): puNES `map_init_195` (puNES; MAPPERS-P). Requires `board-mmc3-chrram` | — | — (unit test) | **on** |
+| `board-422` | 422 | `Mmc3P` kind M422 (IrqBoard): BS-300/BS-400 multicarts, puNES's TEC9719 reading (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-534` | 534 | `Mmc3P` kind M534 (IrqBoard): ING003C, 422 with inverted IRQ latch data (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-370` | 370 | `Mmc3P` kind M370 (IrqBoard): F600, CIRAM page per table in mode 1 (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-344` | 344 | `Mmc3P` kind M344 (IrqBoard): GN-26, address outer bank, NROM-256 mode, DIP read (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-432` | 432 | `Mmc3P` kind M432 (IrqBoard): Realtec 8090, solder-pad read, NROM modes (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-356` | 356 | `Mmc3P` kind M356 (IrqBoard): JY-215 7-in-1, CHR-RAM mode, four-screen mode (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-269` | 269 | `Mmc3P` kind M269 (IrqBoard): Games Xplosion 121-in-1, CHR from permuted PRG (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-527` | 527 | `VrcP` kind M527 (IrqBoard): AX-40G, VRC2b with CIRAM pages from CHR D7 (puNES; MAPPERS-P). Requires `board-vrc-p` | — | — (unit test) | **on** |
+| `board-353` | 353 | `Mmc3P` kind M353 (IrqBoard): 81-03-05-C Super Mario Family, games by $x080 (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-100` | 100 | `Mmc3P` kind M100 (IrqBoard): Nesticle buggy MMC3, raw bank registers (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-559` | 559 | `VrcP` kind M559 (IrqBoard): VRC4 indexed by A10/A11, nametable registers (puNES; MAPPERS-P). Requires `board-vrc-p` | — | — (unit test) | **on** |
+| `board-555` | 555 | `Mmc3P` kind M555 (IrqBoard): Nintendo Campus Challenge 1991, timer and mixed CHR (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-471` | 471 | `IrqP` kind M471 (IrqBoard): Impact Soft IM1, IRQ on every A12 rise (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-526` | 526 | `IrqP` kind M526 (IrqBoard): BJ-56, CPU-cycle IRQ on bit 12 (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-558` | 558 | `IrqP` kind M558 (IrqBoard): Yancheng YC-03-09, 93C66 EEPROM (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-272` | 272 | `IrqP` kind M272 (IrqBoard): J.Y. Akumajou Special bootleg, IRQ on tile slots (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-442` | 442 | `IrqP` kind M442 (IrqBoard): PEC-9588 relative, 1 bpp mode (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-362` | 362 | `VrcP` kind M362 (IrqBoard): 830506C, outer bank from the fetched CHR window (puNES; MAPPERS-P). Requires `board-vrc-p` | — | — (unit test) | **on** |
+| `board-398` | 398 | `VrcP` kind M398 (IrqBoard): JY-048, outer bank from the fetched CHR window (puNES; MAPPERS-P). Requires `board-vrc-p` | — | — (unit test) | **on** |
+| `board-359` | 359 | `IrqP` kind M359 (IrqBoard): BS-400R, CPU or A12 IRQ (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-540` | 540 | `IrqP` kind M540 (IrqBoard): 359 with 2 KiB CHR banks (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-528` | 528 | `IrqP` kind M528 (IrqBoard): 1201, FME-7 banking with a VRC7 IRQ (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-369` | 369 | `Mmc3P` kind M369 (IrqBoard): N-49, NROM / SMB2J / MMC3 games (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-556` | 556 | `ChipSwitch` kind M556 (IrqBoard): MMC3 or VRC4 by its outer register (puNES; MAPPERS-P). Requires `board-chip-switch` | — | — (unit test) | **on** |
+| `board-351` | 351 | `ChipSwitch` kind M351 (IrqBoard): Techline XB, MMC3 / MMC1 / VRC4 by its outer register (puNES; MAPPERS-P). Requires `board-chip-switch` | — | — (unit test) | **on** |
+| `board-512` | 512 | `Mmc3P` kind M512 (IrqBoard): SL-12, CHR-RAM windows and four-screen tables (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-560` | 560 | `IrqP` kind M560 (IrqBoard): CHR from the nametable through an extension RAM (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-413` | 413 | `IrqP` kind M413 (IrqBoard): SMB3 / Batman bootleg, A12 IRQ and serial misc ROM (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-406` | 406 | `Mmc3P` kind M406 (IrqBoard): Haradius Zero / Sidewinder, MMC3 with an MX29F040/AM29F040 flash PRG (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-451` | 451 | `Mmc3P` kind M451 (IrqBoard): Haratyler HP/MP, AMIC A29040B flash PRG behind an MMC3 (puNES; MAPPERS-P). Requires `board-mmc3-p` | — | — (unit test) | **on** |
+| `board-547` | 547 | `IrqP` kind M547 (IrqBoard): Konami QTa (Q-Tai), kanji CHR-ROM through a QT RAM shadowing the nametables (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-561` | 561 | `IrqP` kind M561 (IrqBoard): Bung Super Game Doctor / Venus Turbo Game Doctor copier format, writable copier RAM and trainer boot (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-256` | 256 | `IrqP` kind M256 (IrqBoard): V.R. Technology VT02/VT03 OneBus famiclones, chip registers in the console address space (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-436` | 436 | `IrqP` kind M436 (IrqBoard): OneBus multicart with outer PRG/CHR banks (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-446` | 446 | `ChipSwitch` kind M446 (IrqBoard): Mindkids SMD172B flash multicart, discrete/MMC1/MMC3/VRC2/VRC4/VRC6 personalities (puNES; MAPPERS-P). Requires `board-chip-switch` | — | — (unit test) | **on** |
+| `board-342` | 342 | `IrqP` kind M342 (IrqBoard): COOLGIRL, the open FPGA multicart re-implementing some thirty mappers (puNES mapper_342.c) (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-562` | 562 | `IrqP` kind M562 (IrqBoard): Venus Turbo Game Doctor copier, its BIOS embedded (puNES mapper_562.c) (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
+| `board-355` | 355 | `IrqP` kind M355 (IrqBoard): Hwang Shinwei 3D Block / Block Force, NROM-256 with a PIC16C54 (puNES mapper_355.c, MAME pic16c5x) (puNES; MAPPERS-P). Requires `board-irq-p` | — | — (unit test) | **on** |
 | `board-53` | 53 | `MiscN` M53: Supervision 16-in-1, outer register at `$6000`, ROM at `$6000-$7FFF`, optional EPROM by CRC (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-487` | 487 | `MiscN` M487: NINA-03 and outer registers at `$4100`/`$4180`, Color Dreams register in the second half (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |
 | `board-518` | 518 | `MiscN` M518: Dance 2000, `$5000`/`$5200`, open bus over `$8000-$FFFF`, CHR page 0 from the nametable address (Mesen2; J26) | ~130 (file) | — (no dump) | **on** |

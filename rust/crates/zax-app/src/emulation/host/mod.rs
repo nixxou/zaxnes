@@ -235,6 +235,8 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     pending: VecDeque<(Command, CommandArgs)>,
     hotkeys: HotkeyTracker,
     battery: BatteryRamStore,
+    /// The flash save of a board whose save medium is its flash chip (lot MAPPERS-P).
+    flash: BatteryRamStore,
     /// The resolved tiles of the "3dh" profiles, kept between runs (AMD-062 REQ-PROF-082).
     tile_cache: TileCacheStore,
     session: Option<GameSession>,
@@ -449,6 +451,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             pending: VecDeque::new(),
             hotkeys: HotkeyTracker::new(),
             battery: BatteryRamStore::new(),
+            flash: BatteryRamStore::for_flash(),
             tile_cache: TileCacheStore::new(tile_cache),
             session: None,
             current_game: None,
@@ -2004,6 +2007,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let core = session.core();
         self.battery
             .advance(&self.paths, real_seconds, &core.battery_ram());
+        self.flash
+            .advance_with(&self.paths, real_seconds, || core.export_flash_save());
     }
 
     /// Stops the game being played: the cartridge RAM is written (REQ-PERS-060), the `End`
@@ -2015,6 +2020,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             {
                 let core = session.core();
                 self.battery.flush(&self.paths, &core.battery_ram());
+                self.flash.flush(&self.paths, &core.export_flash_save());
             }
             // AMD-062 REQ-PROF-082: what the game resolved is kept for the next launch, and the
             // catalogue keeps it for a relaunch of the same game (REQ-PROF-080).
@@ -2024,6 +2030,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             if dispose_session {
                 session.dispose(&mut self.settings, &mut self.scene);
                 self.battery.detach();
+                self.flash.detach();
                 if let Some(audio) = &self.audio {
                     audio.set_console(None);
                 }

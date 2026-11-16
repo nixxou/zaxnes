@@ -400,6 +400,33 @@ impl Mapper for Board {
         dispatch!(self, b => b.expansion_audio_output())
     }
 
+    fn boot_program(&self, memory: &CartridgeMemory) -> Option<super::mappers::BootProgram> {
+        dispatch!(self, b => b.boot_program(memory))
+    }
+
+    fn export_save_area(&self) -> Option<Vec<u8>> {
+        dispatch!(self, b => b.export_save_area())
+    }
+
+    fn import_save_area(&mut self, data: &[u8]) -> bool {
+        dispatch!(self, b => b.import_save_area(data))
+    }
+
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    fn snoop_apu_write(&mut self, address: u16, value: u8) -> u8 {
+        dispatch!(self, b => b.snoop_apu_write(address, value))
+    }
+
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    fn apu_status(&self, status: u8) -> u8 {
+        dispatch!(self, b => b.apu_status(status))
+    }
+
+    #[cfg(any(feature = "board-256", feature = "board-436"))]
+    fn take_dac_write(&mut self) -> Option<u8> {
+        dispatch!(self, b => b.take_dac_write())
+    }
+
     fn ppu_irq_horizon(&self) -> Option<i64> {
         dispatch!(self, b => b.ppu_irq_horizon())
     }

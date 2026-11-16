@@ -50,8 +50,8 @@ fn filter(label_key: &str, extensions: &[&'static str]) -> FileFilter {
 #[must_use]
 pub fn rom_filters() -> Vec<FileFilter> {
     vec![
-        filter(keys::BROWSER_FILTER_NES_ROMS, &["nes", "zip"]),
-        filter(keys::BROWSER_FILTER_NES_FILES, &["nes"]),
+        filter(keys::BROWSER_FILTER_NES_ROMS, &["nes", "unf", "unif", "studybox", "zip"]),
+        filter(keys::BROWSER_FILTER_NES_FILES, &["nes", "unf", "unif", "studybox"]),
         filter(keys::BROWSER_FILTER_ZIP, &["zip"]),
         filter(keys::BROWSER_FILTER_ALL, &[]),
     ]

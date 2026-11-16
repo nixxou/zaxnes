@@ -202,6 +202,141 @@ default = [
     "board-266",
     "board-284",
     "board-682",
+    "board-355",
+    "board-562",
+    "board-342",
+    "board-446",
+    "board-436",
+    "board-256",
+    "board-561",
+    "board-547",
+    "board-451",
+    "board-406",
+    "board-413",
+    "board-560",
+    "board-512",
+    "board-351",
+    "board-556",
+    "board-369",
+    "board-528",
+    "board-540",
+    "board-359",
+    "board-398",
+    "board-362",
+    "board-452",
+    "board-442",
+    "board-347",
+    "board-272",
+    "board-558",
+    "board-539",
+    "board-526",
+    "board-471",
+    "board-555",
+    "board-557",
+    "board-559",
+    "board-100",
+    "board-353",
+    "board-527",
+    "board-269",
+    "board-356",
+    "board-432",
+    "board-344",
+    "board-370",
+    "board-543",
+    "board-534",
+    "board-422",
+    "board-536",
+    "board-248",
+    "board-532",
+    "board-186",
+    "board-551",
+    "board-417",
+    "board-416",
+    "board-368",
+    "board-357",
+    "board-311",
+    "board-340",
+    "board-524",
+    "board-447",
+    "board-384",
+    "board-308",
+    "board-412",
+    "board-393",
+    "board-516",
+    "board-457",
+    "board-456",
+    "board-455",
+    "board-420",
+    "board-411",
+    "board-410",
+    "board-401",
+    "board-399",
+    "board-395",
+    "board-377",
+    "board-372",
+    "board-361",
+    "board-345",
+    "board-339",
+    "board-334",
+    "board-327",
+    "board-322",
+    "board-315",
+    "board-291",
+    "board-267",
+    "board-550",
+    "board-404",
+    "board-374",
+    "board-297",
+    "board-554",
+    "board-525",
+    "board-564",
+    "board-541",
+    "board-538",
+    "board-481",
+    "board-438",
+    "board-437",
+    "board-434",
+    "board-433",
+    "board-421",
+    "board-394",
+    "board-431",
+    "board-429",
+    "board-428",
+    "board-415",
+    "board-414",
+    "board-397",
+    "board-409",
+    "board-403",
+    "board-400",
+    "board-396",
+    "board-388",
+    "board-387",
+    "board-386",
+    "board-390",
+    "board-382",
+    "board-380",
+    "board-354",
+    "board-358",
+    "board-375",
+    "board-350",
+    "board-337",
+    "board-381",
+    "board-360",
+    "board-352",
+    "board-343",
+    "board-341",
+    "board-338",
+    "board-335",
+    "board-271",
+    "board-295",
+    "board-282",
+    "board-281",
+    "board-517",
+    "board-389",
+    "board-237",
+    "board-122",
+    "board-81",
+    "board-55",
     # MAPPERS-N: the VS. System, out of `parked-boards` since its quirks left the PPU and the
     # specialised paths (`Ppu2C02::remap_palette`, `BoardKind::RUNS_VS`): mm2/zelda2 `core`
     # +0.000 % / +0.001 % with it on.
@@ -247,6 +382,84 @@ default = [
 
 # MAPPERS-N umbrella (docs/progress/MAPPERS-N.md).
 board-mmc3-clones = []
+# MAPPERS-P umbrella: the MMC3 multicarts of `mmc3_p.rs`.
+board-mmc3-p = []
+board-451 = ["board-mmc3-p"]
+board-406 = ["board-mmc3-p"]
+board-512 = ["board-mmc3-p"]
+# MAPPERS-P umbrella: the chip-switching boards of `chip_switch.rs`.
+board-chip-switch = []
+board-446 = ["board-chip-switch"]
+board-351 = ["board-chip-switch"]
+board-556 = ["board-chip-switch"]
+board-369 = ["board-mmc3-p"]
+board-555 = ["board-mmc3-p"]
+board-100 = ["board-mmc3-p"]
+board-353 = ["board-mmc3-p"]
+board-269 = ["board-mmc3-p"]
+board-356 = ["board-mmc3-p"]
+board-432 = ["board-mmc3-p"]
+board-344 = ["board-mmc3-p"]
+board-370 = ["board-mmc3-p"]
+board-534 = ["board-mmc3-p"]
+board-422 = ["board-mmc3-p"]
+# MAPPERS-P umbrella: the CPU-cycle IRQ boards of `irq_p.rs`.
+board-irq-p = []
+board-355 = ["board-irq-p"]
+board-562 = ["board-irq-p"]
+board-342 = ["board-irq-p"]
+board-436 = ["board-irq-p"]
+board-256 = ["board-irq-p"]
+board-561 = ["board-irq-p"]
+board-547 = ["board-irq-p"]
+board-413 = ["board-irq-p"]
+board-560 = ["board-irq-p"]
+board-528 = ["board-irq-p"]
+board-540 = ["board-irq-p"]
+board-359 = ["board-irq-p"]
+board-442 = ["board-irq-p"]
+board-272 = ["board-irq-p"]
+board-558 = ["board-irq-p"]
+board-526 = ["board-irq-p"]
+board-471 = ["board-irq-p"]
+board-417 = ["board-irq-p"]
+board-416 = ["board-irq-p"]
+board-368 = ["board-irq-p"]
+board-357 = ["board-irq-p"]
+board-311 = ["board-irq-p"]
+# MAPPERS-P umbrella: the VRC2/VRC4 boards of `vrc_p.rs`.
+board-vrc-p = []
+board-398 = ["board-vrc-p"]
+board-362 = ["board-vrc-p"]
+board-559 = ["board-vrc-p"]
+board-527 = ["board-vrc-p"]
+board-524 = ["board-vrc-p"]
+board-447 = ["board-vrc-p"]
+board-384 = ["board-vrc-p"]
+board-308 = ["board-vrc-p"]
+board-412 = ["board-mmc3-p"]
+board-393 = ["board-mmc3-p"]
+board-516 = ["board-mmc3-p"]
+board-457 = ["board-mmc3-p"]
+board-456 = ["board-mmc3-p"]
+board-455 = ["board-mmc3-p"]
+board-420 = ["board-mmc3-p"]
+board-411 = ["board-mmc3-p"]
+board-410 = ["board-mmc3-p"]
+board-401 = ["board-mmc3-p"]
+board-399 = ["board-mmc3-p"]
+board-395 = ["board-mmc3-p"]
+board-377 = ["board-mmc3-p"]
+board-372 = ["board-mmc3-p"]
+board-361 = ["board-mmc3-p"]
+board-345 = ["board-mmc3-p"]
+board-339 = ["board-mmc3-p"]
+board-334 = ["board-mmc3-p"]
+board-327 = ["board-mmc3-p"]
+board-322 = ["board-mmc3-p"]
+board-315 = ["board-mmc3-p"]
+board-291 = ["board-mmc3-p"]
+board-267 = ["board-mmc3-p"]
 
 board-44 = ["board-mmc3-clones"]
 
@@ -279,6 +492,78 @@ board-168 = []
 
 # MAPPERS-N umbrella.
 board-latch-multi = ["board-decode-boards"]
+# MAPPERS-P umbrella: the boards of `mmc1_outer.rs`.
+board-mmc1-outer = ["board-decode-boards"]
+board-543 = ["board-mmc1-outer"]
+board-550 = ["board-mmc1-outer"]
+board-404 = ["board-mmc1-outer"]
+board-374 = ["board-mmc1-outer"]
+board-297 = ["board-mmc1-outer"]
+# MAPPERS-P umbrella: the discrete boards of `multicart_p.rs`.
+board-multi-p = ["board-decode-boards"]
+board-452 = ["board-multi-p"]
+board-347 = ["board-multi-p"]
+board-539 = ["board-multi-p"]
+board-557 = ["board-multi-p"]
+board-536 = ["board-mmc3-chrram"]
+board-248 = ["board-mmc3-scramble"]
+# MAPPERS-P: 532 (China Ersan 2), the Namco 163 with its font overlay.
+board-532 = []
+# MAPPERS-P: the Study Box (186), from a .studybox tape and StudyBox.bin; a bare iNES 186
+# stays refused.
+board-186 = ["board-irq-p"]
+board-551 = ["board-178"]
+board-340 = ["board-multi-p"]
+board-554 = ["board-multi-p"]
+board-525 = ["board-multi-p"]
+board-564 = ["board-multi-p"]
+board-541 = ["board-multi-p"]
+board-538 = ["board-multi-p"]
+board-481 = ["board-multi-p"]
+board-438 = ["board-multi-p"]
+board-437 = ["board-multi-p"]
+board-434 = ["board-multi-p"]
+board-433 = ["board-multi-p"]
+board-421 = ["board-jy-asic"]
+board-394 = ["board-jy-asic"]
+board-431 = ["board-multi-p"]
+board-429 = ["board-multi-p"]
+board-428 = ["board-multi-p"]
+board-415 = ["board-multi-p"]
+board-414 = ["board-multi-p"]
+board-397 = ["board-jy-asic"]
+board-409 = ["board-multi-p"]
+board-403 = ["board-multi-p"]
+board-400 = ["board-multi-p"]
+board-396 = ["board-multi-p"]
+board-388 = ["board-jy-asic"]
+board-387 = ["board-jy-asic"]
+board-386 = ["board-jy-asic"]
+board-390 = ["board-multi-p"]
+board-382 = ["board-multi-p"]
+board-380 = ["board-multi-p"]
+board-354 = ["board-multi-p"]
+board-358 = ["board-jy-asic"]
+board-375 = ["board-multi-p"]
+board-350 = ["board-multi-p"]
+board-337 = ["board-multi-p"]
+board-381 = ["board-multi-p"]
+board-360 = ["board-multi-p"]
+board-352 = ["board-multi-p"]
+board-343 = ["board-multi-p"]
+board-341 = ["board-multi-p"]
+board-338 = ["board-multi-p"]
+board-335 = ["board-multi-p"]
+board-271 = ["board-multi-p"]
+board-295 = ["board-jy-asic"]
+board-282 = ["board-jy-asic"]
+board-281 = ["board-jy-asic"]
+board-517 = ["board-multi-p"]
+board-389 = ["board-multi-p"]
+board-237 = ["board-multi-p"]
+board-122 = ["board-multi-p"]
+board-81 = ["board-multi-p"]
+board-55 = ["board-multi-p"]
 board-57 = ["board-latch-multi"]
 board-58 = ["board-latch-multi"]
 board-59 = ["board-latch-multi"]

@@ -35,6 +35,7 @@ pub fn read(path: &Path) -> Result<RomData, String> {
     match extension.as_deref() {
         Some("zip") => read_zip(path),
         Some("7z") => Err(UNCOMPRESSION_FAILED_MESSAGE.to_owned()),
+        Some("studybox") => read_study_box(path),
         _ => {
             let image = fs::read(path).map_err(|error| error.to_string())?;
             let name = path
@@ -44,6 +45,42 @@ pub fn read(path: &Path) -> Result<RomData, String> {
             Ok(RomData { image, name })
         }
     }
+}
+
+/// The BIOS a Study Box tape runs with (lot MAPPERS-P, as Mesen 2 names it).
+pub const STUDY_BOX_BIOS: &str = "StudyBox.bin";
+
+/// Text of a Study Box tape without its BIOS.
+pub const STUDY_BOX_BIOS_MISSING_MESSAGE: &str =
+    "StudyBox.bin (256 KiB) is needed: put it beside the tape or beside the program";
+
+/// A `.studybox` tape packaged with `StudyBox.bin`, found beside the tape, then beside the
+/// executable or in its `firmware` folder, into the image the core runs.
+fn read_study_box(path: &Path) -> Result<RomData, String> {
+    let tape = fs::read(path).map_err(|error| error.to_string())?;
+    let executable = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf));
+    let candidates = [
+        path.parent().map(|folder| folder.join(STUDY_BOX_BIOS)),
+        executable
+            .as_ref()
+            .map(|folder| folder.join(STUDY_BOX_BIOS)),
+        executable
+            .as_ref()
+            .map(|folder| folder.join("firmware").join(STUDY_BOX_BIOS)),
+    ];
+    let bios = candidates
+        .iter()
+        .flatten()
+        .find_map(|candidate| fs::read(candidate).ok())
+        .ok_or_else(|| STUDY_BOX_BIOS_MISSING_MESSAGE.to_owned())?;
+    let image = zax_nes::rom::package_study_box(&tape, &bios)?;
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    Ok(RomData { image, name })
 }
 
 fn read_zip(path: &Path) -> Result<RomData, String> {

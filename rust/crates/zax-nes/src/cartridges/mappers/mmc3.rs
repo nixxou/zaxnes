@@ -705,7 +705,9 @@ impl<
         feature = "board-208",
         feature = "board-219",
         feature = "board-262",
-        feature = "board-292"
+        feature = "board-292",
+        feature = "board-chip-switch",
+        feature = "board-394"
     ))]
     pub(crate) fn refresh_banks(&mut self) {
         self.update_banks();
@@ -717,7 +719,11 @@ impl<
     /// Behind `board-268`, its only caller. [`Mmc3Outer`](super::Mmc3Outer) recomputes all twelve
     /// windows itself rather than laying an overlay over the chip's, because mapper 268's outer
     /// register replaces *address lines* of both bank numbers — see that type's `refresh`.
-    #[cfg(any(feature = "board-268", feature = "board-mmc3-clones"))]
+    #[cfg(any(
+        feature = "board-268",
+        feature = "board-mmc3-clones",
+        feature = "board-mmc3-p"
+    ))]
     pub(crate) const fn select(&self) -> u8 {
         self.select
     }
@@ -730,7 +736,8 @@ impl<
     #[cfg(any(
         feature = "board-268",
         feature = "board-208",
-        feature = "board-mmc3-clones"
+        feature = "board-mmc3-clones",
+        feature = "board-mmc3-p",
     ))]
     pub(crate) const fn bank_register(&self, index: usize) -> u8 {
         self.bank[index & 0x07]
