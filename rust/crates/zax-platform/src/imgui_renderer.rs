@@ -174,7 +174,7 @@ impl ImguiRenderer {
             self.set_up(draw_data, width, height);
             let clip_offset = draw_data.display_pos;
             let mut bound = FONT_TEXTURE_ID;
-            for list in draw_data.draw_lists() {
+            for list in draw_lists(draw_data) {
                 gl.buffer_data_u8_slice(
                     glow::ARRAY_BUFFER,
                     as_bytes(list.vtx_buffer()),
@@ -484,4 +484,15 @@ impl SavedState {
             }
         }
     }
+}
+
+/// The draw lists of `data`, none when it has none. imgui-rs 0.12 builds their slice from
+/// `CmdLists`, a null pointer when the count is 0 (`DrawData::cmd_lists`): a precondition the
+/// standard library checks in debug builds, which stopped the debug application on its first
+/// frame (2026-11-16). The count is read first instead.
+pub(crate) fn draw_lists(data: &imgui::DrawData) -> impl Iterator<Item = &imgui::DrawList> {
+    (data.draw_lists_count() > 0)
+        .then(|| data.draw_lists())
+        .into_iter()
+        .flatten()
 }

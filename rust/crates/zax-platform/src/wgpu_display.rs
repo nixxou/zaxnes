@@ -1101,7 +1101,7 @@ impl InterfaceRenderer {
 
         self.vertex_data.clear();
         self.index_data.clear();
-        for list in data.draw_lists() {
+        for list in crate::imgui_renderer::draw_lists(data) {
             self.vertex_data
                 .extend_from_slice(as_bytes(list.vtx_buffer()));
             self.index_data
@@ -1147,7 +1147,7 @@ impl InterfaceRenderer {
         pass.set_vertex_buffer(0, vertices.slice(..));
         pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint16);
         let (mut vertex_base, mut index_base) = (0_i32, 0_u32);
-        for list in data.draw_lists() {
+        for list in crate::imgui_renderer::draw_lists(data) {
             for command in list.commands() {
                 let DrawCmd::Elements {
                     count,
