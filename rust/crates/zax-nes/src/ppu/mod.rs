@@ -1687,6 +1687,17 @@ impl Ppu2C02 {
         (self.mask & 0x18) != 0
     }
 
+    /// The nametable address the last background fetch of a frame read, for a board restored
+    /// from a state: a state is written at a frame boundary, where `v` has not moved since the
+    /// discarded fetch of line 239's dot 339. `None` with the rendering off, which made none.
+    pub(crate) const fn last_nametable_read(&self) -> Option<u16> {
+        if self.rendering_enabled() {
+            Some(0x2000 | (self.v & 0x0FFF))
+        } else {
+            None
+        }
+    }
+
     /// Whether the PPU is actually fetching: rendering enabled **and** on a line that fetches —
     /// a visible one or the pre-render line.
     ///
@@ -2932,6 +2943,11 @@ impl Ppu2C02 {
                 }
                 _ => {}
             }
+        } else if self.fetching() && matches!(next, 337 | 339) {
+            // The two dummy nametable fetches of the line's end take the new address the same
+            // way (bus comparison, `g2006w`/`g2006x` e4: writes on 333 and 335 show on 337 and
+            // 339). Their bytes feed no tile — dot 1 reads the next line's — so only `v` moves.
+            self.v = self.t;
         }
         self.run_dots(1, cart);
         self.prepaid_dots = delay + 1;

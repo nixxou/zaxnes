@@ -604,6 +604,10 @@ impl Mapper for Board {
         dispatch_ext!(self, b => b.on_ppu_address_bus(memory, address, clock));
     }
 
+    fn after_state_load(&mut self, last_nametable_read: Option<u16>) {
+        dispatch_ext!(self, b => b.after_state_load(last_nametable_read));
+    }
+
     fn on_ppu_control(&mut self, control: u8) {
         dispatch!(self, b => b.on_ppu_control(control));
     }

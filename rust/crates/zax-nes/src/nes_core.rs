@@ -2795,8 +2795,10 @@ impl NesCore {
         self.bus.input_mut().load_state(&mut reader)?;
         // The cartridge is the one already attached: the ROM never left, so there is nothing to
         // rebuild. `Cartridge::load_state` refreshes the fast ROM windows itself.
+        let last_nametable_read = self.bus.ppu().last_nametable_read();
         if let Some(cartridge) = self.bus.cartridge_mut() {
             cartridge.load_state(&mut reader)?;
+            cartridge.after_state_load(last_nametable_read);
         }
         self.bus
             .ppu_mut()
@@ -2965,6 +2967,7 @@ impl NesCore {
         self.bus.apu_mut().load_state(&mut reader)?;
         self.bus.input_mut().load_state(&mut reader)?;
         cartridge.load_state(&mut reader)?;
+        cartridge.after_state_load(self.bus.ppu().last_nametable_read());
         // A state of the hack restored without it: the original ROM never unlocks the
         // extension, which must not stay as the hack left it (four nametables, margins).
         let unpatched_hack = patch.1.is_none() && patchable;

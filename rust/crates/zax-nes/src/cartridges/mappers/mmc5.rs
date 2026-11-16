@@ -96,8 +96,8 @@ pub struct Mmc5 {
     /// counter never expires inside a frame; the 7 165-dot gap of vblank is where it fires.
     ppu_idle_counter: u8,
     /// How many times in a row the PPU has read the address in `last_ppu_read_addr`, capped at
-    /// [`Mmc5::NT_READS_TO_DETECT`]. Dots 337, 338 and 340 of a line read the same nametable
-    /// address, which is the three the chip looks for.
+    /// [`Mmc5::NT_READS_TO_DETECT`]. Dots 337 and 339 of a line and dot 1 of the next read the
+    /// same nametable address, which is the three the chip looks for.
     nt_read_counter: u8,
     /// The address of the PPU's previous read, for `nt_read_counter`.
     last_ppu_read_addr: u16,
@@ -116,16 +116,6 @@ impl Mmc5 {
     /// the second and the third of "three consecutive PPU reads from the same nametable
     /// address", so it reaches 2.
     const NT_READS_TO_DETECT: u8 = 2;
-
-    /// What [`Mmc5::nt_read_counter`] is restored to by a state load, and why it is not 0.
-    ///
-    /// A state is written at a frame boundary, i.e. in vblank, and the last three reads before
-    /// vblank are always dots 337, 338 and 340 of line 239 reading the same nametable address —
-    /// so the counter is always 2 there. Restoring 2 makes the pre-render line's first read the
-    /// detection point, exactly as it is without a load; restoring 0 would push the first
-    /// detection to the end of the pre-render line and land every split one scanline late for
-    /// that frame, which under run-ahead (a state load per frame, AMD-041) would be permanent.
-    const NT_READS_AFTER_LOAD: u8 = Self::NT_READS_TO_DETECT;
 
     /// PRG-RAM the board is given regardless of the header (up to 64 KiB, banked).
     pub(crate) const MAX_PRG_RAM_SIZE: usize = 64 * 1024;
@@ -296,7 +286,8 @@ impl Mmc5 {
             self.detect_scanline();
         } else if (0x2000..0x3000).contains(&address) && self.last_ppu_read_addr == address {
             // "in the range $2xxx": an attribute address would count too, but the three in a row
-            // only ever happen at dots 337, 338 and 340, which read the nametable byte.
+            // only ever happen at dots 337, 339 and the next line's dot 1, which read the
+            // nametable byte.
             self.nt_read_counter += 1;
         }
 
@@ -317,13 +308,17 @@ impl Mmc5 {
     /// one fetch away ([`Mmc5::need_in_frame`]), so the first detected line only arms and
     /// zeroes, with **no compare** — MR-5-3, which this keeps.
     ///
-    /// **Q-121.** Which PPU line is the *first* detected one is not in the source, and it decides
-    /// every MMC5 split to one line. The pre-render line fetches exactly like a visible one, the
-    /// three identical nametable reads of its dots 337, 338 and 340 included, and nothing
-    /// documented resets the repeat counter across V-blank — so it is detected, visible line 0 is
-    /// the first *counted* line, and `$5203` = N fires on visible line N-1. That is Mesen's
-    /// behaviour and it agrees with the page's "the MMC5's scanline IRQ occurs at PPU cycle 4".
-    /// The ticket carries the alternative and its one-line shape.
+    /// **Q-121.** Which PPU line is the *first* detected one follows from where the three reads
+    /// fall. Two of them end a line and the third begins the next, so line 239 leaves only two
+    /// (no line 240 fetch follows) and the pre-render line's own dot 1 is the third only when it
+    /// reads the same address — when nothing moved `v` and no `$2007` read came in between, as
+    /// the source documents no other reset of the repeat. The usual frame (a `$2006` in the NMI
+    /// handler) is therefore first detected on visible line 0 at dot 3, which arms and zeroes;
+    /// line 1 counts 1, and `$5203` = N fires on visible line N — Mesen's `DetectScanlineStart`
+    /// with its 337/339/1 reads, and `BizHawk`'s `ExROM` (`irq_counter == irq_target + 1` from
+    /// its pre-render line 0). A frame whose vblank left `v` alone detects the pre-render line
+    /// too and fires on N-1. Until the dot-1 read of lot C3c-bus, this core read 337, 338 and
+    /// 340, line 239's three survived V-blank and every frame fired on N-1.
     // Q-121
     fn detect_scanline(&mut self) {
         if !self.in_frame && !self.need_in_frame {
@@ -501,13 +496,14 @@ impl Mapper for Mmc5 {
             self.audio.reset();
         }
         // The scanline detection's own state is **not** in the block and no format version
-        // moves for it: it is re-derived within one line, and the one value a load has to get
-        // right is `nt_read_counter` — see `Mmc5::NT_READS_AFTER_LOAD`. The idle counter starts
-        // disarmed so that the load cannot drop a flag the block says is set; the first PPU read
-        // after the load arms it again.
+        // moves for it: it is re-derived within one line, and the two values a load has to get
+        // right — the repeat of line 239's last nametable address, which the pre-render line's
+        // first read may continue — come back from the PPU through `Mapper::after_state_load`.
+        // The idle counter starts disarmed so that the load cannot drop a flag the block says is
+        // set; the first PPU read after the load arms it again.
         self.need_in_frame = false;
         self.ppu_idle_counter = 0;
-        self.nt_read_counter = Self::NT_READS_AFTER_LOAD;
+        self.nt_read_counter = 0;
         self.last_ppu_read_addr = 0;
 
         // Both are derived from registers the block already carries, so no older block has to
@@ -795,9 +791,10 @@ impl Mapper for Mmc5 {
     /// nesdev ("MMC5"): "The MMC5 detects scanlines by first looking for three consecutive PPU
     /// reads from the same nametable address in the range $2xxx. Once this has been seen, the
     /// next PPU read, regardless of address, is the point at which the scanline is detected."
-    /// The three are dots 337, 338 and 340 of a line — the fetch that loads the first tile of the
-    /// next line, and the two the hardware performs and discards — and "the next PPU read" is the
-    /// attribute fetch of dot 3.
+    /// The three are dots 337 and 339 of a line and dot 1 of the next — "the PPU does two
+    /// matching dummy nametable byte reads at the end of each scanline, followed by a third
+    /// matching nametable byte read at the beginning of the next scanline" — and "the next PPU
+    /// read" is the attribute fetch of dot 3, "at PPU cycle 4".
     ///
     /// This runs on **every** PPU read of an MMC5 game and on no other board's: the three cheap
     /// tests of a non-nametable read are what a pattern fetch pays. The read notification itself
@@ -806,6 +803,16 @@ impl Mapper for Mmc5 {
     // Q-116
     fn on_ppu_address_bus(&mut self, _memory: &mut CartridgeMemory, address: u16, _clock: i64) {
         self.see_ppu_read(address);
+    }
+
+    /// Line 239's last two reads, dots 337 and 339, were of this address: the repeat stands at
+    /// one, and the pre-render line's first read makes it the third when the vblank left `v`
+    /// alone (Q-121) — exactly as without the load, which run-ahead's state per frame relies on.
+    fn after_state_load(&mut self, last_nametable_read: Option<u16>) {
+        if let Some(address) = last_nametable_read {
+            self.last_ppu_read_addr = address;
+            self.nt_read_counter = 1;
+        }
     }
 
     fn on_ppu_control(&mut self, control: u8) {
@@ -1251,8 +1258,8 @@ impl Mmc5Ext {
         // The per-tile state of the two substituting modes, latched where the board already sees
         // every read.
         //
-        // `address != last_ppu_read_addr` leaves out the **two discarded nametable fetches** of
-        // dots 338 and 340, which repeat dot 337's address: they are not tiles, and counting them
+        // `address != last_ppu_read_addr` leaves out the **two repeats** of dot 337's nametable
+        // fetch, on 339 and on the next line's dot 1: they are no new tiles, and counting them
         // would put the split's column three ahead by the end of a line. It is the same test the
         // repeat detection below makes.
         if self.background_substitutes() {
@@ -1288,7 +1295,8 @@ impl Mmc5Ext {
             self.base.detect_scanline();
         } else if (0x2000..0x3000).contains(&address) && self.base.last_ppu_read_addr == address {
             // "in the range $2xxx": an attribute address would count too, but the three in a row
-            // only ever happen at dots 337, 338 and 340, which read the nametable byte.
+            // only ever happen at dots 337, 339 and the next line's dot 1, which read the
+            // nametable byte.
             self.base.nt_read_counter += 1;
         }
 
@@ -1533,6 +1541,10 @@ impl Mapper for Mmc5Ext {
         // Derived within one line, as `Mmc5::load_registers` says of `nt_read_counter`.
         self.clear_derived_state();
         Ok(())
+    }
+
+    fn after_state_load(&mut self, last_nametable_read: Option<u16>) {
+        self.base.after_state_load(last_nametable_read);
     }
 
     fn reset(&mut self, memory: &mut CartridgeMemory) {

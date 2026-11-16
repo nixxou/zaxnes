@@ -1330,6 +1330,26 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   netlist loads `v` in the middle of W+3 and W+4's ALE already carries the new address, where
   Zaxnes fetches W+4 with the old one (`211 netlist bus=2BF0 | zaxnes bus=2BEF`), invisible
   to `dotcmp.py` (`v`/`t` only); to measure with a dedicated program.
+- I3 (2026-11-17) **Line end of the PPU bus, and the MMC5's first detected line (Q-121)**.
+  **Fixed**: the nametable reads of a line's end are dots 337 and 339 and the next line's dot 1
+  (nesdev, MMC5: "two matching dummy nametable byte reads at the end of each scanline, followed
+  by a third matching nametable byte read at the beginning of the next scanline"; Mesen
+  `NesPpu` the same), where this core read 337, 338 and 340; dot 1's read now gives the third
+  tile its byte. A `$2006` load landing on 337 or 339 (writes on 333/335) reaches those dummy
+  fetches too. Bus comparison (`g2000`, `g2005px`, `g2006x`, `g2006w` NTSC e4): background,
+  dot 1, pre-render and line end all 0 mismatches. **Q-121 reverses**: line 239 now leaves two
+  reads, not three, so the pre-render line is detected only when its dot 1 repeats line 239's
+  address (nothing moved `v` in the vblank); the usual frame (a `$2006` in the NMI) is first
+  detected on line 0 and `$5203` = N fires on line N — Mesen (`DetectScanlineStart`) and
+  `BizHawk` (`ExROM`, `irq_target + 1` from its pre-render line 0) agree, while MF-4c's claim
+  that Mesen gave N-1 was wrong. Programs that leave `v` alone (the `mapper_irq_tests` fixture,
+  `mmc5test`, `firefly`) keep N-1. A state load rebuilds the repeat from the PPU's `v`
+  (`Mapper::after_state_load`), so run-ahead fires on the same line (test
+  `q_121_the_mmc5_target_line_survives_a_state_load`). Castlevania III: picture at frame 3 600
+  and audio from 1 200 move back, the exact reverse of MF-4c step 5. Both MMC5 variants checked
+  (the split column skips the repeats as before). **Left**: the sprite phase's garbage nametable
+  fetches (257/259 + 8k) are still not put on the bus; adding them touches the MMC3 A12 filter
+  and the MMC5 split's `chr_reads_since_nt`, to study on its own.
 - I2 (2026-11-16) **PPU address bus against the 2C02 netlist** (`visualnes-bench/buscmp.py`:
   every ALE address of the netlist on fetching lines against the Zaxnes trace's bus, by fetch
   phase and dot % 8; the netlist's power-on `$2000`, never written by these programs, has the

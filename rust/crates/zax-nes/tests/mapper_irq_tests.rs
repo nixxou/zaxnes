@@ -209,13 +209,16 @@ fn req_core_100_the_ss88006_counter_can_be_narrowed_to_four_bits() {
 
 // ---------------------------------------------------------------- MMC5
 
-/// MF-4c, finding MR-5-4 and Q-121: the board finds its lines on its own bus, so the **first**
-/// detected line of a frame is the pre-render line, which fetches exactly like a visible one.
-/// Visible line 0 is therefore the first line the counter counts, and `$5203` = 60 fires on
-/// visible line **59** — except on the very first frame after power-on, where the chip's repeat
-/// counter starts at 0 and the pre-render line's first read detects nothing, so that frame fires
-/// one line later. Both are asserted, because the transient is what a test that runs one frame
-/// would otherwise pin by accident.
+/// MF-4c, finding MR-5-4 and Q-121: the board finds its lines on its own bus, from three reads
+/// of one nametable address — dots 337 and 339 of a line and dot 1 of the next. Line 239 has
+/// no next line that fetches, so the pre-render line is detected only when its dot 1 reads the
+/// address line 239 ended on, i.e. when nothing moved `v` during the vblank: then visible line 0
+/// is the first counted line and `$5203` = 60 fires on visible line **59**. This program never
+/// touches `v`, so that is its steady state — except on the very first frame after power-on,
+/// where the chip's repeat counter starts at 0 and the pre-render line's first read detects
+/// nothing, so that frame fires one line later. A `$2006` in the vblank, which nearly every game
+/// makes, leaves the pre-render line undetected and the target lands on line **60** (Mesen,
+/// `BizHawk`). All three are asserted.
 #[test]
 fn req_core_100_the_mmc5_scanline_irq_fires_on_the_line_5203_names() {
     let mut core = MapperRom::new(5).chr(32).load();
@@ -241,6 +244,44 @@ fn req_core_100_the_mmc5_scanline_irq_fires_on_the_line_5203_names() {
         assert_eq!(59, core.ppu().scanline());
         core.cartridge_mut().unwrap().try_cpu_read(0x5204);
     }
+
+    // A `$2006` written in the vblank moves `v`: the pre-render line's first nametable read no
+    // longer repeats line 239's, the pre-render line is not detected, and the target fires on
+    // the line it names.
+    for _ in 0..4 {
+        while core.ppu().scanline() != 245 {
+            core.bus_mut().tick();
+        }
+        core.write_memory(0x2006, 0x21);
+        core.write_memory(0x2006, 0x23);
+        assert!(tick_until_irq(&mut core, 200_000) > 0);
+        assert_eq!(60, core.ppu().scanline());
+        core.cartridge_mut().unwrap().try_cpu_read(0x5204);
+    }
+}
+
+/// Q-121 across a state load: the repeat of line 239's two dummy reads is not in the block, and
+/// comes back from the PPU's `v` (`Mapper::after_state_load`), so a frame whose vblank leaves `v`
+/// alone fires on the same line after a restore as without one — run-ahead loads a state every
+/// frame, and a different line there would be permanent.
+#[test]
+fn q_121_the_mmc5_target_line_survives_a_state_load() {
+    let mut core = MapperRom::new(5).chr(32).load();
+    core.write_memory(0x2001, 0x18);
+    core.write_memory(0x5203, 60);
+    core.write_memory(0x5204, 0x80);
+    for _ in 0..3 {
+        core.run_frame(0);
+        core.cartridge_mut().unwrap().try_cpu_read(0x5204);
+    }
+    let mut state = zax_nes::state::CoreState::default();
+    core.capture_core_state(&mut state).unwrap();
+    assert!(tick_until_irq(&mut core, 200_000) > 0);
+    let without_load = core.ppu().scanline();
+    core.restore_core_state(&state).unwrap();
+    assert!(tick_until_irq(&mut core, 200_000) > 0);
+    assert_eq!(without_load, core.ppu().scanline());
+    assert_eq!(59, without_load);
 }
 
 #[test]

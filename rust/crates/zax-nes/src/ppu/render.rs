@@ -281,6 +281,16 @@ impl Ppu2C02 {
         match dot {
             1..=256 => {
                 if dot == 1 {
+                    // The nametable byte of the line's third tile, read on the dot its fetch
+                    // starts (nesdev: "a third matching nametable byte read at the beginning of
+                    // the next scanline", after the two dummy reads of dots 337 and 339). Boards
+                    // watching the bus see it here, the MMC5's scanline detection among them.
+                    self.nametable_latch = self.read_vram_inner(
+                        0x2000 | (self.v & 0x0FFF),
+                        PpuBusAccess::Render,
+                        ChrFetch::Background,
+                        cart,
+                    );
                     if VISIBLE {
                         // Dots 1 to 64 clear the secondary OAM to $FF; the unused slots then
                         // make the hardware fetch pattern $FF, which boards watching A12 can
@@ -334,9 +344,11 @@ impl Ppu2C02 {
                 self.shift_background();
                 self.background_fetch(dot, cart);
             }
-            // Two more nametable fetches the hardware performs and discards; they matter
-            // only for boards that watch the PPU address bus.
-            338 | 340 => {
+            // The second of the two nametable fetches the hardware performs and discards after
+            // dot 337's (ALE on 339, /RD on 340 in the netlist; this core reads on the ALE dot,
+            // as for every other fetch). They matter only for boards that watch the PPU address
+            // bus; the third read of the same address is dot 1 of the next line.
+            339 => {
                 self.nametable_latch = self.read_vram_inner(
                     0x2000 | (self.v & 0x0FFF),
                     PpuBusAccess::Render,
