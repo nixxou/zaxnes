@@ -1,0 +1,29 @@
+[package]
+name = "zax-libretro"
+description = "Zaxnes as a libretro core (RetroArch)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# The core RetroArch loads, and the library the tests link.
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+zax-nes = { path = "../zax-nes" }
+zax-engine3d = { path = "../zax-engine3d" }
+zax-profiles = { path = "../zax-profiles" }
+zax-render = { path = "../zax-render" }
+zax-scripting = { path = "../zax-scripting" }
+zax-settings = { path = "../zax-settings" }
+glow = "0.16"
+
+[dev-dependencies]
+png = "0.17"
+# The tests draw the 3D into an offscreen OpenGL context.
+zax-render = { path = "../zax-render", features = ["offscreen"] }

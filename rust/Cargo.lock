@@ -2885,6 +2885,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "zax-libretro"
+version = "0.5.0"
+dependencies = [
+ "glow",
+ "png 0.17.16",
+ "zax-engine3d",
+ "zax-nes",
+ "zax-profiles",
+ "zax-render",
+ "zax-scripting",
+ "zax-settings",
+]
+
+[[package]]
 name = "zax-nes"
 version = "0.5.0"
 dependencies = [
