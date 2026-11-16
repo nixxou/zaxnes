@@ -145,3 +145,11 @@ Judge: the latency from a button to its first visible pixel, measured with `padb
 a test ROM that changes the backdrop when the button is read: today ~1 refresh + scanout; with D3
 the scanout part only. Expected gain: about half a refresh on average (8 ms at 60 Hz).
 
+Judge ROM (2026-11-16, `ext-tools/lagtest-rom/lagtest.nes`, outside the repository like the OAM
+measurement ROM): a white screen that polls the pad all frame long (a strobe and read every ~30
+CPU cycles, no NMI) and sets the three emphasis bits while A is held, so the picture darkens from
+the line being drawn when the press is seen. Checked in the harness (`--press 5-60:a`: dark;
+without: white). With the real-time pad on, a press lands mid-frame and the split line shows the
+line it was read on; a camera or light sensor against padbench's timestamps gives the
+button-to-photon latency, before and after D3, and on a console.
+
