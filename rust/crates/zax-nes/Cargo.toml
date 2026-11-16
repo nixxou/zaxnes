@@ -243,6 +243,7 @@ default = [
     "board-248",
     "board-532",
     "board-186",
+    "board-fds",
     "board-551",
     "board-417",
     "board-416",
@@ -506,6 +507,8 @@ board-532 = []
 # MAPPERS-P: the Study Box (186), from a .studybox tape and StudyBox.bin; a bare iNES 186
 # stays refused.
 board-186 = ["board-irq-p"]
+# Lot FDS: the Famicom Disk System, from a .fds/.qd image and the user's disksys.rom.
+board-fds = ["board-irq-p"]
 board-551 = ["board-178"]
 board-340 = ["board-multi-p"]
 board-554 = ["board-multi-p"]

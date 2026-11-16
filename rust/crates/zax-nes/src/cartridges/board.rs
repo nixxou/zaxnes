@@ -408,6 +408,34 @@ impl Mapper for Board {
         dispatch!(self, b => b.export_save_area())
     }
 
+    fn disk_sides(&self) -> usize {
+        dispatch!(self, b => b.disk_sides())
+    }
+
+    fn disk_side(&self) -> Option<usize> {
+        dispatch!(self, b => b.disk_side())
+    }
+
+    fn insert_disk(&mut self, side: usize) {
+        dispatch!(self, b => b.insert_disk(side));
+    }
+
+    fn eject_disk(&mut self) {
+        dispatch!(self, b => b.eject_disk());
+    }
+
+    fn set_disk_auto_insert(&mut self, enabled: bool) {
+        dispatch!(self, b => b.set_disk_auto_insert(enabled));
+    }
+
+    fn disk_wanted(&self) -> bool {
+        dispatch!(self, b => b.disk_wanted())
+    }
+
+    fn disk_end_frame(&mut self, header: Option<[u8; 10]>) {
+        dispatch!(self, b => b.disk_end_frame(header));
+    }
+
     fn import_save_area(&mut self, data: &[u8]) -> bool {
         dispatch!(self, b => b.import_save_area(data))
     }

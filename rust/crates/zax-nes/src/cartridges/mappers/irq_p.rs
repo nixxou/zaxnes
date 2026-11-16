@@ -8,6 +8,8 @@
 //! the work RAM disabled ([`Mapper::prg_ram_enabled`]).
 #[cfg(feature = "board-342")]
 use super::cool_girl::CoolGirl;
+#[cfg(feature = "board-fds")]
+use super::fds::Fds;
 #[cfg(feature = "board-562")]
 use super::game_doctor::GameDoctor;
 #[cfg(any(feature = "board-256", feature = "board-436"))]
@@ -21,6 +23,10 @@ use super::{windows_for, BootProgram, Eeprom93C66, Mapper};
 use crate::cartridges::{A12Watcher, BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
+
+/// The open bus a `$40xx` read leaves (the address's high byte, the last on the bus).
+#[cfg(feature = "board-fds")]
+const OPEN_BUS_40: u8 = 0x40;
 
 /// 560's nametable memory: the console's 2 KiB it serves itself, then the 1 KiB extension RAM.
 const NT_560: usize = 0xC00;
@@ -123,6 +129,9 @@ pub enum IrqPKind {
     /// 186, Mesen `StudyBox.h` (Fukutake Study Box): the BIOS, 64 KiB of work RAM and a tape
     /// drive ([`super::study_box`]); loaded only from a packaged `.studybox` tape.
     M186,
+    /// 20, the Famicom Disk System (Mesen `Fds.cpp`): the RAM adapter and its drive
+    /// ([`super::fds`]); loaded only from a packaged disk image.
+    M20,
 }
 
 impl IrqPKind {
@@ -153,6 +162,7 @@ impl IrqPKind {
             562 => Self::M562,
             355 => Self::M355,
             186 => Self::M186,
+            20 => Self::M20,
             _ => return None,
         })
     }
@@ -182,6 +192,7 @@ impl IrqPKind {
             Self::M562 => 562,
             Self::M355 => 355,
             Self::M186 => 186,
+            Self::M20 => 20,
         }
     }
 }
@@ -248,6 +259,9 @@ pub struct IrqP {
     /// The Study Box's drive, `None` for the other kinds; saved for that kind.
     #[cfg(feature = "board-186")]
     study_box: Option<Box<StudyBox>>,
+    /// The FDS adapter, `None` for the other kinds; saved for that kind.
+    #[cfg(feature = "board-fds")]
+    fds: Option<Box<Fds>>,
     /// 528's VRC7 IRQ (`init_VRC7(0x01, 0x00)`), saved for that kind only.
     vrc_irq: VrcIrq,
     /// Whether the image has CHR-ROM, which 359's CHR banking needs (`chrrom_size()`).
@@ -298,6 +312,18 @@ impl IrqP {
             #[cfg(feature = "board-562")]
             game_doctor: (kind == IrqPKind::M562).then(|| Box::new(Self::power_on_562(memory))),
             #[cfg(feature = "board-186")]
+            #[cfg(feature = "board-fds")]
+            fds: if kind == IrqPKind::M20 {
+                let rom = memory.rom();
+                Fds::new(
+                    rom.raw(),
+                    rom.header().announced_size(),
+                    rom.header().submapper == 1,
+                )
+                .map(Box::new)
+            } else {
+                None
+            },
             study_box: if kind == IrqPKind::M186 {
                 let rom = memory.rom();
                 StudyBox::new(rom.raw(), rom.header().announced_size()).map(Box::new)
@@ -415,6 +441,7 @@ impl IrqP {
             // `prg_fix_561`/`chr_fix_561` read the copier RAM in `try_read_prg`/`ppu_peek`; 342
             // decodes its own windows (`CoolGirl`).
             IrqPKind::M561 | IrqPKind::M342 | IrqPKind::M562 | IrqPKind::M186 => {}
+            IrqPKind::M20 => self.map_fds(),
             IrqPKind::M256 | IrqPKind::M436 => self.map_one_bus(),
             // `prg_fix_355`: NROM-256.
             IrqPKind::M355 => b.map_prg_32k(0),
@@ -424,11 +451,7 @@ impl IrqP {
                 b.map_chr_8k(0);
             }
             IrqPKind::M528 => self.map_528(),
-            // `prg_fix_442`: `reg[0]` D6 above D0-D4.
-            IrqPKind::M442 => {
-                b.map_prg_32k(((r[0] & 0x40) >> 1) | (r[0] & 0x1F));
-                b.map_chr_8k(0);
-            }
+            IrqPKind::M442 => self.map_442(),
             // `prg_fix_272`/`chr_fix_272`: two 8 KiB registers, the last 16 KiB fixed.
             IrqPKind::M272 => {
                 b.map_prg_8k(0, r[0]);
@@ -777,6 +800,14 @@ impl IrqP {
                     | bit(14, 7)
             }
             _ => 0xFF,
+        }
+    }
+
+    /// `Fds::ProcessCpuClock`.
+    fn step_fds(&mut self) {
+        #[cfg(feature = "board-fds")]
+        if let Some(adapter) = &mut self.fds {
+            adapter.step();
         }
     }
 
@@ -1215,6 +1246,24 @@ impl IrqP {
 
     /// `prg_swap_fme7_528`/`chr_swap_fme7_528`: `outer + (value & (outer | $0F))`, the last
     /// window `~0`; CHR `outer << 4 | value`.
+    /// The FDS: work RAM at $6000-$DFFF (pages 0-3, the first through the PRG-RAM window), the
+    /// BIOS at $E000, 8 KiB of CHR-RAM.
+    fn map_fds(&mut self) {
+        let b = &mut self.banks;
+        b.map_prg_ram_8k(0, 1);
+        b.map_prg_ram_8k(1, 2);
+        b.map_prg_ram_8k(2, 3);
+        b.map_prg_8k(3, 0);
+        b.map_chr_8k(0);
+    }
+
+    /// `prg_fix_442`: `reg[0]` D6 above D0-D4.
+    fn map_442(&mut self) {
+        let r = i32::from(self.regs[0]);
+        self.banks.map_prg_32k(((r & 0x40) >> 1) | (r & 0x1F));
+        self.banks.map_chr_8k(0);
+    }
+
     fn map_528(&mut self) {
         let r = self.regs.map(i32::from);
         let b = &mut self.banks;
@@ -1263,6 +1312,8 @@ impl IrqP {
                 _ => NametableMirroring::Horizontal,
             }),
             IrqPKind::M256 | IrqPKind::M436 => self.one_bus_mirroring(),
+            #[cfg(feature = "board-fds")]
+            IrqPKind::M20 => self.fds.as_ref().map(|adapter| adapter.mirroring()),
             IrqPKind::M342 => self.cool_girl_mirroring(),
             IrqPKind::M562 => self.game_doctor_mirroring(),
             // `mirroring_fix_547`.
@@ -1421,7 +1472,12 @@ impl IrqP {
             }
             // `extcl_cpu_wr_mem_558` decodes `$5000-$53FF` only ([`IrqP::write_558`]); 342's writes
             // go to its FPGA before this decode.
-            IrqPKind::M558 | IrqPKind::M342 | IrqPKind::M562 | IrqPKind::M355 | IrqPKind::M186 => {}
+            IrqPKind::M558
+            | IrqPKind::M342
+            | IrqPKind::M562
+            | IrqPKind::M355
+            | IrqPKind::M186
+            | IrqPKind::M20 => {}
         }
     }
 }
@@ -1492,6 +1548,10 @@ impl Mapper for IrqP {
         if let Some(drive) = &self.study_box {
             drive.save_state(writer);
         }
+        #[cfg(feature = "board-fds")]
+        if let Some(adapter) = &self.fds {
+            adapter.save_state(writer);
+        }
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -1553,6 +1613,10 @@ impl Mapper for IrqP {
         if let Some(drive) = &mut self.study_box {
             drive.load_state(reader)?;
         }
+        #[cfg(feature = "board-fds")]
+        if let Some(adapter) = &mut self.fds {
+            adapter.load_state(reader)?;
+        }
         self.map();
         Ok(())
     }
@@ -1570,6 +1634,10 @@ impl Mapper for IrqP {
     }
 
     fn irq_asserted(&self) -> bool {
+        #[cfg(feature = "board-fds")]
+        if let Some(adapter) = &self.fds {
+            return adapter.timer_irq || adapter.disk_irq;
+        }
         #[cfg(feature = "board-342")]
         if let Some(chip) = &self.cool_girl {
             return chip.irq;
@@ -1671,6 +1739,7 @@ impl Mapper for IrqP {
             IrqPKind::M355 => self.step_pic(),
             // `StudyBox::ProcessCpuClock`.
             IrqPKind::M186 => self.step_study_box(memory),
+            IrqPKind::M20 => self.step_fds(),
             // `extcl_cpu_every_cycle_547`: a 16-bit up-counter, reloaded and asserting on its wrap.
             IrqPKind::M547 => {
                 if self.irq_enabled {
@@ -1782,7 +1851,7 @@ impl Mapper for IrqP {
     fn prg_ram_enabled(&self) -> bool {
         matches!(
             self.kind,
-            IrqPKind::M417 | IrqPKind::M558 | IrqPKind::M561 | IrqPKind::M562
+            IrqPKind::M417 | IrqPKind::M558 | IrqPKind::M561 | IrqPKind::M562 | IrqPKind::M20
         ) || (self.kind == IrqPKind::M528 && self.regs[0] == 0x01)
     }
 
@@ -1854,6 +1923,19 @@ impl Mapper for IrqP {
             }
             chip.write(address, value);
             self.settle(memory);
+            return true;
+        }
+        #[cfg(feature = "board-fds")]
+        if let Some(adapter) = &mut self.fds {
+            if address < 0x6000 {
+                adapter.write(address, value);
+                self.settle(memory);
+            } else if address < 0xE000 {
+                let ram = memory.prg_ram_mut();
+                if let Some(byte) = ram.get_mut(usize::from(address - 0x6000)) {
+                    *byte = value;
+                }
+            }
             return true;
         }
         #[cfg(feature = "board-186")]
@@ -2097,6 +2179,10 @@ impl Mapper for IrqP {
         if let Some(drive) = &mut self.study_box {
             drive.soft_reset();
         }
+        #[cfg(feature = "board-fds")]
+        if let Some(adapter) = &mut self.fds {
+            adapter.soft_reset();
+        }
         // `pic16c5x_reset(RESET)`.
         #[cfg(feature = "board-355")]
         if let Some(chip) = &mut self.pic {
@@ -2114,23 +2200,91 @@ impl Mapper for IrqP {
         let _ = memory;
     }
 
-    /// The COOLGIRL's save area ([`CoolGirl::export_save`]).
-    #[cfg(feature = "board-342")]
+    /// The COOLGIRL's save area ([`CoolGirl::export_save`]) and what the FDS games wrote on
+    /// their disks ([`Fds::export_save`]).
+    #[cfg(any(feature = "board-342", feature = "board-fds"))]
     fn export_save_area(&self) -> Option<Vec<u8>> {
-        self.cool_girl.as_ref().map(|chip| chip.export_save())
+        #[cfg(feature = "board-fds")]
+        if let Some(adapter) = &self.fds {
+            return Some(adapter.export_save());
+        }
+        #[cfg(feature = "board-342")]
+        if let Some(chip) = &self.cool_girl {
+            return Some(chip.export_save());
+        }
+        None
     }
 
-    #[cfg(feature = "board-342")]
+    #[cfg(any(feature = "board-342", feature = "board-fds"))]
     fn import_save_area(&mut self, data: &[u8]) -> bool {
-        self.cool_girl
-            .as_mut()
-            .is_some_and(|chip| chip.import_save(data))
+        #[cfg(feature = "board-fds")]
+        if let Some(adapter) = &mut self.fds {
+            return adapter.import_save(data);
+        }
+        #[cfg(feature = "board-342")]
+        if let Some(chip) = &mut self.cool_girl {
+            return chip.import_save(data);
+        }
+        let _ = data;
+        false
     }
 
-    /// The Study Box's tape audio, mixed while the motor runs (Mesen `StudyBox::MixAudio`).
-    #[cfg(feature = "board-186")]
+    /// The Study Box's tape audio, mixed while the motor runs (Mesen `StudyBox::MixAudio`), and
+    /// the FDS's wavetable channel.
+    #[cfg(any(feature = "board-186", feature = "board-fds"))]
     fn expansion_audio_output(&self) -> Option<i32> {
-        self.study_box.as_ref().map(|drive| drive.audio_level())
+        #[cfg(feature = "board-fds")]
+        if let Some(adapter) = &self.fds {
+            return Some(adapter.audio_level());
+        }
+        #[cfg(feature = "board-186")]
+        if let Some(drive) = &self.study_box {
+            return Some(drive.audio_level());
+        }
+        None
+    }
+
+    #[cfg(feature = "board-fds")]
+    fn disk_sides(&self) -> usize {
+        self.fds.as_ref().map_or(0, |adapter| adapter.side_count())
+    }
+
+    #[cfg(feature = "board-fds")]
+    fn disk_side(&self) -> Option<usize> {
+        self.fds.as_ref().and_then(|adapter| adapter.current_side())
+    }
+
+    #[cfg(feature = "board-fds")]
+    fn insert_disk(&mut self, side: usize) {
+        if let Some(adapter) = &mut self.fds {
+            adapter.insert(side);
+        }
+    }
+
+    #[cfg(feature = "board-fds")]
+    fn eject_disk(&mut self) {
+        if let Some(adapter) = &mut self.fds {
+            adapter.eject();
+        }
+    }
+
+    #[cfg(feature = "board-fds")]
+    fn set_disk_auto_insert(&mut self, enabled: bool) {
+        if let Some(adapter) = &mut self.fds {
+            adapter.set_auto_insert(enabled);
+        }
+    }
+
+    #[cfg(feature = "board-fds")]
+    fn disk_wanted(&self) -> bool {
+        self.fds.as_ref().is_some_and(|adapter| adapter.wants_disk)
+    }
+
+    #[cfg(feature = "board-fds")]
+    fn disk_end_frame(&mut self, header: Option<[u8; 10]>) {
+        if let Some(adapter) = &mut self.fds {
+            adapter.end_frame(header);
+        }
     }
 
     #[cfg(any(feature = "board-256", feature = "board-436"))]
@@ -2176,6 +2330,14 @@ impl Mapper for IrqP {
     }
 
     fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+        #[cfg(feature = "board-fds")]
+        if let Some(adapter) = &mut self.fds {
+            if address < 0x6000 {
+                return Some(adapter.read(address, OPEN_BUS_40));
+            }
+            adapter.see_read(address);
+            return None;
+        }
         #[cfg(feature = "board-186")]
         if let Some(drive) = &mut self.study_box {
             if (0x4200..=0x4203).contains(&address) {
@@ -2210,6 +2372,10 @@ impl Mapper for IrqP {
     }
 
     fn cpu_peek_override(&self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
+        #[cfg(feature = "board-fds")]
+        if let Some(adapter) = &self.fds {
+            return (address < 0x6000).then(|| adapter.peek(address, OPEN_BUS_40));
+        }
         #[cfg(feature = "board-186")]
         if let Some(drive) = &self.study_box {
             if (0x4200..=0x4203).contains(&address) {
@@ -2244,7 +2410,12 @@ impl Mapper for IrqP {
         // PIC must see every CPU fetch (`extcl_cpu_rd_mem_355`), so no read takes the cache.
         if matches!(
             self.kind,
-            IrqPKind::M561 | IrqPKind::M342 | IrqPKind::M562 | IrqPKind::M355 | IrqPKind::M186
+            IrqPKind::M561
+                | IrqPKind::M342
+                | IrqPKind::M562
+                | IrqPKind::M355
+                | IrqPKind::M186
+                | IrqPKind::M20
         ) {
             windows = [super::NO_ROM_WINDOW; 4];
         }

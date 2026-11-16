@@ -643,6 +643,8 @@ const fn clocks_on_cpu_cycle(mapper: i32) -> bool {
             | 342
             // MAPPERS-P: the Study Box's tape drive (Mesen `StudyBox::ProcessCpuClock`).
             | 186
+            // Lot FDS: the disk drive, the IRQ timer and the sound (Mesen `Fds::ProcessCpuClock`).
+            | 20
             // MAPPERS-P: mapper 446, `ChipSwitch` (its VRC4 IRQ, puNES `EXTCL_CPU_EVERY_CYCLE`).
             | 446
             // MAPPERS-P: mapper 436, `IrqP` (puNES `EXTCL_CPU_EVERY_CYCLE`).
@@ -1312,6 +1314,44 @@ impl Cartridge {
     #[must_use]
     pub const fn board_number(&self) -> i32 {
         registry::board_number(self.mapper_number)
+    }
+
+    /// Lot FDS: the disk sides of the drive, 0 without one.
+    #[must_use]
+    pub fn disk_sides(&self) -> usize {
+        self.board.disk_sides()
+    }
+
+    /// The side in the drive, `None` when it is empty or there is no drive.
+    #[must_use]
+    pub fn disk_side(&self) -> Option<usize> {
+        self.board.disk_side()
+    }
+
+    /// Puts `side` in the drive.
+    pub fn insert_disk(&mut self, side: usize) {
+        self.board.insert_disk(side);
+    }
+
+    /// Takes the disk out.
+    pub fn eject_disk(&mut self) {
+        self.board.eject_disk();
+    }
+
+    /// Turns the drive's automatic disk changes on or off.
+    pub fn set_disk_auto_insert(&mut self, enabled: bool) {
+        self.board.set_disk_auto_insert(enabled);
+    }
+
+    /// Whether the BIOS looked for a disk this frame.
+    #[must_use]
+    pub fn disk_wanted(&self) -> bool {
+        self.board.disk_wanted()
+    }
+
+    /// The drive's once-a-frame work.
+    pub fn disk_end_frame(&mut self, header: Option<[u8; 10]>) {
+        self.board.disk_end_frame(header);
     }
 
     /// The save file of a board whose save medium is not battery RAM: the flash chip's changed

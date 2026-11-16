@@ -1174,6 +1174,8 @@ impl NesCore {
         if let Some(ram) = ersan2_ram {
             self.paint_ersan2(&ram);
         }
+        #[cfg(feature = "board-fds")]
+        self.fds_end_frame();
         if let Some(decoder) = decoder {
             self.decode_margins(decoder);
         }
@@ -1198,6 +1200,91 @@ impl NesCore {
         }
 
         self.bus.cycle_count() - start_cycle
+    }
+
+    /// Lot FDS: the drive's once-a-frame work — the BIOS's disk search resolved from what it
+    /// looks for (the ten bytes `$00`/`$01` point at, Mesen `Fds::ReadRam`), and the delayed and
+    /// automatic disk changes. Nothing for a cartridge without a drive.
+    #[cfg(feature = "board-fds")]
+    #[cold]
+    #[inline(never)]
+    fn fds_end_frame(&mut self) {
+        let Some(cartridge) = self.bus.cartridge() else {
+            return;
+        };
+        if cartridge.disk_sides() == 0 {
+            return;
+        }
+        let header = cartridge.disk_wanted().then(|| {
+            let ram = self.bus.ram();
+            let pointer = u16::from_le_bytes([ram[0], ram[1]]);
+            std::array::from_fn(|index| {
+                let address = pointer.wrapping_add(u16::try_from(index).unwrap_or(0));
+                if address == 0xE445 {
+                    0
+                } else {
+                    self.read_memory(address)
+                }
+            })
+        });
+        if let Some(cartridge) = self.bus.cartridge_mut() {
+            cartridge.disk_end_frame(header);
+        }
+    }
+
+    /// Lot FDS: the disk sides of the loaded image's drive, 0 without one.
+    #[must_use]
+    pub fn disk_sides(&self) -> usize {
+        self.bus
+            .cartridge()
+            .map_or(0, crate::cartridges::Cartridge::disk_sides)
+    }
+
+    /// The side in the drive (0 for disk 1 side A, 1 for side B, …), `None` when it is empty.
+    #[must_use]
+    pub fn disk_side(&self) -> Option<usize> {
+        self.bus
+            .cartridge()
+            .and_then(crate::cartridges::Cartridge::disk_side)
+    }
+
+    /// Puts `side` in the drive; a disk in it comes out first and the new one goes in about two
+    /// seconds later, as a player would do it.
+    pub fn insert_disk(&mut self, side: usize) {
+        if let Some(cartridge) = self.bus.cartridge_mut() {
+            cartridge.insert_disk(side);
+        }
+    }
+
+    /// Takes the disk out of the drive.
+    pub fn eject_disk(&mut self) {
+        if let Some(cartridge) = self.bus.cartridge_mut() {
+            cartridge.eject_disk();
+        }
+    }
+
+    /// Turns the other side of the disk in the drive over (side A to B, B to A).
+    pub fn switch_disk_side(&mut self) {
+        if let Some(side) = self.disk_side() {
+            let sides = self.disk_sides();
+            self.insert_disk((side ^ 1) % sides.max(1));
+        }
+    }
+
+    /// Puts the next disk in (side A of the following disk, back to the first after the last).
+    pub fn insert_next_disk(&mut self) {
+        let sides = self.disk_sides();
+        if sides > 0 {
+            let side = self.disk_side().unwrap_or(sides - 1);
+            self.insert_disk(((side & !1) + 2) % sides);
+        }
+    }
+
+    /// Turns the drive's automatic disk changes on or off (on by default).
+    pub fn set_disk_auto_insert(&mut self, enabled: bool) {
+        if let Some(cartridge) = self.bus.cartridge_mut() {
+            cartridge.set_disk_auto_insert(enabled);
+        }
     }
 
     /// Lot MAPPERS-P: whether the loaded image is mapper 532 with a font (*China Ersan 2*).

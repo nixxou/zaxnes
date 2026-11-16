@@ -817,7 +817,8 @@ impl Mapper for IrqBoard {
         feature = "board-682",
         feature = "board-413",
         feature = "board-342",
-        feature = "board-186"
+        feature = "board-186",
+        feature = "board-fds"
     ))]
     #[inline(never)]
     fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
@@ -834,7 +835,8 @@ impl Mapper for IrqBoard {
         feature = "board-682",
         feature = "board-413",
         feature = "board-342",
-        feature = "board-186"
+        feature = "board-186",
+        feature = "board-fds"
     ))]
     #[inline(never)]
     fn cpu_peek_override(&self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
@@ -861,13 +863,49 @@ impl Mapper for IrqBoard {
         inner!(self, b => b.take_dac_write())
     }
 
+    /// Forwarded for the FDS's drive (lot FDS).
+    #[cfg(feature = "board-fds")]
+    fn disk_sides(&self) -> usize {
+        inner!(self, b => b.disk_sides())
+    }
+
+    #[cfg(feature = "board-fds")]
+    fn disk_side(&self) -> Option<usize> {
+        inner!(self, b => b.disk_side())
+    }
+
+    #[cfg(feature = "board-fds")]
+    fn insert_disk(&mut self, side: usize) {
+        inner!(self, b => b.insert_disk(side));
+    }
+
+    #[cfg(feature = "board-fds")]
+    fn eject_disk(&mut self) {
+        inner!(self, b => b.eject_disk());
+    }
+
+    #[cfg(feature = "board-fds")]
+    fn set_disk_auto_insert(&mut self, enabled: bool) {
+        inner!(self, b => b.set_disk_auto_insert(enabled));
+    }
+
+    #[cfg(feature = "board-fds")]
+    fn disk_wanted(&self) -> bool {
+        inner!(self, b => b.disk_wanted())
+    }
+
+    #[cfg(feature = "board-fds")]
+    fn disk_end_frame(&mut self, header: Option<[u8; 10]>) {
+        inner!(self, b => b.disk_end_frame(header));
+    }
+
     /// Forwarded for the COOLGIRL's save area (lot MAPPERS-P), asked when a host saves.
-    #[cfg(feature = "board-342")]
+    #[cfg(any(feature = "board-342", feature = "board-fds"))]
     fn export_save_area(&self) -> Option<Vec<u8>> {
         inner!(self, b => b.export_save_area())
     }
 
-    #[cfg(feature = "board-342")]
+    #[cfg(any(feature = "board-342", feature = "board-fds"))]
     fn import_save_area(&mut self, data: &[u8]) -> bool {
         inner!(self, b => b.import_save_area(data))
     }
@@ -914,7 +952,8 @@ impl Mapper for IrqBoard {
         feature = "board-284",
         feature = "board-682",
         feature = "board-446",
-        feature = "board-186"
+        feature = "board-186",
+        feature = "board-fds"
     ))]
     fn expansion_audio_output(&self) -> Option<i32> {
         inner!(self, b => b.expansion_audio_output())
