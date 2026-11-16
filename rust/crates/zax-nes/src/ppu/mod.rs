@@ -2916,7 +2916,9 @@ impl Ppu2C02 {
     ///   standard core since 2026-11-16, a rule on a cold write path.
     /// * 2C07 (Visual 2C07, `g2006x` at reset phases e0, e3, e6): dot 257 the same, the open bus on
     ///   the cycle whose dot accumulator is 4 ([`Self::open_bus_on_copies`]); its vertical copy
-    ///   ends on dot 302, where no program wrote: left alone.
+    ///   ends on dot 302: `g2006w` writes there (adversarial review 2026-11-16), a second write
+    ///   only leaves a 3-dot transient before the load, left alone; the first write is
+    ///   [`Self::first_address_write_on_vertical_copy`].
     #[cold]
     #[inline(never)]
     fn address_write_on_copy(&mut self) {
@@ -2943,7 +2945,7 @@ impl Ppu2C02 {
     /// The netlist loads `v` in the middle of dot D+3 (`delay_address_load`), so the increment of
     /// dot D+4, which this core has already run with the old `v`, belongs to the new one (lot
     /// FIDPLUS-2, A5, `g2006x`): on a coarse-X increment dot the loaded address is incremented,
-    /// on dot 256 in X and Y. NTSC only, as the other netlist rules.
+    /// on dot 256 in X and Y. NTSC and PAL (the 2C07 the same, Visual 2C07 `g2006x`).
     #[cold]
     #[inline(never)]
     fn increment_after_delayed_load(&mut self) {
@@ -2989,8 +2991,11 @@ impl Ppu2C02 {
         // The 2C07 (Visual 2C07, `g2006w`, 193 collisions at reset phases e0/e3/e6/e9, lot
         // FIDPLUS-C C3c-collision): a coarse-X collision ANDs nametable X as well as coarse X,
         // and `t` keeps the written nametable bits (put back by the `$2006` write after `v`
-        // takes this value, [`Self::write`]).
-        let x_fields = if matches!(self.timing.region, NesRegion::Pal) {
+        // takes this value, [`Self::write`]). The 2C02 ANDs nametable X too (transistor netlist,
+        // `g2006w` at reset phases e0/e4/e6, adversarial review 2026-11-16: a write of `$2D5A`
+        // colliding with `$2ADC` leaves `$2958`, 66 of 66 coarse-X collisions; the first corpus,
+        // `g2006x`, never wrote nametable X = 1). The clones keep the old mask, unmeasured.
+        let x_fields = if self.netlist_measured_region() || matches!(self.timing.region, NesRegion::Pal) {
             0x041F
         } else {
             0x001F
@@ -3370,9 +3375,17 @@ impl Ppu2C02 {
                     self.t = (self.t & 0x00FF) | (u16::from(value & 0x3F) << 8);
                     if self.dot == 257
                         && self.fetching()
-                        && matches!(self.timing.region, NesRegion::Pal)
+                        && (self.netlist_measured_region()
+                            || matches!(self.timing.region, NesRegion::Pal))
                     {
                         self.first_address_write_on_copy(value);
+                    } else if self.scanline == self.pre_render_scanline()
+                        && self.dot == *self.vertical_copy_dots().end()
+                        && self.fetching()
+                        && (self.netlist_measured_region()
+                            || matches!(self.timing.region, NesRegion::Pal))
+                    {
+                        self.first_address_write_on_vertical_copy(value);
                     }
                 }
 
@@ -3416,6 +3429,25 @@ impl Ppu2C02 {
             value
         };
         self.v = (self.v & !0x0400) | (u16::from(source & 0x04) << 8);
+    }
+
+    /// A first `$2006` write on the pre-render line's last vertical copy dot (302 on the 2C07, 304
+    /// on the 2C02): that copy already takes the vertical bits the write puts in `t`'s high byte,
+    /// from the written byte or the CPU's open bus as [`Self::open_bus_on_copies`] says (Visual
+    /// 2C07, `g2006w` at e3, adversarial review 2026-11-16: `$25` on dot 302, open bus `$20`,
+    /// turns `v` = `$2D5A` into `$245A`). The 2C02 form is unmeasured; its second write on 304
+    /// follows the same copy ([`Self::address_write_on_copy`]).
+    #[cold]
+    #[inline(never)]
+    fn first_address_write_on_vertical_copy(&mut self, value: u8) {
+        const VERTICAL: u16 = 0x7BE0;
+        let source = if self.open_bus_on_copies() {
+            self.cpu_open_bus
+        } else {
+            value
+        };
+        let seen = (self.t & 0x00FF) | (u16::from(source & 0x3F) << 8);
+        self.v = (self.v & !VERTICAL) | (seen & VERTICAL);
     }
 
     /// Whether a register write landing on a copy of `t` into `v` (or on a pixel) takes the CPU's
