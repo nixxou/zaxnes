@@ -747,6 +747,18 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   half-clock counter. Whether a real 2C07 powers up with another relation between its /5 dot
   divider and its /6 subcarrier divider (which would move the pixel's phase) is not known.
 
+### C3c-collision. PAL `$2006` load colliding with dot 256 (2026-11-16, open)
+- Visual 2C07, `g2006x` at reset phases e0/e3/e6, line 54 (and 148, 223): `v` = `$210C`,
+  `t` = `$2A08`; second `$2006` write `$D7` on dot 253. Netlist: the load lands on dot 256 and
+  leaves `v` = `$2005`, `t` = `$2805` (dots 256-281). Zaxnes: the load lands on dot 257 (one dot
+  late), the collision (`address_load_collision`, the 2C02's rule `t &= v`, `v` = `$310D` after
+  the dot-256 increments) gives `t` = `$2005`, then `v` = `t`.
+- So on the 2C07: `v` = written AND incremented (`$2AD7 & $310D`), but `t` keeps the written
+  nametable-Y bit (`$2805` = `$2005 | $0800`), and the load is a dot earlier for this write's
+  cycle phase. One value pattern only: a dedicated program (several written values, nametable
+  bits set and clear, writes on dots 248-256 at every cycle phase) is needed before a rule.
+  Cost today: 14 long runs over five frames at each reset phase, about 4 900 dots a frame.
+
 ### D2b. Performance lead found on the way (lot FIDELITY, not fidelity) — tried and dropped (FIDPLUS-1)
 - Callgrind `f4185fa8` vs `27e2c3e2`: the APU stage costs +0.8 to +0.9 % on every game (+17 to
   +21 M instructions per 600 frames) while the PPU stage gains 0.24 %; totals are -0.03 to
