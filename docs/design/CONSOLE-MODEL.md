@@ -124,6 +124,16 @@ Revision A fails `5-MMC3` (both suites) and `6.MMC3_rev_B`: no single model pass
   * left: `g2006x`'s write whose `t` reads `$2805` on the netlist (lines 54, 148, 223: dots
     256-281); every program at e9 parts from the netlist from the first frame (no access near;
     a power-on difference, not a register rule); `r2007` / `oam` at e0 likewise.
+  Step 10 (2026-11-16), closing C3c. At reset phase e3 the whole corpus fits dot phase 2:
+  `g2001px`, `oam`, `g3e01px` 0 differing dots a frame, `g2000`, `g2005`, `g2005px` 0-1, `rmw` 167
+  and `g2006px` ~1 400 with no long run on a rendered line, `g2006x` 14 long runs (the dot-256
+  collision, FIDELITY-LEADS C3c-collision). At e9, `g2000` (1 a frame) and `oam` (0) fit with
+  the rules as they stand; `g2001px` does not at any dot phase, power-on offset (+-40) or
+  alignment (0-3): its `$2001` writes land on the same dots as at e3 but the netlist switches
+  the rendering at another point of the dot. Zaxnes's PAL rules are per dot accumulator phase
+  (five positions of the CPU cycle in the dot); this reset phase looks to sit between two of
+  them, which a dot-granular switch cannot express. Recorded as the limit of the model; a
+  half-dot switch would be a Fidelite+ refinement.
   Still open from the earlier steps:
   the first frame's `$2007` increments seen 4-5 dots later on the netlist (line 241).
   Corpus at reset phase e3 so far (alignment 3 against 0, differing dots, whole frames): `g2005`
