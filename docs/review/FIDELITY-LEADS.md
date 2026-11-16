@@ -425,7 +425,7 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 
 ## B. Power-on and reset
 
-### B1. PPU position at power-on — open (no perf cost; moves every game)
+### B1. PPU position at power-on — done, on by default (FIDELITY step 27)
 - nesdev ("PPU power up state"): the PPU starts at the top of the picture.
 - Zaxnes: starts at vblank (241, 1) (see `docs/review/NMI-MESEN.md`).
 - Mesen 2: (-1, 340). BeesNES: scanline 0, **dot 11** (`Src/Ppu/LSNPpu2C0X.h:247-256`), chosen so
@@ -446,6 +446,9 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   position is not needed on the NES-001**: its reset line holds the PPU at line 0 dot 0 until the
   CPU starts (netlist, step 34), so the position at the first opcode is fixed; only the sub-dot
   alignment varies (A4, "Random" since step 36).
+- **On by default since FIDELITY step 27** (`emu.power_on_top`, with `emu.oam_corruption`;
+  the owner checked the moved games by eye). The fixtures of the older test files keep the
+  vblank power-on they were written against (`tests/common::machine_with`).
 
 ### B2. Reset length 7 vs 8 cycles — settled, no change (step 34)
 - Zaxnes 7 cycles (`cpu/cpu6502.rs:173-178`); Mesen 8. Sets the DMA get/put parity. nesdev gives no
