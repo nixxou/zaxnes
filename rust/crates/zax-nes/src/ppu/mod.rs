@@ -2624,12 +2624,26 @@ impl Ppu2C02 {
                 self.read_vram_inner(address, PpuBusAccess::Cpu, ChrFetch::Background, cart);
         }
 
-        if self.bus_conflicts && self.fetching() && self.read_buffer_from_fetch(cart) {
+        if self.bus_conflicts
+            && (self.fetching() || self.read_latches_on_pre_render())
+            && self.read_buffer_from_fetch(cart)
+        {
             // The increment was made inside, where the hardware makes it.
             return value;
         }
         self.increment_vram_address(cart);
         value
+    }
+
+    /// A `$2007` read on the last dots of the line before the pre-render line, rendering on: its
+    /// latch (5 or 6 dots later) lands on the pre-render line, which fetches, so the read takes the
+    /// fetching path, X+Y increment and fetched byte, not the blanking +1 (Visual 2C07, `r2007` at
+    /// e3 on the 19/32 bench, adversarial review item 8: a read on 310:338 turns `v` = `$04FE`
+    /// into `$14FF` on 311:2). Cheap: the dot test fails on every other dot.
+    fn read_latches_on_pre_render(&self) -> bool {
+        self.dot >= 335
+            && self.scanline == self.pre_render_scanline() - 1
+            && self.rendering_enabled()
     }
 
     /// The read buffer of a `$2007` read made while the PPU is fetching: **what the PPU was
