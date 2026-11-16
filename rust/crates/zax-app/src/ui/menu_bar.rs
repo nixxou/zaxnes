@@ -338,6 +338,35 @@ fn is_selected(selection: Selection, host: &AppHost) -> bool {
     }
 }
 
+/// The Emulation menu; lot FDS: the Disk System drive's commands, greyed out without one.
+fn emulation_menu() -> Menu {
+    let item = |command| MenuItem::of(command, None, CommandArgs::default());
+    Menu {
+        title: text::menu_emulation(),
+        items: vec![
+            item(Command::PauseResume),
+            item(Command::Reset),
+            // AMD-044 REQ-LOOP-072: the soft reset sits right next to the hard one.
+            item(Command::SoftReset),
+            item(Command::Stop),
+            MenuItem::rule(),
+            item(Command::SwitchDiskSide),
+            item(Command::InsertNextDisk),
+            item(Command::EjectDisk),
+            MenuItem::rule(),
+            item(Command::FastForward),
+            item(Command::Rollback),
+            item(Command::FrameBack),
+            item(Command::FrameAdvance),
+            MenuItem::rule(),
+            MenuItem::sub(text::speed(), Submenu::Speed),
+            MenuItem::sub(text::region(), Submenu::Region),
+            MenuItem::sub(text::console_model(), Submenu::ConsoleModel),
+            MenuItem::sub(text::ports(), Submenu::Ports),
+        ],
+    }
+}
+
 fn build_menus() -> Vec<Menu> {
     let item = |command| MenuItem::of(command, None, CommandArgs::default());
     let file = Menu {
@@ -379,26 +408,7 @@ fn build_menus() -> Vec<Menu> {
             item(Command::Quit),
         ],
     };
-    let emulation = Menu {
-        title: text::menu_emulation(),
-        items: vec![
-            item(Command::PauseResume),
-            item(Command::Reset),
-            // AMD-044 REQ-LOOP-072: the soft reset sits right next to the hard one.
-            item(Command::SoftReset),
-            item(Command::Stop),
-            MenuItem::rule(),
-            item(Command::FastForward),
-            item(Command::Rollback),
-            item(Command::FrameBack),
-            item(Command::FrameAdvance),
-            MenuItem::rule(),
-            MenuItem::sub(text::speed(), Submenu::Speed),
-            MenuItem::sub(text::region(), Submenu::Region),
-            MenuItem::sub(text::console_model(), Submenu::ConsoleModel),
-            MenuItem::sub(text::ports(), Submenu::Ports),
-        ],
-    };
+    let emulation = emulation_menu();
     let video = Menu {
         title: text::menu_video(),
         items: vec![

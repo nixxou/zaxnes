@@ -104,6 +104,10 @@ fn req_ui_205_the_model_enumerates_every_menu_command() {
         InsertCoin1,
         InsertCoin2,
         VsService,
+        // Lot FDS: the Disk System's drive.
+        SwitchDiskSide,
+        InsertNextDisk,
+        EjectDisk,
     ];
     for command in expected {
         assert!(

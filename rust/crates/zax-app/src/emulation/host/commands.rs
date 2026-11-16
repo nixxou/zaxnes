@@ -10,7 +10,7 @@ use crate::emulation::emulation_state::EmulationState;
 use crate::emulation::game_catalog::GameCatalog;
 use crate::emulation::notification_center::{NotificationSeverity, SHORT_SECONDS};
 use crate::emulation::speed_setting;
-use crate::game_session::GameSession;
+use crate::game_session::{DiskChange, GameSession};
 use crate::persistence::app_settings::{AppSettings, AppSettingsMut, TvRegionSetting};
 use crate::persistence::console_model::ConsoleModel;
 use crate::persistence::save_slots::{is_valid_slot_id, numbered_slot_id, QUICK_SLOT_ID};
@@ -45,6 +45,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Command::SoftReset => self.can_soft_reset(),
             Command::InsertCoin1 | Command::InsertCoin2 | Command::VsService => {
                 self.can_drive_vs_cabinet()
+            }
+            // Lot FDS: only with a disk drive.
+            Command::SwitchDiskSide | Command::InsertNextDisk | Command::EjectDisk => {
+                self.can_change_disk()
             }
             // AMD-053 REQ-LOOP-076: offered only while the resume point stands.
             Command::ResumeLast => !loading && self.resume_available(),
@@ -201,6 +205,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::InsertCoin1
             | Command::InsertCoin2
             | Command::VsService
+            | Command::SwitchDiskSide
+            | Command::InsertNextDisk
+            | Command::EjectDisk
             | Command::Stop
             | Command::FastForward
             | Command::Rollback
@@ -327,6 +334,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Command::InsertCoin1 => self.drive_vs_cabinet(Some(1)),
             Command::InsertCoin2 => self.drive_vs_cabinet(Some(2)),
             Command::VsService => self.drive_vs_cabinet(None),
+            Command::SwitchDiskSide => self.change_disk(DiskChange::SwitchSide),
+            Command::InsertNextDisk => self.change_disk(DiskChange::NextDisk),
+            Command::EjectDisk => self.change_disk(DiskChange::Eject),
             Command::Stop => self.stop_current_game(true, true),
             Command::FastForward => self.request_fast_forward(args.number),
             Command::Rollback => self.perform_rollback(),
@@ -540,6 +550,25 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
         if let Some(session) = self.session.as_mut() {
             session.drive_vs_cabinet(slot);
+        }
+    }
+
+    /// Lot FDS: whether the game running has a disk drive to change disks in.
+    pub(super) fn can_change_disk(&self) -> bool {
+        self.can_soft_reset()
+            && self
+                .session
+                .as_ref()
+                .is_some_and(|session| session.disk_sides() > 0)
+    }
+
+    /// A disk change in the Famicom Disk System's drive.
+    fn change_disk(&mut self, change: DiskChange) {
+        if !self.can_change_disk() {
+            return;
+        }
+        if let Some(session) = self.session.as_mut() {
+            session.change_disk(change);
         }
     }
 

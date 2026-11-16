@@ -141,8 +141,8 @@ pub fn scan(directory: &Path) -> Vec<RomEntry> {
         .filter(|path| {
             path.is_file()
                 && path.extension().is_some_and(|extension| {
-                    // Lot MAPPERS-P: UNIF images and Study Box tapes too.
-                    ["nes", "unf", "unif", "studybox"]
+                    // Lot MAPPERS-P: UNIF images and Study Box tapes too; lot FDS: disk images.
+                    ["nes", "unf", "unif", "studybox", "fds", "qd"]
                         .iter()
                         .any(|known| extension.eq_ignore_ascii_case(known))
                 })

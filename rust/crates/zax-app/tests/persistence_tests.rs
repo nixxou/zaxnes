@@ -463,6 +463,35 @@ fn a_study_box_tape_is_read_with_its_bios() {
     assert_eq!(&rom.image[..4], b"NES\x1A");
 }
 
+/// Lot FDS: a `.fds` disk image loads with `disksys.rom` found beside it, packaged as the NES 2.0
+/// image the core runs (mapper 20: the BIOS twice, then the disk); without the BIOS the user is
+/// told where to put it, and a `.qd` is read as a Quick Disk image.
+#[test]
+fn a_disk_image_is_read_with_the_disk_system_bios() {
+    let root = TemporaryRoot::new("zax-pers-");
+    let mut disk = b"FDS\x1A\x01".to_vec();
+    disk.resize(16, 0);
+    let mut side = vec![0u8; 65_500];
+    side[0] = 0x01;
+    side[1..15].copy_from_slice(b"*NINTENDO-HVC*");
+    disk.extend_from_slice(&side);
+    let path = root.path().join("game.fds");
+    std::fs::write(&path, &disk).unwrap();
+    assert_eq!(
+        zax_app::emulation::rom_file::FDS_BIOS_MISSING_MESSAGE,
+        rom_file::read(&path).unwrap_err()
+    );
+    std::fs::write(root.path().join("disksys.rom"), vec![0u8; 0x2000]).unwrap();
+    let rom = rom_file::read(&path).unwrap();
+    assert_eq!("game.fds", rom.name);
+    assert_eq!(16 + 2 * 0x2000 + disk.len(), rom.image.len());
+    assert_eq!(&rom.image[..4], b"NES\x1A");
+
+    let mut core = zax_nes::NesCore::new();
+    assert!(core.load_rom(&rom.image, &rom.name).success);
+    assert_eq!(1, core.disk_sides());
+}
+
 /// Lot MAPPERS-P: a board whose save medium is its flash (here the COOLGIRL's save area) keeps
 /// it in `<rom>.flash` beside the RAM files, written when the game stops and read back before
 /// the first frame of the next launch.
