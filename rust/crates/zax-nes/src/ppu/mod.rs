@@ -2359,6 +2359,10 @@ impl Ppu2C02 {
         self.process_dot(cart);
     }
 
+    /// Once a dot, on the hottest path: inlined by hand since the module's growth in lot FIDPLUS-C
+    /// made the compiler call it out of line (callgrind 2026-11-16: +60 M instructions over
+    /// 300 frames of Super Mario Bros. 3, the whole of the core's +0.4 %).
+    #[inline(always)]
     fn advance_counters(&mut self) {
         self.ppu_clock += 1;
         self.dot += 1;
