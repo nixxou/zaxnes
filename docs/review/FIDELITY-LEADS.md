@@ -940,6 +940,33 @@ CHR-RAM) and puNES (`mapper_198.c`, banks from `$50` folding onto `$40-$4F`). Th
 password screen cleanly; the later `[T+ChSFIX2]` and `[T+ChTFIX2]` patches show stray glyphs on
 the password screen, not investigated (translation hacks; their CHR use may differ).
 
+### J38. FDS (mapper 20): Mesen 2's drive, its choices kept — partial
+- Hardware: the RAM adapter (timer IRQ, drive serial interface, `$4030-$4033`), the wavetable
+  channel with its modulator, and a real disk drive turning at its own speed.
+- Zaxnes: a port of Mesen 2 (`Core/NES/Mappers/FDS/Fds.cpp`, `FdsAudio.h`, `ModChannel.h`,
+  `BaseFdsChannel.h`, `FdsLoader.h`, `FdsInputButtons.h`) in
+  `zax-nes/src/cartridges/mappers/fds.rs`, behind `board-fds`, loaded only from a `.fds`/`.qd`
+  packaged with the player's `disksys.rom` (`zax_nes::rom::package_fds`); a bare iNES 20 stays
+  refused. Mesen's choices kept:
+  - the drive: 50 000 cycles to reach the start of a side, 149 between bytes (Mesen's note on
+    *Ai Senshi Nicol*), the gap before each block made up (`AddGaps`: 28 300 bits, then 976), a
+    `.fds` block's CRC a placeholder (`$4D $62`), an IRQ at the end of the disk (*Kosodate
+    Gokko*);
+  - unanswered bits of `$4030`/`$4032` read as open bus with `$40` assumed (`OPEN_BUS_40`)
+    rather than the last value on the bus;
+  - the audio's level through the 2A03 pulse mixer's curve with a gain of 2.4 (`FDS_GAIN`), no
+    low-pass filter (the console has one, ~2 kHz, which Mesen leaves out too);
+  - the automatic disk changes (`ProcessAutoDiskInsert`, the `$E445` header match, the
+    `$4032` polling counter) — Mesen matches at the `$E445` read itself, Zaxnes at the end of
+    that frame (the drive waits 50 000 cycles before it reads, so nothing reads the disk in
+    between); no fast-forward while a disk loads (Mesen's `FdsFastForwardOnLoad` is not ported).
+- Saves: the written disk's changed 256-byte blocks in `<rom>.flash` (`ZXFD`, v1), applied over
+  the original image at the next launch; Mesen keeps an IPS patch instead.
+- Not verified on hardware or on a real BIOS: no `disksys.rom` was available to this lot, so
+  only the unit tests (`zax-nes/tests/fds_tests.rs`) cover it; `fdsirqtests` (in
+  `cleanroom/assets-free/test-roms`) is the first check to run once the owner supplies one.
+- Cost: a few cycles per CPU cycle on mapper 20 only; status **partial**.
+
 ### J37. MAPPERS-P batch 1 (55, 81, 122, 237, 389, 517): puNES readings kept as they are
 Every board of `multicart_p.rs` follows its puNES file; nesdev has no page for most of them. Three
 places where puNES itself is incomplete are copied, not invented around:

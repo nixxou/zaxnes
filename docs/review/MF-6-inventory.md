@@ -231,6 +231,8 @@ this build cannot reach: it loads iNES and NES 2.0 only.
 
 **The FDS** (`MapperFactory::FdsMapperID`) is out of scope: it is a disk system, not a mapper, and
 REQ-CORE-075 names its audio among the optional chips without the spec ever asking for the drive.
+*Update (lot FDS, 2026-11-16): done at the owner's request, behind `board-fds`, from a `.fds`/`.qd`
+with the player's `disksys.rom` (`docs/progress/FDS.md`).*
 
 ---
 
@@ -976,7 +978,8 @@ and SPEC-06 territory. **Mapper 151** (VRC1 on a VS board) goes out with it, whi
 
 **4. The FDS: out of scope.** A disk drive, not a mapper. REQ-CORE-075 names its audio among the
 optional expansion chips without the spec ever asking for the drive, and `MapperFactory`'s
-`FdsMapperID` is a separate loader in Mesen too.
+`FdsMapperID` is a separate loader in Mesen too. *Update (2026-11-16): done in lot FDS
+(`docs/progress/FDS.md`, FIDELITY-LEADS J38).*
 
 **And one board left out for a reason that is a question, not a decision: mapper 116.** It is the
 only number in the inventory the spec names by itself (REQ-CORE-101, P3) and the only one where
