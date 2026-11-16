@@ -111,6 +111,19 @@ Revision A fails `5-MMC3` (both suites) and `6.MMC3_rev_B`: no single model pass
   switch delay is 3 dots on the cycle whose dot accumulator is 0, 4 on 3 and 4 (phases 1 and 2
   not reached at reset phase e3, kept at 4; netlist traces at e0, e6 and e9 queued to reach them).
   `oam`, `g2001px` and `g3e01px`: 0 differing dots on every whole frame.
+  Step 9 (2026-11-16), the corpus at the other reset phases (e0, e6, e9; `phases2.py`, which
+  among the dot phases that align every access keeps the one whose picture differs least):
+  * one dot phase per reset phase, the same for every program: e0 -> 0, e3 -> 2 (`r2007`,
+    `g2000`, `g2001px`, `oam`, `g2006x` all fit 2 only), e6 -> 1;
+  * the `$2001` switch is three dots on phase 2 too (at e3 / dot phase 2 `g2001px` and `oam` match
+    with three, not four): three on phases 0 and 2, four on 1, 3 and 4. Phase 1's four is
+    confirmed at e6 (0 differing dots);
+  * a second `$2006` write on dot 257: the 2C07's horizontal copy takes the written byte, the
+    CPU's open bus on phase 4, as `$2005` there. `g2006x` long runs on rendered lines 42 -> 14
+    at e0, e3 and e6 (`Ppu2C02::write`, register 6);
+  * left: `g2006x`'s write whose `t` reads `$2805` on the netlist (lines 54, 148, 223: dots
+    256-281); every program at e9 parts from the netlist from the first frame (no access near;
+    a power-on difference, not a register rule); `r2007` / `oam` at e0 likewise.
   Still open from the earlier steps:
   the first frame's `$2007` increments seen 4-5 dots later on the netlist (line 241).
   Corpus at reset phase e3 so far (alignment 3 against 0, differing dots, whole frames): `g2005`

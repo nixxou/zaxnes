@@ -1366,11 +1366,13 @@ fn fidplus_c3c_pal_rendering_switch_takes_four_dots() {
         ppu.write(1, 0x00, None);
         ppu.vram_v() == increment_x(before)
     }
-    for phase in 1..5 {
+    for phase in [1, 3, 4] {
         assert!(increments(true, phase), "PAL phase {phase}: dot 16 still renders");
     }
-    // Three dots on the phase-0 cycle (`oam`): the switch is in force by dot 16.
+    // Three dots on the phase-0 and phase-2 cycles (`oam`, `g2001px` at reset phase e3, whose
+    // five programs all fit dot phase 2): the switch is in force by dot 16.
     assert!(!increments(true, 0), "PAL phase 0");
+    assert!(!increments(true, 2), "PAL phase 2");
     assert!(!increments(false, 0), "NTSC: the switch is in force by dot 16");
 }
 

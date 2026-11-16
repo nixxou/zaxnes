@@ -972,9 +972,11 @@ impl Ppu2C02 {
         // with four, 54 000 to 97 000 with two, three or five).
         // On PAL three on the cycle whose dot accumulator is 0, as the `$2006` load comes a dot
         // early there (`oam`, `g2001px`, `g3e01px`: 24 321 differing dots against 107 089 with
-        // four everywhere; phases 1 and 2 not reached by the corpus at reset phase e3, kept at 4).
+        // four everywhere). Phase 2 three as well: at reset phase e3 the five programs `r2007`,
+        // `g2000`, `g2001px`, `oam` and `g2006x` all fit dot phase 2 only, and `g2001px` / `oam`
+        // then match the netlist with three dots there, not four; phase 1 four (`g2001px` at e6).
         let delay = if self.timing.region == NesRegion::Pal {
-            if self.dot_accumulator == 0 {
+            if self.dot_accumulator == 0 || self.dot_accumulator == 2 {
                 3
             } else {
                 4
@@ -3279,6 +3281,23 @@ impl Ppu2C02 {
                     self.post_address_load();
                 } else if self.write_toggle {
                     self.t = (self.t & 0xFF00) | u16::from(value);
+                    if self.dot == 257
+                        && matches!(self.timing.region, NesRegion::Pal)
+                        && self.fetching()
+                    {
+                        // The 2C07's horizontal copy of dot 257 takes the byte this write puts in
+                        // `t` (Visual 2C07, lot FIDPLUS-C C3c, `g2006x`: `v` holds the written
+                        // coarse X from dot 258 until the load), as `post_address_load` does
+                        // for the 2C02 in Fidelite+. On the cycle whose dot accumulator is 4 it
+                        // takes the CPU's open bus instead, as the `$2005` write on this dot
+                        // (`open_bus_on_copies`): `$08` written there leaves coarse X 0.
+                        let source = if self.dot_accumulator == 4 {
+                            self.cpu_open_bus
+                        } else {
+                            self.t.to_le_bytes()[0]
+                        };
+                        self.v = (self.v & !0x041F) | (self.t & 0x0400) | u16::from(source & 0x1F);
+                    }
                     if (self.address_load_delay || self.bus_conflicts) && self.fetching() {
                         self.delay_address_load(&mut cartridge);
                     } else if self.address_load_delay
