@@ -332,6 +332,17 @@ fn setting_values(definition: &mut TypeDef) {
         },
         None,
     );
+    // Dummy, AMD-067: present for the compatibility of 3dSen 2.2 scripts, no effect; Zaxnes has
+    // no turbo fire (REQ-LUA-123). A session value of the script, never a setting.
+    definition.property(
+        "TurboRate",
+        |cx, _| Ok(num(cx.data(|data| data.env.settings.turbo_rate())?)),
+        |cx, _, value| {
+            let written = cx.integer(value, "TurboRate")?;
+            cx.data(|data| data.env.settings.write_turbo_rate(written))
+        },
+        None,
+    );
     whole(definition, "SortOption", SettingId::UiSortOption);
     whole(definition, "MovieMode", SettingId::MovieMode);
     whole(definition, "SelectionMode", SettingId::EditorSelectionMode);

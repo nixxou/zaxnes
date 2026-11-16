@@ -151,6 +151,11 @@ pub struct ScriptSettings {
     /// RO-2 part 4 is the one thing that reads it: a Lua write of `Setting.Msaa` never touches the
     /// real anti-aliasing there, a handheld's budget being the frame itself.
     console_interface: bool,
+    /// `Setting.TurboRate` (AMD-067 REQ-LUA-123). Dummy: present for the compatibility of 3dSen
+    /// 2.2 scripts, no effect; Zaxnes has no turbo fire. Held here for the script session only:
+    /// not a setting of SPEC-09, not in the rollback snapshots, 15 again with every new session
+    /// (a game's launch, a change of profile).
+    turbo_rate: i32,
 }
 
 impl Default for ScriptSettings {
@@ -175,6 +180,7 @@ impl ScriptSettings {
             load_requested: None,
             written_styles: Vec::new(),
             console_interface: false,
+            turbo_rate: Self::DEFAULT_TURBO_RATE,
         }
     }
 
@@ -300,6 +306,26 @@ impl ScriptSettings {
     /// Zaxnes has no 2× multisampling (`video.anti_alias`: None, FFAA = 4 samples, SMAA = 8), so
     /// the mapping is 0 → None and 2 or 4 → FFAA, which AMD-032 §2 makes MSAA 4×.
     // Q-107 §4
+    /// What `Setting.TurboRate` reads before any write (AMD-067 REQ-LUA-123).
+    pub const DEFAULT_TURBO_RATE: i32 = 15;
+
+    /// `Setting.TurboRate` as last written in this session (dummy, AMD-067 REQ-LUA-123).
+    #[must_use]
+    pub const fn turbo_rate(&self) -> i32 {
+        self.turbo_rate
+    }
+
+    /// Keeps the rung of {10, 15, 20, 30} nearest to `written`, the smaller one at equal
+    /// distance (dummy, AMD-067 REQ-LUA-123: kept for the session, applied to nothing).
+    pub fn write_turbo_rate(&mut self, written: i32) {
+        self.turbo_rate = match written {
+            i32::MIN..=12 => 10,
+            13..=17 => 15,
+            18..=25 => 20,
+            _ => 30,
+        };
+    }
+
     pub fn write_msaa(&mut self, written: i32) {
         let normalised = normalise_msaa(written);
         self.write_int(SettingId::VideoMsaa20, normalised);

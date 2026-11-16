@@ -11,12 +11,13 @@ fn blank() -> ScriptSession {
         .start()
 }
 
-// REQ-LUA-118: the version is "2.1", and the criterion of AMD-040 still holds.
+// REQ-LUA-118: the version was "2.1"; AMD-067 REQ-LUA-122 raised it to "2.2". The criterion
+// of AMD-040 still holds.
 #[test]
 fn req_lua_118_the_version_is_two_one() {
     let mut session = blank();
 
-    assert_eq!("2.1", session.text("return CS.Nes3D.Info.Version"));
+    assert_eq!("2.2", session.text("return CS.Nes3D.Info.Version"));
     assert_eq!(
         1.0,
         session.truth(r#"tonumber(CS.Nes3D.Info.Version:match("^%d+")) >= 2"#)
