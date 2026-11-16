@@ -895,6 +895,18 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
     four half-steps (`v` `$1C01` -> `$1800`). The switch-on copy is a pulse inside one
     zero-delay settling step, an evaluation-order race of the switch-level simulation, not a
     timing the chip holds;
+  * (2026-11-16, review point 3) **the PAL bench's M2 duty**: `benchdotpal` drove the 2C07
+    with the 2A03's M2 (15/24); the 2A07's is 19/32 (nesdev "CPU ALL"). Bench
+    `benchdotpal57` (the review's glue variant: /CS and the hold time follow M2 falling at
+    19/32; the 2A03 netlist keeps its own phi2), whole PAL corpus re-traced at e0/e3/e6/e9
+    (`visual2c07-tools/dot57`, `runcorpus57.ps1`, judge `c3cphases57.py`, sweep
+    `c3csweep57.py` with `ZAX_PAL_2001` / `ZAX_PAL_LATCH`). **Both PAL tables move**: the
+    `$2001` switch takes 4 dots on dot accumulator 4 only (3 on 0-3), the `$2007` latch 6 on
+    accumulator 4 only (5 on 0-3); the earlier {3, 4} splits leave 890 605 and 1 185 385
+    differing dots there. Done (`switch_rendering`, `read_buffer_from_fetch`): **the eleven
+    programs and `g2007v` at the four phases, 0 long runs** on the 19/32 bench; golden-core
+    identical. The `$2006` delays (2/3) and every collision rule are unchanged by the duty.
+    The 19/32 bench is now the PAL reference; the 15/24 traces in `dot/` are kept for history;
   * (2026-11-16, review point 6) **the benches' CHR memory**: `handleChrBus` latches the low
     address on ALE's rising edge and drives the data on /RD's falling edge, where a 74LS373 is
     transparent while ALE is high and the memory answers the level. A level-sensitive variant
