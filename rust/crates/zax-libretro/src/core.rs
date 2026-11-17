@@ -121,6 +121,9 @@ pub struct Core {
     detected_region: NesRegion,
     options: Options,
     indices: Vec<u8>,
+    /// The colour emphasis of every pixel of `indices` (PPUMASK bits 5-7 as 0-7), empty for a
+    /// frame without any (lot FIDPLUS-D2b).
+    emphasis: Vec<u8>,
     frame: Vec<u32>,
     width: u32,
     height: u32,
@@ -177,6 +180,7 @@ impl Core {
             detected_region: result.region,
             options: Options::default(),
             indices: Vec::new(),
+            emphasis: Vec::new(),
             frame: Vec::new(),
             width: 256,
             height: 240,
@@ -467,6 +471,7 @@ impl Core {
         self.nes
             .run_frame_ahead(input, u8::from(self.options.smooth_ahead));
         let rows = self.nes.wide_picture_into(&mut self.indices);
+        self.nes.wide_emphasis_into(&mut self.emphasis);
         self.rows = u32::try_from(rows).unwrap_or(240).max(1);
         self.nes
             .split_steady_sprites(&mut self.indices, &mut self.overlay);
@@ -503,7 +508,7 @@ impl Core {
             });
         #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // A few pixels.
         let quarters = (shift * SMOOTH_SCALE as f32).round() as i64;
-        let colours = palette_colours();
+        let colours = Colours::of(&self.emphasis, self.indices.len());
         let scale = SMOOTH_SCALE as usize;
         let (full_width, x0, width) = (full_width as usize, x0 as usize, width as usize);
         self.width = u32::try_from(width * scale).unwrap_or(1);
@@ -527,14 +532,16 @@ impl Core {
                     .and_then(|overlay| overlay.get(x0 + out / scale))
                     .copied()
                     .filter(|index| *index != 0xFF);
+                let pixel = start + if still.is_some() { x0 + out / scale } else { column };
                 let index = still.unwrap_or(row[column]);
-                self.frame.push(colours[usize::from(index & 0x3F)]);
+                self.frame.push(colours.get(index, &self.emphasis, pixel));
             }
         }
     }
 
     fn make_picture(&mut self) {
         let rows = self.nes.wide_picture_into(&mut self.indices);
+        self.nes.wide_emphasis_into(&mut self.emphasis);
         let rows = u32::try_from(rows).unwrap_or(240).max(1);
         let pixels = u32::try_from(self.indices.len()).unwrap_or(0);
         let full_width = (pixels / rows).max(1);
@@ -542,14 +549,23 @@ impl Core {
         self.height = height;
         self.width = width;
         self.framed = true;
-        let colours = palette_colours();
+        let colours = Colours::of(&self.emphasis, self.indices.len());
         self.frame.clear();
         let (x, width, full_width) = (x as usize, width as usize, full_width as usize);
-        for row in self.indices.chunks(full_width).skip(y as usize).take(height as usize) {
+        for (number, row) in self
+            .indices
+            .chunks(full_width)
+            .enumerate()
+            .skip(y as usize)
+            .take(height as usize)
+        {
+            let start = number * full_width;
+            let end = (x + width).min(row.len());
             self.frame.extend(
-                row[x..(x + width).min(row.len())]
+                row[x..end]
                     .iter()
-                    .map(|index| colours[usize::from(index & 0x3F)]),
+                    .zip(x..end)
+                    .map(|(&index, column)| colours.get(index, &self.emphasis, start + column)),
             );
         }
     }
@@ -734,12 +750,81 @@ impl Core {
     }
 }
 
+/// The colours of a picture: the palette's 64, or with a colour emphasis plane its 512 (lot
+/// FIDPLUS-D2b), each pixel taking the emphasis it was drawn with, as the app's 2D picture.
+struct Colours(Vec<u32>);
+
+impl Colours {
+    /// The table for a picture of `pixels` pixels with the emphasis plane `emphasis` (empty, or
+    /// not of the picture's size, for none).
+    fn of(emphasis: &[u8], pixels: usize) -> Self {
+        if emphasis.is_empty() || emphasis.len() != pixels {
+            return Self(palette_colours().to_vec());
+        }
+        Self(
+            (0..512_usize)
+                .map(|entry| {
+                    #[allow(clippy::cast_possible_truncation)] // 0-7
+                    let bits = (entry >> 6) as u8;
+                    pack(zax_engine3d::palette::nes_color_emphasized(entry & 0x3F, bits))
+                })
+                .collect(),
+        )
+    }
+
+    /// Whether the table carries the emphasis.
+    fn emphasized(&self) -> bool {
+        self.0.len() == 512
+    }
+
+    /// The colour of NES colour `index` at picture pixel `pixel`.
+    fn get(&self, index: u8, emphasis: &[u8], pixel: usize) -> u32 {
+        let index = usize::from(index & 0x3F);
+        let bits = if self.emphasized() {
+            usize::from(emphasis.get(pixel).copied().unwrap_or(0) & 7)
+        } else {
+            0
+        };
+        self.0[(bits << 6) | index]
+    }
+}
+
+/// An RGB colour as 0RGB.
+fn pack(rgb: zax_engine3d::palette::Rgb24) -> u32 {
+    (u32::from(rgb.r) << 16) | (u32::from(rgb.g) << 8) | u32::from(rgb.b)
+}
+
 /// The NES colours of the palette in force, 0RGB.
 fn palette_colours() -> [u32; 64] {
     let mut colours = [0_u32; 64];
     for (index, colour) in colours.iter_mut().enumerate() {
-        let rgb = zax_engine3d::palette::nes_color(index);
-        *colour = (u32::from(rgb.r) << 16) | (u32::from(rgb.g) << 8) | u32::from(rgb.b);
+        *colour = pack(zax_engine3d::palette::nes_color(index));
     }
     colours
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Colours;
+
+    #[test]
+    fn a_picture_without_emphasis_takes_the_palette() {
+        let colours = Colours::of(&[], 4);
+        assert!(!colours.emphasized());
+        let plain = super::palette_colours();
+        assert_eq!(colours.get(0x16, &[], 2), plain[0x16]);
+    }
+
+    #[test]
+    fn each_pixel_takes_its_own_emphasis() {
+        let emphasis = [0, 7, 1];
+        let colours = Colours::of(&emphasis, 3);
+        let plain = super::palette_colours();
+        assert_eq!(colours.get(0x30, &emphasis, 0), plain[0x30]);
+        let dark = super::pack(zax_engine3d::palette::nes_color_emphasized(0x30, 7));
+        assert_eq!(colours.get(0x30, &emphasis, 1), dark);
+        assert_ne!(dark, plain[0x30]);
+        // A plane not of the picture's size is no plane.
+        assert!(!Colours::of(&emphasis, 4).emphasized());
+    }
 }
