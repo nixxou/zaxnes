@@ -203,7 +203,11 @@ impl Ppu2C02 {
     /// [`Self::edges_on`] on the path of the board kind `K`: false at compile time on the
     /// standard copies.
     pub(super) const fn edges_on_for<K: BoardKind>(&self) -> bool {
-        K::FIDELITY_PLUS && self.edges_on()
+        // Not while the widescreen extension's overclock holds the PPU still: an edge lands a
+        // number of dots after the access, and no dot runs then, so the margin writes the
+        // overclock exists for would pile up unlanded (lot REWRITE-UI, Blaster Master's
+        // widescreen with Fidelity+). They take the standard core's timing instead.
+        K::FIDELITY_PLUS && self.edges_on() && !self.wide.stalling()
     }
 
     /// Whether edges place the register effects: Fidélité+ on the NTSC 2C02's timing.

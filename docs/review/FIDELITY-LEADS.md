@@ -1527,6 +1527,13 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 - I2. *The Legend of Zelda* sprite-overflow bit (C4).
 - I3. `$2002` open-bus bits and `$2007` reads during rendering vs Mesen (C5).
 - I4. Mega Man 2 widescreen not eyeballed; PAL/Dendy fidelity work unverified.
+- I6. (lot REWRITE-UI, 2026-11-18) **Fidelity+ and the widescreen overclock.** The widescreen
+  extension's overclock (`$5006`) holds the PPU still while the CPU runs extra cycles to write the
+  margin tiles; Fidelity+ lands `$2006`/`$2007` effects a number of dots after the access, and no
+  dot runs during a stall, so the writes piled up unlanded: black blocks and bands in the margins
+  and the picture (Blaster Master widescreen, owner's savestate). Fix: no edges while
+  `WideExtension::stalling()`; those writes take the standard core's timing. An approximation
+  inside an approximation (the overclock has no hardware counterpart); fidplus test files pass.
 - I5. (lot FAST-1, 2026-11-17) **A savestate reload is not always the run that never stopped.**
   `fast_core_tests.rs`, `fast_1_savestates_cross_both_ways`: after 300 frames with a button
   pattern, a state saved and loaded on a fresh core continues identically on the standard and
