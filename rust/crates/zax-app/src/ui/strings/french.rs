@@ -567,6 +567,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("options.new.preset_options", "Options de ce préréglage"),
     ("options.new.essentials", "L'essentiel"),
     ("options.new.next_game", "au prochain jeu"),
+    ("options.new.shaders_open", "Configurer les shaders..."),
     ("options.new.next_start", "au prochain démarrage"),
     ("options.preset.fastest.name", "Rapidité max"),
     ("options.preset.fastest.summary", "Pour les consoles portables et les machines modestes. La même console, avec beaucoup moins de calcul : les images et les sons ne changent pas."),

@@ -194,6 +194,15 @@ impl MenuItem {
         }
     }
 
+    /// A submenu whose title also runs `command` when it is clicked (lot REWRITE-UI: hovering
+    /// "Load a state" lists the slots, clicking it opens the slots with their pictures).
+    fn sub_clicked(label: String, submenu: Submenu, command: UiCommand) -> Self {
+        Self {
+            ui_command: Some(command),
+            ..Self::sub(label, submenu)
+        }
+    }
+
     /// A line of text that does nothing, such as "(empty)".
     #[must_use]
     pub fn note(label: String) -> Self {
@@ -379,28 +388,18 @@ fn build_menus() -> Vec<Menu> {
             item(Command::ResumeLast),
             MenuItem::rule(),
             item(Command::ChooseProfile),
-            // AMD-053 REQ-UI-210: the favourite mark of the game being played, and the filter the
-            // enumeration of the games reads.
-            item(Command::ToggleFavorite),
-            item(Command::FilterFavorites),
+            // Lot REWRITE-UI (owner, 2026-11-17): the favourite mark and its filter, the deletion
+            // of a game and the two covers served a game library the PC window no longer shows;
+            // the commands stay (Lua, shortcuts, the console mode's favourite), the entries go.
             item(Command::ImportProfile),
             // AMD-030 §2: "Fichier → Importer depuis 3dSen…", right after the single-file import
             // it extends.
             item(Command::ImportThreeDSen),
-            // SPEC-10 REQ-UI-037 with AMD-010 §3: the deletion of a user profile is one of the
-            // functions the amendment keeps mandatory, and the tile button it describes becomes
-            // a menu entry here: the presentation is informative, the function is not.
-            item(Command::DeleteGame),
             MenuItem::rule(),
-            // REQ-PERS-036 is P3 after AMD-020 (Q-050); the two sources a menu can offer.
-            item(Command::CreateGameArt),
-            item(Command::ImportCover),
-            MenuItem::rule(),
-            MenuItem::sub(text::load_state(), Submenu::LoadState),
-            MenuItem::sub(text::save_state(), Submenu::SaveState),
-            // The slots with their pictures, in the screens of the console mode.
-            MenuItem::of_ui(UiCommand::LoadStates, "Ctrl+L"),
-            MenuItem::of_ui(UiCommand::SaveStates, "Ctrl+S"),
+            // Hovered, the slots; clicked (or Ctrl+L / Ctrl+S), the slots with their pictures in
+            // the screens of the console mode (lot REWRITE-UI: one entry each instead of two).
+            MenuItem::sub_clicked(text::load_state(), Submenu::LoadState, UiCommand::LoadStates),
+            MenuItem::sub_clicked(text::save_state(), Submenu::SaveState, UiCommand::SaveStates),
             // REQ-UI-052: the slot deletion of SPEC-09 REQ-PERS-054 needs a route of its own,
             // since a classic menu has no selected tile to hang a small button on.
             MenuItem::sub(text::delete_state(), Submenu::DeleteState),

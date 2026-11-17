@@ -115,7 +115,9 @@ fn req_ui_037_the_menu_bar_offers_both_deletions() {
     let host = &harness.host;
     let rows = harness.ui.menu_bar.all_items(host);
 
-    assert!(rows
+    // Lot REWRITE-UI (owner, 2026-11-17): the deletion of a game left the PC menu (the console
+    // mode's game list keeps it); the slot deletion stays.
+    assert!(!rows
         .iter()
         .any(|row| row.command == Some(Command::DeleteGame)));
     assert!(rows

@@ -119,6 +119,8 @@ enum Simple {
     Group(OptionsGroup),
     /// The whole classic tab.
     All,
+    /// The button that opens the shaders window.
+    Shaders,
 }
 
 /// One tab of the new window: the classic tabs its advanced mode draws one under the other, and
@@ -140,6 +142,8 @@ const PAGES: [Page; 7] = [
             Simple::Row(SettingId::VideoVSync),
             Simple::Row(SettingId::VideoAntiAlias),
             Simple::Row(SettingId::VideoSkipFrame),
+            Simple::Row(SettingId::VideoBackend),
+            Simple::Shaders,
         ],
         advanced: &[OptionsTab::Display],
     },
@@ -296,6 +300,13 @@ impl ZaxUi {
         for item in page.simple {
             match *item {
                 Simple::All => self.draw_tab_body(ui, host, page.tab),
+                Simple::Shaders => {
+                    if ui.button(strings::get("options.new.shaders_open")) {
+                        self.state.shaders = true;
+                        play(host, UiSound::Confirm);
+                    }
+                }
+                Simple::Row(id) if !options::is_shown(zax_settings::catalogue::descriptor(id)) => {}
                 Simple::Row(id) => {
                     let row = options::row_of(id);
                     super::options::draw_row(ui, host, &row, run_ahead_forced, fceux_validation);

@@ -27,6 +27,7 @@ pub const fn colour_of(severity: NotificationSeverity) -> [f32; 4] {
 }
 
 impl ZaxUi {
+    #[allow(dead_code)] // Lot REWRITE-UI: not drawn any more, kept while a PC game list is decided.
     pub(super) fn draw_welcome(&mut self, ui: &Ui, host: &mut AppHost) {
         let display = ui.io().display_size;
         let width = 520.0_f32.min(260.0_f32.max(display[0] - 80.0));

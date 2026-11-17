@@ -312,9 +312,8 @@ impl ZaxUi {
         };
         self.menu_bar_drawn = shown;
         self.chrome_height = if auto_hide { 0.0 } else { bar };
-        if self.state.welcome_visible() {
-            self.draw_welcome(ui, frame.host);
-        }
+        // Lot REWRITE-UI (owner, 2026-11-17): no welcome window any more; a game opens from the
+        // File menu. `UiState::welcome_visible` still says when it would show.
         if self.state.has_current_game {
             pens::draw_pens(ui, frame.host);
             self.draw_movie_bar(ui, frame.host);

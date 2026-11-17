@@ -34,3 +34,11 @@ hardware defects, VS DIPs, ...). Of these the fast core and Fidelity+ are now im
   console frame rate, real-time pad) and Achievements whole. The advanced mode's 3D render tab
   takes Light and Camera (FOV) under it; Interface only in advanced. Classic window unchanged.
 * 6. No music in the interface (owner): the mixer's menu music is never enabled, its track never decoded; the sound effects stay. The setting `audio.bg_music` stays in the model, without effect.
+* 7. Display (simple) adds the graphics API (amber "at the next start") and a "Configure the
+  shaders..." button. No welcome window (owner): a game opens from File.
+* 8. File menu (owner): Favorite, Favorites only, Delete the game, Create the cover, Import a
+  cover leave the PC menu (they served a game library the PC no longer shows; the commands
+  stay). "Load a state" / "Save the state": hovered, the slots; clicked, the slots with their
+  pictures (the "...Ctrl+L/S" duplicates removed; the shortcuts stay). `ui_round_one_fix_tests`
+  updated (no DeleteGame entry). **App tests not rerun for steps 7-8: G: full (735 MB), a debug
+  test build needs about 16 GB.**

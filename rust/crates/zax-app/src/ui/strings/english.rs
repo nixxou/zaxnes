@@ -553,6 +553,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("options.new.preset_options", "Options of this preset"),
     ("options.new.essentials", "Essentials"),
     ("options.new.next_game", "at the next game"),
+    ("options.new.shaders_open", "Configure the shaders..."),
     ("options.new.next_start", "at the next start"),
     ("options.preset.fastest.name", "Fastest"),
     ("options.preset.fastest.summary", "For handhelds and modest machines. The same console with far less work: the pictures and sounds do not change."),
