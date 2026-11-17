@@ -245,10 +245,35 @@ impl Ppu2C02 {
                 #[allow(clippy::cast_sign_loss)] // 0..32.
                 let slot = self.secondary_oam_addr as usize;
                 if !(self.in_sprite_range(y) && !self.sprite_in_margin()) {
-                    self.oam_eval_latch = y;
-                    self.secondary_oam[slot] = y;
-                    self.next_sprite();
-                    dot += 2;
+                    // A run of sprites not on the line, one pair each: each writes its Y over the
+                    // same slot and moves on; the run stops before a sprite in range, at the end
+                    // of OAM or of the range.
+                    let height = if (self.control & 0x20) != 0 { 16 } else { 8 };
+                    let line = self.scanline;
+                    let mut next = sprite;
+                    let mut last_y = y;
+                    loop {
+                        next = (next + 1) & 0x3F;
+                        dot += 2;
+                        if next == 0 || dot >= last {
+                            break;
+                        }
+                        let y = i32::from(self.oam[next * 4]);
+                        if line >= y && line < y + height {
+                            break;
+                        }
+                        last_y = self.oam[next * 4];
+                    }
+                    self.oam_eval_latch = last_y;
+                    self.secondary_oam[slot] = last_y;
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // 0..64.
+                    {
+                        self.eval_sprite = next as i32;
+                    }
+                    self.eval_byte = 0;
+                    if next == 0 {
+                        self.eval_finished = true;
+                    }
                     continue;
                 }
                 if dot + 7 <= last {
