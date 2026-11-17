@@ -1347,8 +1347,17 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   the hardware. `Mmc5Ext`'s line-start test counts pattern fetches since the last
   **attribute** fetch (threshold 18: the line's last group's two plus the sixteen sprite
   fetches), since the garbage fetches are nametable reads whose address the pre-render line's
-  vertical copy changes mid-phase. **Left**: line 240's dot 0 (no rendering line of this core
-  there; what the idle bus shows during vblank is not modelled either).
+  vertical copy changes mid-phase. **Line 240, measured at the pins** (`benchpins`: the 14
+  address pins, ALE, /RD and /WR every half-step, `g2000` e4): dot 0 gives an ALE with the
+  pattern address (`1000`, /RD high), and from dot 1 the pins show `v` (`0802`) and hold it
+  through vblank until the pre-render line's first fetch — now raised to the A12 watchers
+  (`Ppu2C02::post_render_bus`). **Cost** (callgrind, 300 frames, clean builds of `0602c292`
+  and `f1b67088`): Super Mario Bros. 3 (MMC3) +0.20 %, Mega Man 2 -0.06 %, Zelda II -0.09 %.
+  The bus events are compiled out of the kinds whose board never watches the bus
+  (`BoardKind::WATCHES_BUS`), the MMC3 kind skips the garbage fetch that cannot move A12
+  (`BoardKind::A12_ONLY`), and the rendering `match` keeps its range-compare shape (an arm of
+  its own for dot 0 or 339 had made it a dispatch, +33 M on Mega Man 2). What is left on the
+  MMC3 is its watcher seeing seven more A12 events a line, the price of the MC-ACC's count.
 - I3 (2026-11-17) **Line end of the PPU bus, and the MMC5's first detected line (Q-121)**.
   **Fixed**: the nametable reads of a line's end are dots 337 and 339 and the next line's dot 1
   (nesdev, MMC5: "two matching dummy nametable byte reads at the end of each scanline, followed
