@@ -1583,6 +1583,13 @@ impl GameSession {
         if clock.enabled() != self.engine.last_hook_time().is_some() {
             self.engine.set_hook_timing(clock.enabled());
         }
+        if !self.core.frame_in_progress() {
+            // The frame the slices begin is shown only once it ends: until then the display
+            // reads the picture of the frame before it, kept here, and not the core halfway
+            // through a frame (its margins are built from the tile records of the frame in
+            // progress, so they would vanish on every display tick that falls inside one).
+            self.keep_picture();
+        }
         self.lend(model, scene, |session, scene| {
             let word = if session.core.frame_in_progress() {
                 session.frame_word(frame)
@@ -1782,11 +1789,31 @@ impl GameSession {
         self.engine.two_dimensional_mode
     }
 
+    /// Whether the display reads the picture kept in the pipeline rather than the core's: while
+    /// a frame runs on the emulation thread or waits to be converted, and while a frame run in
+    /// real-time slices is in progress (lot FIDPLUS-B).
+    fn shows_kept_picture(&self) -> bool {
+        self.pipeline.in_flight || self.pipeline.pending.is_some() || self.core.frame_in_progress()
+    }
+
+    /// Keeps the core's picture of the frame that just ended (and its emphasis, phase, smooth
+    /// scrolling shift and motion, steady sprites) for the display.
+    fn keep_picture(&mut self) {
+        self.pipeline.picture_height = self.core.wide_picture_into(&mut self.pipeline.picture);
+        self.core
+            .wide_emphasis_into(&mut self.pipeline.picture_emphasis);
+        self.pipeline.video_phase = self.core.video_phase();
+        self.pipeline.picture_shift = self.core.picture_shift();
+        self.pipeline.picture_motion = self.core.picture_motion();
+        self.core
+            .split_steady_sprites(&mut self.pipeline.picture, &mut self.pipeline.overlay);
+    }
+
     /// Copies the core's indexed picture (256 x 240, larger with widescreen margins) into
     /// `destination`; returns its rows.
     pub fn copy_nes_picture(&self, destination: &mut Vec<u8>) -> usize {
         destination.clear();
-        if self.pipeline.in_flight || self.pipeline.pending.is_some() {
+        if self.shows_kept_picture() {
             destination.extend_from_slice(&self.pipeline.picture);
             self.pipeline.picture_height
         } else {
@@ -1801,7 +1828,7 @@ impl GameSession {
         destination: &mut Vec<u8>,
         overlay: &mut Vec<u8>,
     ) -> usize {
-        if self.pipeline.in_flight || self.pipeline.pending.is_some() {
+        if self.shows_kept_picture() {
             overlay.clear();
             overlay.extend_from_slice(&self.pipeline.overlay);
             return self.copy_nes_picture(destination);
@@ -1814,7 +1841,7 @@ impl GameSession {
     /// The colour emphasis of the picture [`GameSession::copy_nes_picture`] copies, into
     /// `destination`; empty for a frame without any (lot FIDPLUS-D2b).
     pub fn copy_nes_emphasis(&self, destination: &mut Vec<u8>) {
-        if self.pipeline.in_flight || self.pipeline.pending.is_some() {
+        if self.shows_kept_picture() {
             destination.clear();
             destination.extend_from_slice(&self.pipeline.picture_emphasis);
         } else {
@@ -1825,7 +1852,7 @@ impl GameSession {
     /// The subcarrier phase of the picture [`GameSession::copy_nes_picture`] copies.
     #[must_use]
     pub fn nes_video_phase(&self) -> usize {
-        if self.pipeline.in_flight || self.pipeline.pending.is_some() {
+        if self.shows_kept_picture() {
             self.pipeline.video_phase
         } else {
             self.core.video_phase()
@@ -1836,7 +1863,7 @@ impl GameSession {
     /// copies ([`NesCore::picture_shift`]).
     #[must_use]
     pub fn nes_picture_shift(&self) -> Option<(f32, i32, i32)> {
-        if self.pipeline.in_flight || self.pipeline.pending.is_some() {
+        if self.shows_kept_picture() {
             self.pipeline.picture_shift
         } else {
             self.core.picture_shift()
@@ -1847,7 +1874,7 @@ impl GameSession {
     /// copies ([`NesCore::picture_motion`]).
     #[must_use]
     pub fn nes_picture_motion(&self) -> Option<f32> {
-        if self.pipeline.in_flight || self.pipeline.pending.is_some() {
+        if self.shows_kept_picture() {
             self.pipeline.picture_motion
         } else {
             self.core.picture_motion()
