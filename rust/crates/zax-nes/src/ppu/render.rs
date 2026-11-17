@@ -278,19 +278,11 @@ impl Ppu2C02 {
         dot: i32,
         cart: Cart<'_, '_, K>,
     ) {
+        // The arms keep the shape `1..=256 | 257..=320 | 321..=337 | 338..=340 | _` that the
+        // compiler lowers to a few range compares: an arm of its own for dot 0 or 339 made it a
+        // dispatch that cost +33 M instructions over 300 frames of Mega Man 2 (callgrind, lot
+        // C3c-bus), so both are tests inside an arm that only their neighbours reach.
         match dot {
-            // The idle dot puts the pattern address of the coming low-plane fetch on the bus —
-            // the tile of dot 339's read, the line's fine Y (nesdev, "PPU rendering": "the same
-            // CHR address that is later used to fetch the low background tile byte"; the 2C02
-            // netlist shows it on dot 0 of every line after a fetching one, `1002` on line 10 of
-            // `g2000`). Address lines only, as nothing says /RD falls. The pre-render line follows
-            // no fetch and shows nothing; line 240's is `Ppu2C02::post_render_bus`, no line of
-            // this core renders there.
-            0 => {
-                if VISIBLE && (K::WATCHES_BUS || cfg!(feature = "ppu-dot-trace")) {
-                    self.notify_address_bus_without_read(self.pattern_address(0), cart);
-                }
-            }
             1..=256 => {
                 if dot == 1 {
                     // The nametable byte of the line's third tile, read on the dot its fetch
@@ -360,15 +352,28 @@ impl Ppu2C02 {
             // dot 337's (ALE on 339, /RD on 340 in the netlist; this core reads on the ALE dot,
             // as for every other fetch). They matter only for boards that watch the PPU address
             // bus; the third read of the same address is dot 1 of the next line.
-            339 => {
-                self.nametable_latch = self.read_vram_inner(
-                    0x2000 | (self.v & 0x0FFF),
-                    PpuBusAccess::Render,
-                    ChrFetch::Background,
-                    cart,
-                );
+            338..=340 => {
+                if dot == 339 {
+                    self.nametable_latch = self.read_vram_inner(
+                        0x2000 | (self.v & 0x0FFF),
+                        PpuBusAccess::Render,
+                        ChrFetch::Background,
+                        cart,
+                    );
+                }
             }
-            _ => {}
+            // Dot 0, the idle dot: it puts the pattern address of the coming low-plane fetch on
+            // the bus — the tile of dot 339's read, the line's fine Y (nesdev, "PPU rendering":
+            // "the same CHR address that is later used to fetch the low background tile byte";
+            // the 2C02 netlist shows it on dot 0 of every line after a fetching one, `1002` on
+            // line 10 of `g2000`). Address lines only, as nothing says /RD falls. The pre-render
+            // line follows no fetch and shows nothing; line 240's is `Ppu2C02::post_render_bus`,
+            // no line of this core renders there.
+            _ => {
+                if VISIBLE && (K::WATCHES_BUS || cfg!(feature = "ppu-dot-trace")) && dot == 0 {
+                    self.notify_address_bus_without_read(self.pattern_address(0), cart);
+                }
+            }
         }
     }
 
@@ -873,8 +878,11 @@ impl Ppu2C02 {
         let slot = (((dot - 257) >> 3) & 0x07) as usize;
         let step = (dot - 257) & 0x07;
 
+        // An A12-only board needs the first of the two (the one after a pattern fetch), not the
+        // second: see `BoardKind::A12_ONLY`.
         if (K::WATCHES_BUS || cfg!(feature = "ppu-dot-trace"))
-            && (step == 2 || (step == 0 && dot != 257))
+            && ((step == 2 && (!K::A12_ONLY || cfg!(feature = "ppu-dot-trace")))
+                || (step == 0 && dot != 257))
         {
             // Each sprite slot opens with two garbage nametable fetches of the current `v`
             // (nesdev, "PPU rendering"; the 2C02 netlist puts `0x2000 | v` on the bus on dots
