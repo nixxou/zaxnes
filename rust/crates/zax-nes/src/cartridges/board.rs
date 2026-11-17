@@ -604,6 +604,10 @@ impl Mapper for Board {
         dispatch_ext!(self, b => b.on_ppu_address_bus(memory, address, clock));
     }
 
+    fn after_state_load(&mut self, last_nametable_read: Option<u16>) {
+        dispatch_ext!(self, b => b.after_state_load(last_nametable_read));
+    }
+
     fn on_ppu_control(&mut self, control: u8) {
         dispatch!(self, b => b.on_ppu_control(control));
     }
@@ -816,6 +820,20 @@ pub trait BoardKind {
     /// instructions over 300 frames (+0.045 % `core`).
     const RUNS_VS: bool = false;
 
+    /// Whether this kind's board may watch the PPU address bus (lot C3c-bus): `false` for the
+    /// five one-board kinds whose board never does (NROM, MMC1, `UxROM`, `CNROM`, `AxROM`), so
+    /// that the bus events added for the boards that do — the sprite phase's garbage nametable
+    /// fetches, the idle dot's pattern address — are no code at all on their paths. Callgrind
+    /// of Mega Man 2 put those calls, latch test included, at +29 M over 300 frames.
+    const WATCHES_BUS: bool = true;
+
+    /// Whether this kind's board looks at nothing on the bus but **A12's level** (the MMC3 and
+    /// its family): an address that cannot change A12 — the second of two nametable fetches in
+    /// a row — is then no event for it, and the PPU leaves the call out. Callgrind of Super Mario
+    /// Bros. 3: the sprite phase's eight second garbage fetches a line were +18 M over 300
+    /// frames of A12 watcher calls that never moved it.
+    const A12_ONLY: bool = false;
+
     /// Whether `board` is this kind's variant.
     fn matches(board: &Board) -> bool;
 
@@ -838,6 +856,8 @@ impl<K: BoardKind> BoardKind for Fid<K> {
     type B = K::B;
     const SWITCHES: bool = K::SWITCHES;
     const FIDELITY_PLUS: bool = true;
+    const WATCHES_BUS: bool = K::WATCHES_BUS;
+    const A12_ONLY: bool = K::A12_ONLY;
 
     #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
     #[inline(always)]
@@ -890,9 +910,15 @@ impl BoardKind for AnyBoard {
 /// the rule of [`BoardKind`] holds, and it panics rather than read the wrong board if it ever is.
 macro_rules! board_kind {
     ($(#[$doc:meta])* $kind:ident, $board:ident) => {
-        board_kind!($(#[$doc])* $kind, $board, false);
+        board_kind!($(#[$doc])* $kind, $board, false, false, false);
     };
-    ($(#[$doc:meta])* $kind:ident, $board:ident, $serves:literal) => {
+    ($(#[$doc:meta])* $kind:ident, $board:ident, $serves:literal, $watches:literal) => {
+        board_kind!($(#[$doc])* $kind, $board, $serves, $watches, false);
+    };
+    (
+        $(#[$doc:meta])* $kind:ident, $board:ident, $serves:literal, $watches:literal,
+        $a12_only:literal
+    ) => {
         $(#[$doc])*
         pub enum $kind {}
 
@@ -902,6 +928,13 @@ macro_rules! board_kind {
             // See `BoardKind::SERVES_NAMETABLES`: `false` unless the invocation says otherwise
             // (the full MMC5, `Mmc5ExtKind`, serves all four tables).
             const SERVES_NAMETABLES: bool = $serves;
+
+            // See `BoardKind::WATCHES_BUS`: `false` unless the invocation says otherwise (the
+            // MMC3's A12 counter, the full MMC5's scanline detection).
+            const WATCHES_BUS: bool = $watches;
+
+            // See `BoardKind::A12_ONLY`: the MMC3's kind alone.
+            const A12_ONLY: bool = $a12_only;
 
             #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
             #[inline(always)]
@@ -1000,7 +1033,10 @@ board_kind!(
 board_kind!(
     /// Mapper 4 (and the boards the registry builds on the MMC3).
     Mmc3Kind,
-    Mmc3
+    Mmc3,
+    false,
+    true,
+    true
 );
 board_kind!(
     /// Mapper 1.
@@ -1071,5 +1107,6 @@ board_kind!(
     /// Mapper 5 with extended attributes or the split armed; it stays so until a reset or a state.
     Mmc5ExtKind,
     Mmc5Ext,
+    true,
     true
 );

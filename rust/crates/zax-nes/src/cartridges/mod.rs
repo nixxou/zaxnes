@@ -1844,8 +1844,9 @@ impl Cartridge {
     ///
     /// Every fetch of a rendered line comes through here, through
     /// [`Ppu2C02::read_vram_inner`](crate::ppu::Ppu2C02): the nametable byte, the attribute
-    /// byte, the two background planes, the two discarded nametable fetches of dots 338 and
-    /// 340, and every sprite pattern plane — 57 600-odd calls a frame, measured.
+    /// byte, the two background planes, the discarded nametable fetch of dot 339 (the third
+    /// tile's, on dot 1, is a normal one), and every sprite pattern plane — 57 600-odd calls a
+    /// frame, measured.
     ///
     /// `ppu_clock` is the PPU dot count since power-on, which the A12 filter of MMC3-style
     /// boards needs to tell a real rise from the short dips of the fetch pipeline, and which
@@ -1856,6 +1857,12 @@ impl Cartridge {
     /// not-taken branch per fetch, instead of the dispatch's niche prologue and indirect jump.
     pub fn on_ppu_address_bus(&mut self, address: u16, ppu_clock: i64) {
         self.on_ppu_address_bus_as::<AnyBoard>(address, ppu_clock);
+    }
+
+    /// [`Mapper::after_state_load`]: the PPU's last nametable read before the state, once both
+    /// are restored.
+    pub(crate) fn after_state_load(&mut self, last_nametable_read: Option<u16>) {
+        self.board.after_state_load(last_nametable_read);
     }
 
     pub fn on_ppu_address_bus_as<K: BoardKind>(&mut self, address: u16, ppu_clock: i64) {
@@ -2242,9 +2249,9 @@ mod tests {
 
     /// The addresses of one rendered line as the PPU puts them on the cartridge's bus, in order:
     /// per tile the nametable byte, the attribute byte and the two pattern planes (each driven
-    /// one dot before it is latched), then the two discarded nametable fetches of dots 338 and
-    /// 340 — which, with the fetch of dot 337, are the **three consecutive reads of the same
-    /// nametable address** the MMC5 looks for.
+    /// one dot before it is latched), then the fetch of dot 337, the discarded one of dot 339
+    /// and the next line's dot 1 — the **three consecutive reads of the same nametable
+    /// address** the MMC5 looks for.
     ///
     /// `clock` steps by one dot per entry, which is enough for the A12 filter of MMC3-style
     /// boards to ignore the pattern fetches and for every board to see a plausible line.
@@ -2263,8 +2270,8 @@ mod tests {
             }
         }
 
-        // Dots 337, 338 and 340: the same address three times, then the attribute fetch of the
-        // next line, which is the point at which the scanline is detected.
+        // Dots 337 and 339 and the next line's dot 1: the same address three times, then the
+        // attribute fetch of dot 3, which is the point at which the scanline is detected.
         for _ in 0..3 {
             push(0x2020, &mut clock);
         }

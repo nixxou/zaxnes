@@ -938,20 +938,25 @@ impl Ppu2C02 {
         // (Visual 2C07 netlist, lot FIDPLUS-C C3c, `g2001px`: a switch on written on dot 12 leaves
         // dot 16's increment undone and fetches again from dot 17; 8 170 differing dots a frame
         // with four, 54 000 to 97 000 with two, three or five).
-        // On PAL three on the cycle whose dot accumulator is 0, as the `$2006` load comes a dot
-        // early there (`oam`, `g2001px`, `g3e01px`: 24 321 differing dots against 107 089 with
-        // four everywhere). Phase 2 three as well: at reset phase e3 the five programs `r2007`,
-        // `g2000`, `g2001px`, `oam` and `g2006x` all fit dot phase 2 only, and `g2001px` / `oam`
-        // then match the netlist with three dots there, not four; phase 1 four (`g2001px` at e6).
+        // On PAL three on the cycles whose dot accumulator is 0, 1 or 2, four on 3 and 4: the
+        // split of the `$2007` read's latch (Visual 2C07 netlist, `oam` and `g2001px` at the four
+        // reset phases e0/e3/e6/e9, which between them switch on and off on every accumulator:
+        // no differing run longer than 2 dots in any aligned frame; the earlier {0, 2} -> 3 left
+        // 58 311 at e0, switch on with accumulator 1, and 371 915 at e9, switch off with 1).
+        // With the 2A07's M2 duty (19/32, bench `benchdotpal57`, adversarial review 2026-11-16):
+        // four on accumulator 4 only (`oam`, `g2001px` at the four phases, 0 long runs; the
+        // 15/24 bench's {3, 4} split leaves 890 605 differing dots there).
         let delay = if self.timing.region == NesRegion::Pal {
-            if self.dot_accumulator == 0 || self.dot_accumulator == 2 {
-                3
-            } else {
+            if self.dot_accumulator == 4 {
                 4
+            } else {
+                3
             }
         } else {
             2
         };
+        #[cfg(feature = "ppu-dot-trace")]
+        let delay = pal_switch_override(self.timing.region, self.dot_accumulator, value, delay);
         let corrupts = (value & 0x18) == 0 && self.switch_off_corrupts_palettes();
         if renders && self.prepaid_dots == 0 {
             if corrupts {
@@ -1682,6 +1687,17 @@ impl Ppu2C02 {
         (self.mask & 0x18) != 0
     }
 
+    /// The nametable address the last background fetch of a frame read, for a board restored
+    /// from a state: a state is written at a frame boundary, where `v` has not moved since the
+    /// discarded fetch of line 239's dot 339. `None` with the rendering off, which made none.
+    pub(crate) const fn last_nametable_read(&self) -> Option<u16> {
+        if self.rendering_enabled() {
+            Some(0x2000 | (self.v & 0x0FFF))
+        } else {
+            None
+        }
+    }
+
     /// Whether the PPU is actually fetching: rendering enabled **and** on a line that fetches —
     /// a visible one or the pre-render line.
     ///
@@ -1866,6 +1882,9 @@ impl Ppu2C02 {
         }
         self.control = value;
         self.t = (self.t & 0xF3FF) | (u16::from(value & 0x03) << 10);
+        if self.dot == 304 && self.netlist_measured_region() {
+            self.control_write_on_vertical_copy(value);
+        }
         if let Some(cartridge) = cartridge {
             cartridge.on_ppu_control_as::<K>(value);
         }
@@ -2409,6 +2428,11 @@ impl Ppu2C02 {
                 self.suppress_vblank = false;
                 self.begin_rendered_frame();
                 self.after_reset = false;
+            } else if K::WATCHES_BUS
+                && self.scanline == VISIBLE_SCANLINES
+                && self.rendering_enabled()
+            {
+                self.post_render_bus(cart);
             }
 
             // The sprite captures of SPEC-02 §3.5 run on the first dot of the visible line
@@ -2619,12 +2643,26 @@ impl Ppu2C02 {
                 self.read_vram_inner(address, PpuBusAccess::Cpu, ChrFetch::Background, cart);
         }
 
-        if self.bus_conflicts && self.fetching() && self.read_buffer_from_fetch(cart) {
+        if self.bus_conflicts
+            && (self.fetching() || self.read_latches_on_pre_render())
+            && self.read_buffer_from_fetch(cart)
+        {
             // The increment was made inside, where the hardware makes it.
             return value;
         }
         self.increment_vram_address(cart);
         value
+    }
+
+    /// A `$2007` read on the last dots of the line before the pre-render line, rendering on: its
+    /// latch (5 or 6 dots later) lands on the pre-render line, which fetches, so the read takes the
+    /// fetching path, X+Y increment and fetched byte, not the blanking +1 (Visual 2C07, `r2007` at
+    /// e3 on the 19/32 bench, adversarial review item 8: a read on 310:338 turns `v` = `$04FE`
+    /// into `$14FF` on 311:2). Cheap: the dot test fails on every other dot.
+    fn read_latches_on_pre_render(&self) -> bool {
+        self.dot >= 335
+            && self.scanline == self.pre_render_scanline() - 1
+            && self.rendering_enabled()
     }
 
     /// The read buffer of a `$2007` read made while the PPU is fetching: **what the PPU was
@@ -2658,23 +2696,7 @@ impl Ppu2C02 {
     #[cold]
     #[inline(never)]
     fn read_buffer_from_fetch<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) -> bool {
-        // X - D: 6 in alignments 2 and 3, 5 in 0 and 1.
-        // On the PAL 2C07 (16 dots for 5 CPU cycles) the read lands at a different point of its
-        // dot from one cycle to the next: X - D is 6 on the two cycles whose dot accumulator is
-        // 3 or 4, 5 on the three others (Visual 2C07 netlist, lot FIDPLUS-C C3c, `r2007`: 5 in
-        // 60 % of the reads and 6 in 40 %, whatever the dot; every other split of the five
-        // phases leaves 49 000 to 102 000 differing dots a frame, this one 8 400).
-        let latch_dots: i32 = if self.timing.region == NesRegion::Pal {
-            if self.dot_accumulator >= 3 {
-                6
-            } else {
-                5
-            }
-        } else if self.alignment >= 2 {
-            6
-        } else {
-            5
-        };
+        let latch_dots = self.data_latch_dots();
         if self.prepaid_dots != 0 {
             return false;
         }
@@ -2688,9 +2710,18 @@ impl Ppu2C02 {
         }
         if (latch_dot & 1) == 0 {
             // An even dot: its own fetch is the byte.
+            let before_latch = self.v;
             self.run_dots(1, cart);
             self.prepaid_dots = latch_dots;
             self.read_buffer = self.fetch_bus_value(cart.as_deref());
+            if (self.netlist_measured_region() || self.timing.region == NesRegion::Pal)
+                && self.scanline == self.pre_render_scanline()
+                && self.vertical_copy_dots().contains(&latch_dot)
+            {
+                self.read_increment_meets_vertical_copy(before_latch);
+                self.notify_address_bus(self.v & 0x3FFF, cart);
+                return true;
+            }
             // Lot FIDPLUS-2 (A5, netlist): the read's X and Y increments are the pipeline's own
             // signals, so on a dot that increments coarse X anyway (every eighth, 328, 336) they
             // merge with it: one X increment, plus Y; on dot 256, which makes both, nothing more.
@@ -2712,12 +2743,18 @@ impl Ppu2C02 {
         // An odd dot: the bus still holds the byte the fetch of X - 1 read.
         let residue = self.fetch_bus_value(cart.as_deref());
         self.read_buffer = residue;
+        let before_latch = self.v;
         self.run_dots(1, cart);
-        if latch_dot == 257 && (self.netlist_measured_region() || self.timing.region == NesRegion::Pal) {
-            // Lot FIDPLUS-2 (A5, netlist): on dot 257 the horizontal copy overrides the read's
-            // coarse X increment; only its Y increment is left.
-            self.increment_y();
-            self.v_row_next = self.v;
+        if (self.netlist_measured_region() || self.timing.region == NesRegion::Pal)
+            && self.scanline == self.pre_render_scanline()
+            && self.vertical_copy_dots().contains(&latch_dot)
+        {
+            self.read_increment_meets_vertical_copy(before_latch);
+            self.notify_address_bus(self.v & 0x3FFF, cart);
+        } else if latch_dot == 257 && (self.netlist_measured_region() || self.timing.region == NesRegion::Pal) {
+            // On dot 257 the horizontal copy and the read's coarse X increment meet: `v` and `t`
+            // keep their AND (FIDELITY-LEADS I7).
+            self.increment_meets_horizontal_copy(before_latch);
             self.notify_address_bus(self.v & 0x3FFF, cart);
         } else {
             self.increment_vram_address(cart);
@@ -2728,6 +2765,136 @@ impl Ppu2C02 {
             self.refetch_with_low_byte(residue, cart.as_deref());
         }
         true
+    }
+
+    /// The increment of `v` after a `$2007` **write** made while the PPU is fetching.
+    ///
+    /// The write starts the same state machine as the read ([`Self::read_buffer_from_fetch`]):
+    /// `v` takes its rendering increment (X and Y) on the same dot X, `D + 6` in this core's
+    /// alignment (`D + 5` in the two others), and merges with the pipeline's own increments the
+    /// same way: on a dot that increments coarse X anyway, one X increment plus Y; on 256 nothing
+    /// more; on 257 `v` and `t` keep the AND of their horizontal bits
+    /// ([`Self::increment_meets_horizontal_copy`]). Measured on the transistor
+    /// netlists of the 2A03 and 2C02 (audit `scr` at reset phase e4, `docs/review/FIDELITY-LEADS.md`
+    /// I6): line 8, a write on dot 112 leaves `v` = `$652F` until dot 117 and makes it `$7530` on
+    /// 118; line 41, a write on dot 66 turns `$1539` into `$253A` on 72. Before this the increment
+    /// was made at the access, so 136 of 150 writes differed from the netlist for five dots, and a
+    /// write whose X fell on an eighth dot kept the extra coarse X increment for the whole line.
+    ///
+    /// The byte itself is still written at the access; the netlist trace compares `v` and `t`, not
+    /// the memory a write during rendering reaches.
+    #[cold]
+    #[inline(never)]
+    fn write_increment_from_fetch<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {
+        let latch_dots = self.data_latch_dots();
+        if self.prepaid_dots != 0 {
+            // The PPU already runs ahead of this cycle (two `$2007` accesses in a row): no room
+            // to run it further, the increment is made now.
+            self.increment_vram_address(cart);
+            return;
+        }
+        self.run_dots(i64::from(latch_dots - 1), cart);
+        let latch_dot = self.dot + 1;
+        let before_latch = self.v;
+        self.run_dots(1, cart);
+        self.prepaid_dots = latch_dots;
+        let measured = self.netlist_measured_region() || self.timing.region == NesRegion::Pal;
+        if !self.fetching() || !measured {
+            self.increment_vram_address(cart);
+            return;
+        }
+        if self.scanline == self.pre_render_scanline()
+            && self.vertical_copy_dots().contains(&latch_dot)
+        {
+            self.read_increment_meets_vertical_copy(before_latch);
+        } else if latch_dot == 257 {
+            self.increment_meets_horizontal_copy(before_latch);
+        } else if matches!(latch_dot, 8..=256 | 328 | 336) && latch_dot % 8 == 0 {
+            if latch_dot != 256 {
+                self.increment_y();
+                self.v_row_next = self.v;
+            }
+        } else {
+            self.increment_vram_address(cart);
+            return;
+        }
+        self.notify_address_bus(self.v & 0x3FFF, cart);
+    }
+
+    /// X - D for a `$2007` access made while fetching: the dots from the dot a read of the same
+    /// cycle samples to the dot whose start latches the data and whose middle increments `v`.
+    fn data_latch_dots(&self) -> i32 {
+        // X - D: 6 in alignments 2 and 3, 5 in 0 and 1.
+        // On the PAL 2C07 (16 dots for 5 CPU cycles) the read lands at a different point of its
+        // dot from one cycle to the next: X - D is 6 on the two cycles whose dot accumulator is
+        // 3 or 4, 5 on the three others (Visual 2C07 netlist, lot FIDPLUS-C C3c, `r2007`: 5 in
+        // 60 % of the reads and 6 in 40 %, whatever the dot; every other split of the five
+        // phases leaves 49 000 to 102 000 differing dots a frame, this one 8 400). That bench
+        // drove the 2C07 with the 2A03's M2 duty (15/24); with the 2A07's 19/32 (nesdev "CPU
+        // ALL", adversarial review 2026-11-16, bench `benchdotpal57`) M2 falls earlier and
+        // only accumulator 4 takes 6: `r2007` and `g2007v` at e0/e3/e6/e9, 0 long runs, against
+        // 1 185 385 differing dots with the old split.
+        let latch_dots: i32 = if self.timing.region == NesRegion::Pal {
+            if self.dot_accumulator == 4 {
+                6
+            } else {
+                5
+            }
+        } else if self.alignment >= 2 {
+            6
+        } else {
+            5
+        };
+        #[cfg(feature = "ppu-dot-trace")]
+        let latch_dots = pal_latch_override(self.timing.region, self.dot_accumulator, latch_dots);
+        latch_dots
+    }
+
+    /// A `$2007` read whose X+Y increment lands on one of the pre-render line's vertical copy dots
+    /// (2C07 and 2C02 alike): the incremented `v` and `t` meet on the vertical bits and **both keep
+    /// their AND** (the low side wins, as in the `$2006` load collision), while the horizontal
+    /// bits keep the increment. Visual 2C07 netlist, lot FIDPLUS-C C3c, `r2007` at reset phase
+    /// e0: a read latching on dot 278 turns `v` = `$7040`, `t` = `$2000` into `v` = `$0001`,
+    /// `t` = `$0000` (the increment of `$7040` is `$0061`); at the other phases the same read
+    /// latches on 277, before the copy, and `t` is left alone. A read latching on dot 300
+    /// (every phase) fits too: `$2000` AND `$3002` keeps `t`. Odd latch dots alike (`g2007v`, a
+    /// program aimed at the window: at e3 a read latching on 289 turns `$7BC2` / `$7BC0` into
+    /// `$0BC3` / `$0BC0`, one on 285 `$5A81` / `$5A80` into `$4A82` / `$4A80`). `before_latch` is
+    /// `v` before the copy of that dot. The NTSC 2C02 does the same (transistor netlist, `g2007n`
+    /// at reset phases e0/e2/e4/e6: the nine events of e0 and e4 fit, dots 280-292, the first
+    /// copy dot included).
+    #[cold]
+    #[inline(never)]
+    fn read_increment_meets_vertical_copy(&mut self, before_latch: u16) {
+        const VERTICAL: u16 = 0x7BE0;
+        self.v = before_latch;
+        self.increment_coarse_x();
+        self.increment_y();
+        let kept = self.t & self.v & VERTICAL;
+        self.t = (self.t & !VERTICAL) | kept;
+        self.v = (self.v & !VERTICAL) | kept;
+        self.v_row_next = self.v;
+    }
+
+    /// A `$2007` read or write whose X+Y increment lands on dot 257, the horizontal copy: as on
+    /// the vertical copy dots ([`Self::read_increment_meets_vertical_copy`]) the incremented `v`
+    /// and `t` meet on the horizontal bits and **both keep their AND**, the vertical bits keep the
+    /// increment. 2C02 netlist, audit `scr` at reset phase e4 (FIDELITY-LEADS I7): a write on dot
+    /// 251 (X = 257) turns `v` = `$0131`, `t` = `$3F6F` into `v` = `$1122`, `t` = `$3B62`; a read
+    /// on 251, `$5111` / `$316F` into `$6102` / `$3162`. The rule this replaces (lot FIDPLUS-2,
+    /// A5: the copy wins, only Y is left) is the case where the AND gives `t`'s bits, as on Zelda
+    /// II's title split. `before_latch` is `v` before the copy of dot 257.
+    #[cold]
+    #[inline(never)]
+    pub(super) fn increment_meets_horizontal_copy(&mut self, before_latch: u16) {
+        const HORIZONTAL: u16 = 0x041F;
+        self.v = before_latch;
+        self.increment_coarse_x();
+        self.increment_y();
+        let kept = self.t & self.v & HORIZONTAL;
+        self.t = (self.t & !HORIZONTAL) | kept;
+        self.v = (self.v & !HORIZONTAL) | kept;
+        self.v_row_next = self.v;
     }
 
     /// The byte the fetch of the dot just run (an even one, where the fetches read) put on the
@@ -2837,7 +3004,7 @@ impl Ppu2C02 {
             self.address_load_collision();
         }
         let next = self.dot + 1;
-        if self.fetching() && matches!(next, 2..=256 | 322..=336) {
+        if self.fetching() && matches!(next, 1..=256 | 321..=336) {
             let hybrid = |address: u16, old: u16| (address & 0xFF00) | (old & 0x00FF);
             match (next - 1) & 0x07 {
                 1 => {
@@ -2853,8 +3020,27 @@ impl Ppu2C02 {
                             >> shift)
                             & 0x03;
                 }
+                0 | 2 => {
+                    // The next dot starts a nametable or attribute fetch (8k+1, 8k+3): the
+                    // netlist loads `v` in the middle of this dot, so that fetch's ALE already
+                    // carries the new address (transistor netlist, `g2006x` e4, bus comparison
+                    // 2026-11-16: a write on dot 95 puts `$2BED` on the bus on dot 99, not the
+                    // old `$23D3`). This core reads the byte on that first dot, so the tile or
+                    // attribute of that fetch came from the old address too. No increment falls
+                    // on these dots.
+                    self.v = self.t;
+                }
                 _ => {}
             }
+        } else if self.fetching()
+            && (matches!(next, 337 | 339)
+                || ((257..=320).contains(&next) && matches!((next - 257) & 0x07, 0 | 2)))
+        {
+            // The dummy nametable fetches of the line's end and the sprite phase's garbage ones
+            // take the new address the same way (bus comparison, `g2006w`/`g2006x` e4: writes on
+            // 333 and 335 show on 337 and 339, one on 269 on 273). Their bytes feed no tile — dot
+            // 1 reads the next line's — so only `v` moves.
+            self.v = self.t;
         }
         self.run_dots(1, cart);
         self.prepaid_dots = delay + 1;
@@ -2872,7 +3058,9 @@ impl Ppu2C02 {
     ///   standard core since 2026-11-16, a rule on a cold write path.
     /// * 2C07 (Visual 2C07, `g2006x` at reset phases e0, e3, e6): dot 257 the same, the open bus on
     ///   the cycle whose dot accumulator is 4 ([`Self::open_bus_on_copies`]); its vertical copy
-    ///   ends on dot 302, where no program wrote: left alone.
+    ///   ends on dot 302: `g2006w` writes there (adversarial review 2026-11-16), a second write
+    ///   only leaves a 3-dot transient before the load, left alone; the first write is
+    ///   [`Self::first_address_write_on_vertical_copy`].
     #[cold]
     #[inline(never)]
     fn address_write_on_copy(&mut self) {
@@ -2899,7 +3087,7 @@ impl Ppu2C02 {
     /// The netlist loads `v` in the middle of dot D+3 (`delay_address_load`), so the increment of
     /// dot D+4, which this core has already run with the old `v`, belongs to the new one (lot
     /// FIDPLUS-2, A5, `g2006x`): on a coarse-X increment dot the loaded address is incremented,
-    /// on dot 256 in X and Y. NTSC only, as the other netlist rules.
+    /// on dot 256 in X and Y. NTSC and PAL (the 2C07 the same, Visual 2C07 `g2006x`).
     #[cold]
     #[inline(never)]
     fn increment_after_delayed_load(&mut self) {
@@ -2942,10 +3130,22 @@ impl Ppu2C02 {
         if !increments || !self.fetching() {
             return;
         }
+        // The 2C07 (Visual 2C07, `g2006w`, 193 collisions at reset phases e0/e3/e6/e9, lot
+        // FIDPLUS-C C3c-collision): a coarse-X collision ANDs nametable X as well as coarse X,
+        // and `t` keeps the written nametable bits (put back by the `$2006` write after `v`
+        // takes this value, [`Self::write`]). The 2C02 ANDs nametable X too (transistor netlist,
+        // `g2006w` at reset phases e0/e4/e6, adversarial review 2026-11-16: a write of `$2D5A`
+        // colliding with `$2ADC` leaves `$2958`, 66 of 66 coarse-X collisions; the first corpus,
+        // `g2006x`, never wrote nametable X = 1). The clones keep the old mask, unmeasured.
+        let x_fields = if self.netlist_measured_region() || matches!(self.timing.region, NesRegion::Pal) {
+            0x041F
+        } else {
+            0x001F
+        };
         self.t = if dot == 256 {
             self.t & self.v
         } else {
-            (self.t & !0x001F) | (self.t & self.v & 0x001F)
+            (self.t & !x_fields) | (self.t & self.v & x_fields)
         };
     }
 
@@ -3271,6 +3471,7 @@ impl Ppu2C02 {
                     {
                         self.address_write_on_copy();
                     }
+                    let written = self.t;
                     if (self.address_load_delay || self.bus_conflicts) && self.fetching() {
                         self.delay_address_load(&mut cartridge);
                     } else if self.address_load_delay
@@ -3284,6 +3485,18 @@ impl Ppu2C02 {
                     let delayed = self.prepaid_dots == 4
                         || (self.prepaid_dots == 3 && matches!(self.timing.region, NesRegion::Pal));
                     self.v = self.t;
+                    if self.t != written && matches!(self.timing.region, NesRegion::Pal) {
+                        // C3c-collision: the 2C07's `t` keeps the written nametable bits.
+                        self.t |= written & 0x0C00;
+                        // A load that collided on dot 256: the dot after it, 257, copies `t`'s
+                        // horizontal bits into the `v` it left, which the prepaid run made
+                        // before this assignment (Visual 2C07, `g2006w`: a write on dot 254
+                        // ends at `$2C58`, not `$2858`). On the 2C02 `t` = `v` after the
+                        // collision, so the copy changes nothing there.
+                        if self.dot == 257 && self.fetching() {
+                            self.v = (self.v & !0x041F) | (self.t & 0x041F);
+                        }
+                    }
                     if delayed {
                         self.increment_after_delayed_load();
                     }
@@ -3302,6 +3515,20 @@ impl Ppu2C02 {
                     self.notify_address_bus_without_read(self.v & 0x3FFF, &mut cartridge);
                 } else {
                     self.t = (self.t & 0x00FF) | (u16::from(value & 0x3F) << 8);
+                    if self.dot == 257
+                        && self.fetching()
+                        && (self.netlist_measured_region()
+                            || matches!(self.timing.region, NesRegion::Pal))
+                    {
+                        self.first_address_write_on_copy(value);
+                    } else if self.scanline == self.pre_render_scanline()
+                        && self.dot == *self.vertical_copy_dots().end()
+                        && self.fetching()
+                        && (self.netlist_measured_region()
+                            || matches!(self.timing.region, NesRegion::Pal))
+                    {
+                        self.first_address_write_on_vertical_copy(value);
+                    }
                 }
 
                 self.write_toggle = !self.write_toggle;
@@ -3310,13 +3537,23 @@ impl Ppu2C02 {
             7 => {
                 // A `$2007` access is an ALE of `v` (step 39).
                 self.ale_low = self.v.to_le_bytes()[0];
-                if self.edges_on_for::<K>() && !self.rendering_now() {
-                    self.post_data_store(value);
+                if self.edges_on_for::<K>() {
+                    if !self.rendering_now() {
+                        self.post_data_store(value);
+                        return;
+                    }
+                    self.rewrite_pending_vram_write(value, &mut cartridge);
+                    self.write_vram_inner(self.v & 0x3FFF, value, PpuBusAccess::Cpu, &mut cartridge);
+                    self.post_write_increment();
                     return;
                 }
                 self.rewrite_pending_vram_write(value, &mut cartridge);
                 self.write_vram_inner(self.v & 0x3FFF, value, PpuBusAccess::Cpu, &mut cartridge);
-                self.increment_vram_address(&mut cartridge);
+                if self.bus_conflicts && (self.fetching() || self.read_latches_on_pre_render()) {
+                    self.write_increment_from_fetch(&mut cartridge);
+                } else {
+                    self.increment_vram_address(&mut cartridge);
+                }
             }
 
             // $2002 is read-only; the write only loaded the bus latch.
@@ -3328,6 +3565,61 @@ impl Ppu2C02 {
     const fn rendering_now(&self) -> bool {
         self.rendering_enabled()
             && (self.scanline < VISIBLE_SCANLINES || self.scanline == self.pre_render_scanline())
+    }
+
+    /// A first `$2006` write on dot 257 of a fetching line, PAL 2C07 (Visual 2C07, `g2006w`, reset
+    /// phases e0/e3/e6/e9, lot FIDPLUS-C C3c): the horizontal copy of that dot already takes the
+    /// nametable-X bit the write puts in `t` (bit 2 of the byte), or the CPU's open bus on the
+    /// cycle [`Self::open_bus_on_copies`] names, as the second write and `$2005` do there. A write
+    /// on dot 258 comes after the copy and leaves `v` alone, which is what this core does anyway.
+    #[cold]
+    #[inline(never)]
+    fn first_address_write_on_copy(&mut self, value: u8) {
+        let source = if self.open_bus_on_copies() {
+            self.cpu_open_bus
+        } else {
+            value
+        };
+        self.v = (self.v & !0x0400) | (u16::from(source & 0x04) << 8);
+    }
+
+    /// A `$2000` write on the 2C02's last vertical copy dot (304) of the pre-render line: that
+    /// copy already takes the nametable-Y bit the write puts in `t`, as the first `$2006` write
+    /// does there ([`Self::first_address_write_on_vertical_copy`]). 2C02 netlist, audit `scr` at
+    /// reset phase e4, alignment 3: `$2000` = `$00` on 261:304 leaves `v` = `$316F` with `t` =
+    /// `$316F`, where Zaxnes kept the bit the copy took before the write (`$396F`), and the
+    /// difference ran through the first five lines of the next frame (FIDELITY-LEADS I7).
+    #[cold]
+    #[inline(never)]
+    fn control_write_on_vertical_copy(&mut self, value: u8) {
+        if self.scanline != self.pre_render_scanline() || !self.fetching() {
+            return;
+        }
+        let source = if self.open_bus_on_copies() {
+            self.cpu_open_bus
+        } else {
+            value
+        };
+        self.v = (self.v & !0x0800) | (u16::from(source & 0x02) << 10);
+    }
+
+    /// A first `$2006` write on the pre-render line's last vertical copy dot (302 on the 2C07, 304
+    /// on the 2C02): that copy already takes the vertical bits the write puts in `t`'s high byte,
+    /// from the written byte or the CPU's open bus as [`Self::open_bus_on_copies`] says (Visual
+    /// 2C07, `g2006w` at e3, adversarial review 2026-11-16: `$25` on dot 302, open bus `$20`,
+    /// turns `v` = `$2D5A` into `$245A`). The 2C02 form is unmeasured; its second write on 304
+    /// follows the same copy ([`Self::address_write_on_copy`]).
+    #[cold]
+    #[inline(never)]
+    fn first_address_write_on_vertical_copy(&mut self, value: u8) {
+        const VERTICAL: u16 = 0x7BE0;
+        let source = if self.open_bus_on_copies() {
+            self.cpu_open_bus
+        } else {
+            value
+        };
+        let seen = (self.t & 0x00FF) | (u16::from(source & 0x3F) << 8);
+        self.v = (self.v & !VERTICAL) | (seen & VERTICAL);
     }
 
     /// Whether a register write landing on a copy of `t` into `v` (or on a pixel) takes the CPU's
@@ -3814,6 +4106,32 @@ impl Ppu2C02 {
         }
     }
 
+    /// The post-render line's first two dots on the bus, raised from dot 1 (the branch every
+    /// line already takes there) with dot 0's own clock for the first. 2C02 netlist
+    /// (`benchpins`, `g2000` e4): dot 0 of line 240 gives an ALE with the coming low-plane
+    /// pattern address (`1000`, /RD high), like every dot 0 after a fetching line; from dot 1
+    /// the pins show `v` (`0802`) and hold it through vblank until the pre-render line's first
+    /// fetch. Address lines only, so only an A12 watcher sees them.
+    #[cold]
+    #[inline(never)]
+    fn post_render_bus<K: BoardKind>(&self, cart: Cart<'_, '_, K>) {
+        let pattern = self.pattern_address(0);
+        if let Some(cartridge) = cart.as_deref_mut() {
+            cartridge.on_ppu_address_bus_without_read_as::<K>(pattern, self.ppu_clock - 1);
+            cartridge.on_ppu_address_bus_without_read_as::<K>(self.v & 0x3FFF, self.ppu_clock);
+        }
+        #[cfg(feature = "ppu-dot-trace")]
+        self.dot_trace_bus.set(self.v & 0x3FFF);
+    }
+
+    /// A read whose byte nothing uses — the sprite phase's garbage nametable fetches — put on
+    /// the bus for the trace and the boards that watch it, without reading the memory.
+    pub(super) fn notify_discarded_read<K: BoardKind>(&self, address: u16, cart: Cart<'_, '_, K>) {
+        #[cfg(feature = "ppu-dot-trace")]
+        self.dot_trace_bus.set(address);
+        self.notify_address_bus(address, cart);
+    }
+
     /// The counterpart for the address lines moving with **/RD high**: a `$2007` write, or a
     /// `$2006` write loading `v`. A12 is an address line, so an A12 counter must see both, and a
     /// board whose rule is about /RD — the MMC5's in-frame detection — must not
@@ -3830,6 +4148,24 @@ impl Ppu2C02 {
         }
     }
 
+    /// Overrides the PAL `$2001` switch delays (feature `ppu-dot-trace`, measurement only): ten
+    /// values, switch on for dot accumulators 0-4 then switch off for 0-4; 0 keeps the model.
+    #[cfg(feature = "ppu-dot-trace")]
+    pub fn set_pal_switch_override(delays: [i32; 10]) {
+        for (slot, value) in PAL_SWITCH_OVERRIDE.iter().zip(delays) {
+            slot.store(value, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// Overrides the PAL `$2007` read latch (feature `ppu-dot-trace`, measurement only): five
+    /// values, dots for accumulators 0-4; 0 keeps the model.
+    #[cfg(feature = "ppu-dot-trace")]
+    pub fn set_pal_latch_override(dots: [i32; 5]) {
+        for (slot, value) in PAL_LATCH_OVERRIDE.iter().zip(dots) {
+            slot.store(value, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
     /// Starts a per-dot trace (feature `ppu-dot-trace`), dropping any previous one.
     #[cfg(feature = "ppu-dot-trace")]
     pub fn start_dot_trace(&mut self) {
@@ -3839,8 +4175,11 @@ impl Ppu2C02 {
     /// Marks the last traced dot with a CPU register access (feature `ppu-dot-trace`).
     #[cfg(feature = "ppu-dot-trace")]
     fn trace_access(&mut self, access: u32) {
+        // Bits 24-27: the dot accumulator at the access, plus one (PAL dot-phase studies).
+        #[allow(clippy::cast_sign_loss)] // 0..5.
+        let phase = ((self.dot_accumulator + 1) as u32 & 0x0F) << 24;
         if let Some(last) = self.dot_trace.as_mut().and_then(|trace| trace.last_mut()) {
-            last.access = access;
+            last.access = access | phase;
         }
     }
 
@@ -4206,4 +4545,39 @@ const fn oam_bit_draw(bit: usize) -> u64 {
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
     z ^ (z >> 31)
+}
+
+#[cfg(feature = "ppu-dot-trace")]
+static PAL_SWITCH_OVERRIDE: [std::sync::atomic::AtomicI32; 10] =
+    [const { std::sync::atomic::AtomicI32::new(0) }; 10];
+
+/// The measurement override of [`Ppu2C02::set_pal_switch_override`].
+#[cfg(feature = "ppu-dot-trace")]
+fn pal_switch_override(region: NesRegion, accumulator: i32, value: u8, delay: i32) -> i32 {
+    if region != NesRegion::Pal {
+        return delay;
+    }
+    #[allow(clippy::cast_sign_loss)] // 0..5.
+    let slot = accumulator as usize + if (value & 0x18) == 0 { 5 } else { 0 };
+    match PAL_SWITCH_OVERRIDE[slot].load(std::sync::atomic::Ordering::Relaxed) {
+        0 => delay,
+        forced => forced,
+    }
+}
+
+#[cfg(feature = "ppu-dot-trace")]
+static PAL_LATCH_OVERRIDE: [std::sync::atomic::AtomicI32; 5] =
+    [const { std::sync::atomic::AtomicI32::new(0) }; 5];
+
+/// The measurement override of [`Ppu2C02::set_pal_latch_override`].
+#[cfg(feature = "ppu-dot-trace")]
+fn pal_latch_override(region: NesRegion, accumulator: i32, dots: i32) -> i32 {
+    if region != NesRegion::Pal {
+        return dots;
+    }
+    #[allow(clippy::cast_sign_loss)] // 0..5.
+    match PAL_LATCH_OVERRIDE[accumulator as usize].load(std::sync::atomic::Ordering::Relaxed) {
+        0 => dots,
+        forced => forced,
+    }
 }

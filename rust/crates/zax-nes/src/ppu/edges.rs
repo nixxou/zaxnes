@@ -53,10 +53,14 @@ pub(super) enum EdgeKind {
     CopyAfterSwitchOff,
     /// The second phase of a coarse-Y wrap from 29 (A7): coarse Y 30 back to 0, one dot later.
     SettleCoarseY,
+    /// The increment of `v` after a `$2007` write made while rendering, after the work of the
+    /// read's latch dot X: the write starts the read's state machine (netlist, audit `scr` e4,
+    /// `docs/review/FIDELITY-LEADS.md` I6). Merged with X's own increments as the read's.
+    WriteIncrement,
 }
 
 impl EdgeKind {
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 10] = [
         Self::LoadAddress,
         Self::StoreData,
         Self::ReadLatch,
@@ -66,6 +70,7 @@ impl EdgeKind {
         Self::SwitchRendering,
         Self::CopyAfterSwitchOff,
         Self::SettleCoarseY,
+        Self::WriteIncrement,
     ];
 
     fn from_u8(byte: u8) -> Option<Self> {
@@ -90,6 +95,9 @@ pub(super) struct FidState {
     /// the address this core read it at. Not part of the state: it never outlives a dot pair.
     pub(super) fetch_pending: u8,
     pub(super) fetch_address: u16,
+    /// `v` before the work of the dot whose edges are being applied: what a `$2007` increment
+    /// landing on dot 257 meets the horizontal copy with. Not part of the state: rebuilt per dot.
+    pub(super) v_before_dot: u16,
 }
 
 impl FidState {
@@ -100,6 +108,7 @@ impl FidState {
         data_latch: 0,
         fetch_pending: 0,
         fetch_address: 0,
+        v_before_dot: 0,
     };
 }
 
@@ -275,6 +284,7 @@ impl Ppu2C02 {
             // coarse-Y wrap of dot 256) or an edge posts counts from the next.
             let mut pending = usize::from(self.fid.edge_count);
             let before = self.v;
+            self.fid.v_before_dot = before;
             self.run_one_dot(cart);
             if self.dot == 256 && self.edges_on() {
                 self.two_phase_y_wrap(before);
@@ -455,11 +465,9 @@ impl Ppu2C02 {
                 if self.fetching() {
                     if self.dot == 257 {
                         // The horizontal copy of X and the read's coarse-X increment drive the
-                        // same lines in the same half: the copy wins, the Y increment is left
-                        // (A5, netlist).
-                        self.increment_y_two_phase();
-                        self.v_row_next = self.v;
-                        self.notify_address_bus(self.v & 0x3FFF, cart);
+                        // same lines in the same half: `v` and `t` keep their AND
+                        // (FIDELITY-LEADS I7).
+                        self.horizontal_copy_meets_increment(cart);
                     } else {
                         let before = self.v;
                         self.increment_vram_address(cart);
@@ -477,6 +485,7 @@ impl Ppu2C02 {
                     self.refetch_with_low_byte(self.read_buffer, cart.as_deref());
                 }
             }
+            EdgeKind::WriteIncrement => self.edge_write_increment(cart),
             EdgeKind::ReadLatchAfterFetch => {
                 self.read_buffer = self.fetch_bus_value(cart.as_deref());
                 // The read's X and Y increment signals and the pipeline's own are the same lines:
@@ -632,6 +641,50 @@ impl Ppu2C02 {
         };
         self.post_edge(dots, kind);
         value
+    }
+
+    /// A `$2007` write in Fidélité+ while rendering: the byte is stored at the access, as before;
+    /// the increment of `v` comes on the read's latch dot X (`D + 6` in alignments 2 and 3, `D + 5`
+    /// in 0 and 1), after X's work ([`EdgeKind::WriteIncrement`]). Netlist, audit `scr` at reset
+    /// phase e4: line 8, a write on dot 112 leaves `v` = `$652F` up to dot 117 and makes it `$7530`
+    /// on 118; line 41, on dot 66, `$1539` becomes `$253A` on 72, one X increment merged with the
+    /// pipeline's own plus Y.
+    pub(super) fn post_write_increment(&mut self) {
+        let dots = self.edge_dot(READ_LATCH_LATENCY) + 1;
+        self.post_edge(dots, EdgeKind::WriteIncrement);
+    }
+
+    /// A `$2007` increment applied after the work of dot 257: `v` and `t` keep the AND of their
+    /// horizontal bits ([`Ppu2C02::increment_meets_horizontal_copy`]), with A7's two phases.
+    fn horizontal_copy_meets_increment<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {
+        let before = self.fid.v_before_dot;
+        self.increment_meets_horizontal_copy(before);
+        self.two_phase_y_wrap(before);
+        self.notify_address_bus(self.v & 0x3FFF, cart);
+    }
+
+    /// [`EdgeKind::WriteIncrement`], after the work of X: the read's rules without its buffer.
+    fn edge_write_increment<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {
+        if !self.fetching() {
+            self.increment_vram_address(cart);
+            return;
+        }
+        let dot = self.dot;
+        if dot == 257 {
+            // The horizontal copy of 257 meets the coarse-X increment (FIDELITY-LEADS I7).
+            self.horizontal_copy_meets_increment(cart);
+            return;
+        } else {
+            let natural_x = (dot % 8 == 0 && (8..=256).contains(&dot)) || dot == 328 || dot == 336;
+            if !natural_x {
+                self.increment_coarse_x();
+            }
+            if dot != 256 {
+                self.increment_y_two_phase();
+            }
+        }
+        self.v_row_next = self.v;
+        self.notify_address_bus(self.v & 0x3FFF, cart);
     }
 
     /// A `$2007` write in Fidélité+ outside rendering: the data latch now, the store and the

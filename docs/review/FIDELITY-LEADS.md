@@ -799,7 +799,7 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   half-clock counter. Whether a real 2C07 powers up with another relation between its /5 dot
   divider and its /6 subcarrier divider (which would move the pixel's phase) is not known.
 
-### C3c-collision. PAL `$2006` load colliding with dot 256 (2026-11-16, open)
+### C3c-collision. PAL `$2006` load colliding with an increment of `v` (2026-11-16, rule done)
 - Visual 2C07, `g2006x` at reset phases e0/e3/e6, line 54 (and 148, 223): `v` = `$210C`,
   `t` = `$2A08`; second `$2006` write `$D7` on dot 253. Netlist: the load lands on dot 256 and
   leaves `v` = `$2005`, `t` = `$2805` (dots 256-281). Zaxnes: the load lands on dot 257 (one dot
@@ -810,6 +810,129 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   cycle phase. One value pattern only: a dedicated program (several written values, nametable
   bits set and clear, writes on dots 248-256 at every cycle phase) is needed before a rule.
   Cost today: 14 long runs over five frames at each reset phase, about 4 900 dots a frame.
+- **Dedicated program `g2006w` (2026-11-16)**: second `$2006` writes looping over `$2108`,
+  `$2AD7`, `$2D5A`, `$25A5` (the four nametable cases), 51-cycle loop sliding over every dot;
+  Visual 2C07 at reset phases e0, e3, e6, e9 (`ext-tools/visual2c07-tools`: `c3ccoll.py`
+  extracts each write near dot 256, `c3crule.py` checks the rule). **All 193 collisions fit**:
+  * on the dot-256 increment (X and Y): `v` = written AND incremented, every field;
+  * on a coarse-X increment: coarse X **and nametable X** (`$041F`) written AND incremented,
+    the rest written (the 2C02 rule of A3c ANDs coarse X only, `$001F`);
+  * `t` = `v` with the **written nametable bits** (`$0C00`) kept; on the 2C02 `t` = `v`.
+- **Done in the standard core** (`Ppu2C02::address_load_collision` and the `$2006` write, PAL
+  only): judge `c3cjudge.py` at e3 (dot phase 2, phase -14), long runs (> 2 dots) on rendered
+  lines per aligned frame **55-60 before, 3-6 after**; golden-core 98 games x 1800 frames
+  identical; zax-nes tests green.
+- **Final state (2026-11-16)**: `c3cphases.py`, every reset phase, the aligned frames: **0 runs
+  longer than 2 dots** on rendered lines at e0 (dot phase 0, phase 9; frames 1-2 not paired,
+  the sliding program's access sequence differs there), e3 (2, -14), e6 (1, -14) and e9 (0, -14).
+  golden-core 98 games x 1800 identical, zax-nes tests and clippy green.
+- **The two leads below**, seen in the 3-6 runs, are both done:
+  * (done 2026-11-16) a write on dot 254 ended at `$2858` in Zaxnes, `$2C58` in the netlist. **Not
+    a delay**: counted from the write's own dot on both sides (`c3cdelay.py`; the netlist's A
+    line comes when /CS rises, after the access's dots), the delays agree write for write (2
+    or 3 dots, the same cycle phases). The load collided on dot 256 and the prepaid run made
+    dot 257's horizontal copy before the `$2006` write set `v = t`, losing it; the 2C02 hides
+    it (`t` = `v` after its collision). Fixed in the `$2006` write: PAL, load on dot 256, the
+    copy is made again after the assignment.
+  * (done 2026-11-16, `Ppu2C02::first_address_write_on_copy`, judge 3-6 -> 1-2 long runs a
+    frame, golden-core identical) a **first** `$2006` write on dot 257: the netlist's horizontal copy already takes the new
+    nametable-X bit from `t`, Zaxnes copies the old one (22 dots, until the next copy).
+
+### C3c-corpus. The PAL corpus at the four reset phases (2026-11-16)
+- All eleven programs (`g2000`, `g2001px`, `g2005`, `g2005px`, `g2006px`, `g2006w`, `g2006x`,
+  `g3e01px`, `oam`, `r2007`, `rmw`) traced on Visual 2C07 + the 2A03 netlist at reset phases e0,
+  e3, e6, e9 (`runcorpus.ps1`) and judged with `c3cphases.py` (Zaxnes dot phase / offset searched
+  per trace, then runs longer than 2 dots on rendered lines of the aligned frames).
+- **`$2007` read on a pre-render vertical copy dot** (`r2007` e0, 240 lines off): a read whose
+  X+Y increment latches on dot 278, the first PAL vertical copy dot, turns `v` = `$7040`,
+  `t` = `$2000` into `v` = `$0001`, `t` = `$0000`. The increment of `$7040` is `$0061`; the copy
+  and the increment meet on the vertical bits and **both registers keep the AND** (`$0061 &
+  $2000`), as in the `$2006` load collision (low side wins); the horizontal bits keep the
+  increment. At e3/e6/e9 the same read latches on 277, before the copy, and `t` stays. A read
+  latching on dot 300 fits the same rule at every phase (`$2000 & $3002` keeps `t`). Done:
+  `Ppu2C02::read_increment_meets_vertical_copy`, PAL. **Odd latch dots alike**: `g2007v`,
+  aimed at the window (four `t` patterns from `$2000` / `$2005`, six reads latching on dots
+  268-291), at e3: a read latching on 289 turns `$7BC2` / `$7BC0` into `$0BC3` / `$0BC0`, one
+  on 285 `$5A81` / `$5A80` into `$4A82` / `$4A80`; `g2007v` matches at the four phases.
+- **`$2001` switch delay by dot phase** (`oam` e0, `g2001px` e9, `g3e01px` e9): each program
+  switches at one dot accumulator per reset phase, so the four phases of `oam` and `g2001px`
+  cover switch on and off at every accumulator. Measured by sweeping the delay table
+  (`c3csweep.py`, harness override `ZAX_PAL_2001`, dot-trace build only): **3 dots on
+  accumulators 0-2, 4 on 3-4**, the split of the `$2007` read latch (5 / 6). The previous
+  {0, 2} -> 3 table left 58 311 dots in long runs at `oam` e0 and 371 915 at `g2001px` e9;
+  the new one 0 on all eight traces. Done in `switch_rendering`.
+- **Final state**: the eleven programs and `g2007v` at every phase, 0 runs longer than 2 dots in
+  the aligned frames, with the dot phase each reset phase takes (e0 0, e3 2, e6 1, e9 0): a
+  search from dot phase 0 (`corpus-phases-final.txt`) can align the accesses of `g2001px`,
+  `g3e01px` and `oam` at e3/e6 on dot phase 0 too and then shows false runs. `g2005` e0 and
+  `rmw` e0 align on dot phases 1 and 3 and pair one frame each (the sliding programs' access
+  sequences differ in the others). golden-core: the
+  291 test ROMs identical to `core-goldens.jsonl`, the 18 games of `demo/roms` x 1800 frames
+  identical to the previous build; zax-nes tests green.
+- **Leads left**:
+  * (done 2026-11-16) the NTSC 2C02 does the same: `g2007n` (`g2007v` timed for 262 lines) on
+    the transistor netlist at reset phases e0/e2/e4/e6, nine events of e0 and e4 on dots
+    280-292 all fit the AND rule (`andrule.py`), dot 280 (the first copy dot, `v` taken before
+    the copy) included; Zaxnes matches at the four phases (alignment 0 at e0/e2, 2 or 3 with
+    the power-on in vblank at e4/e6). The old NTSC `r2007` traces now show one frame of long
+    runs, a pairing artifact: the aligned frame's preceding pre-render line is not aligned
+    (offsets -1/-2), so Zaxnes's read latches on 280 where the netlist's latches on 286;
+    golden-core identical;
+  * (2026-11-16) **the NTSC corpus at the four reset phases** (`runcorpus_ntsc.ps1` added e0/e2
+    for `g2000`, `g2005`, `g2006x`, `g3e01px`, `oam`, `r2007`; judge `c3cntsc.py`): e4 takes
+    alignment 3 and e6 alignment 2, power-on in vblank, and every program is clean there but
+    `r2007` (the pairing artifact above) and `rmw` (unpairable with this bench: its `v` follows
+    the netlist's power-on `$2001`; what it measures, the bytes read back and copied to
+    `$2005`, is `00 01 02 01 01 05 06 07 00` in the netlist at the four NTSC and four PAL reset
+    phases and in Zaxnes on both regions, `INC $2007` over 03 04 leaving 01 01). At e0/e2
+    (alignments 0/1) `g2000`, `g2005`, `g2006x`, `r2007` are clean; `g3e01px` and `oam` hit
+    step 33's switch-on race on every switch on (`A 0 86 W2001=0A`: `v` `$0006` -> `$0000`, a
+    horizontal copy from `t`, then fetches), present or not with the bench's hold time: not
+    trusted, not ported, as before. **Settled at half-step resolution** (adversarial review
+    point 7, `visualnes-bench/benchdbg.cpp`, `g3e01px` e0): `v` takes `t` in the very
+    half-step where /CS rises and `rendering_1`/`rendering_2` go high, and the copy node
+    `copy_vramaddr_hscroll` is never seen high; on a normal dot 257 the same node is high for
+    four half-steps (`v` `$1C01` -> `$1800`). The switch-on copy is a pulse inside one
+    zero-delay settling step, an evaluation-order race of the switch-level simulation, not a
+    timing the chip holds;
+  * (2026-11-16, review point 3) **the PAL bench's M2 duty**: `benchdotpal` drove the 2C07
+    with the 2A03's M2 (15/24); the 2A07's is 19/32 (nesdev "CPU ALL"). Bench
+    `benchdotpal57` (the review's glue variant: /CS and the hold time follow M2 falling at
+    19/32; the 2A03 netlist keeps its own phi2), whole PAL corpus re-traced at e0/e3/e6/e9
+    (`visual2c07-tools/dot57`, `runcorpus57.ps1`, judge `c3cphases57.py`, sweep
+    `c3csweep57.py` with `ZAX_PAL_2001` / `ZAX_PAL_LATCH`). **Both PAL tables move**: the
+    `$2001` switch takes 4 dots on dot accumulator 4 only (3 on 0-3), the `$2007` latch 6 on
+    accumulator 4 only (5 on 0-3); the earlier {3, 4} splits leave 890 605 and 1 185 385
+    differing dots there. Done (`switch_rendering`, `read_buffer_from_fetch`): **the eleven
+    programs and `g2007v` at the four phases, 0 long runs** on the 19/32 bench; golden-core
+    identical. The `$2006` delays (2/3) and every collision rule are unchanged by the duty.
+    The 19/32 bench is now the PAL reference; the 15/24 traces in `dot/` are kept for history;
+  * (2026-11-16, review items 5 and 8) **first `$2006` write on the last vertical copy dot,
+    NTSC measured**: `g2006v` (`mk2006v.py`, a `$2006` pair timed on the pre-render line's
+    end, first bytes `$2D`/`$3B`/`$1A`/`$25`) on the 2C02 netlist at e0/e1/e3/e4/e5/e6/e7:
+    at e3 a first write of `$3B` on dot 304 shows `t` = `$2000` for that dot (open bus `$20`)
+    and the copy takes it, `v` `$2D00` -> `$2400`; Zaxnes's `first_address_write_on_vertical_copy`
+    gives the same with alignment 3 (open bus), clean at e0/e3/e4/e6. **A `$2007` read
+    latching on the pre-render line** (310:338 on the 2C07, the latch on 311:2) takes the
+    fetching path, X+Y and the fetched byte (`read_latches_on_pre_render`); `r2007` clean at
+    the four PAL phases, pre-render line included. The judges (`c3cphases*`, `c3cntsc`,
+    `c3csweep*`) now count the pre-render line (but the first judged frame's, which holds
+    the power-on `v`), print how many frames they judged and say NO FRAME JUDGED / CLEAN /
+    DIFFERS (review item 4);
+  * (2026-11-16, review point 6) **the benches' CHR memory**: `handleChrBus` latches the low
+    address on ALE's rising edge and drives the data on /RD's falling edge, where a 74LS373 is
+    transparent while ALE is high and the memory answers the level. A level-sensitive variant
+    (`visualnes-bench/macros_hold_lvl.cpp`, `benchdot2lvl.exe`), NTSC `r2007` e4 against the
+    same run on the edge bench: **`v` and `t` identical on all 851 968 dots** (no C3c rule
+    depends on it); 1 806 dots differ in `inbuf`, 114 in the ALE address, mostly the ALE +
+    Read case (edge bench: refetch at `$20CA` with the residue byte; level variant: `$2000`).
+    The variant does not model the contention of PPU and memory on AD0-7 when ALE and /RD
+    overlap, so neither bench is authoritative on bus values; AccuracyCoin (`ALE + Read`,
+    `$2007 Stress Test`, written against a console) passes with the current model. Bus and
+    buffer values stay judged by hardware tests, not by the netlist; C1's open question is
+    still the SMB3 Japan line 193 video (I1);
+  * dedicated programs for the value patterns the corpus measures once (`$2001` values other
+    than `$0A`/`$1E`/`$00`, a read on the copy dots with `t` having more vertical bits set).
 
 ### D2b. Performance lead found on the way (lot FIDELITY, not fidelity) — tried and dropped (FIDPLUS-1)
 - Callgrind `f4185fa8` vs `27e2c3e2`: the APU stage costs +0.8 to +0.9 % on every game (+17 to
@@ -1124,6 +1247,17 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   DMC output timer at 431 with 8 bits left, as the CPU differential aligns them. Test
   `fidplus_cpu_apu_parity_tests` (an OAM DMA started on the same cycle takes one cycle more or
   less). Whether a console fixes it or draws it stays open; the choice covers both.
+- 2026-11-17, fidelity audit (`ext-tools/fidelity-audit`, gap 6): on the audit's bench (the
+  "hold" variant of the netlist bench, reset released at power-on with no extra hold) the 2A03
+  netlist aligns with Zaxnes at **DMC timer 1014, 8 bits, the default parity** (`dmcdma`,
+  `cpuflow`, `apuL5`/`apuL4`/`apuF`/`apuG`: zero gap); the option's 431 + flipped parity puts the
+  DMAs 156 to 166 cycles early there. Both are the netlist, from all-zero nodes: the difference is
+  the time from power-on to the reset's release, which sets where the DMC timer and the get / put
+  parity stand at the first opcode. So the netlist has no single power-on phase; a console's comes
+  from its reset circuit (RC, CIC) and is not one value either. Not changed: the option keeps the
+  CPU differential's pair, documented as one bench's. Lead (Fidélité+): the `Random` choice could
+  draw the parity and the DMC timer over its whole range rather than between two pairs — no
+  hardware reference picks a distribution.
 
 ### G6. Open-bus bits of a controller read just after a DMC fetch — open (2026-11-15)
 
@@ -1191,6 +1325,180 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 
 ## I. Open questions from tests and comparisons
 
+- I1 update (2026-11-16, replay on the 2C02 netlist, `ext-tools/smb3-netlist/RAPPORT.md`): the
+  game's line-193 sequence (`$A82F`: `$2006` = `$0B`, `$00`, `LDA $2007`, then `$2000`/`$2005`;
+  state dumped with Mesen) rebuilt as a sliding NROM program (`mksmb3.py`, `smb3p0.nes`) and
+  run on three cartridge models (edge, transparent 74LS373, transparent + memory delay, the
+  last one honouring AccuracyCoin's ALE + Read). **C1's timing is confirmed**: latch X = R+5
+  (e0/e2) or R+6 (e4/e6), the shape a function of X alone, `v`/`t` identical on all three
+  benches. Zaxnes equals the delay bench at every X but X = 8k+6 (the netlist re-reads the
+  attribute byte through the open latch -> palette 1, dark blue; Zaxnes black) and X = 8k
+  (invisible here); the video shows no dark blue, so not ported. The video's classes match the
+  alignment-0/1 weights (22/33/34/11 % against 19/33/33/15 %: the console is in that family,
+  which also explains "never empty": X = 239 exists only in 2/3). Still unexplained by every
+  digital model: the dash shape at X = 231/232 and the white at X = 235 (ALE / /RD analog
+  contention). Hardware test proposed: film `smb3p0.nes` on a console. New lead (C2): the
+  netlist loads `v` in the middle of W+3 and W+4's ALE already carries the new address, where
+  Zaxnes fetches W+4 with the old one (`211 netlist bus=2BF0 | zaxnes bus=2BEF`), invisible
+  to `dotcmp.py` (`v`/`t` only); to measure with a dedicated program.
+- I9 (2026-11-17) **`$2004` read during sprite evaluation: the netlist ahead by 2 to 5 dots —
+  open** (fidelity audit `oam`, `latmap.py oam 2004 net\oam-e0.txt 129000 5`, replayed after
+  I6-I7, same figures). Dots 1-64, 257-320 and 321-0 fit at the usual k = +1 (128/128, 107/116,
+  42/42); in 65-256 only 282 of 469 do, and the misses are the netlist showing the byte Zaxnes
+  shows 2-3 dots later on line 35 (sprites 7-8 in range), 5 on line 48 (11-12), 2 on line 63
+  (14-15), so the evaluation's OAM address runs ahead in the netlist by an amount that depends
+  on which sprites are in range. Not trusted yet: on that bench `$2003`/`$2004` writes do not
+  reach the cells (OAM set by `sprite_write`, `OAMADDR` never written), and the map pools 19
+  phases. Next: a dedicated per-dot trace of the OAM address node (`spr_ptr`) on one line with
+  a known in-range set, against Zaxnes's exact evaluation (`ppu-exact-sprite-eval`), which
+  passes AccuracyCoin's evaluation rows.
+  Done the same day (`visualnes-bench/benchspr.cpp`, nodes `spr_addr0-7`, `spr_ptr0-5`, program
+  `oamn`, OAM by `sprite_write(a, a)` and Y = 100 for sprites 50-59): the pointer moves as
+  expected (2 dots a sprite, 8 for a copy: on the line labelled 48, copies of `$28`-`$2F` on dots
+  67-106, then `+4` every 2 dots), but the copied set is Y = 40 and 44 with Y = 48 rejected —
+  the set every emulator, and the games, select on line 47 (a sprite at Y is shown on lines
+  Y + 1 to Y + 8). The bench's OAM labelling or cell mapping is one line off from what its
+  `vpos` says for the background, which the dot-perfect `scr` match vouches for; the 2-5 dot
+  "lead" follows from a different in-range set, not from Zaxnes's evaluation. Kept open only as
+  a bench question; no Zaxnes change.
+- I8 (2026-11-17) **Alignment-dependent races of the 2C02 netlist that hardware tests contradict
+  or that are a simulation artefact — not ported** (fidelity audit, gaps 3 and 4). Both replayed
+  on a second bench whose /CS is decoded from the 2A03's own M2 (`visualnes-bench/benchdot2m2`,
+  `fidelity-audit/benchaudm2`, `macros_m2.cpp`) besides the hold-time bench: **identical tables
+  on both**, so neither comes from the /CS model.
+  * `$2002` / start of vblank (`vblA`, `vblC`): alignment 0 (e2) is Zaxnes's, 14 frames of 14.
+    Alignment 1 (e0) takes the NMI on a read at 241:2 (Zaxnes suppresses it); alignments 2-3
+    (e6/e4) also read 0 and suppress the flag on 240:340, and take the NMI on 241:2. A model of
+    exactly that (the /NMI sample one dot later in alignments 1-3, the suppression on 340 in 2-3)
+    **fails `ppu_vbl_nmi` 02/05-08, `vbl_nmi_timing` 2/3/5/6/7, `cpu_interrupts` 2 and
+    AccuracyCoin's `NMI at VBlank end`** in alignments 1 and 2 — hardware-verified tests that
+    pass on consoles of any alignment. Reverted, as I5: the netlist's timing of this race is not
+    the console's. Zaxnes keeps one table for the four alignments.
+  * `$2001` toggles in alignments 0/1 (`scr` e0, 54 runs): at a switch on, on the first dot that
+    fetches, the netlist ANDs the low 12 bits of `v` with the address the pipeline puts on the bus
+    at that dot (`$7114` -> `$7004` with the low pattern address `$0007`, `$7509` -> `$7501` with
+    `$0557` for tile `$55`, `$7110` -> `$7100` with `$0107`; nothing on a nametable address dot,
+    `$2000 | v`), bits 12-14 kept; at a switch off landing on an increment dot, the increment is
+    partial (coarse X wraps without flipping the nametable, X without Y on 256, a coarse-Y carry on
+    113). This is step 33's switch-on race (A3c): the review's half-step trace showed `v` change
+    inside one zero-delay settling step with no copy node high, an evaluation-order effect of the
+    switch-level simulation. The AND model is recorded here, not ported; a console test (a switch
+    on in each alignment, `v` read back through `$2007`) would settle it.
+- I7 (2026-11-17) **`$2007` increment on dot 257, and `$2000` on the last vertical copy dot —
+  fixed** (fidelity audit, `scr` e4). (1) A `$2007` read or write whose increment lands on dot 257
+  meets the horizontal copy: **`v` and `t` both keep the AND** of their horizontal bits (the
+  incremented `v`'s and `t`'s), as on the vertical copy dots; the write on 43:251 turns
+  `$0131` / `$3F6F` into `$1122` / `$3B62`, the read on 129:251 `$5111` / `$316F` into
+  `$6102` / `$3162`. A5's rule (the copy wins, Y only) is the case where the AND gives `t`, which
+  is what Zelda II's split had. (2) A `$2000` write on 261:304 reaches that dot's vertical copy
+  (`v` takes the written nametable-Y bit, `$396F` -> `$316F`), like the first `$2006` write there.
+  `increment_meets_horizontal_copy`, `control_write_on_vertical_copy`, the Fidélité+ edge keeps
+  `v` from before the dot (`v_before_dot`). With I6: **`scr` e4 against alignment 3, Fidélité+,
+  0 differing dots in 4 frames** (136 W2007 runs, 1 W2000 run and 16 inherited before); e0
+  against alignment 1 has only I8's `$2001` runs left.
+- I6 (2026-11-17) **The increment of a `$2007` write made while rendering — fixed** (fidelity
+  audit, gap 2). The 2C02 netlist (audit `scr` at reset phase e4) gives the write the read's
+  timing: `v` takes its X+Y increment on the read's latch dot X (`D + 6` in alignments 2 and 3,
+  `D + 5` in 0 and 1), merged with the pipeline's own increments as the read's is (A5): on a
+  dot that increments coarse X anyway one X plus Y, on 256 nothing more, on 257 the AND of I7. Line 8,
+  a write on dot 112 leaves `v` = `$652F` to dot 117 and makes it `$7530` on 118; line 41, a
+  write on dot 66 turns `$1539` into `$253A` on 72, not `$153A` + X + Y. Zaxnes made it at
+  the access: 136 of 150 writes differed for five dots, 14 for a whole line. Now: Fidélité+
+  posts an edge (`EdgeKind::WriteIncrement`, after X's work) — `scr` e4 `W2007` class 136 → 0;
+  the standard path does the same with its run-ahead (`write_increment_from_fetch`) under
+  `emu.ppu_bus_conflicts`, off by default like the read model (C1) — 147 → 11 runs of one dot,
+  where the per-dot trace records X before the increment that follows its work (`v` the next
+  fetch uses is the netlist's). AccuracyCoin has no `$2007`-write-while-rendering test (its
+  `$2007 Stress Test` reads), so the netlist is the reference. The byte is still stored at the
+  access: the trace compares `v`/`t`, not the address a write during rendering reaches, which
+  remains to measure (at X - 2 the netlist's bus shows `$2700`, not a fetch address). Duelito,
+  which writes `$2007` with rendering on in its first frames, changes picture (golden row
+  updated); 18 games, MMC5 set and AccuracyCoin 147/147 unchanged.
+- I5 (2026-11-17) **DMC IRQ latency: the netlist against the hardware; Zaxnes keeps the
+  hardware's** (fidelity audit `ext-tools/fidelity-audit`, gap 1). The 2A03 netlist (audit
+  bench `benchaud`, and `benchirq` with the nodes) raises `set_pcm_irq`/`pcm_irq` two cycles
+  after the DMA read R of a sample's last byte and the 6502's `c_irq` on R+3, 78 cases of 78;
+  Zaxnes raises the flag on R. A model with the flag on R+2 (what `$4015` reads; blargg's
+  `7-dmc_basics` #19 needs it there at the latest) and /IRQ on R+3 made the audit's `cpuflow`
+  match to the cycle (0 of 41 705, 79 IRQ latencies of 79) — and **failed AccuracyCoin's
+  `Interrupt flag latency` test B** (`AccuracyCoin.asm` `TEST_IFlagLatency_PageBoundaryTest`:
+  a taken branch crossing a page, the DMC DMA between its cycles 2 and 3, must take the IRQ at
+  the poll before cycle 4, i.e. one cycle after the read). AccuracyCoin is verified on the
+  console, and the DMA's own placement is confirmed by both (audit `dmcdma`, 66 DMA, and the
+  DMA tests of blargg and AccuracyCoin), so the netlist's IRQ path is what disagrees with the
+  hardware here, as for the seven unofficial opcodes the audit lists. **Reverted; Zaxnes keeps
+  the flag on the read.** To revisit only with a console measurement of that latency.
+- I4 (2026-11-17) **Sprite phase and idle dot of the PPU bus**. **Fixed**: each sprite slot's
+  two garbage nametable fetches (ALE 257 + 8k and 259 + 8k, both `0x2000 | v` in the 2C02
+  netlist; Mesen reads an attribute address on the second, the netlist does not) are now put
+  on the bus (`notify_discarded_read`, no memory read: the byte is discarded), and a `$2006`
+  load landing on one of them reaches it (W+4, write on 269 seen on 273). The idle dot 0 of
+  lines 1-239 (and of line 0 when not skipped) shows the coming low-plane pattern address, as
+  nesdev describes and the netlist shows (`1002` on `g2000` line 10), address lines only.
+  Bus comparison (`g2000`, `g2005px`, `g2006x`, `g2006w` e4): every dot 0 and every
+  garbage fetch now matches; the sprite pattern addresses still differ only because these
+  programs leave OAM uninitialised and the netlist's power-on OAM differs. **Consequences**: an
+  A12 watcher now sees A12 fall between sprite slots, which is what the Acclaim MC-ACC's ÷8
+  prescaler divides — it counted one line in eight before, now one per line (test
+  `mr_4_3_the_mc_acc_counts_one_line_per_eight_falls_while_rendering`); with 8x16 sprites
+  mixing both tables an MMC3's low run between two high slots can now reach the filter, as on
+  the hardware. `Mmc5Ext`'s line-start test counts pattern fetches since the last
+  **attribute** fetch (threshold 18: the line's last group's two plus the sixteen sprite
+  fetches), since the garbage fetches are nametable reads whose address the pre-render line's
+  vertical copy changes mid-phase. **Line 240, measured at the pins** (`benchpins`: the 14
+  address pins, ALE, /RD and /WR every half-step, `g2000` e4): dot 0 gives an ALE with the
+  pattern address (`1000`, /RD high), and from dot 1 the pins show `v` (`0802`) and hold it
+  through vblank until the pre-render line's first fetch — now raised to the A12 watchers
+  (`Ppu2C02::post_render_bus`). **Cost** (callgrind, 300 frames, clean builds of `0602c292`
+  and `f1b67088`): Super Mario Bros. 3 (MMC3) +0.20 %, Mega Man 2 -0.06 %, Zelda II -0.09 %.
+  The bus events are compiled out of the kinds whose board never watches the bus
+  (`BoardKind::WATCHES_BUS`), the MMC3 kind skips the garbage fetch that cannot move A12
+  (`BoardKind::A12_ONLY`), and the rendering `match` keeps its range-compare shape (an arm of
+  its own for dot 0 or 339 had made it a dispatch, +33 M on Mega Man 2). What is left on the
+  MMC3 is its watcher seeing seven more A12 events a line, the price of the MC-ACC's count.
+- I3 (2026-11-17) **Line end of the PPU bus, and the MMC5's first detected line (Q-121)**.
+  **Fixed**: the nametable reads of a line's end are dots 337 and 339 and the next line's dot 1
+  (nesdev, MMC5: "two matching dummy nametable byte reads at the end of each scanline, followed
+  by a third matching nametable byte read at the beginning of the next scanline"; Mesen
+  `NesPpu` the same), where this core read 337, 338 and 340; dot 1's read now gives the third
+  tile its byte. A `$2006` load landing on 337 or 339 (writes on 333/335) reaches those dummy
+  fetches too. Bus comparison (`g2000`, `g2005px`, `g2006x`, `g2006w` NTSC e4): background,
+  dot 1, pre-render and line end all 0 mismatches. **Q-121 reverses**: line 239 now leaves two
+  reads, not three, so the pre-render line is detected only when its dot 1 repeats line 239's
+  address (nothing moved `v` in the vblank); the usual frame (a `$2006` in the NMI) is first
+  detected on line 0 and `$5203` = N fires on line N — Mesen (`DetectScanlineStart`) and
+  `BizHawk` (`ExROM`, `irq_target + 1` from its pre-render line 0) agree, while MF-4c's claim
+  that Mesen gave N-1 was wrong. Programs that leave `v` alone (the `mapper_irq_tests` fixture,
+  `mmc5test`, `firefly`) keep N-1. A state load rebuilds the repeat from the PPU's `v`
+  (`Mapper::after_state_load`), so run-ahead fires on the same line (test
+  `q_121_the_mmc5_target_line_survives_a_state_load`). Castlevania III: picture at frame 3 600
+  and audio from 1 200 move back, the exact reverse of MF-4c step 5. Both MMC5 variants checked
+  (the split column skips the repeats as before). **Left**: the sprite phase's garbage nametable
+  fetches (257/259 + 8k) are still not put on the bus; adding them touches the MMC3 A12 filter
+  and the MMC5 split's `chr_reads_since_nt`, to study on its own.
+- I2 (2026-11-16) **PPU address bus against the 2C02 netlist** (`visualnes-bench/buscmp.py`:
+  every ALE address of the netlist on fetching lines against the Zaxnes trace's bus, by fetch
+  phase and dot % 8; the netlist's power-on `$2000`, never written by these programs, has the
+  background table bit and 8x16 sprites set, so bit 12 differences and the sprite phase are
+  power-on artifacts). **Fixed**: a `$2006` load landing just before a nametable or attribute
+  fetch (W+4 = 8k+1 / 8k+3, also dot 1 and 321) now makes that fetch with the new `v`, as the
+  netlist (`delay_address_load`); this core reads the byte on that first dot, so the tile or
+  attribute came from the old address. `g2006x`: 1 232 background mismatches -> 0; `g2006w`
+  (four targets, every dot), `g2000`, `g2005px`: 0 but dot 1 (`g2006px` and the other
+  rendering-off programs have no fetch to compare once their first frame starts). golden-core: RasterTest1/2 only,
+  2 pixels at x 254-255 of line 210 (rows updated). **Left as leads** (boards watching the bus
+  only): the first nametable fetch of a line (dots 1-2) is not put on the bus (its byte comes
+  from dot 340's read, same address), and the line end reads at 337/338/340 where the chip
+  fetches at 337/339 then dot 1; Zaxnes's MMC5 line detection (`nt_read_counter`, three
+  identical reads) is tuned to the current sequence, so the two must change together (adding
+  the dot-1 read alone would move MMC5 detection by two dots). Both MMC5 boards depend on it:
+  the light `Mmc5` (line detection) and `Mmc5Ext` (`board-mmc5-exattr-split`, on by default),
+  whose split column counts nametable fetches with a new address and finds the line start by
+  the run of pattern reads before it (`chr_reads_since_nt`, i.e. the sprite phase's reads), so
+  a faithful line end or sprite-phase NT fetches must be checked on both, with the split games.
+  The W+4 fix itself changes no fetch count, only the address one fetch carries after a
+  mid-line `$2006` write (MMC5 tests green, light/full pixel comparison included); the sprite phase's garbage
+  nametable fetches (257-320) are not put on the bus either.
 - I1. SMB3 Japan line 193 shapes (C1): console video shows "2 px + gap + 8 px" 36 %, 8 px 31 %,
   16 px 22 %, holes 12 %, never empty; BeesNES/puNES/NesHawk/Zaxnes default: 8 or 16 px; Mesen: empty
   75 %. Same `$2006`/`$2007` timing in Mesen and Zaxnes (W 212, R 224, v=$0B02). Branch

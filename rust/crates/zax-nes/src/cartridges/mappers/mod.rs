@@ -488,6 +488,13 @@ pub trait Mapper {
         self.load_registers(reader)
     }
 
+    /// Called once the whole state is back, PPU included, with the nametable address of the
+    /// PPU's last background fetch before the state was written (`None` when the rendering was
+    /// off). A board deriving state from the PPU's reads, rather than storing it, takes back
+    /// here what the reads before the boundary left it: the MMC5's repeat of line 239's two
+    /// dummy fetches, which the pre-render line's first read may continue.
+    fn after_state_load(&mut self, _last_nametable_read: Option<u16>) {}
+
     /// Puts the registers back to their power-on values and recomputes the windows.
     ///
     /// This is the **power-on** path (REQ-CORE-004): `NesCore::reset` is a power cycle

@@ -160,6 +160,25 @@ pub fn command(args: &[String]) -> Result<(), HarnessError> {
         core.bus_mut().ppu_mut().flip_frame_parity();
     }
     let mut text = String::new();
+    let show_phase = std::env::var_os("ZAX_TRACE_PHASE").is_some();
+    // ZAX_PAL_2001 = ten comma-separated delays (switch on, accumulators 0-4, then off; 0 keeps
+    // the model): a measurement override of the PAL `$2001` switch delay.
+    if let Ok(list) = std::env::var("ZAX_PAL_2001") {
+        let mut delays = [0_i32; 10];
+        for (slot, item) in delays.iter_mut().zip(list.split(',')) {
+            *slot = item.trim().parse().unwrap_or(0);
+        }
+        zax_nes::ppu::Ppu2C02::set_pal_switch_override(delays);
+    }
+    // ZAX_PAL_LATCH = five comma-separated $2007 latch delays (accumulators 0-4; 0 keeps the
+    // model): a measurement override.
+    if let Ok(list) = std::env::var("ZAX_PAL_LATCH") {
+        let mut dots = [0_i32; 5];
+        for (slot, item) in dots.iter_mut().zip(list.split(',')) {
+            *slot = item.trim().parse().unwrap_or(0);
+        }
+        zax_nes::ppu::Ppu2C02::set_pal_latch_override(dots);
+    }
     for frame in 1..=options.last {
         let traced = frame >= options.first;
         if traced {
@@ -173,11 +192,17 @@ pub fn command(args: &[String]) -> Result<(), HarnessError> {
                 } else {
                     format!("{:04X}", record.bus)
                 };
-                let access = match record.access {
+                let mut access = match record.access {
                     0 => "-".to_owned(),
-                    a if a & 0x8000 != 0 => format!("W{:04X}={:02X}", a & 0x7FFF, a >> 16),
+                    a if a & 0x8000 != 0 => {
+                        format!("W{:04X}={:02X}", a & 0x7FFF, (a >> 16) & 0xFF)
+                    }
                     a => format!("R{:04X}", a & 0x7FFF),
                 };
+                // ZAX_TRACE_PHASE: the PPU's dot accumulator at each access, after `@`.
+                if record.access != 0 && show_phase {
+                    let _ = write!(access, "@{}", (record.access >> 24).saturating_sub(1));
+                }
                 let _ = writeln!(
                     text,
                     "{frame} {} {} {:04X} {:04X} {bus} {access}",

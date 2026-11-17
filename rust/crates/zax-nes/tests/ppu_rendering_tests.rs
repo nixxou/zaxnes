@@ -1367,13 +1367,12 @@ fn fidplus_c3c_pal_rendering_switch_takes_four_dots() {
         ppu.write(1, 0x00, None);
         ppu.vram_v() == increment_x(before)
     }
-    for phase in [1, 3, 4] {
-        assert!(increments(true, phase), "PAL phase {phase}: dot 16 still renders");
+    assert!(increments(true, 4), "PAL phase 4: dot 16 still renders");
+    // Three dots on the cycles whose accumulator is 0 to 3 (`oam`, `g2001px` at the four reset
+    // phases, on a bench with the 2A07's M2 duty, 19/32): the switch is in force by dot 16.
+    for phase in [0, 1, 2, 3] {
+        assert!(!increments(true, phase), "PAL phase {phase}");
     }
-    // Three dots on the phase-0 and phase-2 cycles (`oam`, `g2001px` at reset phase e3, whose
-    // five programs all fit dot phase 2): the switch is in force by dot 16.
-    assert!(!increments(true, 0), "PAL phase 0");
-    assert!(!increments(true, 2), "PAL phase 2");
     assert!(!increments(false, 0), "NTSC: the switch is in force by dot 16");
 }
 
@@ -1427,8 +1426,8 @@ fn fidplus_c3c_pal_2005_on_dot_257_takes_the_open_bus_one_cycle_in_five() {
 }
 
 /// Lot FIDPLUS-C C3c (Visual 2C07 netlist, `r2007`): on the PAL 2C07 a `$2007` read during
-/// rendering latches 6 dots after its access dot on the cycles whose dot accumulator is 3 or 4,
-/// 5 on the others. Read on dot 98: with 6 the latch is dot 104, which increments coarse X anyway,
+/// rendering latches 6 dots after its access dot on the cycle whose dot accumulator is 4, 5 on
+/// the others (bench with the 2A07's M2 duty, 19/32). Read on dot 98: with 6 the latch is dot 104, which increments coarse X anyway,
 /// so the two merge (one X step by the end of dot 104); with 5 it is dot 103 (two steps).
 #[test]
 fn fidplus_c3c_pal_2007_read_latch_follows_the_cycle_phase() {
@@ -1447,7 +1446,7 @@ fn fidplus_c3c_pal_2007_read_latch_follows_the_cycle_phase() {
         (ppu.vram_v() & 0x1F).wrapping_sub(before) & 0x1F
     }
     for phase in 0..5 {
-        let expected = if phase >= 3 { 1 } else { 2 };
+        let expected = if phase == 4 { 1 } else { 2 };
         assert_eq!(expected, coarse_x_steps(phase), "accumulator {phase}");
     }
 }
