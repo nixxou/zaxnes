@@ -82,6 +82,12 @@ impl ZaxUi {
         let Some(_item) = shown else {
             return;
         };
+        self.draw_tab_body(ui, host, tab);
+    }
+
+    /// The body of a tab, under its title: its reset button, then its entries (lot REWRITE-UI:
+    /// the new window draws several of them in one of its own tabs).
+    pub(super) fn draw_tab_body(&mut self, ui: &Ui, host: &mut AppHost, tab: options::OptionsTab) {
         if ui.button(text::reset_defaults()) {
             host.update_settings(|model| self.options.reset_tab(model, tab));
             play(host, UiSound::Confirm);
@@ -226,7 +232,12 @@ fn draw_group_heading(ui: &Ui, group: OptionsGroup, style_note: Option<&str>) ->
 /// Every one of the four is still its own setting, edited by its own widget and written through
 /// the same path a row of its own used: a change plays the validation sound, the reset button of
 /// the tab reaches all four, and the settings file is untouched. Only the place changes.
-fn draw_compact_row(ui: &Ui, host: &mut AppHost, compact: CompactRow, cells: &[OptionsRow; 4]) {
+pub(super) fn draw_compact_row(
+    ui: &Ui,
+    host: &mut AppHost,
+    compact: CompactRow,
+    cells: &[OptionsRow; 4],
+) {
     let _id = ui.push_id(compact.title());
     ui.text(compact.title());
     for (cell, caption) in cells.iter().zip(options::COMPACT_CAPTIONS) {

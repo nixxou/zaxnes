@@ -13,7 +13,7 @@ use zax_settings::values::SettingValue;
 use super::{centre, play, ZaxUi};
 use crate::application::AppHost;
 use crate::audio::UiSound;
-use crate::ui::options;
+use crate::ui::options::{self, OptionsGroup, OptionsTab, TabEntry};
 use crate::ui::{strings, text};
 
 /// The window's default size, as the classic one's.
@@ -110,6 +110,84 @@ const ESSENTIALS: [SettingId; 5] = [
     SettingId::UiLanguage,
 ];
 
+/// What the simple mode shows of a page.
+#[derive(Clone, Copy)]
+enum Simple {
+    /// One setting.
+    Row(SettingId),
+    /// Every row of a group of the classic tab (its compact rows included).
+    Group(OptionsGroup),
+    /// The whole classic tab.
+    All,
+}
+
+/// One tab of the new window: the classic tabs its advanced mode draws one under the other, and
+/// what its simple mode shows (nothing: the tab is hidden in that mode).
+struct Page {
+    /// The classic tab whose title it takes and whose groups the simple mode reads.
+    tab: OptionsTab,
+    simple: &'static [Simple],
+    advanced: &'static [OptionsTab],
+}
+
+/// The tabs between Essentials and Controllers (owner's selection, 2026-11-17). The 3D render
+/// takes the light and the camera, which are the 3D scene's alone.
+const PAGES: [Page; 7] = [
+    Page {
+        tab: OptionsTab::Display,
+        simple: &[
+            Simple::Row(SettingId::UiFullscreen),
+            Simple::Row(SettingId::VideoVSync),
+            Simple::Row(SettingId::VideoAntiAlias),
+            Simple::Row(SettingId::VideoSkipFrame),
+        ],
+        advanced: &[OptionsTab::Display],
+    },
+    Page {
+        tab: OptionsTab::NesPicture,
+        simple: &[
+            Simple::Row(SettingId::VideoNesPalette),
+            Simple::Row(SettingId::VideoCompositeSignal),
+            Simple::Group(OptionsGroup::Overscan),
+        ],
+        advanced: &[OptionsTab::NesPicture],
+    },
+    Page {
+        tab: OptionsTab::Render3d,
+        simple: &[],
+        advanced: &[OptionsTab::Render3d, OptionsTab::Light, OptionsTab::Camera],
+    },
+    Page {
+        tab: OptionsTab::Audio,
+        simple: &[
+            Simple::Row(SettingId::AudioVolume),
+            Simple::Row(SettingId::AudioConsoleProfile),
+        ],
+        advanced: &[OptionsTab::Audio],
+    },
+    Page {
+        tab: OptionsTab::Emulation,
+        simple: &[
+            Simple::Row(SettingId::EmuRunAhead),
+            Simple::Row(SettingId::EmuSmoothScrollAhead),
+            Simple::Row(SettingId::EmuRainbowNetwork),
+            Simple::Row(SettingId::EmuExactRate),
+            Simple::Row(SettingId::EmuRealtimeInput),
+        ],
+        advanced: &[OptionsTab::Emulation],
+    },
+    Page {
+        tab: OptionsTab::Interface,
+        simple: &[],
+        advanced: &[OptionsTab::Interface],
+    },
+    Page {
+        tab: OptionsTab::Achievements,
+        simple: &[Simple::All],
+        advanced: &[OptionsTab::Achievements],
+    },
+];
+
 /// Whether the settings still hold every value `preset` writes.
 fn matches(model: &SettingsModel, preset: &Preset) -> bool {
     preset
@@ -169,9 +247,28 @@ impl ZaxUi {
                 {
                     self.draw_essentials(ui, host);
                 }
-                if self.options_advanced {
-                    for tab in options::TABS {
-                        self.draw_options_tab(ui, host, tab, None);
+                for page in &PAGES {
+                    if self.options_advanced && page.advanced.is_empty() {
+                        continue;
+                    }
+                    if !self.options_advanced && page.simple.is_empty() {
+                        continue;
+                    }
+                    let Some(_tab) = TabItem::new(options::title_of(page.tab)).begin(ui) else {
+                        continue;
+                    };
+                    if self.options_advanced {
+                        for (index, &tab) in page.advanced.iter().enumerate() {
+                            if index > 0 {
+                                ui.spacing();
+                                ui.separator();
+                                ui.text_colored(ACCENT, options::title_of(tab));
+                            }
+                            let _id = ui.push_id_usize(index);
+                            self.draw_tab_body(ui, host, tab);
+                        }
+                    } else {
+                        self.draw_simple_page(ui, host, page);
                     }
                 }
                 if let Some(_tab) =
@@ -187,6 +284,49 @@ impl ZaxUi {
             }
         }
         self.state.options = open;
+    }
+
+    /// A page in the simple mode: the rows the owner chose, a group of the classic tab, or all
+    /// of it.
+    fn draw_simple_page(&mut self, ui: &Ui, host: &mut AppHost, page: &Page) {
+        let run_ahead_forced = host
+            .session()
+            .is_some_and(crate::game_session::GameSession::forces_run_ahead_to_zero);
+        let fceux_validation = host.fceux_validation();
+        for item in page.simple {
+            match *item {
+                Simple::All => self.draw_tab_body(ui, host, page.tab),
+                Simple::Row(id) => {
+                    let row = options::row_of(id);
+                    super::options::draw_row(ui, host, &row, run_ahead_forced, fceux_validation);
+                    if let Some(note) = later_note(id) {
+                        ui.same_line();
+                        ui.text_colored(LATER, note);
+                    }
+                }
+                Simple::Group(group) => {
+                    ui.spacing();
+                    ui.text_disabled(group.title());
+                    let mut inside = false;
+                    for entry in self.options.entries(page.tab).to_vec() {
+                        match entry {
+                            TabEntry::Group(heading) => inside = heading == group,
+                            TabEntry::Row(row) if inside => super::options::draw_row(
+                                ui,
+                                host,
+                                &row,
+                                run_ahead_forced,
+                                fceux_validation,
+                            ),
+                            TabEntry::Compact(compact, cells) if inside => {
+                                super::options::draw_compact_row(ui, host, compact, &cells);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// The Essentials tab: the slider, its box and check boxes, then the essential settings.

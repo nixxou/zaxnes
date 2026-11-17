@@ -28,3 +28,8 @@ hardware defects, VS DIPs, ...). Of these the fast core and Fidelity+ are now im
   when the settings left the preset. The classic window stays: a button in each opens the other.
   The mode and the last preset are not saved yet (window state). Catalogue test: `emu.fast_core`
   added to the list of additions (also on feat/fast-core).
+* 5. Owner's selection (2026-11-17): the simple mode also shows Display (fullscreen, vsync,
+  anti-aliasing, frame skip), NES picture (palette, composite signal, overscan group), Audio
+  (volume, console audio profile), Emulation (run-ahead, smooth scrolling, Rainbow network,
+  console frame rate, real-time pad) and Achievements whole. The advanced mode's 3D render tab
+  takes Light and Camera (FOV) under it; Interface only in advanced. Classic window unchanged.
