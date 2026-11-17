@@ -24,3 +24,8 @@ Design: `docs/design/FAST-CORE.md`.
 * 2026-11-17: step 1a (FastBus, lazy tick, exact): smb1 0.640 -> 0.338, mm2 0.725 -> 0.355, metroid 0.770 -> 0.395 ms/frame (about 2x the standard core); golden in play identical.
 * 2026-11-17: step 4a (MMC3 on the fast path, its A12 events replayed at their clocks, exact): smb3 0.938 -> 0.517 ms/frame; 98/98 identical in play.
 * 2026-11-17: step 1b (idle loops JMP-self and LDA ram/branch repeated by counting, exact): smb1 0.265, mm2 0.291, smb3 0.472 ms/frame; metroid unchanged (other loop shape).
+* 2026-11-17: same-loop comparison (`fceux-bench`, attract mode, 6000 frames, capture on, built with
+  `--features fceux-core` in `target-fceux`; `ZAXNES_FAST_CORE=1` selects the fast core there).
+  ms/frame, FCEUX / standard / fast: smb1 0.226 / 0.916 / 0.312, smb3 0.211 / 1.071 / 0.380,
+  mm2 0.232 / 0.733 / 0.290, metroid 0.231 / 0.733 / 0.369. Gap to FCEUX 1.25-1.8x (was 3.2-5.1x),
+  still exact. Also fixed: `movie_sync.rs` did not build with `fceux-core` since PalM/PalN.

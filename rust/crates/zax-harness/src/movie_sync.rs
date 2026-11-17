@@ -859,9 +859,9 @@ impl FceuxMachine {
         // `FceuxEngine::region_of` maps the four the same way: a dual-compatible cartridge runs
         // NTSC timing (REQ-CORE-015).
         let region = match region {
-            NesRegion::Ntsc | NesRegion::Multi => zax_fceux::Region::Ntsc,
+            NesRegion::Ntsc | NesRegion::Multi | NesRegion::PalM => zax_fceux::Region::Ntsc,
             NesRegion::Pal => zax_fceux::Region::Pal,
-            NesRegion::Dendy => zax_fceux::Region::Dendy,
+            NesRegion::Dendy | NesRegion::PalN => zax_fceux::Region::Dendy,
         };
         let mut core = zax_fceux::Fceux::new().map_err(|error| error.to_string())?;
         core.load_rom(image, name)

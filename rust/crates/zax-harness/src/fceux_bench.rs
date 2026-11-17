@@ -224,6 +224,8 @@ fn time_zaxnes(options: &Options, image: &[u8]) -> Result<Measurement, HarnessEr
         .file_stem()
         .map_or_else(String::new, |s| s.to_string_lossy().into_owned());
     let mut core = NesCore::new();
+    // `ZAXNES_FAST_CORE=1`: the fast core (lot FAST-1), for the same comparison.
+    core.set_fast_core(std::env::var("ZAXNES_FAST_CORE").is_ok_and(|value| value != "0"));
     if !core.load_rom(image, &stem).success {
         return Err(HarnessError::Rom("Zaxnes refused the image".to_owned()));
     }
