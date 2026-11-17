@@ -18,6 +18,7 @@ mod band_limited_resampler;
 pub mod console_profile;
 mod dmc_channel;
 mod envelope;
+mod fast;
 mod length_counter;
 pub mod mixer;
 mod mmc5_audio;

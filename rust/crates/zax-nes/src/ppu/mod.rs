@@ -20,6 +20,7 @@
 
 mod edges;
 mod emphasis;
+mod fast;
 mod palette_corruption;
 mod ppu_bus_access;
 mod render;
@@ -2247,7 +2248,12 @@ impl Ppu2C02 {
 
             let span = self.visible_span_ahead(count);
             if span > 0 {
-                if !self.run_visible_span::<K>(span, cart.as_deref()) {
+                let done = if K::FAST {
+                    self.run_visible_span_fast::<K>(span, cart.as_deref())
+                } else {
+                    self.run_visible_span::<K>(span, cart.as_deref())
+                };
+                if !done {
                     self.run_visible_span_through_bus(span, cart);
                 }
                 count -= span;

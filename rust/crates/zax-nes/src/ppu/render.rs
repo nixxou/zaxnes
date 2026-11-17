@@ -554,7 +554,7 @@ impl Ppu2C02 {
     /// level-2 figures — is the `ppu-exact-sprite-eval` arm below. See `MF-4e.md` step 4 and
     /// `docs/review/BOARD-FEATURES.md`.
     #[cfg(not(feature = "ppu-exact-sprite-eval"))]
-    fn run_sprite_evaluation(&mut self, dot: i32) {
+    pub(super) fn run_sprite_evaluation(&mut self, dot: i32) {
         if dot == 65 {
             self.eval_sprite = i32::from(self.oam_address >> 2);
             self.eval_byte = i32::from(self.oam_address & 0x03);
@@ -657,7 +657,7 @@ impl Ppu2C02 {
     /// `third_party/mesen2`'s `NesPpu<T>::ProcessSpriteEvaluation` is the shape this follows, and
     /// the comments it carries from the nesdev page are reproduced at the branches they belong to.
     #[cfg(feature = "ppu-exact-sprite-eval")]
-    fn run_sprite_evaluation(&mut self, dot: i32) {
+    pub(super) fn run_sprite_evaluation(&mut self, dot: i32) {
         if (dot & 1) == 1 {
             if dot == 65 {
                 // The evaluation takes the OAM address as it stands, whatever `$2003` left in it,
@@ -1057,7 +1057,7 @@ impl Ppu2C02 {
     /// multiplexer picks it. The slots only change during dots 257 to 320, so the line is
     /// the same whichever pixel of 1 to 256 asks for it. The sprites past the eighth, when the
     /// limit is removed, come after them.
-    fn rebuild_sprite_line(&mut self) {
+    pub(super) fn rebuild_sprite_line(&mut self) {
         if self.rebuild_disturbed_sprite_line() {
             return;
         }
@@ -1267,9 +1267,9 @@ impl SpanPixels {
 
 /// [`Ppu2C02::sprite_line`] cell flags; the low four bits are the palette (bits 2-3) and the
 /// 2-bit pixel, 0 when no sprite covers the column.
-const SPRITE_OPAQUE: u8 = 0x40;
-const SPRITE_BEHIND: u8 = 0x20;
-const SPRITE_ZERO: u8 = 0x10;
+pub(super) const SPRITE_OPAQUE: u8 = 0x40;
+pub(super) const SPRITE_BEHIND: u8 = 0x20;
+pub(super) const SPRITE_ZERO: u8 = 0x10;
 
 /// The bits of a [`Ppu2C02::sprite_line`] cell that do not depend on the pixel.
 pub(super) const fn sprite_flags(attribute: u8, zero: bool) -> u8 {

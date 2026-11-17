@@ -588,7 +588,11 @@ impl NesBus {
 
         self.apu_lag += 1;
         if self.apu_lag > self.apu_quiet {
-            self.catch_up_apu();
+            if K::FAST {
+                self.catch_up_apu_fast();
+            } else {
+                self.catch_up_apu();
+            }
         }
     }
 
@@ -680,6 +684,22 @@ impl NesBus {
             self.apu_lag = 0;
         }
         self.apu_quiet = self.apu.quiet_cycles();
+        self.poll_dmc_dma();
+    }
+
+    /// [`Self::catch_up_apu`] for the fast core (lot FAST-1): the APU runs through
+    /// [`Apu2A03::run_cpu_cycles_fast`], whose quiet stretches leave the silent channels out.
+    fn catch_up_apu_fast(&mut self) {
+        if !self.apu_batching {
+            self.sync_apu();
+            return;
+        }
+
+        if self.apu_lag > 0 {
+            self.apu.run_cpu_cycles_fast(self.apu_lag);
+            self.apu_lag = 0;
+        }
+        self.apu_quiet = self.apu.fast_quiet_cycles();
         self.poll_dmc_dma();
     }
 

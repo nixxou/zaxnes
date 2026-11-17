@@ -131,6 +131,28 @@ impl PulseChannel {
         self.timer -= clocks as i32;
     }
 
+    /// Whether the channel outputs 0 whatever its sequencer does, until a register write or a
+    /// frame-counter clock (lot FAST-1): its timer may then run without being stepped.
+    pub fn silent(&self) -> bool {
+        self.muted() || !self.length.active() || self.envelope.volume() == 0
+    }
+
+    /// `clocks` timer clocks of a [`Self::silent`] channel in one go: the same timer and
+    /// sequencer position as that many [`Self::clock_timer`] calls (lot FAST-1).
+    #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)] // At most a frame's clocks.
+    pub fn advance_silent(&mut self, clocks: u32) {
+        let clocks = clocks as i32;
+        if self.timer < 0 || clocks <= self.timer {
+            self.timer -= clocks;
+            return;
+        }
+        let rest = clocks - (self.timer + 1);
+        let period = self.timer_period + 1;
+        let reloads = 1 + rest / period;
+        self.timer = self.timer_period - rest % period;
+        self.sequence_position = (self.sequence_position + reloads as usize) & 7;
+    }
+
     /// Clocks the timer; called every other CPU cycle.
     /// Clocks the timer; `true` when the sequencer moved (the output may have changed).
     pub fn clock_timer(&mut self) -> bool {

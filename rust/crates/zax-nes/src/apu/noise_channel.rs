@@ -131,6 +131,32 @@ impl NoiseChannel {
         self.timer -= clocks as i32;
     }
 
+    /// Whether the channel outputs 0 whatever its shift register does, until a register write or
+    /// a frame-counter clock (lot FAST-1).
+    pub const fn silent(&self) -> bool {
+        !self.length.active() || self.envelope.volume() == 0
+    }
+
+    /// `clocks` timer clocks of a [`Self::silent`] channel in one go: the same timer and shift
+    /// register as that many [`Self::clock_timer`] calls (lot FAST-1).
+    #[allow(clippy::cast_possible_wrap)] // At most a frame's clocks.
+    pub fn advance_silent(&mut self, clocks: u32) {
+        let clocks = clocks as i32;
+        if self.timer < 0 || clocks <= self.timer {
+            self.timer -= clocks;
+            return;
+        }
+        let rest = clocks - (self.timer + 1);
+        let period = self.periods[self.period_index];
+        let reloads = 1 + rest / period;
+        self.timer = period - 1 - rest % period;
+        let tap = if self.short_mode { 6 } else { 1 };
+        for _ in 0..reloads {
+            let feedback = (self.shift_register ^ (self.shift_register >> tap)) & 1;
+            self.shift_register = (self.shift_register >> 1) | (feedback << 14);
+        }
+    }
+
     /// Clocks the timer; called every CPU cycle.
     /// Clocks the timer; `true` when the shift register moved (the output may have changed).
     pub fn clock_timer(&mut self) -> bool {
