@@ -2425,6 +2425,11 @@ impl Ppu2C02 {
                 self.suppress_vblank = false;
                 self.begin_rendered_frame();
                 self.after_reset = false;
+            } else if K::WATCHES_BUS
+                && self.scanline == VISIBLE_SCANLINES
+                && self.rendering_enabled()
+            {
+                self.post_render_bus(cart);
             }
 
             // The sprite captures of SPEC-02 §3.5 run on the first dot of the visible line
@@ -3985,6 +3990,24 @@ impl Ppu2C02 {
         if let Some(cartridge) = cart.as_deref_mut() {
             cartridge.on_ppu_address_bus_as::<K>(address, self.ppu_clock);
         }
+    }
+
+    /// The post-render line's first two dots on the bus, raised from dot 1 (the branch every
+    /// line already takes there) with dot 0's own clock for the first. 2C02 netlist
+    /// (`benchpins`, `g2000` e4): dot 0 of line 240 gives an ALE with the coming low-plane
+    /// pattern address (`1000`, /RD high), like every dot 0 after a fetching line; from dot 1
+    /// the pins show `v` (`0802`) and hold it through vblank until the pre-render line's first
+    /// fetch. Address lines only, so only an A12 watcher sees them.
+    #[cold]
+    #[inline(never)]
+    fn post_render_bus<K: BoardKind>(&self, cart: Cart<'_, '_, K>) {
+        let pattern = self.pattern_address(0);
+        if let Some(cartridge) = cart.as_deref_mut() {
+            cartridge.on_ppu_address_bus_without_read_as::<K>(pattern, self.ppu_clock - 1);
+            cartridge.on_ppu_address_bus_without_read_as::<K>(self.v & 0x3FFF, self.ppu_clock);
+        }
+        #[cfg(feature = "ppu-dot-trace")]
+        self.dot_trace_bus.set(self.v & 0x3FFF);
     }
 
     /// A read whose byte nothing uses — the sprite phase's garbage nametable fetches — put on

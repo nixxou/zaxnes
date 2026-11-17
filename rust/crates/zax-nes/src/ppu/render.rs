@@ -284,10 +284,10 @@ impl Ppu2C02 {
             // CHR address that is later used to fetch the low background tile byte"; the 2C02
             // netlist shows it on dot 0 of every line after a fetching one, `1002` on line 10 of
             // `g2000`). Address lines only, as nothing says /RD falls. The pre-render line follows
-            // no fetch and shows nothing; line 240's is not modelled (no line of this core
-            // renders there).
+            // no fetch and shows nothing; line 240's is `Ppu2C02::post_render_bus`, no line of
+            // this core renders there.
             0 => {
-                if VISIBLE {
+                if VISIBLE && (K::WATCHES_BUS || cfg!(feature = "ppu-dot-trace")) {
                     self.notify_address_bus_without_read(self.pattern_address(0), cart);
                 }
             }
@@ -873,7 +873,9 @@ impl Ppu2C02 {
         let slot = (((dot - 257) >> 3) & 0x07) as usize;
         let step = (dot - 257) & 0x07;
 
-        if step == 2 || (step == 0 && dot != 257) {
+        if (K::WATCHES_BUS || cfg!(feature = "ppu-dot-trace"))
+            && (step == 2 || (step == 0 && dot != 257))
+        {
             // Each sprite slot opens with two garbage nametable fetches of the current `v`
             // (nesdev, "PPU rendering"; the 2C02 netlist puts `0x2000 | v` on the bus on dots
             // 257 + 8k and 259 + 8k, both nametable addresses where Mesen reads an attribute on
