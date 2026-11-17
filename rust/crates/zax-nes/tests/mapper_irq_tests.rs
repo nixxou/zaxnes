@@ -423,6 +423,28 @@ fn mr_4_3_the_mc_acc_clocks_once_per_eight_a12_falls() {
     assert!(irq(&core), "the ninth fall must clock the counter again");
 }
 
+/// The MC-ACC's ÷8 counts **lines** while rendering, because a line holds eight A12 falls: with
+/// the background at $0000 and the sprites at $1000, each sprite slot's pattern fetches raise
+/// A12 and the next slot's two garbage nametable fetches drop it — seven falls inside the sprite
+/// phase and the eighth on dot 321 (the 2C02 netlist's bus; Mesen reads there too). Without
+/// those fetches A12 stayed high through the sprite phase and the counter ran eight times slow.
+#[test]
+fn mr_4_3_the_mc_acc_counts_one_line_per_eight_falls_while_rendering() {
+    let mut core = MapperRom::new(4).chr(32).submapper(3).load();
+    enable_scanline_counting(&mut core);
+    core.mapper_write(0xC000, 20);
+    core.mapper_write(0xC001, 0x00);
+    core.mapper_write(0xE001, 0x00);
+    assert!(tick_until_irq(&mut core, 200_000) > 0);
+    core.mapper_write(0xE000, 0x00);
+    core.mapper_write(0xE001, 0x00);
+    let period = tick_until_irq(&mut core, 200_000);
+    assert!(
+        (20 * 341 / 3..=22 * 341 / 3).contains(&period),
+        "period {period}"
+    );
+}
+
 /// And a plain mapper-4 image — no submapper, or any submapper but 3 — is an MMC3: one filtered
 /// A12 **rise** clocks it, so the very first toggle fires.
 #[test]

@@ -2943,10 +2943,14 @@ impl Ppu2C02 {
                 }
                 _ => {}
             }
-        } else if self.fetching() && matches!(next, 337 | 339) {
-            // The two dummy nametable fetches of the line's end take the new address the same
-            // way (bus comparison, `g2006w`/`g2006x` e4: writes on 333 and 335 show on 337 and
-            // 339). Their bytes feed no tile — dot 1 reads the next line's — so only `v` moves.
+        } else if self.fetching()
+            && (matches!(next, 337 | 339)
+                || ((257..=320).contains(&next) && matches!((next - 257) & 0x07, 0 | 2)))
+        {
+            // The dummy nametable fetches of the line's end and the sprite phase's garbage ones
+            // take the new address the same way (bus comparison, `g2006w`/`g2006x` e4: writes on
+            // 333 and 335 show on 337 and 339, one on 269 on 273). Their bytes feed no tile — dot
+            // 1 reads the next line's — so only `v` moves.
             self.v = self.t;
         }
         self.run_dots(1, cart);
@@ -3981,6 +3985,14 @@ impl Ppu2C02 {
         if let Some(cartridge) = cart.as_deref_mut() {
             cartridge.on_ppu_address_bus_as::<K>(address, self.ppu_clock);
         }
+    }
+
+    /// A read whose byte nothing uses — the sprite phase's garbage nametable fetches — put on
+    /// the bus for the trace and the boards that watch it, without reading the memory.
+    pub(super) fn notify_discarded_read<K: BoardKind>(&self, address: u16, cart: Cart<'_, '_, K>) {
+        #[cfg(feature = "ppu-dot-trace")]
+        self.dot_trace_bus.set(address);
+        self.notify_address_bus(address, cart);
     }
 
     /// The counterpart for the address lines moving with **/RD high**: a `$2007` write, or a

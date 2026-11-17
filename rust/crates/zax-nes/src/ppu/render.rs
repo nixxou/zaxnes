@@ -279,6 +279,18 @@ impl Ppu2C02 {
         cart: Cart<'_, '_, K>,
     ) {
         match dot {
+            // The idle dot puts the pattern address of the coming low-plane fetch on the bus —
+            // the tile of dot 339's read, the line's fine Y (nesdev, "PPU rendering": "the same
+            // CHR address that is later used to fetch the low background tile byte"; the 2C02
+            // netlist shows it on dot 0 of every line after a fetching one, `1002` on line 10 of
+            // `g2000`). Address lines only, as nothing says /RD falls. The pre-render line follows
+            // no fetch and shows nothing; line 240's is not modelled (no line of this core
+            // renders there).
+            0 => {
+                if VISIBLE {
+                    self.notify_address_bus_without_read(self.pattern_address(0), cart);
+                }
+            }
             1..=256 => {
                 if dot == 1 {
                     // The nametable byte of the line's third tile, read on the dot its fetch
@@ -860,6 +872,17 @@ impl Ppu2C02 {
         #[allow(clippy::cast_sign_loss)] // dot is 257..=320 here, so the slot is 0..=7.
         let slot = (((dot - 257) >> 3) & 0x07) as usize;
         let step = (dot - 257) & 0x07;
+
+        if step == 2 || (step == 0 && dot != 257) {
+            // Each sprite slot opens with two garbage nametable fetches of the current `v`
+            // (nesdev, "PPU rendering"; the 2C02 netlist puts `0x2000 | v` on the bus on dots
+            // 257 + 8k and 259 + 8k, both nametable addresses where Mesen reads an attribute on
+            // the second). Dot 257's is the background fetch's own. Their low A12 between the
+            // sprite pattern fetches is what gives an A12 watcher one edge per slot — the eight
+            // falls a line the MC-ACC's ÷8 prescaler divides — and the MMC5 sees them too.
+            self.notify_discarded_read(0x2000 | (self.v & 0x0FFF), cart);
+            return;
+        }
 
         if step == 3 || step == 5 {
             // The address of the coming fetch is already on the bus, /RD still high (see

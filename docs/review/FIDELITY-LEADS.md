@@ -1330,6 +1330,25 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   netlist loads `v` in the middle of W+3 and W+4's ALE already carries the new address, where
   Zaxnes fetches W+4 with the old one (`211 netlist bus=2BF0 | zaxnes bus=2BEF`), invisible
   to `dotcmp.py` (`v`/`t` only); to measure with a dedicated program.
+- I4 (2026-11-17) **Sprite phase and idle dot of the PPU bus**. **Fixed**: each sprite slot's
+  two garbage nametable fetches (ALE 257 + 8k and 259 + 8k, both `0x2000 | v` in the 2C02
+  netlist; Mesen reads an attribute address on the second, the netlist does not) are now put
+  on the bus (`notify_discarded_read`, no memory read: the byte is discarded), and a `$2006`
+  load landing on one of them reaches it (W+4, write on 269 seen on 273). The idle dot 0 of
+  lines 1-239 (and of line 0 when not skipped) shows the coming low-plane pattern address, as
+  nesdev describes and the netlist shows (`1002` on `g2000` line 10), address lines only.
+  Bus comparison (`g2000`, `g2005px`, `g2006x`, `g2006w` e4): every dot 0 and every
+  garbage fetch now matches; the sprite pattern addresses still differ only because these
+  programs leave OAM uninitialised and the netlist's power-on OAM differs. **Consequences**: an
+  A12 watcher now sees A12 fall between sprite slots, which is what the Acclaim MC-ACC's ÷8
+  prescaler divides — it counted one line in eight before, now one per line (test
+  `mr_4_3_the_mc_acc_counts_one_line_per_eight_falls_while_rendering`); with 8x16 sprites
+  mixing both tables an MMC3's low run between two high slots can now reach the filter, as on
+  the hardware. `Mmc5Ext`'s line-start test counts pattern fetches since the last
+  **attribute** fetch (threshold 18: the line's last group's two plus the sixteen sprite
+  fetches), since the garbage fetches are nametable reads whose address the pre-render line's
+  vertical copy changes mid-phase. **Left**: line 240's dot 0 (no rendering line of this core
+  there; what the idle bus shows during vblank is not modelled either).
 - I3 (2026-11-17) **Line end of the PPU bus, and the MMC5's first detected line (Q-121)**.
   **Fixed**: the nametable reads of a line's end are dots 337 and 339 and the next line's dot 1
   (nesdev, MMC5: "two matching dummy nametable byte reads at the end of each scanline, followed

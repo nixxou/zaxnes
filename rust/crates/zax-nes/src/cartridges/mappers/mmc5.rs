@@ -955,16 +955,17 @@ pub struct Mmc5Ext {
     /// is column 0. Not in the savestate, for the reason `Mmc5::nt_read_counter` is not: a line
     /// re-derives it.
     split_column: u8,
-    /// Pattern fetches ($0000-$1FFF) seen since the last nametable-space read, capped at
+    /// Pattern fetches ($0000-$1FFF) seen since the last **attribute** fetch, capped at
     /// [`Mmc5Ext::CHR_READS_BEFORE_ROW_START`]: how the board finds, **on its own bus**, the dot
     /// where the PPU begins a line's fetch sequence.
     ///
     /// Inside a tile group the PPU reads the nametable byte, the attribute byte and the two
-    /// pattern planes, so exactly **two** pattern fetches separate one nametable-space read from
-    /// the next. Between the last nametable fetch of a line and the first of the next line's
-    /// prefetch lie the **sixteen** sprite pattern fetches of dots 257-320. So a nametable fetch
-    /// that follows four or more pattern fetches is the first of a line's sequence, and nothing
-    /// else is.
+    /// pattern planes, so the count never passes **two** while the background is fetched. The
+    /// sprite phase reads no attribute: each slot reads the nametable twice (`0x2000 | v`, which
+    /// the pre-render line's vertical copy changes halfway through, so their address is no
+    /// guide) and its two pattern planes. The line's last group's two and the **sixteen**
+    /// sprite pattern fetches of dots 257-320 make eighteen on the next line's first fetch, on
+    /// 321, and that nametable fetch is the only one that follows eighteen.
     ///
     /// Counting it here rather than taking a hook from the PPU is not a stylistic choice: a
     /// `dot == 321` test inside `Ppu2C02::run_rendering_dot` moved **+5.4 M to +13.6 M
@@ -1000,12 +1001,12 @@ const _: () = assert!(std::mem::offset_of!(Mmc5Ext, base) == 0);
 
 #[cfg(feature = "board-mmc5-exattr-split")]
 impl Mmc5Ext {
-    /// Pattern fetches that must precede a nametable fetch for it to be the first of a line's
-    /// fetch sequence: two separate the nametable-space reads of one tile group, and sixteen
-    /// (eight sprites, two planes) separate the last group of a line from the first of the next
-    /// line's prefetch. Four is the midpoint and any value from three to sixteen gives the same
-    /// answer. See [`Mmc5Ext::chr_reads_since_nt`].
-    const CHR_READS_BEFORE_ROW_START: u8 = 4;
+    /// Pattern fetches since the last attribute fetch that a nametable fetch must follow to be
+    /// the first of a line's fetch sequence: a tile group holds two, and the line's last group
+    /// (attribute on 251, patterns on 253 and 255) plus the **sixteen** sprite pattern fetches
+    /// make eighteen on dot 321. Dot 313's garbage nametable fetch follows sixteen, so only
+    /// eighteen finds 321. See [`Mmc5Ext::chr_reads_since_nt`].
+    const CHR_READS_BEFORE_ROW_START: u8 = 18;
 
     // --------------------------------------------------------------- the run-time switch
 
@@ -1287,7 +1288,9 @@ impl Mmc5Ext {
                     }
                 }
 
-                self.chr_reads_since_nt = 0;
+                if !nametable_fetch {
+                    self.chr_reads_since_nt = 0;
+                }
             }
         }
 
