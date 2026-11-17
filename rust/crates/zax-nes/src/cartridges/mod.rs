@@ -2095,6 +2095,16 @@ impl Cartridge {
         self.step_cpu_cycle_as::<AnyBoard>();
     }
 
+    pub fn step_cpu_cycles_as<K: BoardKind>(&mut self, cycles: u32) {
+        self.memory.cpu_cycle += i64::from(cycles);
+        if self.clocks_on_cpu_cycle {
+            for _ in 0..cycles {
+                K::board_mut(&mut self.board).on_cpu_cycle(&mut self.memory);
+            }
+        }
+    }
+
+    /// One CPU cycle, as [`Self::step_cpu_cycles_as`] with 1.
     pub fn step_cpu_cycle_as<K: BoardKind>(&mut self) {
         self.memory.cpu_cycle += 1;
         if self.clocks_on_cpu_cycle {

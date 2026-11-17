@@ -21,3 +21,4 @@ Design: `docs/design/FAST-CORE.md`.
 * 2026-11-17: step 2b (sprite evaluation per sprite, table colours): smb1 0.635 -> 0.470, mm2 0.699 -> 0.497, metroid 0.750 -> 0.520 ms/frame; golden identical.
 * 2026-11-17: step 2c (sprite fetches and prefetch without the per-dot dispatch): smb1 0.649 -> 0.407, mm2 0.712 -> 0.444, metroid 0.763 -> 0.463; golden in play identical (1800 frames, input script).
 * 2026-11-17: step 2d (runs of off-line sprites in one loop): smb1 0.396, mm2 0.425, metroid 0.440 ms/frame; identical. One golden-core segfault (fast run, 77th ROM) did not reproduce in three runs nor ROM by ROM: watch it.
+* 2026-11-17: step 1a (FastBus, lazy tick, exact): smb1 0.640 -> 0.338, mm2 0.725 -> 0.355, metroid 0.770 -> 0.395 ms/frame (about 2x the standard core); golden in play identical.

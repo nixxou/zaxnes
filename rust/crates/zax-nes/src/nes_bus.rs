@@ -185,6 +185,10 @@ pub struct NesBus {
     /// line, so a board without expansion audio pays exactly what it paid before AMD-054
     /// (see [`NesBus::catch_up_apu`]).
     apu_batching: bool,
+    /// Lot FAST-1: CPU cycles [`FastBus`] has counted and not yet handed to the machine.
+    fast_pending: u32,
+    /// Lot FAST-1: cycles [`FastBus`] may count before the next flush.
+    fast_left: i64,
     /// Whether the instruction being run was fetched from the extension's execution zone: its
     /// data accesses at `$3000`-`$3FFF` reach the extension when the zone holds its data there
     /// (`WideExtension::zone_data`), the game's still reach the PPU.
@@ -247,6 +251,8 @@ impl NesBus {
             #[cfg(any(feature = "board-256", feature = "board-436"))]
             vt_bus: false,
             apu_batching: false,
+            fast_pending: 0,
+            fast_left: 1,
             apu_quiet: 0,
             zone_instruction: false,
         }
@@ -2248,5 +2254,188 @@ impl NesBus {
         self.ppu_lag = 0;
         self.ppu_deadline = 0;
         Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------------------- fast
+
+/// Lot FAST-1 (`docs/design/FAST-CORE.md`): the bus lent to the CPU by the fast core's frame loop.
+///
+/// # A lazy tick, the same machine
+///
+/// [`NesBus::tick`] does five things on every cycle: the widescreen stall test, the cycle count,
+/// the PPU's lag and deadline, the cartridge's cycle counter (and cycle hook), the APU's lag and
+/// quiet stretch. Between two deadlines none of them does anything but count. This bus counts the
+/// cycles of RAM and plain PRG-ROM accesses in [`NesBus::fast_pending`] and hands them all to the
+/// machine at once ([`NesBus::flush_fast_as`]) on the cycle a deadline falls on — the very cycle
+/// on which `tick` would have caught the PPU or the APU up — and before every other access, which
+/// then runs through the standard path. Nothing outside the counters can look at the machine
+/// between two flushes: the CPU only reads the NMI and IRQ lines, and those only change at a
+/// PPU or APU catch-up, which a flush does on its cycle. So the frames, the sound and the state
+/// are the standard core's.
+pub struct FastBus<'a, K> {
+    bus: &'a mut NesBus,
+    kind: std::marker::PhantomData<K>,
+}
+
+impl<'a, K: BoardKind> FastBus<'a, K> {
+    /// Lends `bus` to the CPU for the fast core's frame loop.
+    pub fn new(bus: &'a mut NesBus) -> Self {
+        Self {
+            bus,
+            kind: std::marker::PhantomData,
+        }
+    }
+}
+
+impl NesBus {
+    /// Cycles from now to the next one on which a flush must run: a PPU deadline or the end of
+    /// the APU's quiet stretch, 1 when every cycle must be ticked (a stall, a DMA, the PPU or the
+    /// APU not batched).
+    fn fast_horizon(&self) -> i64 {
+        if !self.deferred_ppu
+            || !self.apu_batching
+            || self.dma != 0
+            || self.ppu.wide().has_stall_cycles()
+        {
+            return 1;
+        }
+        (self.ppu_deadline - self.cycles)
+            .min(i64::from(self.apu_quiet) - i64::from(self.apu_lag) + 1)
+            .max(1)
+    }
+
+    /// Hands the counted cycles to the machine, as as many [`NesBus::tick_as`] would: at most
+    /// [`NesBus::fast_horizon`] of them, so that a catch-up can only fall on the last.
+    pub(crate) fn flush_fast_as<K: BoardKind>(&mut self) {
+        let pending = self.fast_pending;
+        if pending > 0 {
+            self.fast_pending = 0;
+            if self.ppu.wide().has_stall_cycles() {
+                for _ in 0..pending {
+                    self.tick_as::<K>();
+                }
+            } else {
+                self.cycles += i64::from(pending);
+                self.ppu_lag += pending;
+                if self.cycles >= self.ppu_deadline {
+                    self.catch_up_ppu_as::<K>();
+                }
+                if let Some(cartridge) = self.cartridge.as_mut() {
+                    cartridge.step_cpu_cycles_as::<K>(pending);
+                }
+                self.apu_lag += pending;
+                if self.apu_lag > self.apu_quiet {
+                    self.catch_up_apu_fast();
+                }
+            }
+        }
+        self.fast_left = self.fast_horizon();
+    }
+
+    /// One counted cycle, flushed when a deadline falls on it.
+    #[allow(clippy::inline_always)] // Once per CPU cycle on the fast path.
+    #[inline(always)]
+    fn fast_cycle_as<K: BoardKind>(&mut self) {
+        self.fast_pending += 1;
+        self.fast_left -= 1;
+        if self.fast_left <= 0 {
+            self.flush_fast_as::<K>();
+        }
+    }
+}
+
+impl<K: BoardKind> CpuBus for FastBus<'_, K> {
+    #[allow(clippy::inline_always)] // The CPU's every read cycle.
+    #[inline(always)]
+    fn read(&mut self, address: u16) -> u8 {
+        let bus = &mut *self.bus;
+        if address < 0x2000 {
+            bus.fast_cycle_as::<K>();
+            let value = if bus.dma == 0 {
+                bus.ram[usize::from(address) & (RAM_SIZE - 1)]
+            } else {
+                let value = bus.halted_read_cycle_as::<K>(address);
+                bus.fast_left = bus.fast_horizon();
+                value
+            };
+            bus.data_bus = value;
+            return value;
+        }
+        if address >= 0x8000 && bus.dma == 0 {
+            if let Some(value) = bus
+                .cartridge
+                .as_ref()
+                .and_then(|cartridge| cartridge.read_rom_window(address))
+            {
+                bus.fast_cycle_as::<K>();
+                if bus.dma == 0 {
+                    bus.data_bus = value;
+                    return value;
+                }
+                // The flush of this very cycle raised a DMA request: the cycle is its halt.
+                let value = bus.halted_read_cycle_as::<K>(address);
+                bus.fast_left = bus.fast_horizon();
+                bus.data_bus = value;
+                return value;
+            }
+        }
+        bus.flush_fast_as::<K>();
+        let value = bus.cpu_read_as::<K>(address);
+        bus.fast_left = bus.fast_horizon();
+        value
+    }
+
+    #[allow(clippy::inline_always)] // The CPU's every opcode and operand fetch.
+    #[inline(always)]
+    fn read_code(&mut self, address: u16) -> u8 {
+        if (0x2000..0x4000).contains(&address) {
+            let bus = &mut *self.bus;
+            bus.flush_fast_as::<K>();
+            let value = bus.cpu_read_code_as::<K>(address);
+            bus.fast_left = bus.fast_horizon();
+            return value;
+        }
+        self.bus.zone_instruction = false;
+        self.read(address)
+    }
+
+    #[allow(clippy::inline_always)] // The CPU's every write cycle.
+    #[inline(always)]
+    fn write(&mut self, address: u16, value: u8) {
+        let bus = &mut *self.bus;
+        if address < 0x2000 {
+            bus.fast_cycle_as::<K>();
+            bus.data_bus = value;
+            bus.ram[usize::from(address) & (RAM_SIZE - 1)] = value;
+            return;
+        }
+        bus.flush_fast_as::<K>();
+        bus.cpu_write_as::<K>(address, value);
+        bus.fast_left = bus.fast_horizon();
+    }
+
+    fn peek(&self, address: u16) -> u8 {
+        self.bus.cpu_peek(address)
+    }
+
+    #[allow(clippy::inline_always)] // Sampled once per CPU cycle.
+    #[inline(always)]
+    fn nmi_asserted(&self) -> bool {
+        self.bus.ppu.nmi_line_sample()
+    }
+
+    #[allow(clippy::inline_always)] // Sampled once per CPU cycle.
+    #[inline(always)]
+    fn irq_asserted(&self) -> bool {
+        self.bus.cpu_irq_asserted_as::<K>()
+    }
+
+    fn cycle_count(&self) -> i64 {
+        self.bus.cycles + i64::from(self.bus.fast_pending)
+    }
+
+    fn dma_gave_back_at(&self) -> i64 {
+        self.bus.dma_gave_back
     }
 }

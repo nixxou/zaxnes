@@ -729,6 +729,12 @@ impl WideExtension {
     /// Takes one CPU cycle of the overclock: true when the machine must stay still for it (the
     /// CPU alone runs it).
     #[inline]
+    /// Whether overclock cycles are owed (lot FAST-1: the fast bus then ticks every cycle).
+    #[must_use]
+    pub const fn has_stall_cycles(&self) -> bool {
+        self.stall != 0
+    }
+
     pub fn take_stall_cycle(&mut self) -> bool {
         if self.stall == 0 {
             return false;

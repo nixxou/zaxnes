@@ -1681,7 +1681,7 @@ impl NesCore {
         loop {
             let done = match self.bus.cartridge() {
                 Some(cartridge) => with_fast_board_kind!(cartridge.board(), K => {
-                    self.run_frame_steps::<K>(idle_loop)
+                    self.run_fast_frame_steps::<K>(idle_loop)
                 }, self.run_frame_steps::<AnyBoard>(idle_loop)),
                 None => true,
             };
@@ -1691,6 +1691,26 @@ impl NesCore {
         }
         self.bus.end_deferred_ppu();
         true
+    }
+
+    /// [`NesCore::run_frame_steps`] for the fast core: the CPU steps a [`FastBus`], whose counted
+    /// cycles are handed to the machine before the frame's loop looks at it.
+    fn run_fast_frame_steps<K: BoardKind>(&mut self, idle_loop: Option<(u16, u16)>) -> bool {
+        self.bus.flush_fast_as::<K>();
+        loop {
+            self.cpu.step(&mut crate::nes_bus::FastBus::<K>::new(&mut self.bus));
+            if let Some((first, last)) = idle_loop {
+                if (first..=last).contains(&self.cpu.pc) && self.bus.ppu().wide().stalling() {
+                    self.bus.flush_fast_as::<K>();
+                    self.bus.ppu_mut().wide_mut().end_stall();
+                    self.bus.flush_fast_as::<K>();
+                }
+            }
+            if self.bus.ppu().vblank_just_started() {
+                self.bus.flush_fast_as::<K>();
+                return true;
+            }
+        }
     }
 
     /// Whether the Fidélité+ loop runs the frames.
