@@ -1247,6 +1247,17 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   DMC output timer at 431 with 8 bits left, as the CPU differential aligns them. Test
   `fidplus_cpu_apu_parity_tests` (an OAM DMA started on the same cycle takes one cycle more or
   less). Whether a console fixes it or draws it stays open; the choice covers both.
+- 2026-11-17, fidelity audit (`ext-tools/fidelity-audit`, gap 6): on the audit's bench (the
+  "hold" variant of the netlist bench, reset released at power-on with no extra hold) the 2A03
+  netlist aligns with Zaxnes at **DMC timer 1014, 8 bits, the default parity** (`dmcdma`,
+  `cpuflow`, `apuL5`/`apuL4`/`apuF`/`apuG`: zero gap); the option's 431 + flipped parity puts the
+  DMAs 156 to 166 cycles early there. Both are the netlist, from all-zero nodes: the difference is
+  the time from power-on to the reset's release, which sets where the DMC timer and the get / put
+  parity stand at the first opcode. So the netlist has no single power-on phase; a console's comes
+  from its reset circuit (RC, CIC) and is not one value either. Not changed: the option keeps the
+  CPU differential's pair, documented as one bench's. Lead (Fidélité+): the `Random` choice could
+  draw the parity and the DMC timer over its whole range rather than between two pairs — no
+  hardware reference picks a distribution.
 
 ### G6. Open-bus bits of a controller read just after a DMC fetch — open (2026-11-15)
 
