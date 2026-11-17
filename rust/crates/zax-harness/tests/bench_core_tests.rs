@@ -109,7 +109,7 @@ fn a_bad_count_or_an_unknown_option_is_a_usage_error() {
         Err(HarnessError::Usage(_))
     ));
     assert!(matches!(
-        Options::parse(&arguments(&["--fast"])),
+        Options::parse(&arguments(&["--fastest"])),
         Err(HarnessError::Usage(_))
     ));
     assert!(matches!(Options::parse(&[]), Err(HarnessError::Usage(_))));

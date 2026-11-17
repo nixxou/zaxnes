@@ -37,6 +37,7 @@ impl Apu2A03 {
 
     /// [`Self::quiet_cycles`] with the silent channels left out.
     #[allow(clippy::float_cmp, clippy::cast_sign_loss)] // Exact level; positive counts.
+    #[must_use]
     pub fn fast_quiet_cycles(&self) -> u32 {
         if self.frame_irq_pending || self.level_dirty || self.resampler.level() != self.level {
             return 0;

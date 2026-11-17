@@ -115,6 +115,7 @@ impl Ppu2C02 {
     }
 
     /// `groups` whole groups of eight dots of a visible line, from a phase-0 dot.
+    #[allow(clippy::too_many_lines)] // One loop over the groups, its locals shared.
     fn run_span_groups<K: BoardKind>(
         &mut self,
         groups: i64,
@@ -330,14 +331,14 @@ impl Ppu2C02 {
                 && self.eval_byte == 0
                 && !self.sprite_in_range
                 && self.secondary_oam_addr < 32
-                && self.secondary_oam_addr & 3 == 0
+                && self.secondary_oam_addr.trailing_zeros() >= 2
             {
                 #[allow(clippy::cast_sign_loss)] // 0..64.
                 let sprite = self.eval_sprite as usize;
                 let y = self.oam[sprite * 4];
                 #[allow(clippy::cast_sign_loss)] // 0..32.
                 let slot = self.secondary_oam_addr as usize;
-                if !(self.in_sprite_range(y) && !self.sprite_in_margin()) {
+                if !self.in_sprite_range(y) || self.sprite_in_margin() {
                     // A run of sprites not on the line, one pair each: each writes its Y over the
                     // same slot and moves on; the run stops before a sprite in range, at the end
                     // of OAM or of the range.
