@@ -131,7 +131,24 @@ pub fn golden_row(rel: &str, image: &[u8], frames: u32) -> Result<Value, Harness
             ),
         });
     }
+    // Lot FAST-1: `ZAXNES_GOLDEN_WIDE=<pixels>` offers a widescreen margin on each side (and
+    // `ZAXNES_GOLDEN_WIDE_Y` above and below), `ZAXNES_GOLDEN_ADVANCED=1` the advanced built-in
+    // patches, so that the cores can be compared with the widescreen extension at work.
+    let env_number = |key: &str| {
+        std::env::var(key)
+            .ok()
+            .and_then(|value| value.trim().parse::<i32>().ok())
+    };
+    if std::env::var("ZAXNES_GOLDEN_ADVANCED").is_ok_and(|value| value != "0") {
+        core.set_advanced_patches(true);
+    }
     let load = core.load_rom(image, &name);
+    if let Some(margin) = env_number("ZAXNES_GOLDEN_WIDE") {
+        core.set_widescreen_margin(margin);
+    }
+    if let Some(margin) = env_number("ZAXNES_GOLDEN_WIDE_Y") {
+        core.set_widescreen_vertical_margin(margin);
+    }
     row.insert("load_ok".into(), json!(load.success));
     if !load.success {
         row.insert("load_failure".into(), json!(format!("{:?}", load.failure)));

@@ -31,3 +31,4 @@ Design: `docs/design/FAST-CORE.md`.
   still exact. Also fixed: `movie_sync.rs` did not build with `fceux-core` since PalM/PalN.
 * 2026-11-17: step 2e (capture's pattern planes in one CHR view read): smb1 0.236, mm2 0.252, metroid 0.343, smb3 0.431 ms/frame (bench-core 2D); identical.
 * 2026-11-17: step 2f (groups decode one tile, 64-bit window, plane pair read): smb1 0.221, mm2 0.253, metroid 0.335, smb3 0.411 ms/frame; identical.
+* 2026-11-17: widescreen check (golden-core ZAXNES_GOLDEN_WIDE=64, ADVANCED=1, play script): fast == standard on 98/98 (the extension is active: 97/98 tile hashes differ from the narrow run). check.sh WIDE=1 runs it.
