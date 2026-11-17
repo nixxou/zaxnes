@@ -4,7 +4,6 @@
 use super::{EmulationHost, GameView};
 use crate::emulation::game_catalog::GameCatalog;
 use crate::persistence::app_settings::AppSettings;
-use crate::persistence::game_art;
 use crate::persistence::save_slots;
 
 /// The question asked before a game is deleted.
@@ -23,8 +22,6 @@ pub fn delete_slot_question(slot_id: &str) -> String {
 /// What a confirmation does once the user agrees.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfirmedAction {
-    /// Delete the game with this identifier.
-    DeleteGame(String),
     /// Delete the slot with this identifier.
     DeleteSlot(String),
     /// Load the slot with the components of the built-in hack set now.
@@ -121,9 +118,6 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
 
     fn perform(&mut self, action: ConfirmedAction) {
         match action {
-            ConfirmedAction::DeleteGame(game_id) => {
-                self.delete_game(&game_id);
-            }
             ConfirmedAction::DeleteSlot(slot_id) => self.delete_slot(&slot_id),
             ConfirmedAction::LoadSlotAsSet(slot_id) => self.load_slot_checked(&slot_id, false),
             ConfirmedAction::LoadSlotAligned(slot_id) => self.load_slot_aligned(&slot_id),
@@ -167,136 +161,6 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             alternative: None,
             action: ConfirmedAction::Acknowledge,
         });
-    }
-
-    /// Asks before deleting the game; returns false when it cannot be deleted now.
-    pub fn request_delete_game(&mut self, game_id: &str) -> bool {
-        if game_id.is_empty() || self.loading || !self.games.can_delete(game_id) {
-            return false;
-        }
-        let title = self
-            .games
-            .title(game_id)
-            .unwrap_or_else(|| game_id.to_owned());
-        self.confirm(ConfirmationRequest {
-            title,
-            message: DELETE_GAME_QUESTION.to_owned(),
-            confirm_label: YES_LABEL.to_owned(),
-            cancel_label: NO_LABEL.to_owned(),
-            alternative: None,
-            action: ConfirmedAction::DeleteGame(game_id.to_owned()),
-        })
-    }
-
-    /// Deletes a user game: the emulation stops when it is the one playing, its slots go, then
-    /// its profile file, its cover and its library entry (REQ-PERS-042).
-    pub fn delete_game(&mut self, game_id: &str) -> bool {
-        if game_id.is_empty() || !self.games.can_delete(game_id) {
-            return false;
-        }
-        // The title is read before the entry goes, so the notification can name the game.
-        let title = self
-            .games
-            .title(game_id)
-            .unwrap_or_else(|| game_id.to_owned());
-        // 1. The emulation stops when the game being deleted is the one playing.
-        if self.current_game_id() == Some(game_id) {
-            self.stop_current_game(true, true);
-        }
-        // 2. Every slot of that game, the quick slot included: its ROM's files, and those of the
-        // slots shared by every game before.
-        let rom = self.rom_file_name(game_id);
-        let index = save_slots::SaveSlotIndex::for_rom(&self.paths, &rom);
-        for slot in index.occupied_for(game_id) {
-            index.delete_files(&self.paths, &slot.id);
-        }
-        if self.slots.rom() == Some(rom.as_str()) {
-            self.slots = save_slots::SaveSlotIndex::new();
-        }
-        for slot in self.legacy_slots.occupied_for(game_id) {
-            self.legacy_slots.delete_files(&self.paths, &slot.id);
-            self.legacy_slots.vacate(&slot.id);
-        }
-        self.save_slot_index();
-        // 3 to 5. The profile file, the cover art and the library entry, then library.json.
-        if !self.games.delete_game(game_id) {
-            return false;
-        }
-        let message = self.deleted_message(&title);
-        self.notifications.show_normal(&message);
-        true
-    }
-
-    /// Stores a capture of the game as its cover (REQ-PERS-036); returns whether it did.
-    pub fn create_game_art(&mut self) -> bool {
-        let Some((id, fallback_title)) = self
-            .current_game
-            .as_ref()
-            .map(|game| (game.id.clone(), game.title.clone()))
-        else {
-            return false;
-        };
-        let Some(capture) = self.thumbnail_for_slot() else {
-            return false;
-        };
-        let title = self.games.title(&id).unwrap_or(fallback_title);
-        let stored = game_art::set_cover_from_capture(&self.paths, &title, &id, &capture);
-        self.store_cover(&id, stored, false)
-    }
-
-    /// Fits the PNG at `path` as the cover of the current game; returns whether it did.
-    pub fn import_cover(&mut self, path: &str) -> bool {
-        let Some(game) = self.current_game.as_ref() else {
-            return false;
-        };
-        if path.is_empty() {
-            return false;
-        }
-        let (id, fallback_title) = (game.id.clone(), game.title.clone());
-        let title = self.games.title(&id).unwrap_or(fallback_title);
-        let stored = Some(game_art::import_cover(
-            &self.paths,
-            &title,
-            &id,
-            std::path::Path::new(path),
-        ));
-        self.store_cover(&id, stored, false)
-    }
-
-    /// The cover of the "2D Mode" entry follows the pause capture every time the menu appears
-    /// (REQ-PERS-036, third source).
-    pub(super) fn refresh_two_dimensional_cover(&mut self) {
-        let Some(game) = self.current_game.as_ref().filter(|game| game.is_2d_mode) else {
-            return;
-        };
-        let Some(capture) = self.pause_thumbnail.as_deref() else {
-            return;
-        };
-        let (id, fallback_title) = (game.id.clone(), game.title.clone());
-        let title = self.games.title(&id).unwrap_or(fallback_title);
-        let stored = game_art::set_cover_from_capture(&self.paths, &title, &id, capture);
-        self.store_cover(&id, stored, true);
-    }
-
-    fn store_cover(
-        &mut self,
-        game_id: &str,
-        stored: Option<Result<String, String>>,
-        quiet: bool,
-    ) -> bool {
-        match stored {
-            Some(Ok(file_name)) => {
-                self.games.set_cover(game_id, Some(&file_name));
-                true
-            }
-            Some(Err(failure)) => {
-                if !quiet && !failure.is_empty() {
-                    self.notifications.show_error(&failure);
-                }
-                false
-            }
-            None => false,
-        }
     }
 
     /// Deletes the files of the slot and empties it in the index.

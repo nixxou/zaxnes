@@ -255,7 +255,6 @@ impl UserDataPaths {
             &self.saves_directory,
             &self.battery_directory,
             &self.profiles_directory,
-            &self.covers_directory,
             &self.logs_directory,
         ] {
             fs::create_dir_all(folder)?;

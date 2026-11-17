@@ -370,11 +370,6 @@ impl HandheldUi {
                 .iter()
                 .find(|(id, _)| *id == SettingId::VideoWidescreen)
                 .map_or(global_on, |(_, value)| value.as_int() != 0);
-            // AMD-053 REQ-UI-210: the mark of the library entry the game plays with.
-            entry.favorite = entry
-                .profile
-                .as_ref()
-                .is_some_and(|profile| host.is_favorite(&profile.id));
         }
         // REQ-LOOP-076: the Resume entry heads the enumeration of the games.
         if let Some(game) = host.resume_game_title() {
@@ -936,27 +931,6 @@ impl HandheldUi {
             // AMD-053 REQ-LOOP-076: the Resume row, which loads the resume point.
             RomListCommand::ResumeLast => {
                 host.enqueue(Command::ResumeLast, CommandArgs::default());
-            }
-            // REQ-UI-210: L2 marks the library entry the game plays with, and the marker of the
-            // row follows at once.
-            RomListCommand::ToggleFavorite(path) => {
-                let id = self
-                    .roms
-                    .entries()
-                    .iter()
-                    .find(|entry| entry.path == path)
-                    .and_then(|entry| entry.profile.as_ref())
-                    .map(|profile| profile.id.clone());
-                if let Some(favorite) = id.and_then(|id| host.toggle_favorite(&id)) {
-                    if let Some(entry) = self
-                        .roms
-                        .entries_mut()
-                        .iter_mut()
-                        .find(|entry| entry.path == path)
-                    {
-                        entry.favorite = favorite;
-                    }
-                }
             }
         }
     }

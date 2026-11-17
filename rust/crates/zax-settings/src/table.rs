@@ -1863,11 +1863,9 @@ fn interface(out: &mut Vec<SettingDescriptor>) {
         // AMD-053 §3 point 10: a third order, « Favorites first ». The value 2 is never written
         // into profile field 36 — 0 goes there instead — and a 2 read from a profile is ignored
         // like every value of user scope (REQ-PERS-005 point 2).
-        .with_domain(Domain::choice(vec![
-            opt(0, "A-Z"),
-            opt(1, "Recent"),
-            opt(2, "Favorites first"),
-        ]))
+        // Lot REWRITE-UI (owner, 2026-11-17): no favourites any more, so no third order; a 2
+        // saved before falls back to the default like any value out of the domain.
+        .with_domain(Domain::choice(vec![opt(0, "A-Z"), opt(1, "Recent")]))
         .with_lua("SortOption")
         .with_field("36")
         .with_label("Sort by"),

@@ -43,10 +43,6 @@ pub struct RomEntry {
     /// started): `widescreen_other` is the patch its profile or its name says, which may fit it
     /// or not ([W] in dark grey).
     pub widescreen_unstudied: bool,
-    /// Whether the library entry the game plays with is marked as a favourite (AMD-053
-    /// REQ-UI-210). The handheld list shows the marker and L2 toggles it: no text is typed, so
-    /// the function fits a gamepad-only screen.
-    pub favorite: bool,
     /// Whether this row is the `Resume` entry of AMD-053 REQ-LOOP-076 rather than a ROM file: it
     /// heads the list while the resume point stands, and its `name` is the title of its game.
     pub resume: bool,
@@ -69,7 +65,6 @@ impl RomEntry {
             widescreen_other: None,
             widescreen_forced: false,
             widescreen_unstudied: false,
-            favorite: false,
             resume: false,
         }
     }
@@ -124,8 +119,6 @@ pub enum RomListCommand {
     Achievements(PathBuf),
     /// Load the resume point (AMD-053 REQ-LOOP-076): the `Resume` row at the head of the list.
     ResumeLast,
-    /// Mark or unmark the selected game as a favourite (AMD-053 REQ-UI-210, L2).
-    ToggleFavorite(PathBuf),
 }
 
 /// The ROM files of `directory`, sorted by name without regard to case. A folder that cannot be
@@ -283,14 +276,6 @@ impl RomListModel {
                     .filter(|entry| !entry.resume)
                     .map(|entry| RomListCommand::ChooseProfile(entry.path.clone()));
             }
-            // REQ-UI-210: the one free button of the home screen marks a favourite — no text is
-            // typed, so the function fits a gamepad-only screen.
-            PadButton::L2 => {
-                return self
-                    .selected_entry()
-                    .filter(|entry| !entry.resume && entry.profile.is_some())
-                    .map(|entry| RomListCommand::ToggleFavorite(entry.path.clone()));
-            }
             PadButton::Y => return Some(RomListCommand::Options),
             // L1 the widescreen, R1 the hacks; Start plays, as A does (owner request).
             PadButton::L1 => {
@@ -420,24 +405,6 @@ mod tests {
         assert_eq!(
             Some(RomListCommand::Play(PathBuf::from("/roms/a.nes"))),
             model.handle(PadButton::A)
-        );
-    }
-
-    /// AMD-053 REQ-UI-210: L2 marks the selected game, and only one that has a profile — the mark
-    /// belongs to the library entry.
-    #[test]
-    fn req_ui_210_l2_marks_the_selected_game_as_a_favourite() {
-        let mut model = list(&["a", "b"]);
-        assert_eq!(None, model.handle(PadButton::L2), "no profile, no mark");
-
-        model.entries_mut()[0].profile = Some(ProfileMatch {
-            id: "g1".to_owned(),
-            title: "A".to_owned(),
-            two_dimensional: false,
-        });
-        assert_eq!(
-            Some(RomListCommand::ToggleFavorite(PathBuf::from("/roms/a.nes"))),
-            model.handle(PadButton::L2)
         );
     }
 

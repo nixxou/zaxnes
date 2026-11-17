@@ -42,3 +42,12 @@ hardware defects, VS DIPs, ...). Of these the fast core and Fidelity+ are now im
   pictures (the "...Ctrl+L/S" duplicates removed; the shortcuts stay). `ui_round_one_fix_tests`
   updated (no DeleteGame entry). **App tests not rerun for steps 7-8: G: full (735 MB), a debug
   test build needs about 16 GB.**
+* 9. Owner (2026-11-17): favourites, covers and the deletion of a game are gone, console and PC.
+  Commands `favorite.toggle`, `library.filter_favorites`, `file.delete_game`,
+  `file.create_game_art`, `file.import_cover` removed with their handlers; the console list's L2
+  and its marker, the PC chooser's filter, marker and button, the cover browser, the 2D Mode's
+  automatic cover, the `covers` folder's creation; `ui.sort_option` loses « Favorites first » (a
+  saved 2 falls back to A-Z). Kept: the `favorite`/`cover` fields of `library.json` (read, ignored)
+  and `GameCatalog::delete_game`/`game_art::delete_cover` (no caller left in the app). Tests:
+  command_model, resume_point, round_one_fix, native_dialog, ui_round_one_fix, menu_bar, ui_flow,
+  desktop_options_golden, handheld_tree and the lib all pass (release, one by one: G: full).

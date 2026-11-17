@@ -196,31 +196,6 @@ fn req_ui_213_noresume_neither_reads_nor_writes_nor_erases_the_resume_point() {
     );
 }
 
-/// REQ-UI-210: `favorite.toggle` on the entry named, or on the one being played, and the filter
-/// the enumeration reads.
-#[test]
-fn req_ui_210_favorite_toggle_and_the_filter_are_commands_of_the_model() {
-    let mut harness = LoopHarness::create();
-    harness.launch("g1");
-    harness.catalog().add("g2", None);
-
-    assert!(!harness.host.is_favorite("g1"));
-    harness.run_with(Command::ToggleFavorite, CommandArgs::of_text("g1"));
-    assert!(harness.host.is_favorite("g1"));
-    assert!(!harness.host.is_favorite("g2"));
-    // Without a text it is the game being played.
-    harness.run(Command::ToggleFavorite);
-    assert!(!harness.host.is_favorite("g1"));
-
-    assert!(!harness.host.favorites_only());
-    assert!(!harness.host.is_checked(Command::FilterFavorites));
-    harness.run(Command::FilterFavorites);
-    assert!(harness.host.favorites_only());
-    assert!(harness.host.is_checked(Command::FilterFavorites));
-    harness.run(Command::FilterFavorites);
-    assert!(!harness.host.favorites_only());
-}
-
 /// REQ-UI-211: `library.search` keeps the typed text, blank included.
 #[test]
 fn req_ui_211_library_search_keeps_the_typed_text() {
@@ -308,35 +283,5 @@ fn req_ui_210_211_the_chooser_marks_filters_and_searches() {
     model.set_search("pokemon");
     assert_eq!(vec!["Pokémon".to_owned()], titles(&model));
 
-    // The marker follows the toggle, and the filter combines with the search.
-    model.set_search("");
-    model.set_favorite("2", true);
-    model.set_favorite("4", true);
-    assert!(model
-        .all()
-        .iter()
-        .filter(|choice| choice.favorite)
-        .map(|choice| choice.title.as_str())
-        .eq(["MARIO Kart", "Metroid"]));
-    model.set_favorites_only(true);
-    assert_eq!(
-        vec!["MARIO Kart".to_owned(), "Metroid".to_owned()],
-        titles(&model)
-    );
-    model.set_search("mario");
-    assert_eq!(vec!["MARIO Kart".to_owned()], titles(&model));
-
-    // « Favorites first » reaches the chooser through ui.sort_option.
-    let mut library = library;
-    library.set_favorite("4", true);
-    let favorites_first =
-        ProfileChooserModel::with_order(&library, LibrarySortOption::FavoritesFirst);
-    assert_eq!(
-        Some("Metroid"),
-        favorites_first
-            .all()
-            .first()
-            .map(|choice| choice.title.as_str())
-    );
-    let _ = GameLibrary::default();
+    let _ = (library, GameLibrary::default());
 }

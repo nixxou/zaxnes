@@ -57,7 +57,6 @@ pub struct ProfileChooserModel {
     all: Vec<ProfileChoice>,
     filtered: Vec<usize>,
     search: String,
-    favorites_only: bool,
     /// The ROM the chosen profile will launch; none when the chooser only picks a profile.
     pub rom_path: Option<String>,
     /// The identifier of the selected game.
@@ -95,7 +94,6 @@ impl ProfileChooserModel {
             all,
             filtered: Vec::new(),
             search: String::new(),
-            favorites_only: false,
             rom_path: None,
             selected_id: None,
         };
@@ -135,47 +133,20 @@ impl ProfileChooserModel {
         self.refresh();
     }
 
-    /// Whether the list keeps only the favourites (AMD-053 REQ-UI-210, command
-    /// `library.filter_favorites`).
-    #[must_use]
-    pub const fn favorites_only(&self) -> bool {
-        self.favorites_only
-    }
-
-    /// Ticks or unticks the favourites filter and filters the list.
-    pub fn set_favorites_only(&mut self, favorites_only: bool) {
-        self.favorites_only = favorites_only;
-        self.refresh();
-    }
-
-    /// Marks or unmarks the entry of `id` in the list, so the marker follows the toggle without
-    /// the whole list being rebuilt.
-    pub fn set_favorite(&mut self, id: &str, favorite: bool) {
-        if let Some(choice) = self.all.iter_mut().find(|choice| choice.id == id) {
-            choice.favorite = favorite;
-        }
-        self.refresh();
-    }
-
-    /// Starts a new choice for `rom_path`: no selection, no search. The favourites filter is left
-    /// as the user set it.
+    /// Starts a new choice for `rom_path`: no selection, no search.
     pub fn reset(&mut self, rom_path: Option<&str>) {
         self.rom_path = rom_path.map(str::to_owned);
         self.selected_id = None;
         self.set_search("");
     }
 
-    /// REQ-UI-211: an entry is kept when it satisfies **both** the search — case and accents
-    /// ignored — and the favourites filter.
+    /// REQ-UI-211: an entry is kept when it satisfies the search, case and accents ignored.
     fn refresh(&mut self) {
         self.filtered = self
             .all
             .iter()
             .enumerate()
-            .filter(|(_, choice)| {
-                (!self.favorites_only || choice.favorite)
-                    && search::matches(&choice.title, &self.search)
-            })
+            .filter(|(_, choice)| search::matches(&choice.title, &self.search))
             .map(|(index, _)| index)
             .collect();
     }

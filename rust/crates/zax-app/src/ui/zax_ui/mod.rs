@@ -87,8 +87,6 @@ pub enum BrowserPurpose {
     Rom,
     /// A profile to import.
     Profile,
-    /// A cover picture to import.
-    Cover,
     /// The ROM folder of the console mode (Rust-only).
     RomsFolder,
     /// A 3dSen installation or bundle to import.
@@ -427,7 +425,6 @@ impl ZaxUi {
                     None => self.open_browser(host, BrowserPurpose::ThreeDSen),
                 }
             }
-            Command::ImportCover => self.open_browser(host, BrowserPurpose::Cover),
             Command::OpenMovie => self.open_browser(host, BrowserPurpose::Movie),
             Command::CancelModal => self.cancel_topmost_modal(),
             Command::ShowOptions => self.state.options = true,
@@ -573,7 +570,6 @@ impl ZaxUi {
     fn browser_title(purpose: BrowserPurpose) -> String {
         match purpose {
             BrowserPurpose::Rom => text::open_rom_title(),
-            BrowserPurpose::Cover => text::import_cover_title(),
             BrowserPurpose::ThreeDSen => text::import_three_d_sen_title(),
             BrowserPurpose::Profile => text::import_profile_title(),
             BrowserPurpose::RomsFolder => text::roms_folder_title(),
@@ -584,7 +580,6 @@ impl ZaxUi {
     fn browser_filters(purpose: BrowserPurpose) -> Vec<file_browser::FileFilter> {
         match purpose {
             BrowserPurpose::Rom => file_browser::rom_filters(),
-            BrowserPurpose::Cover => file_browser::cover_filters(),
             BrowserPurpose::ThreeDSen => file_browser::three_d_sen_filters(),
             BrowserPurpose::Profile => file_browser::profile_filters(),
             BrowserPurpose::RomsFolder => Vec::new(),
@@ -676,7 +671,6 @@ impl ZaxUi {
         }
         match self.purpose {
             BrowserPurpose::Rom => host.enqueue(Command::OpenRom, CommandArgs::of_text(path)),
-            BrowserPurpose::Cover => host.enqueue(Command::ImportCover, CommandArgs::of_text(path)),
             BrowserPurpose::Movie => host.enqueue(Command::OpenMovie, CommandArgs::of_text(path)),
             BrowserPurpose::ThreeDSen => self.import_three_d_sen(host, path),
             BrowserPurpose::Profile => self.import_profile(host, path),

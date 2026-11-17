@@ -14,9 +14,6 @@ use crate::ui::{strings, text};
 /// The colour of a destructive first button (AMD-056 §3 leaves it free, AMD-010 §4).
 const DESTRUCTIVE_BUTTON: [f32; 4] = [0.60, 0.16, 0.16, 1.0];
 
-/// What marks a favourite entry in the list (AMD-053 REQ-UI-210; the form is free).
-const FAVORITE_MARKER: &str = "*";
-
 impl ZaxUi {
     pub(super) fn draw_file_browser(&mut self, ui: &Ui, host: &mut AppHost) {
         let mut open = self.state.file_browser;
@@ -175,14 +172,6 @@ impl ZaxUi {
                 self.chooser.set_search(&search);
             }
             ui.same_line();
-            let mut favorites_only = self.chooser.favorites_only();
-            if ui.checkbox(
-                strings::get(&Command::FilterFavorites.label_key()),
-                &mut favorites_only,
-            ) {
-                self.chooser.set_favorites_only(favorites_only);
-                host.set_favorites_only(favorites_only);
-            }
             // REQ-LOOP-076: the Resume entry heads the enumeration of the games, and no filter
             // reaches it.
             Self::draw_resume_entry(ui, host, &mut open);
@@ -196,11 +185,7 @@ impl ZaxUi {
                     let _id = ui.push_id_usize(index);
                     // REQ-UI-210: a favourite entry is distinguished; the form of the marker is
                     // free, and this one is a star before the title.
-                    let label = if choice.favorite {
-                        format!("{FAVORITE_MARKER} {}", choice.title)
-                    } else {
-                        choice.title.clone()
-                    };
+                    let label = choice.title.clone();
                     if ui.selectable_config(&label).selected(selected).build() {
                         if selected {
                             picked = Some(choice.clone());
@@ -218,12 +203,7 @@ impl ZaxUi {
             }
             let disabled = ui.begin_disabled(self.chooser.selected_id.is_none());
             let launch = ui.button(text::launch());
-            ui.same_line();
-            let toggle_favorite = ui.button(strings::get(&Command::ToggleFavorite.label_key()));
             drop(disabled);
-            if toggle_favorite {
-                self.toggle_selected_favorite(host);
-            }
             if launch {
                 picked = self
                     .chooser
@@ -242,17 +222,6 @@ impl ZaxUi {
             }
         }
         self.state.profile_chooser = open;
-    }
-
-    /// `favorite.toggle` on the selected entry, with the list's marker following it (REQ-UI-210).
-    fn toggle_selected_favorite(&mut self, host: &mut AppHost) {
-        let Some(id) = self.chooser.selected_id.clone() else {
-            return;
-        };
-        if let Some(favorite) = host.toggle_favorite(&id) {
-            self.chooser.set_favorite(&id, favorite);
-            play(host, UiSound::Confirm);
-        }
     }
 
     /// The `Resume` entry of AMD-053 REQ-LOOP-076, with the title of its game: shown only while

@@ -41,8 +41,6 @@ const BAR: [f32; 4] = [0.1, 0.1, 0.16, 1.0];
 const WARNING: [f32; 4] = [1.0, 0.45, 0.35, 1.0];
 /// The [W] of a game whose ROM was not studied yet: its profile or its name says a hack.
 const UNSTUDIED: [f32; 4] = [0.42, 0.44, 0.5, 1.0];
-/// What marks a favourite game in the home list (AMD-053 REQ-UI-210; the form is free).
-const FAVORITE_MARKER: &str = "*";
 /// A value a game has of its own, and the hint of the list when the game has some.
 const GAME_OWN: [f32; 4] = [0.3, 0.9, 1.0, 1.0];
 const GAME_OWN_ON_FOCUS: [f32; 4] = [0.0, 0.3, 0.4, 1.0];
@@ -1549,8 +1547,6 @@ fn home_row_label(entry: &RomEntry) -> String {
             strings::get(&Command::ResumeLast.label_key()),
             entry.name
         )
-    } else if entry.favorite {
-        format!("{FAVORITE_MARKER} {}", entry.name)
     } else {
         entry.name.clone()
     }

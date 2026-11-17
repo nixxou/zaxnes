@@ -29,18 +29,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::ImportThreeDSen
             | Command::SetCameraMode => !loading,
             Command::LaunchGame => !loading && has_text(args),
-            Command::DeleteGame => {
-                let game = args
-                    .text
-                    .as_deref()
-                    .or_else(|| self.current_game_id())
-                    .unwrap_or_default();
-                !loading && self.games.can_delete(game)
+            Command::Reset | Command::ToggleTwoDimensional => {
+                !loading && self.current_game.is_some()
             }
-            Command::CreateGameArt
-            | Command::ImportCover
-            | Command::Reset
-            | Command::ToggleTwoDimensional => !loading && self.current_game.is_some(),
             // AMD-044 REQ-LOOP-072: next to the hard reset, but it needs a running session.
             Command::SoftReset => self.can_soft_reset(),
             Command::InsertCoin1 | Command::InsertCoin2 | Command::VsService => {
@@ -52,15 +43,6 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             }
             // AMD-053 REQ-LOOP-076: offered only while the resume point stands.
             Command::ResumeLast => !loading && self.resume_available(),
-            // REQ-UI-210: the entry named, or the one being played.
-            Command::ToggleFavorite => {
-                let game = args
-                    .text
-                    .as_deref()
-                    .or_else(|| self.current_game_id())
-                    .unwrap_or_default();
-                self.games.exists(game)
-            }
             Command::SaveSlot => self.can_save(args.number),
             Command::LoadSlot => {
                 let slot = numbered_slot_id(args.number);
@@ -128,7 +110,6 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::ShowKeyConfig
             | Command::ShowDataFolder
             | Command::ToggleEditorMode
-            | Command::FilterFavorites
             | Command::SearchLibrary
             | Command::ShowAbout => true,
         }
@@ -160,8 +141,6 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 self.movie_mode() == Some(zax_nes::movie::MovieMode::Recording)
             }
             Command::ToggleMenuMusic => self.settings.menu_music(),
-            // REQ-UI-210: « Favorites only », a tickable command of the enumeration.
-            Command::FilterFavorites => self.favorites_only,
             _ => false,
         }
     }
@@ -184,12 +163,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::ChooseProfile
             | Command::ImportProfile
             | Command::ImportThreeDSen
-            | Command::DeleteGame
-            | Command::CreateGameArt
-            | Command::ImportCover
             | Command::ResumeLast
-            | Command::ToggleFavorite
-            | Command::FilterFavorites
             | Command::SearchLibrary
             | Command::Quit => self.execute_file(command, args),
             Command::SaveSlot
@@ -267,35 +241,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         match command {
             Command::OpenRom => self.open_rom_or_ask_for_one(args),
             Command::LaunchGame => self.launch_game(args.text.as_deref().unwrap_or_default()),
-            Command::DeleteGame => {
-                let game = args
-                    .text
-                    .clone()
-                    .or_else(|| self.current_game_id().map(str::to_owned))
-                    .unwrap_or_default();
-                self.request_delete_game(&game);
-            }
-            Command::CreateGameArt => {
-                self.create_game_art();
-            }
-            Command::ImportCover => match args.text.as_deref().filter(|text| !text.is_empty()) {
-                Some(path) => {
-                    self.import_cover(path);
-                }
-                None => self.request_ui(command, args),
-            },
             Command::Quit => self.quit_requested = true,
             // AMD-053 REQ-LOOP-076: the only path that reads the resume point.
             Command::ResumeLast => self.resume_last_game(),
-            Command::ToggleFavorite => {
-                let game = args
-                    .text
-                    .clone()
-                    .or_else(|| self.current_game_id().map(str::to_owned))
-                    .unwrap_or_default();
-                self.toggle_favorite(&game);
-            }
-            Command::FilterFavorites => self.set_favorites_only(!self.favorites_only),
             Command::SearchLibrary => {
                 self.set_library_search(args.text.as_deref().unwrap_or_default());
             }

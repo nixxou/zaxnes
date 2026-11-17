@@ -352,9 +352,6 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     /// `-emustats`: where the one line per emulated frame goes; none when the option is off,
     /// which is the default (AMD-053 REQ-UI-213).
     emu_stats: Option<LogFn>,
-    /// Whether the enumeration of the games keeps only the favourites (AMD-053 REQ-UI-210,
-    /// command `library.filter_favorites`). Interface state, not a setting: it is not persisted.
-    favorites_only: bool,
     /// The text typed in the search of the enumeration of the games (REQ-UI-211, command
     /// `library.search`); blank excludes nothing.
     library_search: String,
@@ -503,7 +500,6 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             resume: None,
             suspend_resume,
             emu_stats,
-            favorites_only: false,
             library_search: String::new(),
         };
         host.start_up();
@@ -1521,9 +1517,6 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             if let Some(capture) = self.view.as_mut().and_then(GameView::capture_thumbnail) {
                 self.pause_thumbnail = Some(capture);
             }
-            // REQ-PERS-036, third source: the cover of the "2D Mode" entry follows the pause
-            // capture every time the menu appears.
-            self.refresh_two_dimensional_cover();
         }
         let was_running = self.state == EmulationState::Running;
         self.state = next;

@@ -36,13 +36,8 @@ fn req_ui_205_the_model_enumerates_every_menu_command() {
         QuickSave,
         QuickLoad,
         DeleteSlot,
-        DeleteGame,
-        CreateGameArt,
-        ImportCover,
         // AMD-053 §3 point 17: the four commands the amendment adds to the model.
         ResumeLast,
-        ToggleFavorite,
-        FilterFavorites,
         SearchLibrary,
         CancelModal,
         Quit,

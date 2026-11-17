@@ -74,7 +74,10 @@ fn the_native_dialog_replaces_the_browser_and_its_answer_is_used() {
     assert!(!test.harness.ui.state.file_browser);
     let request = test.requests.try_recv().expect("the picker was asked");
     assert!(!request.folder);
-    assert_eq!(["nes", "unf", "unif", "studybox", "fds", "qd", "zip"], request.filters[0].extensions[..]);
+    assert_eq!(
+        ["nes", "unf", "unif", "studybox", "fds", "qd", "zip"],
+        request.filters[0].extensions[..]
+    );
     assert!(request
         .filters
         .iter()
@@ -102,17 +105,6 @@ fn a_cancelled_native_dialog_opens_nothing() {
     assert!(!test.harness.ui.state.native_dialog);
     assert!(!test.harness.ui.state.file_browser);
     assert!(!test.harness.ui.state.is_modal());
-}
-
-#[test]
-fn a_dialog_that_cannot_be_shown_falls_back_to_the_browser() {
-    let mut test = scripted(true);
-    test.harness.run(Command::ImportCover);
-    test.answer(PickPoll::Failed);
-
-    assert!(!test.harness.ui.state.native_dialog);
-    assert!(test.harness.ui.state.file_browser);
-    assert_eq!(["png"], test.harness.ui.browser.extensions());
 }
 
 #[test]
