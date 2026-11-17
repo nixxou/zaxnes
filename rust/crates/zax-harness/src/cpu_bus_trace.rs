@@ -22,7 +22,7 @@ use zax_nes::NesCore;
 use crate::HarnessError;
 
 /// The command's usage line.
-pub const USAGE: &str = "  zax-harness cpu-bus-trace <program.bin> --cycles <n> [--alignment <0-3>] [--phase <dots>] [--dmc <timer>,<bits>] [--flip-apu-parity] [--flip-get-put] [--fidelity-plus] --out <file>
+pub const USAGE: &str = "  zax-harness cpu-bus-trace <program.bin> --cycles <n> [--alignment <0-3>] [--phase <dots>] [--dmc <timer>,<bits>] [--flip-apu-parity] [--flip-get-put] [--fidelity-plus] [--region ntsc|pal] [--dot-phase <0-4>] [--chr-ram] --out <file>
       (per CPU cycle: address, R/W, data; the program at $8000 as the 2A03 netlist bench loads it)";
 
 struct Options {
@@ -34,6 +34,9 @@ struct Options {
     flip_parity: bool,
     flip_get_put: bool,
     fidelity_plus: bool,
+    pal: bool,
+    dot_phase: i32,
+    chr_ram: bool,
     out: PathBuf,
 }
 
@@ -48,6 +51,9 @@ fn parse(args: &[String]) -> Result<Options, HarnessError> {
     let mut flip_parity = false;
     let mut flip_get_put = false;
     let mut fidelity_plus = false;
+    let mut pal = false;
+    let mut dot_phase = 0;
+    let mut chr_ram = false;
     let mut out = None;
     while let Some(flag) = rest.next() {
         match flag.as_str() {
@@ -85,6 +91,19 @@ fn parse(args: &[String]) -> Result<Options, HarnessError> {
             "--flip-apu-parity" => flip_parity = true,
             "--flip-get-put" => flip_get_put = true,
             "--fidelity-plus" => fidelity_plus = true,
+            "--region" => match rest.next().map(String::as_str) {
+                Some("pal") => pal = true,
+                Some("ntsc") => pal = false,
+                _ => return Err(usage()),
+            },
+            "--chr-ram" => chr_ram = true,
+            "--dot-phase" => {
+                dot_phase = rest
+                    .next()
+                    .ok_or_else(usage)?
+                    .parse()
+                    .map_err(|_| usage())?;
+            }
             "--out" => out = Some(PathBuf::from(rest.next().ok_or_else(usage)?)),
             _ => return Err(usage()),
         }
@@ -98,20 +117,31 @@ fn parse(args: &[String]) -> Result<Options, HarnessError> {
         flip_parity,
         flip_get_put,
         fidelity_plus,
+        pal,
+        dot_phase,
+        chr_ram,
         out: out.ok_or_else(usage)?,
     })
 }
 
 /// An NROM image holding `program` as the bench's PRG RAM: 32 KiB at `$8000`, vectors set.
-fn image_of(program: &[u8]) -> Vec<u8> {
+/// `chr_ram`: 8 KiB of CHR-RAM and vertical mirroring (the `ext-tools/fidcheck` console ROMs),
+/// else 8 KiB of zero CHR-ROM and horizontal mirroring.
+fn image_of(program: &[u8], chr_ram: bool) -> Vec<u8> {
     let mut prg = vec![0u8; 0x8000];
     let length = program.len().min(0x7FFA);
     prg[..length].copy_from_slice(&program[..length]);
     prg[0x7FFA..].copy_from_slice(&[0x00, 0x90, 0x00, 0x80, 0x00, 0x90]);
-    let mut image = vec![b'N', b'E', b'S', 0x1A, 2, 1, 0, 0];
+    let mut image = if chr_ram {
+        vec![b'N', b'E', b'S', 0x1A, 2, 0, 1, 0]
+    } else {
+        vec![b'N', b'E', b'S', 0x1A, 2, 1, 0, 0]
+    };
     image.resize(16, 0);
     image.extend_from_slice(&prg);
-    image.extend_from_slice(&[0u8; 0x2000]);
+    if !chr_ram {
+        image.extend_from_slice(&[0u8; 0x2000]);
+    }
     image
 }
 
@@ -185,12 +215,19 @@ pub fn command(args: &[String]) -> Result<(), HarnessError> {
         core.set_cpu_ppu_alignment(alignment);
     }
     if !core
-        .load_rom(&image_of(&program), "cpu-bus-trace.nes")
+        .load_rom(&image_of(&program, options.chr_ram), "cpu-bus-trace.nes")
         .success
     {
         return Err(HarnessError::Rom("Zaxnes refused the image".to_owned()));
     }
+    if options.pal {
+        core.set_region(zax_nes::NesRegion::Pal);
+    }
     core.reset();
+    // The 2C07's dot accumulator at power-on (lot FIDPLUS-C C3c), as dot-trace --dot-phase.
+    core.bus_mut()
+        .ppu_mut()
+        .set_dot_accumulator_phase(options.dot_phase);
     let (cpu, bus) = core.cpu_and_bus_mut();
     if let Some((timer, bits)) = options.dmc {
         bus.apu_mut().diagnostic_set_dmc_phase(timer, bits);
