@@ -286,3 +286,125 @@ impl Ppu2C02 {
         }
     }
 }
+
+impl Ppu2C02 {
+    /// The fast core's stretch of the end of a visible rendering line, when the board watches no
+    /// part of the PPU bus and its CHR can be read directly: the sprite fetches of dots 258 to
+    /// 320 and the two-tile prefetch of dots 321 to 336, at most `count` dots from the current
+    /// one. Returns the dots run, 0 when the stretch does not apply here (the caller then steps
+    /// the dot as usual). The work is the per-dot path's, without its dispatch: on these dots of
+    /// a visible line `process_dot` does nothing but `run_rendering_dot`, whose arms are the
+    /// sprite fetch (and the extra sprites on dot 320) and the shift-and-fetch.
+    pub(super) fn run_line_end_fast<K: BoardKind>(
+        &mut self,
+        count: i64,
+        cartridge: Option<&Cartridge>,
+    ) -> i64 {
+        if K::WATCHES_BUS
+            || self.scanline >= super::VISIBLE_SCANLINES
+            || !self.rendering_enabled()
+        {
+            return 0;
+        }
+        let Some(cartridge) = cartridge else {
+            return 0;
+        };
+        if !(257..336).contains(&self.dot) {
+            return 0;
+        }
+
+        if self.dot < 320 {
+            let Some(chr) = cartridge.chr_view_as::<K>() else {
+                return 0;
+            };
+            #[allow(clippy::cast_possible_truncation)] // At most a line.
+            let last = (i64::from(self.dot) + count).min(320) as i32;
+            for dot in self.dot + 1..=last {
+                self.oam_address = 0;
+                let step = (dot - 257) & 0x07;
+                if step == 4 || step == 6 {
+                    #[allow(clippy::cast_sign_loss)] // dot is 258..=320, the slot 0..=7.
+                    let slot = ((dot - 257) >> 3) as usize;
+                    let address = self.sprite_pattern_address(slot);
+                    let data = chr.read(address + if step == 4 { 0 } else { 8 });
+                    self.sprite_line_stale = true;
+                    let x = self.secondary_oam[(slot * 4) + 3];
+                    let data = if self.fetched_sprite_in_margin(slot) {
+                        0
+                    } else {
+                        data
+                    };
+                    if step == 4 {
+                        self.sprite_pattern_low[slot] = data;
+                        self.sprite_attribute[slot] = self.secondary_oam[(slot * 4) + 2];
+                        self.sprite_x[slot] = x;
+                    } else {
+                        self.sprite_pattern_high[slot] = data;
+                    }
+                }
+            }
+            let run = last - self.dot;
+            self.dot = last;
+            self.ppu_clock += i64::from(run);
+            if last == 320 {
+                self.load_extra_sprites(Some(cartridge));
+            }
+            return i64::from(run);
+        }
+
+        // Dot 320 done: the two prefetch groups (dots 321-328, 329-336), whole or not at all.
+        if self.dot != 320 || count < 16 {
+            return 0;
+        }
+        if cartridge.chr_view_as::<K>().is_none() {
+            return 0;
+        }
+        self.run_prefetch_groups::<K>(cartridge);
+        16
+    }
+
+    /// The two groups of eight dots of the prefetch (321-328, 329-336): the shift-and-fetch of
+    /// the span groups, with no pixel.
+    fn run_prefetch_groups<K: BoardKind>(&mut self, cartridge: &Cartridge) {
+        let Some(chr) = cartridge.chr_view_as::<K>() else {
+            return;
+        };
+        let layout = self.layout_of(Some(cartridge));
+        let mut nametables = [0usize; 4];
+        for (table, start) in (0u16..).zip(nametables.iter_mut()) {
+            let page = self.nametable_page(0x2000 + (table << 10), Some(cartridge));
+            *start = usize::try_from(page).map_or_else(
+                |_| super::map_nametable(0x2000 + (table << 10), layout),
+                |page| page << 10,
+            );
+        }
+        for _ in 0..2 {
+            let attribute_low = if (self.attribute_latch & 1) != 0 { 0xFF } else { 0x00 };
+            let attribute_high = if (self.attribute_latch & 2) != 0 { 0xFF } else { 0x00 };
+            let low = ((self.pattern_shift_low << 1) & 0xFF00) | u16::from(self.pattern_low_latch);
+            let high =
+                ((self.pattern_shift_high << 1) & 0xFF00) | u16::from(self.pattern_high_latch);
+            let attr_low = ((self.attribute_shift_low << 1) & 0xFF00) | attribute_low;
+            let attr_high = ((self.attribute_shift_high << 1) & 0xFF00) | attribute_high;
+            self.pattern_shift_low = low << 7;
+            self.pattern_shift_high = high << 7;
+            self.attribute_shift_low = attr_low << 7;
+            self.attribute_shift_high = attr_high << 7;
+
+            let nametable_byte = |vram: &[u8], address: u16| {
+                vram[nametables[usize::from((address >> 10) & 0x03)]
+                    | (usize::from(address) & 0x03FF)]
+            };
+            self.nametable_latch = nametable_byte(&self.vram, 0x2000 | (self.v & 0x0FFF));
+            let address =
+                0x23C0 | (self.v & 0x0C00) | ((self.v >> 4) & 0x38) | ((self.v >> 2) & 0x07);
+            let shift = ((self.v >> 4) & 0x04) | (self.v & 0x02);
+            self.attribute_latch = (nametable_byte(&self.vram, address) >> shift) & 0x03;
+            self.pattern_low_latch = chr.read(self.pattern_address(0));
+            self.pattern_high_latch = chr.read(self.pattern_address(8));
+            self.increment_coarse_x();
+            self.dot += 8;
+            self.ppu_clock += 8;
+        }
+    }
+}

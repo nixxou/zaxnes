@@ -936,7 +936,7 @@ impl Ppu2C02 {
     /// no limit (see [`super::SpriteLimit`]): those in range after the eighth, up to the end of
     /// the OAM where the evaluation stops. Their patterns are read without touching the
     /// cartridge, which saw the hardware's fetches only.
-    fn load_extra_sprites(&mut self, cartridge: Option<&Cartridge>) {
+    pub(super) fn load_extra_sprites(&mut self, cartridge: Option<&Cartridge>) {
         self.extra_loaded = 0;
         if self.sprites_loaded < SPRITES_PER_LINE_I32
             || self.sprite_limit == super::SpriteLimit::Kept

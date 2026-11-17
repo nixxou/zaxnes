@@ -2246,6 +2246,14 @@ impl Ppu2C02 {
                 continue;
             }
 
+            if K::FAST {
+                let run = self.run_line_end_fast::<K>(count, cart.as_deref());
+                if run > 0 {
+                    count -= run;
+                    continue;
+                }
+            }
+
             let span = self.visible_span_ahead(count);
             if span > 0 {
                 let done = if K::FAST {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Golden-core of the fast core against the standard reference, then the 2D bench. Run from rust/.
-S=${FAST_SCRATCH:?set FAST_SCRATCH}; H=target/release/zax-harness.exe; T=G:/3DSen/test-originals
+S=${FAST_SCRATCH:-./fast-scratch}; H=target/release/zax-harness.exe; T=G:/3DSen/test-originals
 P="100-110:start,200-210:start,300-2400:right,320-360:a,500-540:a,700-760:a,900-930:b,1000-1040:a,1200-1300:left,1400-1450:a,1600-1700:down,1800-1830:a"
 export ZAXNES_GOLDEN_PRESS=$P ZAXNES_GOLDEN_EVERY=30
 [ -f $S/stdp.jsonl ] || $H golden-core $T $S/stdp.jsonl 1800 > $S/stdp.log 2>&1
