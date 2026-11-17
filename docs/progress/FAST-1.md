@@ -18,3 +18,4 @@ Design: `docs/design/FAST-CORE.md`.
 * 2026-11-17: design written; baseline smb3 core 19.8 M Ir/frame (PPU 60 %, APU 21 %).
 * 2026-11-17: phase 0 done; golden-core 600 frames, standard vs `ZAXNES_FAST_CORE=1`: byte-identical (98 ROMs).
 * 2026-11-17: order changed: the PPU and the APU first (the CPU + bus is the smallest share). Steps 2a and 3a exact (golden-core identical, 98 ROMs). bench-core 2D: smb1 0.644 -> 0.561 ms, mm2 0.719 -> 0.588, metroid 0.768 -> 0.647.
+* 2026-11-17: step 2b (sprite evaluation per sprite, table colours): smb1 0.635 -> 0.470, mm2 0.699 -> 0.497, metroid 0.750 -> 0.520 ms/frame; golden identical.
