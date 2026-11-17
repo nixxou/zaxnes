@@ -373,7 +373,7 @@ impl Ppu2C02 {
             let shift = ((coarse_y & 0x02) << 1) | (column & 0x02);
             let palette = (attribute >> shift) & 0x03;
 
-            let (plane0, plane1) = self.read_pattern_planes(
+            let (plane0, plane1) = self.pattern_planes_as::<K>(
                 pattern_table + (u16::from(tile) * 16),
                 ChrFetch::Background,
                 cart.as_deref(),
@@ -1279,7 +1279,7 @@ impl Ppu2C02 {
         cart: Cart<'_, '_, K>,
     ) {
         let (plane0, plane1) =
-            self.read_pattern_planes(pattern_address, ChrFetch::Sprite, cart.as_deref());
+            self.pattern_planes_as::<K>(pattern_address, ChrFetch::Sprite, cart.as_deref());
         if let Some(cartridge) = cart.as_deref_mut() {
             cartridge.advance_chr_latch_as::<K>(
                 i32::from(pattern_address & 0x1000),
@@ -1324,6 +1324,24 @@ impl Ppu2C02 {
             plane1 |= u64::from(view.read(address + 8 + row)) << (8 * row);
         }
         (plane0, plane1)
+    }
+
+    /// [`Self::read_pattern_planes`], read through the CHR peek view in one go on the fast
+    /// core's paths (lot FAST-1): the view is what the peek of these boards reads.
+    #[allow(clippy::inline_always)] // Once per captured tile.
+    #[inline(always)]
+    fn pattern_planes_as<K: BoardKind>(
+        &self,
+        address: u16,
+        fetch: ChrFetch,
+        cartridge: Option<&Cartridge>,
+    ) -> (u64, u64) {
+        if K::FAST {
+            if let Some(view) = cartridge.and_then(Cartridge::chr_peek_view_as::<K>) {
+                return view.tile_planes(address);
+            }
+        }
+        self.read_pattern_planes(address, fetch, cartridge)
     }
 
     fn read_pattern_planes(

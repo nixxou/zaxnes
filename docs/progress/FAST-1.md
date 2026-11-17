@@ -29,3 +29,4 @@ Design: `docs/design/FAST-CORE.md`.
   ms/frame, FCEUX / standard / fast: smb1 0.226 / 0.916 / 0.312, smb3 0.211 / 1.071 / 0.380,
   mm2 0.232 / 0.733 / 0.290, metroid 0.231 / 0.733 / 0.369. Gap to FCEUX 1.25-1.8x (was 3.2-5.1x),
   still exact. Also fixed: `movie_sync.rs` did not build with `fceux-core` since PalM/PalN.
+* 2026-11-17: step 2e (capture's pattern planes in one CHR view read): smb1 0.236, mm2 0.252, metroid 0.343, smb3 0.431 ms/frame (bench-core 2D); identical.
