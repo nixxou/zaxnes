@@ -1341,6 +1341,17 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   netlist loads `v` in the middle of W+3 and W+4's ALE already carries the new address, where
   Zaxnes fetches W+4 with the old one (`211 netlist bus=2BF0 | zaxnes bus=2BEF`), invisible
   to `dotcmp.py` (`v`/`t` only); to measure with a dedicated program.
+- I9 (2026-11-17) **`$2004` read during sprite evaluation: the netlist ahead by 2 to 5 dots —
+  open** (fidelity audit `oam`, `latmap.py oam 2004 net\oam-e0.txt 129000 5`, replayed after
+  I6-I7, same figures). Dots 1-64, 257-320 and 321-0 fit at the usual k = +1 (128/128, 107/116,
+  42/42); in 65-256 only 282 of 469 do, and the misses are the netlist showing the byte Zaxnes
+  shows 2-3 dots later on line 35 (sprites 7-8 in range), 5 on line 48 (11-12), 2 on line 63
+  (14-15), so the evaluation's OAM address runs ahead in the netlist by an amount that depends
+  on which sprites are in range. Not trusted yet: on that bench `$2003`/`$2004` writes do not
+  reach the cells (OAM set by `sprite_write`, `OAMADDR` never written), and the map pools 19
+  phases. Next: a dedicated per-dot trace of the OAM address node (`spr_ptr`) on one line with
+  a known in-range set, against Zaxnes's exact evaluation (`ppu-exact-sprite-eval`), which
+  passes AccuracyCoin's evaluation rows.
 - I8 (2026-11-17) **Alignment-dependent races of the 2C02 netlist that hardware tests contradict
   or that are a simulation artefact — not ported** (fidelity audit, gaps 3 and 4). Both replayed
   on a second bench whose /CS is decoded from the 2A03's own M2 (`visualnes-bench/benchdot2m2`,
