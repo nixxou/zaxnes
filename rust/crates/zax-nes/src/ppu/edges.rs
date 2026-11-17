@@ -53,10 +53,14 @@ pub(super) enum EdgeKind {
     CopyAfterSwitchOff,
     /// The second phase of a coarse-Y wrap from 29 (A7): coarse Y 30 back to 0, one dot later.
     SettleCoarseY,
+    /// The increment of `v` after a `$2007` write made while rendering, after the work of the
+    /// read's latch dot X: the write starts the read's state machine (netlist, audit `scr` e4,
+    /// `docs/review/FIDELITY-LEADS.md` I6). Merged with X's own increments as the read's.
+    WriteIncrement,
 }
 
 impl EdgeKind {
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 10] = [
         Self::LoadAddress,
         Self::StoreData,
         Self::ReadLatch,
@@ -66,6 +70,7 @@ impl EdgeKind {
         Self::SwitchRendering,
         Self::CopyAfterSwitchOff,
         Self::SettleCoarseY,
+        Self::WriteIncrement,
     ];
 
     fn from_u8(byte: u8) -> Option<Self> {
@@ -477,6 +482,7 @@ impl Ppu2C02 {
                     self.refetch_with_low_byte(self.read_buffer, cart.as_deref());
                 }
             }
+            EdgeKind::WriteIncrement => self.edge_write_increment(cart),
             EdgeKind::ReadLatchAfterFetch => {
                 self.read_buffer = self.fetch_bus_value(cart.as_deref());
                 // The read's X and Y increment signals and the pipeline's own are the same lines:
@@ -632,6 +638,40 @@ impl Ppu2C02 {
         };
         self.post_edge(dots, kind);
         value
+    }
+
+    /// A `$2007` write in Fidélité+ while rendering: the byte is stored at the access, as before;
+    /// the increment of `v` comes on the read's latch dot X (`D + 6` in alignments 2 and 3, `D + 5`
+    /// in 0 and 1), after X's work ([`EdgeKind::WriteIncrement`]). Netlist, audit `scr` at reset
+    /// phase e4: line 8, a write on dot 112 leaves `v` = `$652F` up to dot 117 and makes it `$7530`
+    /// on 118; line 41, on dot 66, `$1539` becomes `$253A` on 72, one X increment merged with the
+    /// pipeline's own plus Y.
+    pub(super) fn post_write_increment(&mut self) {
+        let dots = self.edge_dot(READ_LATCH_LATENCY) + 1;
+        self.post_edge(dots, EdgeKind::WriteIncrement);
+    }
+
+    /// [`EdgeKind::WriteIncrement`], after the work of X: the read's rules without its buffer.
+    fn edge_write_increment<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {
+        if !self.fetching() {
+            self.increment_vram_address(cart);
+            return;
+        }
+        let dot = self.dot;
+        if dot == 257 {
+            // The horizontal copy of 257 wins over the coarse-X increment; Y is left.
+            self.increment_y_two_phase();
+        } else {
+            let natural_x = (dot % 8 == 0 && (8..=256).contains(&dot)) || dot == 328 || dot == 336;
+            if !natural_x {
+                self.increment_coarse_x();
+            }
+            if dot != 256 {
+                self.increment_y_two_phase();
+            }
+        }
+        self.v_row_next = self.v;
+        self.notify_address_bus(self.v & 0x3FFF, cart);
     }
 
     /// A `$2007` write in Fidélité+ outside rendering: the data latch now, the store and the

@@ -1330,6 +1330,24 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   netlist loads `v` in the middle of W+3 and W+4's ALE already carries the new address, where
   Zaxnes fetches W+4 with the old one (`211 netlist bus=2BF0 | zaxnes bus=2BEF`), invisible
   to `dotcmp.py` (`v`/`t` only); to measure with a dedicated program.
+- I6 (2026-11-17) **The increment of a `$2007` write made while rendering — fixed** (fidelity
+  audit, gap 2). The 2C02 netlist (audit `scr` at reset phase e4) gives the write the read's
+  timing: `v` takes its X+Y increment on the read's latch dot X (`D + 6` in alignments 2 and 3,
+  `D + 5` in 0 and 1), merged with the pipeline's own increments as the read's is (A5): on a
+  dot that increments coarse X anyway one X plus Y, on 256 nothing more, on 257 Y only. Line 8,
+  a write on dot 112 leaves `v` = `$652F` to dot 117 and makes it `$7530` on 118; line 41, a
+  write on dot 66 turns `$1539` into `$253A` on 72, not `$153A` + X + Y. Zaxnes made it at
+  the access: 136 of 150 writes differed for five dots, 14 for a whole line. Now: Fidélité+
+  posts an edge (`EdgeKind::WriteIncrement`, after X's work) — `scr` e4 `W2007` class 136 → 0;
+  the standard path does the same with its run-ahead (`write_increment_from_fetch`) under
+  `emu.ppu_bus_conflicts`, off by default like the read model (C1) — 147 → 11 runs of one dot,
+  where the per-dot trace records X before the increment that follows its work (`v` the next
+  fetch uses is the netlist's). AccuracyCoin has no `$2007`-write-while-rendering test (its
+  `$2007 Stress Test` reads), so the netlist is the reference. The byte is still stored at the
+  access: the trace compares `v`/`t`, not the address a write during rendering reaches, which
+  remains to measure (at X - 2 the netlist's bus shows `$2700`, not a fetch address). Duelito,
+  which writes `$2007` with rendering on in its first frames, changes picture (golden row
+  updated); 18 games, MMC5 set and AccuracyCoin 147/147 unchanged.
 - I5 (2026-11-17) **DMC IRQ latency: the netlist against the hardware; Zaxnes keeps the
   hardware's** (fidelity audit `ext-tools/fidelity-audit`, gap 1). The 2A03 netlist (audit
   bench `benchaud`, and `benchirq` with the nodes) raises `set_pcm_irq`/`pcm_irq` two cycles
