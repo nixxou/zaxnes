@@ -52,3 +52,4 @@ hardware defects, VS DIPs, ...). Of these the fast core and Fidelity+ are now im
   command_model, resume_point, round_one_fix, native_dialog, ui_round_one_fix, menu_bar, ui_flow,
   desktop_options_golden, handheld_tree and the lib all pass (release, one by one: G: full).
 * 10. Fidelity+ with the widescreen overclock (owner's savestate, black bands): no edges while the extension stalls the PPU (`edges_on_for`); FIDELITY-LEADS I6. fidplus test files pass (equivalence 764 s).
+* 11. Simple mode shows the 3D render tab: visual style, reflections, the Geometry group, light intensity, shadows, field of view (owner).

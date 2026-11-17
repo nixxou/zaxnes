@@ -158,7 +158,14 @@ const PAGES: [Page; 7] = [
     },
     Page {
         tab: OptionsTab::Render3d,
-        simple: &[],
+        simple: &[
+            Simple::Row(SettingId::RenderVisualStyle),
+            Simple::Row(SettingId::RenderStyleReflections),
+            Simple::Group(OptionsGroup::Geometry),
+            Simple::Row(SettingId::LightIntensity),
+            Simple::Row(SettingId::RenderShadow),
+            Simple::Row(SettingId::CameraFov),
+        ],
         advanced: &[OptionsTab::Render3d, OptionsTab::Light, OptionsTab::Camera],
     },
     Page {
