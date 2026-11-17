@@ -145,14 +145,25 @@ pub fn golden_row(rel: &str, image: &[u8], frames: u32) -> Result<Value, Harness
 
     let mut recorder = Checkpoints::default();
     let mut audio = AudioHash::new();
+    // Lot FAST-1: `ZAXNES_GOLDEN_PRESS=<script>` (as `render --press`) plays port 1, and
+    // `ZAXNES_GOLDEN_EVERY=<n>` adds a checkpoint every n frames, to compare cores in play. The
+    // committed goldens use neither.
+    let press = match std::env::var("ZAXNES_GOLDEN_PRESS") {
+        Ok(text) => Some(crate::render::input_script::InputScript::parse(&text)?),
+        Err(_) => None,
+    };
+    let every = std::env::var("ZAXNES_GOLDEN_EVERY")
+        .ok()
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .filter(|&n| n > 0);
     for frame in 1..=frames {
         // AMD-041 REQ-ARCH-012 amended: `golden-core` runs at **N = 0** and has no option to
         // change it. The digests of the 291 rows were taken without run-ahead and are only
         // comparable at N equal, so this call must stay `run_frame`.
-        core.run_frame(0);
+        core.run_frame(press.as_ref().map_or(0, |script| script.at(frame)));
         audio.drain(&core)?;
 
-        if CHECKPOINTS.contains(&frame) {
+        if CHECKPOINTS.contains(&frame) || every.is_some_and(|n| frame % n == 0) {
             recorder.record(frame, &core, &audio);
         }
     }
