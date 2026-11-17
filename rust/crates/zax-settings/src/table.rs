@@ -2435,6 +2435,20 @@ fn fidelity_plus(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("Fidelity+"),
     );
+    // Lot FAST-1 (docs/design/FAST-CORE.md): the fast core, the same machine run by lines and
+    // counted cycles for the commercial boards. Off by default.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuFastCore,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextRomLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Fast core"),
+    );
     // Lot FIDPLUS-B step 1 (docs/design/REALTIME-PACING.md): frames chained at the console's own
     // rate (60.0988 Hz NTSC, 50.0070 Hz PAL) and the sound with them. Off: the nominal 60 and 50
     // of DEC-R2-T3.

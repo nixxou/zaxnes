@@ -127,6 +127,7 @@ options
       emu.cpu_ppu_alignment
       emu.cpu_apu_parity
       emu.fidelity_plus
+      emu.fast_core
       emu.exact_rate
       emu.realtime_input
       emu.late_present

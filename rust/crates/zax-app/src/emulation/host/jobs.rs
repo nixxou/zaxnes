@@ -667,6 +667,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let alignment = self.cpu_ppu_alignment();
                 let netlist_get_put = self.netlist_get_put();
                 let fidelity_plus = self.settings.get(SettingId::EmuFidelityPlus).as_bool();
+                let fast_core = self.settings.get(SettingId::EmuFastCore).as_bool();
                 let console = self.console_hardware();
                 let result = match self.session.as_mut() {
                     Some(session) => {
@@ -677,6 +678,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                         session.core_mut().set_cpu_ppu_alignment(alignment);
                         session.core_mut().set_netlist_get_put(netlist_get_put);
                         session.core_mut().set_fidelity_plus(fidelity_plus);
+                        session.core_mut().set_fast_core(fast_core);
                         session
                             .core_mut()
                             .set_console_audio_profile(console_profile);

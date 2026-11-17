@@ -334,6 +334,7 @@ const EMULATION: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::EmuCpuPpuAlignment),
     LayoutEntry::Row(SettingId::EmuCpuApuParity),
     LayoutEntry::Row(SettingId::EmuFidelityPlus),
+    LayoutEntry::Row(SettingId::EmuFastCore),
     LayoutEntry::Row(SettingId::EmuExactRate),
     LayoutEntry::Row(SettingId::EmuRealtimeInput),
     LayoutEntry::Row(SettingId::EmuLatePresent),

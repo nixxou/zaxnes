@@ -975,6 +975,13 @@ impl EngineHandle {
         }
     }
 
+    /// `emu.fast_core` (lot FAST-1); Zaxnes only.
+    pub fn set_fast_core(&mut self, enabled: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_fast_core(enabled);
+        }
+    }
+
     /// `emu.fidelity_plus` (lot FIDPLUS-A); Zaxnes only.
     pub fn set_fidelity_plus(&mut self, enabled: bool) {
         if let Some(core) = self.zaxnes_mut() {

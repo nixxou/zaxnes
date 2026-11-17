@@ -537,6 +537,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("option.Zaxnes", "Zaxnes"),
     ("option.2A03 netlist", "2A03 netlist"),
     ("setting.emu.fidelity_plus", "Fidelity+"),
+    ("setting.emu.fast_core", "Fast core"),
     ("setting.emu.exact_rate", "Console frame rate"),
     ("setting.emu.realtime_input", "Real-time pad"),
     ("setting.emu.late_present", "Late present"),
@@ -1318,6 +1319,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         "detail.emu.realtime_input",
         "Reads the pad about every millisecond and runs the console in slices of real time between two screen refreshes, instead of reading the pad once a refresh and running a whole image at once: the game sees a button about 9 ms sooner on average (up to 16 ms), and reads it at the moment it asks for it, as on the console. Not used with run-ahead or while a movie is recorded or played: those keep whole images. Takes effect at once. Default: on."
+    ),
+    (
+        "detail.emu.fast_core",
+        "Runs the console several times faster on the common commercial boards (NROM, MMC1, UxROM, CNROM, AxROM, MMC3): the video chip draws a line eight dots at a time, the processor's cycles are counted and handed to the chips at once, the game's waiting loops are counted instead of run. The same console, the same pictures and sounds; other boards run as without it. Made for handhelds. Fidelity+ takes over when both are on. Takes effect at the next load. Default: off.",
     ),
     (
         "detail.emu.fidelity_plus",

@@ -171,6 +171,7 @@ setting_ids! {
     EmuCpuPpuAlignment => "emu.cpu_ppu_alignment",
     EmuCpuApuParity => "emu.cpu_apu_parity",
     EmuFidelityPlus => "emu.fidelity_plus",
+    EmuFastCore => "emu.fast_core",
     EmuExactRate => "emu.exact_rate",
     EmuRealtimeInput => "emu.realtime_input",
     EmuLatePresent => "emu.late_present",

@@ -551,6 +551,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("option.Zaxnes", "Zaxnes"),
     ("option.2A03 netlist", "Netlist du 2A03"),
     ("setting.emu.fidelity_plus", "Fidélité+"),
+    ("setting.emu.fast_core", "Cœur rapide"),
     ("setting.emu.exact_rate", "Cadence de la console"),
     ("setting.emu.realtime_input", "Manette en temps réel"),
     ("setting.emu.late_present", "Présentation tardive"),
@@ -1292,6 +1293,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (
         "detail.emu.realtime_input",
         "Lit la manette environ toutes les millisecondes et fait avancer la console par tranches de temps réel entre deux rafraîchissements de l'écran, au lieu de lire la manette une fois par rafraîchissement et de calculer une image entière d'un coup : le jeu voit un bouton environ 9 ms plus tôt en moyenne (jusqu'à 16 ms), et le lit au moment où il le demande, comme sur la console. Pas utilisé avec le run-ahead ni pendant l'enregistrement ou la lecture d'un film : ceux-ci gardent des images entières. Prend effet tout de suite. Par défaut : activé."
+    ),
+    (
+        "detail.emu.fast_core",
+        "Fait tourner la console plusieurs fois plus vite sur les cartes commerciales courantes (NROM, MMC1, UxROM, CNROM, AxROM, MMC3) : la puce vidéo dessine une ligne huit points à la fois, les cycles du processeur sont comptés et remis aux puces d'un coup, les boucles d'attente du jeu sont comptées au lieu d'être exécutées. La même console, les mêmes images et les mêmes sons ; les autres cartes tournent comme sans l'option. Pensé pour les consoles portables. Fidélité+ prend le dessus quand les deux sont activés. Prend effet au prochain chargement. Par défaut : désactivé.",
     ),
     (
         "detail.emu.fidelity_plus",

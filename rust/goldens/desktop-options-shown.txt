@@ -53,6 +53,7 @@ emu.ppu_reset_line
 emu.cpu_apu_parity
 emu.cpu_ppu_alignment
 emu.fidelity_plus
+emu.fast_core
 emu.exact_rate
 emu.realtime_input
 emu.late_present
