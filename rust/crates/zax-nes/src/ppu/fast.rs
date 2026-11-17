@@ -19,7 +19,7 @@
 //! So the group's eight pixels come from `n`, its fetches run in their own order, and the sprite
 //! evaluation, which looks at neither, runs its dots as before.
 
-use super::{Ppu2C02, OPAQUE_PIXEL, SCREEN_WIDTH};
+use super::{Cart, Ppu2C02, OPAQUE_PIXEL, SCREEN_WIDTH};
 use crate::cartridges::{BoardKind, Cartridge};
 
 /// `SPREAD[b]`: the eight bits of `b` spread over the eight bytes of a `u64`, the leftmost pixel
@@ -63,48 +63,74 @@ impl Ppu2C02 {
     pub(super) fn run_visible_span_fast<K: BoardKind>(
         &mut self,
         count: i64,
-        cartridge: Option<&Cartridge>,
+        cart: Cart<'_, '_, K>,
     ) -> bool {
-        let Some(cartridge_ref) = cartridge else {
-            return false;
-        };
-        if cartridge_ref.chr_view_as::<K>().is_none() {
+        if !cart
+            .as_deref()
+            .is_some_and(|cartridge| self.fast_nametables(cartridge).is_some() && fast_chr::<K>(cartridge).is_some())
+        {
             return false;
         }
 
         // Dots up to the next phase-0 dot (`dot + 1 ≡ 1 mod 8`, so `dot ≡ 0 mod 8`).
         let head = i64::from((8 - (self.dot & 7)) & 7).min(count);
-        if head > 0 && !self.run_visible_span::<K>(head, cartridge) {
-            return false;
+        if head > 0 {
+            self.run_span_dots::<K>(head, cart);
         }
         let groups = (count - head) / 8;
         if groups > 0 {
-            self.run_span_groups::<K>(groups, cartridge_ref);
+            let mut events = A12Events::new();
+            if let Some(cartridge) = cart.as_deref() {
+                self.run_span_groups::<K>(groups, cartridge, &mut events);
+            }
+            events.emit::<K>(cart.as_deref_mut());
         }
         let tail = count - head - groups * 8;
         if tail > 0 {
-            self.run_visible_span::<K>(tail, cartridge);
+            self.run_span_dots::<K>(tail, cart);
         }
         true
     }
 
-    /// `groups` whole groups of eight dots of a visible line, from a phase-0 dot.
-    fn run_span_groups<K: BoardKind>(&mut self, groups: i64, cartridge: &Cartridge) {
-        let Some(chr) = cartridge.chr_view_as::<K>() else {
-            return;
-        };
+    /// Dots of a visible span one at a time, through the bus for a board that watches A12.
+    fn run_span_dots<K: BoardKind>(&mut self, count: i64, cart: Cart<'_, '_, K>) {
+        if K::A12_ONLY {
+            self.run_visible_span_through_bus(count, cart);
+        } else {
+            let _ = self.run_visible_span::<K>(count, cart.as_deref());
+        }
+    }
 
-        // The start of each logical nametable in console VRAM, as `run_visible_span` finds it
-        // (it accepted the cartridge, so no table is served by it).
+    /// The start of each logical nametable in console VRAM, as `run_visible_span` finds them;
+    /// `None` when the cartridge serves one itself.
+    fn fast_nametables(&self, cartridge: &Cartridge) -> Option<[usize; 4]> {
         let layout = self.layout_of(Some(cartridge));
         let mut nametables = [0usize; 4];
         for (table, start) in (0u16..).zip(nametables.iter_mut()) {
             let page = self.nametable_page(0x2000 + (table << 10), Some(cartridge));
+            if page == Cartridge::SERVED_BY_CARTRIDGE {
+                return None;
+            }
             *start = usize::try_from(page).map_or_else(
                 |_| super::map_nametable(0x2000 + (table << 10), layout),
                 |page| page << 10,
             );
         }
+        Some(nametables)
+    }
+
+    /// `groups` whole groups of eight dots of a visible line, from a phase-0 dot.
+    fn run_span_groups<K: BoardKind>(
+        &mut self,
+        groups: i64,
+        cartridge: &Cartridge,
+        events: &mut A12Events,
+    ) {
+        let (Some(chr), Some(nametables)) =
+            (fast_chr::<K>(cartridge), self.fast_nametables(cartridge))
+        else {
+            return;
+        };
         let nametable_byte = |vram: &[u8], address: u16| {
             vram[nametables[usize::from((address >> 10) & 0x03)] | (usize::from(address) & 0x03FF)]
         };
@@ -168,11 +194,20 @@ impl Ppu2C02 {
             }
 
             // The group's fetches (phases 0, 2, 4, 6, 7), into the latches and `v`.
-            self.nametable_latch = nametable_byte(&self.vram, 0x2000 | (self.v & 0x0FFF));
+            let nametable_address = 0x2000 | (self.v & 0x0FFF);
+            self.nametable_latch = nametable_byte(&self.vram, nametable_address);
             let address =
                 0x23C0 | (self.v & 0x0C00) | ((self.v >> 4) & 0x38) | ((self.v >> 2) & 0x07);
             let shift = ((self.v >> 4) & 0x04) | (self.v & 0x02);
             self.attribute_latch = (nametable_byte(&self.vram, address) >> shift) & 0x03;
+            if K::A12_ONLY {
+                // A12 moves twice in the group at most: down with the nametable fetch on dot
+                // `first`, up (with background patterns at $1000) with the low plane's address
+                // on dot `first + 3`. The other fetches repeat the level, which a watcher of A12
+                // does not see.
+                events.push(nametable_address, self.ppu_clock + 1, true);
+                events.push(self.pattern_address(0), self.ppu_clock + 4, false);
+            }
             self.pattern_low_latch = chr.read(self.pattern_address(0));
             self.pattern_high_latch = chr.read(self.pattern_address(8));
             self.increment_coarse_x();
@@ -323,30 +358,58 @@ impl Ppu2C02 {
     pub(super) fn run_line_end_fast<K: BoardKind>(
         &mut self,
         count: i64,
-        cartridge: Option<&Cartridge>,
+        cart: Cart<'_, '_, K>,
     ) -> i64 {
-        if K::WATCHES_BUS
+        if (K::WATCHES_BUS && !K::A12_ONLY)
             || self.scanline >= super::VISIBLE_SCANLINES
             || !self.rendering_enabled()
         {
             return 0;
         }
-        let Some(cartridge) = cartridge else {
-            return 0;
-        };
         if !(257..336).contains(&self.dot) {
             return 0;
         }
+        let mut events = A12Events::new();
+        let run = match cart.as_deref() {
+            Some(cartridge) => self.run_line_end_dots::<K>(count, cartridge, &mut events),
+            None => 0,
+        };
+        events.emit::<K>(cart.as_deref_mut());
+        run
+    }
 
+    /// The body of [`Self::run_line_end_fast`], the A12 events recorded in `events`.
+    fn run_line_end_dots<K: BoardKind>(
+        &mut self,
+        count: i64,
+        cartridge: &Cartridge,
+        events: &mut A12Events,
+    ) -> i64 {
         if self.dot < 320 {
-            let Some(chr) = cartridge.chr_view_as::<K>() else {
+            let Some(chr) = fast_chr::<K>(cartridge) else {
                 return 0;
             };
             #[allow(clippy::cast_possible_truncation)] // At most a line.
             let last = (i64::from(self.dot) + count).min(320) as i32;
+            let first_clock = self.ppu_clock - i64::from(self.dot);
             for dot in self.dot + 1..=last {
                 self.oam_address = 0;
                 let step = (dot - 257) & 0x07;
+                if K::A12_ONLY {
+                    // The slot's garbage nametable fetch (dot 257's is the background's own),
+                    // then the low plane's address: the two places A12 can move in a slot.
+                    #[allow(clippy::cast_sign_loss)] // dot is 258..=320, the slot 0..=7.
+                    let slot = ((dot - 257) >> 3) as usize;
+                    if step == 0 {
+                        events.push(0x2000 | (self.v & 0x0FFF), first_clock + i64::from(dot), true);
+                    } else if step == 3 {
+                        events.push(
+                            self.sprite_pattern_address(slot),
+                            first_clock + i64::from(dot),
+                            false,
+                        );
+                    }
+                }
                 if step == 4 || step == 6 {
                     #[allow(clippy::cast_sign_loss)] // dot is 258..=320, the slot 0..=7.
                     let slot = ((dot - 257) >> 3) as usize;
@@ -381,28 +444,21 @@ impl Ppu2C02 {
         if self.dot != 320 || count < 16 {
             return 0;
         }
-        if cartridge.chr_view_as::<K>().is_none() {
+        if fast_chr::<K>(cartridge).is_none() || self.fast_nametables(cartridge).is_none() {
             return 0;
         }
-        self.run_prefetch_groups::<K>(cartridge);
+        self.run_prefetch_groups::<K>(cartridge, events);
         16
     }
 
     /// The two groups of eight dots of the prefetch (321-328, 329-336): the shift-and-fetch of
     /// the span groups, with no pixel.
-    fn run_prefetch_groups<K: BoardKind>(&mut self, cartridge: &Cartridge) {
-        let Some(chr) = cartridge.chr_view_as::<K>() else {
+    fn run_prefetch_groups<K: BoardKind>(&mut self, cartridge: &Cartridge, events: &mut A12Events) {
+        let (Some(chr), Some(nametables)) =
+            (fast_chr::<K>(cartridge), self.fast_nametables(cartridge))
+        else {
             return;
         };
-        let layout = self.layout_of(Some(cartridge));
-        let mut nametables = [0usize; 4];
-        for (table, start) in (0u16..).zip(nametables.iter_mut()) {
-            let page = self.nametable_page(0x2000 + (table << 10), Some(cartridge));
-            *start = usize::try_from(page).map_or_else(
-                |_| super::map_nametable(0x2000 + (table << 10), layout),
-                |page| page << 10,
-            );
-        }
         for _ in 0..2 {
             let attribute_low = if (self.attribute_latch & 1) != 0 { 0xFF } else { 0x00 };
             let attribute_high = if (self.attribute_latch & 2) != 0 { 0xFF } else { 0x00 };
@@ -420,16 +476,68 @@ impl Ppu2C02 {
                 vram[nametables[usize::from((address >> 10) & 0x03)]
                     | (usize::from(address) & 0x03FF)]
             };
-            self.nametable_latch = nametable_byte(&self.vram, 0x2000 | (self.v & 0x0FFF));
+            let nametable_address = 0x2000 | (self.v & 0x0FFF);
+            self.nametable_latch = nametable_byte(&self.vram, nametable_address);
             let address =
                 0x23C0 | (self.v & 0x0C00) | ((self.v >> 4) & 0x38) | ((self.v >> 2) & 0x07);
             let shift = ((self.v >> 4) & 0x04) | (self.v & 0x02);
             self.attribute_latch = (nametable_byte(&self.vram, address) >> shift) & 0x03;
+            if K::A12_ONLY {
+                events.push(nametable_address, self.ppu_clock + 1, true);
+                events.push(self.pattern_address(0), self.ppu_clock + 4, false);
+            }
             self.pattern_low_latch = chr.read(self.pattern_address(0));
             self.pattern_high_latch = chr.read(self.pattern_address(8));
             self.increment_coarse_x();
             self.dot += 8;
             self.ppu_clock += 8;
+        }
+    }
+}
+
+/// The CHR the fast paths read: the fetch view, or for a board that only watches A12 (whose
+/// fetches read what its peek reads), the peek view; the A12 events go to it apart.
+fn fast_chr<K: BoardKind>(cartridge: &Cartridge) -> Option<crate::cartridges::ChrView<'_>> {
+    if K::A12_ONLY {
+        cartridge.chr_peek_view_as::<K>()
+    } else {
+        cartridge.chr_view_as::<K>()
+    }
+}
+
+/// The A12 events of a stretch of fast dots, in order, handed to the cartridge once the stretch
+/// has read its CHR: an A12 watcher only sees changes of level, and nothing in the stretch reads
+/// the counter it clocks.
+struct A12Events {
+    list: [(u16, i64, bool); 80],
+    len: usize,
+}
+
+impl A12Events {
+    const fn new() -> Self {
+        Self {
+            list: [(0, 0, false); 80],
+            len: 0,
+        }
+    }
+
+    fn push(&mut self, address: u16, clock: i64, read: bool) {
+        if let Some(slot) = self.list.get_mut(self.len) {
+            *slot = (address, clock, read);
+            self.len += 1;
+        }
+    }
+
+    fn emit<K: BoardKind>(&self, cartridge: Option<&mut Cartridge>) {
+        let Some(cartridge) = cartridge else {
+            return;
+        };
+        for &(address, clock, read) in &self.list[..self.len] {
+            if read {
+                cartridge.on_ppu_address_bus_as::<K>(address & 0x3FFF, clock);
+            } else {
+                cartridge.on_ppu_address_bus_without_read_as::<K>(address & 0x3FFF, clock);
+            }
         }
     }
 }

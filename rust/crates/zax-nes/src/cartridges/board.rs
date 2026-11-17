@@ -1073,6 +1073,7 @@ macro_rules! with_fast_board_kind {
             $crate::cartridges::Board::UxRom(_) => 3,
             $crate::cartridges::Board::CnRom(_) => 4,
             $crate::cartridges::Board::AxRom(_) => 5,
+            $crate::cartridges::Board::Mmc3(_) => 6,
             _ => 0,
         };
         match entry {
@@ -1096,6 +1097,10 @@ macro_rules! with_fast_board_kind {
                 type $kind = $crate::cartridges::Fast<$crate::cartridges::AxRomKind>;
                 $run
             }
+            6 => {
+                type $kind = $crate::cartridges::Fast<$crate::cartridges::Mmc3Kind>;
+                $run
+            }
             _ => $other,
         }
     }};
@@ -1106,7 +1111,12 @@ pub(crate) use with_fast_board_kind;
 pub(crate) const fn has_fast_path(board: &Board) -> bool {
     matches!(
         board,
-        Board::Nrom(_) | Board::Mmc1(_) | Board::UxRom(_) | Board::CnRom(_) | Board::AxRom(_)
+        Board::Nrom(_)
+            | Board::Mmc1(_)
+            | Board::UxRom(_)
+            | Board::CnRom(_)
+            | Board::AxRom(_)
+            | Board::Mmc3(_)
     )
 }
 

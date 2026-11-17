@@ -2247,7 +2247,7 @@ impl Ppu2C02 {
             }
 
             if K::FAST {
-                let run = self.run_line_end_fast::<K>(count, cart.as_deref());
+                let run = self.run_line_end_fast::<K>(count, cart);
                 if run > 0 {
                     count -= run;
                     continue;
@@ -2257,7 +2257,7 @@ impl Ppu2C02 {
             let span = self.visible_span_ahead(count);
             if span > 0 {
                 let done = if K::FAST {
-                    self.run_visible_span_fast::<K>(span, cart.as_deref())
+                    self.run_visible_span_fast::<K>(span, cart)
                 } else {
                     self.run_visible_span::<K>(span, cart.as_deref())
                 };
