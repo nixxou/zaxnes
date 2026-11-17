@@ -13,6 +13,7 @@ mod key_config;
 mod menu;
 mod movie_bar;
 mod options;
+mod options_new;
 mod overlay;
 mod pens;
 mod shaders;
@@ -112,6 +113,13 @@ pub struct ZaxUi {
     pub menu_bar: MenuBarModel,
     /// The options window.
     pub options: OptionsModel,
+    /// Lot REWRITE-UI: the classic options window rather than the new one (a button in each
+    /// goes to the other while the two are compared).
+    pub options_classic: bool,
+    /// Lot REWRITE-UI: the new window's advanced mode (every tab) rather than its simple one.
+    pub options_advanced: bool,
+    /// Lot REWRITE-UI: the preset last chosen on the slider (0 fastest to 4 most faithful).
+    pub options_preset: usize,
     /// The key configuration window.
     pub keys: KeyConfigModel,
     /// The profile chooser.
@@ -183,6 +191,9 @@ impl ZaxUi {
             state: UiState::default(),
             menu_bar: MenuBarModel::new(),
             options: OptionsModel::new(),
+            options_classic: false,
+            options_advanced: false,
+            options_preset: 2,
             keys: KeyConfigModel::new(),
             chooser: ProfileChooserModel::new(host.games().library()),
             browser: FileBrowserModel::new(),
@@ -309,7 +320,11 @@ impl ZaxUi {
             self.draw_movie_bar(ui, frame.host);
         }
         if self.state.options {
-            self.draw_options(ui, frame.host);
+            if self.options_classic {
+                self.draw_options(ui, frame.host);
+            } else {
+                self.draw_options_new(ui, frame.host);
+            }
         }
         if self.state.shaders {
             self.draw_shaders(ui, frame.host);

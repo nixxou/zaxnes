@@ -82,6 +82,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
     // emu.engine: the per-game engine choice of lot FCEUX-23 step 5 (`docs/review/FCEUX-ENGINE.md`
     // §4), which only a build with the `fceux-core` feature offers but every build carries the key
     // of, so a `games.json` crosses between them. emu.cartridge_db and emu.power_on_ram: lot CARTDB.
+    // emu.fast_core: lot FAST-1.
     assert_eq!(
         additions,
         [
@@ -105,6 +106,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "emu.cpu_revision",
             "emu.engine",
             "emu.exact_rate",
+            "emu.fast_core",
             "emu.fidelity_plus",
             "emu.forced_patch",
             "emu.hack_options",

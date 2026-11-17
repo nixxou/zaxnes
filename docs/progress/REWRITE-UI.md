@@ -21,3 +21,10 @@ hardware defects, VS DIPs, ...). Of these the fast core and Fidelity+ are now im
   core now runs the real-time slices too (they bypassed it, so with the default "real-time
   pad" the fast core did nothing): `NesBus::fast_limit` holds its counting to the slice's end.
   `fast_1_real_time_slices_match`: 320 ROMs, 600 frames in 144 Hz slices, identical.
+* 3-4. Presets and the new window (`ui/zax_ui/options_new.rs`): simple mode = Essentials +
+  Controllers, advanced mode = every tab of the classic window as well; the five-step slider
+  writes its preset's values, the box says what it turns on, the preset's check boxes are the
+  real settings (amber "at the next game" / "at the next start" when one waits); "(modified)"
+  when the settings left the preset. The classic window stays: a button in each opens the other.
+  The mode and the last preset are not saved yet (window state). Catalogue test: `emu.fast_core`
+  added to the list of additions (also on feat/fast-core).

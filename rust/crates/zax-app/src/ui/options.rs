@@ -1141,6 +1141,13 @@ fn is_editable(descriptor: &SettingDescriptor) -> bool {
     }
 }
 
+/// The row of one setting, with its widget's bounds, wherever it is drawn (lot REWRITE-UI: the
+/// new window draws settings outside the tabs' layout).
+#[must_use]
+pub fn row_of(id: SettingId) -> OptionsRow {
+    build_row(catalogue::descriptor(id))
+}
+
 fn build_row(descriptor: &'static SettingDescriptor) -> OptionsRow {
     let (minimum, maximum, step) = bounds(descriptor);
     OptionsRow {

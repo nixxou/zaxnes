@@ -41,6 +41,10 @@ impl ZaxUi {
             .opened(&mut open)
             .begin();
         if let Some(_window) = window {
+            // Lot REWRITE-UI: the way to the new window, while the two are compared.
+            if ui.button(strings::get("options.new.to_new")) {
+                self.options_classic = false;
+            }
             // RO-1: nine tabs. Scrolling keeps every title readable where the window is too narrow
             // for all of them; the default policy would shrink them to an ellipsis instead.
             if let Some(_bar) =
@@ -59,7 +63,7 @@ impl ZaxUi {
     }
 
     /// One tab: its reset button, then its entries in the order [`options::LAYOUT`] gives them.
-    fn draw_options_tab(
+    pub(super) fn draw_options_tab(
         &mut self,
         ui: &Ui,
         host: &mut AppHost,
@@ -129,7 +133,7 @@ impl ZaxUi {
 
     /// A folder setting: a field written on Enter or when it loses the focus, and a button
     /// that picks the folder (Rust-only, the ROM folder of the console mode).
-    fn draw_folder_row(&mut self, ui: &Ui, host: &mut AppHost, row: &OptionsRow) {
+    pub(super) fn draw_folder_row(&mut self, ui: &Ui, host: &mut AppHost, row: &OptionsRow) {
         let id = row.descriptor.id();
         let _id = ui.push_id(row.descriptor.key());
         let stored = host.settings().get(id).as_text().to_owned();
@@ -248,7 +252,7 @@ fn draw_compact_row(ui: &Ui, host: &mut AppHost, compact: CompactRow, cells: &[O
 /// One row of a tab. `run_ahead_forced` is Q-103's verdict on the running game, which only the
 /// Run-ahead row shows; `fceux_validation` is lot FCEUX-6's verdict on it, which only the engine
 /// row shows.
-fn draw_row(
+pub(super) fn draw_row(
     ui: &Ui,
     host: &mut AppHost,
     row: &OptionsRow,
