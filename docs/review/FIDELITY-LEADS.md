@@ -1330,6 +1330,20 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   netlist loads `v` in the middle of W+3 and W+4's ALE already carries the new address, where
   Zaxnes fetches W+4 with the old one (`211 netlist bus=2BF0 | zaxnes bus=2BEF`), invisible
   to `dotcmp.py` (`v`/`t` only); to measure with a dedicated program.
+- I5 (2026-11-17) **DMC IRQ latency: the netlist against the hardware; Zaxnes keeps the
+  hardware's** (fidelity audit `ext-tools/fidelity-audit`, gap 1). The 2A03 netlist (audit
+  bench `benchaud`, and `benchirq` with the nodes) raises `set_pcm_irq`/`pcm_irq` two cycles
+  after the DMA read R of a sample's last byte and the 6502's `c_irq` on R+3, 78 cases of 78;
+  Zaxnes raises the flag on R. A model with the flag on R+2 (what `$4015` reads; blargg's
+  `7-dmc_basics` #19 needs it there at the latest) and /IRQ on R+3 made the audit's `cpuflow`
+  match to the cycle (0 of 41 705, 79 IRQ latencies of 79) — and **failed AccuracyCoin's
+  `Interrupt flag latency` test B** (`AccuracyCoin.asm` `TEST_IFlagLatency_PageBoundaryTest`:
+  a taken branch crossing a page, the DMC DMA between its cycles 2 and 3, must take the IRQ at
+  the poll before cycle 4, i.e. one cycle after the read). AccuracyCoin is verified on the
+  console, and the DMA's own placement is confirmed by both (audit `dmcdma`, 66 DMA, and the
+  DMA tests of blargg and AccuracyCoin), so the netlist's IRQ path is what disagrees with the
+  hardware here, as for the seven unofficial opcodes the audit lists. **Reverted; Zaxnes keeps
+  the flag on the read.** To revisit only with a console measurement of that latency.
 - I4 (2026-11-17) **Sprite phase and idle dot of the PPU bus**. **Fixed**: each sprite slot's
   two garbage nametable fetches (ALE 257 + 8k and 259 + 8k, both `0x2000 | v` in the 2C02
   netlist; Mesen reads an attribute address on the second, the netlist does not) are now put
