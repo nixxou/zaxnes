@@ -1352,6 +1352,15 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   phases. Next: a dedicated per-dot trace of the OAM address node (`spr_ptr`) on one line with
   a known in-range set, against Zaxnes's exact evaluation (`ppu-exact-sprite-eval`), which
   passes AccuracyCoin's evaluation rows.
+  Done the same day (`visualnes-bench/benchspr.cpp`, nodes `spr_addr0-7`, `spr_ptr0-5`, program
+  `oamn`, OAM by `sprite_write(a, a)` and Y = 100 for sprites 50-59): the pointer moves as
+  expected (2 dots a sprite, 8 for a copy: on the line labelled 48, copies of `$28`-`$2F` on dots
+  67-106, then `+4` every 2 dots), but the copied set is Y = 40 and 44 with Y = 48 rejected —
+  the set every emulator, and the games, select on line 47 (a sprite at Y is shown on lines
+  Y + 1 to Y + 8). The bench's OAM labelling or cell mapping is one line off from what its
+  `vpos` says for the background, which the dot-perfect `scr` match vouches for; the 2-5 dot
+  "lead" follows from a different in-range set, not from Zaxnes's evaluation. Kept open only as
+  a bench question; no Zaxnes change.
 - I8 (2026-11-17) **Alignment-dependent races of the 2C02 netlist that hardware tests contradict
   or that are a simulation artefact — not ported** (fidelity audit, gaps 3 and 4). Both replayed
   on a second bench whose /CS is decoded from the 2A03's own M2 (`visualnes-bench/benchdot2m2`,
