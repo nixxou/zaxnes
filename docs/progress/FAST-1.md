@@ -38,6 +38,16 @@ Design: `docs/design/FAST-CORE.md`.
   98/98 identical, widescreen too). Loop detection now looks 3 instructions back.
   fceux-bench fast core: zelda2 0.622 -> 0.371, smb1 0.278 -> 0.266 ms/frame.
 
+* 2026-11-17: `emu.fast_core` in the app (desktop and handheld option rows, EN/FR), off by default.
+* 2026-11-17: `tests/fast_core_tests.rs` (ignored, needs ROMs): 320 ROMs on fast boards, 600 frames,
+  fast == standard (cycles, picture, wide picture, tiles, sound, state); savestates cross both
+  ways (compared with a reload on the same core: the resampler and lead I5 aside); widescreen
+  64/16 with the advanced patches and run-ahead 2 identical.
+* 2026-11-17: the line's last seven span dots as a short group: callgrind smb1 -0.2 %, mm2 -0.4 %,
+  smb3 -0.3 %; golden 98/98, widescreen 98/98. Tried and dropped: MMC3 span ends through the
+  peek view with recorded A12 changes (+2.3 % then +0.3 % on smb3: no better than the bus), and
+  packed A12 entries to shrink their clearing (smb3 -0.3 % but nrom/mmc1 +0.8 %, inlining).
+
 ## Where it stands (end of 2026-11-17)
 
 fceux-bench, attract mode, 6000 frames, capture on, ms/frame (FCEUX / standard / fast):

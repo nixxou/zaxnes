@@ -72,15 +72,23 @@ impl Ppu2C02 {
         if head > 0 {
             self.run_span_dots::<K>(head, cart);
         }
-        let groups = (count - head) / 8;
+        let mut groups = (count - head) / 8;
+        let mut tail = count - head - groups * 8;
+        // The line's last seven span dots (249 to 255, phases 0 to 6) run as a group short of
+        // its phase-7 dot: its eighth pixel is x = 255, which never makes a sprite 0 hit and
+        // which dot 256 paints again before anything reads it.
+        let short_last = tail == 7 && i64::from(self.dot) + groups * 8 == 248;
+        if short_last {
+            groups += 1;
+            tail = 0;
+        }
         if groups > 0 {
             let mut events = A12Events::new();
             if let Some(cartridge) = cart.as_deref() {
-                self.run_span_groups::<K>(groups, cartridge, &mut events);
+                self.run_span_groups::<K>(groups, short_last, cartridge, &mut events);
             }
             events.emit::<K>(cart.as_deref_mut());
         }
-        let tail = count - head - groups * 8;
         if tail > 0 {
             self.run_span_dots::<K>(tail, cart);
         }
@@ -119,6 +127,7 @@ impl Ppu2C02 {
     fn run_span_groups<K: BoardKind>(
         &mut self,
         groups: i64,
+        short_last: bool,
         cartridge: &Cartridge,
         events: &mut A12Events,
     ) {
@@ -191,7 +200,8 @@ impl Ppu2C02 {
         let sprite_line = &self.sprite_line;
         let pixels = &mut self.pixels;
 
-        for _ in 0..groups {
+        for group in 0..groups {
+            let short = short_last && group + 1 == groups;
             // The group's reload, then its eight pixels from the two tiles it shows.
             let attribute_low: u8 = if (attribute_latch & 1) != 0 {
                 0xFF
@@ -271,6 +281,12 @@ impl Ppu2C02 {
                 events.push(pattern, clock + 4, false);
             }
             (pattern_low_latch, pattern_high_latch) = chr.read_pair(pattern);
+            if short {
+                // Seven dots: the coarse X increment is dot 256's.
+                x0 += 7;
+                clock += 7;
+                break;
+            }
             if (v & 0x001F) == 0x001F {
                 v = (v & !0x001F) ^ 0x0400;
             } else {
@@ -293,11 +309,13 @@ impl Ppu2C02 {
         if zero_hit {
             self.sprite_zero_hit = true;
         }
-        // The shifters after the last group: its reload shifted seven times more.
-        self.pattern_shift_low = loaded[0] << 7;
-        self.pattern_shift_high = loaded[1] << 7;
-        self.attribute_shift_low = loaded[2] << 7;
-        self.attribute_shift_high = loaded[3] << 7;
+        // The shifters after the last group: its reload shifted seven times more (six for a
+        // short group).
+        let shift = if short_last { 6 } else { 7 };
+        self.pattern_shift_low = loaded[0] << shift;
+        self.pattern_shift_high = loaded[1] << shift;
+        self.attribute_shift_low = loaded[2] << shift;
+        self.attribute_shift_high = loaded[3] << shift;
 
         // Sprite evaluation looks at none of the above (it reads OAM and writes the secondary
         // OAM, which no pixel of this line reads): its dots run after the groups, in order.
