@@ -160,3 +160,46 @@ first) and with the agreement table; nothing is merged without the owner.
 * In 3D the profile's Lua becomes the main per-frame cost once the core is fast; the 3D gain is
   capped by it, the 2D gain is not.
 * `.bk2` movies recorded on QuickNES do not sync on this core either: it is not QuickNES's timing.
+
+## Every speed lead, and what speed buys back (2026-11-17)
+
+Measured on the fast path after steps 2a and 3a (callgrind, smb1 in 2D, per frame): APU about
+6 M Ir before 3a, PPU 6.4 M (span groups 3.1 M, tile capture about 1.2 M, dots 256-340 and the
+pre-render line the rest), CPU + bus about 3.4 M.
+
+Core leads, largest first:
+
+1. **PPU, the rest of the line**: dots 256-340 (sprite fetches) and the pre-render line, still per
+   dot; sprite evaluation once per line instead of per dot; `$2002` polling (sprite 0 and vblank
+   waits) forces fine catch-ups: predict the hit and the flag instead.
+2. **APU, audible events**: cached next-event cycle per channel instead of `quiet_cycles` over all
+   of them at every event; later, per-channel Blip deltas (QuickNES's model, linear mix).
+3. **CPU without a per-cycle tick**: cycles counted, deadlines tested per instruction, a page
+   table for RAM/PRG.
+4. **Idle-loop skip**: a game spinning on `$2002` or on a RAM flag set by its NMI jumps to the
+   next interrupt (the widescreen patches already know some of these loops).
+5. **Frames nobody sees**: catch-up and run-ahead frames render no pixels (sprite 0 and the state
+   still computed); the tile capture only where a frame is converted or saved.
+6. **MMC3 IRQ by line** instead of the A12 watcher on every fetch.
+7. **Build**: PGO on the handheld build (LTO fat, one codegen unit and `target-cpu=cortex-a53`
+   are already there).
+
+Outside the core, on a handheld in 3D: the profile's Lua hooks, the conversion and the draw
+list, then the GPU; the device's own profiler (`logs/zaxnes.log`) has to say which first.
+
+### What the handheld pays in latency today
+
+Measured from the code of `accuracy-done`:
+
+| Mechanism | Where | Latency |
+|---|---|---|
+| Emulation on a separate core (`ZAXNES_SEPARATE_CORE`, no UI setting) | PortMaster only | +1 displayed frame of input |
+| Emulation ahead (`ZAXNES_CORE_AHEAD`) | with the above, scripts that leave the core alone | turns the real-time pad off |
+| `emu.pipeline` = Auto | PortMaster default, 3D, when frames are late | +1 displayed frame of picture |
+| GPU queue depth 2 = no fence | PortMaster and Android | the driver's own queue (Mali: up to 3) |
+| `emu.run_ahead` = 0 | PortMaster (desktop and Android: 1) | no run-ahead gain |
+| `emu.realtime_input` (on) | Zaxnes only, off with run-ahead or emulation ahead | gains up to a refresh when there is idle time |
+| `video.half_rate_3d` (off) | handheld option | +1 refresh in 3D when on |
+
+Each of these trades latency for speed. A core several times faster lets the handheld drop the
+separate core and the pipeline, and afford run-ahead 1: that is where its latency gain is.
