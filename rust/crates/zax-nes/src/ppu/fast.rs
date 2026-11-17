@@ -116,6 +116,14 @@ impl Ppu2C02 {
         #[allow(clippy::cast_sign_loss)] // Visible line, 0..240.
         let row = self.scanline as usize * SCREEN_WIDTH;
 
+        // The colour of a background entry with no sprite over it, for the whole span.
+        let mut background_colors = [0u8; 16];
+        for (entry, color) in (0u8..).zip(background_colors.iter_mut()) {
+            let entry = if background && (entry & 0x03) != 0 { entry } else { 0 };
+            *color = self.palette_marked[usize::from(entry)] & color_mask;
+        }
+        let evaluation_from = (self.dot + 1).max(65);
+
         for _ in 0..groups {
             let first = self.dot + 1;
 
@@ -139,14 +147,24 @@ impl Ppu2C02 {
             }
             #[allow(clippy::cast_sign_loss)] // first is 9..=241 here.
             let x0 = (first - 1) as usize;
-            for (j, background_entry) in window.to_le_bytes().into_iter().enumerate() {
-                let x = x0 + j;
-                let background_entry = if background { background_entry } else { 0 };
-                let sprite = if sprites { self.sprite_line[x] } else { 0 };
-                let color = self.compose_span_pixel(background_entry, sprite, x, color_mask);
-                if let Some(pixel) = self.pixels.get_mut(row + x) {
-                    *pixel = color;
+            let entries = window.to_le_bytes();
+            let mut cells = [0u8; 8];
+            if sprites {
+                cells.copy_from_slice(&self.sprite_line[x0..x0 + 8]);
+            }
+            let mut colors = [0u8; 8];
+            if u64::from_le_bytes(cells) == 0 {
+                for (color, entry) in colors.iter_mut().zip(entries) {
+                    *color = background_colors[usize::from(entry & 0x0F)];
                 }
+            } else {
+                for (j, color) in colors.iter_mut().enumerate() {
+                    let entry = if background { entries[j] } else { 0 };
+                    *color = self.compose_span_pixel(entry, cells[j], x0 + j, color_mask);
+                }
+            }
+            if let Some(out) = self.pixels.get_mut(row + x0..row + x0 + 8) {
+                out.copy_from_slice(&colors);
             }
 
             // The group's fetches (phases 0, 2, 4, 6, 7), into the latches and `v`.
@@ -159,13 +177,14 @@ impl Ppu2C02 {
             self.pattern_high_latch = chr.read(self.pattern_address(8));
             self.increment_coarse_x();
 
-            // Sprite evaluation looks at none of the above: its dots run as they did.
-            for dot in first.max(65)..first + 8 {
-                self.run_sprite_evaluation(dot);
-            }
-
             self.dot += 8;
             self.ppu_clock += 8;
+        }
+
+        // Sprite evaluation looks at none of the above (it reads OAM and writes the secondary
+        // OAM, which no pixel of this line reads): its dots run after the groups, in order.
+        if self.dot >= evaluation_from {
+            self.run_sprite_evaluation_range(evaluation_from, self.dot);
         }
     }
 
@@ -191,5 +210,79 @@ impl Ppu2C02 {
             0
         };
         self.palette_marked[usize::from(entry & 0x1F)] & color_mask
+    }
+
+    /// Dots `first` to `last` (both at least 65) of the sprite evaluation, as that many
+    /// [`Ppu2C02::run_sprite_evaluation`] calls would run them. A whole pair of dots (odd, then
+    /// even) of an aligned evaluation takes a sprite at once: one pair for a sprite not on the
+    /// line, four for one that is copied. Anything else (dot 65's start, a misaligned address, a
+    /// full secondary OAM, a pair cut by the range) runs dot by dot.
+    #[cfg(feature = "ppu-exact-sprite-eval")]
+    fn run_sprite_evaluation_range(&mut self, first: i32, last: i32) {
+        let mut dot = first;
+        while dot <= last {
+            let pair = (dot & 1) == 1 && dot > 65 && dot < last;
+            if pair && self.eval_finished {
+                // The copy is over: odd dots read OAM into the buffer, even dots move the sprite
+                // half and read the secondary OAM back into it, so only the last pair shows.
+                let pairs = (last - dot + 1) / 2;
+                self.eval_sprite = (self.eval_sprite + pairs) & 0x3F;
+                #[allow(clippy::cast_sign_loss)] // Masked to 0..32.
+                let slot = (self.secondary_oam_addr & 0x1F) as usize;
+                self.oam_eval_latch = self.secondary_oam[slot];
+                dot += pairs * 2;
+                continue;
+            }
+            if pair
+                && self.eval_byte == 0
+                && !self.sprite_in_range
+                && self.secondary_oam_addr < 32
+                && self.secondary_oam_addr & 3 == 0
+            {
+                #[allow(clippy::cast_sign_loss)] // 0..64.
+                let sprite = self.eval_sprite as usize;
+                let y = self.oam[sprite * 4];
+                #[allow(clippy::cast_sign_loss)] // 0..32.
+                let slot = self.secondary_oam_addr as usize;
+                if !(self.in_sprite_range(y) && !self.sprite_in_margin()) {
+                    self.oam_eval_latch = y;
+                    self.secondary_oam[slot] = y;
+                    self.next_sprite();
+                    dot += 2;
+                    continue;
+                }
+                if dot + 7 <= last {
+                    if dot + 1 == 66 {
+                        self.sprite_zero_found = true;
+                    }
+                    self.secondary_oam[slot..slot + 4]
+                        .copy_from_slice(&self.oam[sprite * 4..sprite * 4 + 4]);
+                    #[allow(clippy::cast_possible_truncation)] // 0..64.
+                    if let Some(source) = self.secondary_source.get_mut(slot >> 2) {
+                        *source = sprite as u8;
+                    }
+                    self.oam_eval_latch = self.oam[sprite * 4 + 3];
+                    self.secondary_oam_addr += 4;
+                    self.eval_copy_dot = dot + 7;
+                    self.eval_sprite = (self.eval_sprite + 1) & 0x3F;
+                    self.eval_finished = self.eval_sprite == 0;
+                    self.sprite_in_range = false;
+                    self.eval_found = self.secondary_oam_addr >> 2;
+                    dot += 8;
+                    continue;
+                }
+            }
+            self.run_sprite_evaluation(dot);
+            dot += 1;
+        }
+    }
+
+    /// The evaluation of a build without `ppu-exact-sprite-eval` has its own shape; it runs dot
+    /// by dot here.
+    #[cfg(not(feature = "ppu-exact-sprite-eval"))]
+    fn run_sprite_evaluation_range(&mut self, first: i32, last: i32) {
+        for dot in first..=last {
+            self.run_sprite_evaluation(dot);
+        }
     }
 }

@@ -828,7 +828,7 @@ impl Ppu2C02 {
     /// sprite half wraps back to 0, which is how an evaluation that started misaligned stops
     /// part-way through a sprite.
     #[cfg(feature = "ppu-exact-sprite-eval")]
-    fn next_sprite(&mut self) {
+    pub(super) fn next_sprite(&mut self) {
         self.eval_sprite = (self.eval_sprite + 1) & 0x3F;
         self.eval_byte = 0;
         if self.eval_sprite == 0 {
@@ -839,7 +839,7 @@ impl Ppu2C02 {
     /// `11407930`'s own body: the byte index is the caller's business here, so this only moves the
     /// sprite index and stops the copy when it runs off the end of OAM.
     #[cfg(not(feature = "ppu-exact-sprite-eval"))]
-    fn next_sprite(&mut self) {
+    pub(super) fn next_sprite(&mut self) {
         self.eval_sprite += 1;
         if self.eval_sprite >= 64 {
             self.eval_sprite = 0;
@@ -850,14 +850,14 @@ impl Ppu2C02 {
     /// Whether the sprite being evaluated is one the widescreen extension's high byte puts in a
     /// margin: not on the screen, it takes no place among the line's eight (nor raises the
     /// overflow), so that the sprites on the screen all show.
-    fn sprite_in_margin(&self) -> bool {
+    pub(super) fn sprite_in_margin(&self) -> bool {
         #[allow(clippy::cast_sign_loss)] // Masked to 0..64.
         let sprite = (self.eval_sprite & 63) as usize;
         let x = self.oam[(sprite * 4) + 3];
         !(0..256).contains(&self.wide.sprite_x(sprite, x))
     }
 
-    fn in_sprite_range(&self, sprite_y: u8) -> bool {
+    pub(super) fn in_sprite_range(&self, sprite_y: u8) -> bool {
         let height = if (self.control & 0x20) != 0 { 16 } else { 8 };
         let sprite_y = i32::from(sprite_y);
         self.scanline >= sprite_y && self.scanline < sprite_y + height
