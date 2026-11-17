@@ -337,3 +337,52 @@ fn the_demo_makes_sound() {
     assert!((470_000..=490_000).contains(&frames));
     assert!(loudest > 1000, "the game makes sound");
 }
+
+/// An NROM image that turns rendering off with PPUMASK `mask` and the backdrop set to white:
+/// the whole picture is colour `$30` with the emphasis bits of `mask`.
+fn backdrop_rom(mask: u8) -> Vec<u8> {
+    #[rustfmt::skip]
+    let code = [
+        0x78, 0xD8, 0xA2, 0xFF, 0x9A,             // SEI CLD LDX #$FF TXS
+        0x2C, 0x02, 0x20, 0x10, 0xFB,             // vblank: BIT $2002 / BPL
+        0x2C, 0x02, 0x20, 0x10, 0xFB,             // a second one
+        0xA9, 0x3F, 0x8D, 0x06, 0x20,             // $2006 = $3F
+        0xA9, 0x00, 0x8D, 0x06, 0x20,             // $2006 = $00
+        0xA9, 0x30, 0x8D, 0x07, 0x20,             // $3F00 = $30 (white)
+        0xA9, 0x00, 0x8D, 0x06, 0x20, 0x8D, 0x06, 0x20, // v = $0000
+        0xA9, mask, 0x8D, 0x01, 0x20,             // $2001 = mask
+        0x4C, 0x2B, 0xC0,                         // JMP to itself ($C02B)
+    ];
+    let mut prg = vec![0xEA_u8; 0x4000];
+    prg[..code.len()].copy_from_slice(&code);
+    prg[0x3FFA..].copy_from_slice(&[0x2B, 0xC0, 0x00, 0xC0, 0x2B, 0xC0]);
+    let mut image = vec![b'N', b'E', b'S', 0x1A, 1, 1, 0, 0];
+    image.resize(16, 0);
+    image.extend_from_slice(&prg);
+    image.extend_from_slice(&[0_u8; 0x2000]);
+    image
+}
+
+#[test]
+fn the_picture_takes_the_colour_emphasis_of_its_pixels() {
+    let colour_of = |mask: u8| {
+        let mut core = Core::load(&backdrop_rom(mask), "emphasis.nes", widescreen(false))
+            .expect("the test image loads");
+        for _ in 0..6 {
+            core.run(0);
+        }
+        let (pixels, width, height) = core.picture();
+        assert!(width > 0 && height > 0);
+        let middle = pixels[pixels.len() / 2];
+        assert!(pixels.iter().all(|&pixel| pixel == middle), "one colour, mask {mask:#04X}");
+        middle
+    };
+    let pack = |rgb: zax_engine3d::palette::Rgb24| {
+        (u32::from(rgb.r) << 16) | (u32::from(rgb.g) << 8) | u32::from(rgb.b)
+    };
+    assert_eq!(colour_of(0x00), pack(zax_engine3d::palette::nes_color(0x30)));
+    // All three bits: the white the console darkens.
+    let emphasized = colour_of(0xE0);
+    assert_eq!(emphasized, pack(zax_engine3d::palette::nes_color_emphasized(0x30, 7)));
+    assert_ne!(emphasized, colour_of(0x00));
+}

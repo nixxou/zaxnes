@@ -108,6 +108,8 @@ pub struct ThreeD {
     zapper_offset: Vec3,
     records: Vec<TileRecord>,
     picture: Vec<u8>,
+    /// The colour emphasis of every pixel of `picture`, empty without any (lot FIDPLUS-D2b).
+    picture_emphasis: Vec<u8>,
     picture_height: usize,
     frame: i32,
     /// The settings changed since the scene last followed them (the scripts', the options').
@@ -154,6 +156,7 @@ impl ThreeD {
             zapper_offset: Vec3::default(),
             records: Vec::new(),
             picture: Vec::new(),
+            picture_emphasis: Vec::new(),
             picture_height: 240,
             frame: 0,
             changes: Arc::default(),
@@ -288,6 +291,7 @@ impl ThreeD {
         self.sync_settings(nes);
         self.follow_settings();
         self.picture_height = nes.wide_picture_into(&mut self.picture);
+        nes.wide_emphasis_into(&mut self.picture_emphasis);
         let width = self.picture.len() / self.picture_height.max(1);
         self.overscan
             .in_force(i32::try_from(width.saturating_sub(256) / 2).unwrap_or(0))
@@ -499,9 +503,13 @@ impl ThreeD {
                     draw_list: None,
                     nes_picture: &self.picture,
                     nes_picture_height: self.picture_height,
-                    // The palette gives the colours: the per-pixel emphasis and the composite RGB
-                    // picture of the app (lot FIDPLUS-D) are not carried by this core yet.
-                    nes_picture_emphasis: &[],
+                    // The palette gives the colours, with each pixel's emphasis; the composite
+                    // RGB picture of the app (lot FIDPLUS-D2b step 2) is not carried yet.
+                    nes_picture_emphasis: if self.picture_emphasis.len() == self.picture.len() {
+                        &self.picture_emphasis
+                    } else {
+                        &[]
+                    },
                     nes_picture_rgb: &[],
                 },
             );
