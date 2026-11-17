@@ -1322,11 +1322,11 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.fast_core",
-        "Runs the console several times faster on the common commercial boards (NROM, MMC1, UxROM, CNROM, AxROM, MMC3): the video chip draws a line eight dots at a time, the processor's cycles are counted and handed to the chips at once, the game's waiting loops are counted instead of run. The same console, the same pictures and sounds; other boards run as without it. Made for handhelds. Fidelity+ takes over when both are on. Takes effect at the next load. Default: off.",
+        "Runs the console several times faster on the common commercial boards (NROM, MMC1, UxROM, CNROM, AxROM, MMC3): the video chip draws a line eight dots at a time, the processor's cycles are counted and handed to the chips at once, the game's waiting loops are counted instead of run. The same console, the same pictures and sounds; other boards run as without it. Made for handhelds. Fidelity+ takes over when both are on. Takes effect at once. Default: off.",
     ),
     (
         "detail.emu.fidelity_plus",
-        "Runs the console through the Fidelity+ machine: the effects of the game's accesses to the video chip land on the clock edges measured on the transistor-level model of the chips, instead of on the delays of the standard core. Closest to the console, slower. Under construction: NTSC consoles only so far (PAL and Dendy run as without it). Takes effect at the next load. Default: off.",
+        "Runs the console through the Fidelity+ machine: the effects of the game's accesses to the video chip land on the clock edges measured on the transistor-level model of the chips, instead of on the delays of the standard core. Closest to the console, slower. Under construction: NTSC consoles only so far (PAL and Dendy run as without it). Takes effect at once. Default: off.",
     ),
     (
         "detail.emu.ppu_reset_line",

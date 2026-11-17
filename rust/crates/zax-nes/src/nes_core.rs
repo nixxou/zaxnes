@@ -1335,8 +1335,24 @@ impl NesCore {
             self.bus.ppu_mut().set_fidelity_plus(self.fidelity_plus);
         }
         self.bus.defer_ppu();
+        // Lot REWRITE-UI: the fast core runs real-time slices too (the default host loop), its
+        // counting held to the slice's end.
+        let fast = self.fast_core
+            && !fidelity
+            && !self.generic_path
+            && !self.bus.is_vs_image()
+            && self
+                .bus
+                .cartridge()
+                .is_some_and(|cartridge| has_fast_path(cartridge.board()));
+        if fast {
+            self.bus.set_fast_limit(until);
+        }
         let done = loop {
             let outcome = match self.bus.cartridge().filter(|_| !self.generic_path) {
+                Some(cartridge) if fast => with_fast_board_kind!(cartridge.board(), K => {
+                    self.run_fast_frame_steps::<K>(frame.idle_loop, until)
+                }, self.run_slice_steps::<AnyBoard>(frame.idle_loop, until, fidelity)),
                 Some(cartridge) => with_board_kind!(cartridge.board(), K => {
                     self.run_slice_steps::<K>(frame.idle_loop, until, fidelity)
                 }),
@@ -1349,6 +1365,7 @@ impl NesCore {
             }
         };
         self.bus.end_deferred_ppu();
+        self.bus.set_fast_limit(i64::MAX);
         if !done {
             return None;
         }
@@ -1688,7 +1705,10 @@ impl NesCore {
         loop {
             let done = match self.bus.cartridge() {
                 Some(cartridge) => with_fast_board_kind!(cartridge.board(), K => {
-                    self.run_fast_frame_steps::<K>(idle_loop)
+                    !matches!(
+                        self.run_fast_frame_steps::<K>(idle_loop, i64::MAX),
+                        SliceOutcome::Budget
+                    )
                 }, self.run_frame_steps::<AnyBoard>(idle_loop)),
                 None => true,
             };
@@ -1702,7 +1722,15 @@ impl NesCore {
 
     /// [`NesCore::run_frame_steps`] for the fast core: the CPU steps a [`FastBus`], whose counted
     /// cycles are handed to the machine before the frame's loop looks at it.
-    fn run_fast_frame_steps<K: BoardKind>(&mut self, idle_loop: Option<(u16, u16)>) -> bool {
+    ///
+    /// `until`: the cycle a real-time slice ends on (`i64::MAX` for a whole frame); the steps
+    /// stop at the first instruction that reaches it, as [`NesCore::run_slice_steps`] does, and
+    /// no idle loop is counted past it.
+    fn run_fast_frame_steps<K: BoardKind>(
+        &mut self,
+        idle_loop: Option<(u16, u16)>,
+        until: i64,
+    ) -> SliceOutcome {
         self.bus.flush_fast_as::<K>();
         // The program counters of the last three instructions: a loop of up to three
         // instructions shows as the counter coming back to one of them.
@@ -1741,7 +1769,11 @@ impl NesCore {
             }
             if self.bus.ppu().vblank_just_started() {
                 self.bus.flush_fast_as::<K>();
-                return true;
+                return SliceOutcome::FrameDone;
+            }
+            if self.bus.cycles_with_pending() >= until {
+                self.bus.flush_fast_as::<K>();
+                return SliceOutcome::Budget;
             }
         }
     }

@@ -189,6 +189,10 @@ pub struct NesBus {
     fast_pending: u32,
     /// Lot FAST-1: cycles [`FastBus`] may count before the next flush.
     fast_left: i64,
+    /// Lot REWRITE-UI: the cycle the fast core's counting may not pass, the end of a real-time
+    /// slice (`i64::MAX` otherwise), so that a counted idle loop never carries the frame past
+    /// the instant the host reads the pads again.
+    fast_limit: i64,
     /// Whether the instruction being run was fetched from the extension's execution zone: its
     /// data accesses at `$3000`-`$3FFF` reach the extension when the zone holds its data there
     /// (`WideExtension::zone_data`), the game's still reach the PPU.
@@ -253,6 +257,7 @@ impl NesBus {
             apu_batching: false,
             fast_pending: 0,
             fast_left: 1,
+            fast_limit: i64::MAX,
             apu_quiet: 0,
             zone_instruction: false,
         }
@@ -2302,7 +2307,18 @@ impl NesBus {
         }
         (self.ppu_deadline - self.cycles)
             .min(i64::from(self.apu_quiet) - i64::from(self.apu_lag) + 1)
+            .min(self.fast_limit.saturating_sub(self.cycles))
             .max(1)
+    }
+
+    /// Lot REWRITE-UI: the cycle the fast core may not count past ([`NesBus::fast_limit`]).
+    pub(crate) const fn set_fast_limit(&mut self, cycle: i64) {
+        self.fast_limit = cycle;
+    }
+
+    /// The cycles run, those the fast core has counted and not yet handed over included.
+    pub(crate) const fn cycles_with_pending(&self) -> i64 {
+        self.cycles + self.fast_pending as i64
     }
 
     /// Hands the counted cycles to the machine, as as many [`NesBus::tick_as`] would: at most

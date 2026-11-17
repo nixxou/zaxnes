@@ -1296,11 +1296,11 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ),
     (
         "detail.emu.fast_core",
-        "Fait tourner la console plusieurs fois plus vite sur les cartes commerciales courantes (NROM, MMC1, UxROM, CNROM, AxROM, MMC3) : la puce vidéo dessine une ligne huit points à la fois, les cycles du processeur sont comptés et remis aux puces d'un coup, les boucles d'attente du jeu sont comptées au lieu d'être exécutées. La même console, les mêmes images et les mêmes sons ; les autres cartes tournent comme sans l'option. Pensé pour les consoles portables. Fidélité+ prend le dessus quand les deux sont activés. Prend effet au prochain chargement. Par défaut : désactivé.",
+        "Fait tourner la console plusieurs fois plus vite sur les cartes commerciales courantes (NROM, MMC1, UxROM, CNROM, AxROM, MMC3) : la puce vidéo dessine une ligne huit points à la fois, les cycles du processeur sont comptés et remis aux puces d'un coup, les boucles d'attente du jeu sont comptées au lieu d'être exécutées. La même console, les mêmes images et les mêmes sons ; les autres cartes tournent comme sans l'option. Pensé pour les consoles portables. Fidélité+ prend le dessus quand les deux sont activés. Prend effet tout de suite. Par défaut : désactivé.",
     ),
     (
         "detail.emu.fidelity_plus",
-        "Fait tourner la console dans la machine Fidélité+ : les effets des accès du jeu à la puce vidéo tombent sur les fronts d'horloge mesurés sur le modèle au transistor près des puces, au lieu des délais du cœur standard. Au plus près de la console, plus lent. En construction : consoles NTSC seulement pour l'instant (PAL et Dendy tournent comme sans l'option). Prend effet au prochain chargement. Par défaut : désactivé.",
+        "Fait tourner la console dans la machine Fidélité+ : les effets des accès du jeu à la puce vidéo tombent sur les fronts d'horloge mesurés sur le modèle au transistor près des puces, au lieu des délais du cœur standard. Au plus près de la console, plus lent. En construction : consoles NTSC seulement pour l'instant (PAL et Dendy tournent comme sans l'option). Prend effet tout de suite. Par défaut : désactivé.",
     ),
     (
         "detail.emu.ppu_reset_line",

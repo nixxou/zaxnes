@@ -1725,6 +1725,21 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 // requirement asks for: its bursts expire and re-arm about six times a second.
                 self.pacer.reset();
             }
+            // Lot REWRITE-UI: both switch at the next frame, the machine's state being the same
+            // either way (the fast core's savestates cross both ways; Fidélité+ finishes its
+            // pending edges on its own loop when it is turned off).
+            SettingId::EmuFastCore => {
+                let on = self.settings.get(id).as_bool();
+                if let Some(session) = self.session.as_mut().filter(|session| session.has_rom()) {
+                    session.core_mut().set_fast_core(on);
+                }
+            }
+            SettingId::EmuFidelityPlus => {
+                let on = self.settings.get(id).as_bool();
+                if let Some(session) = self.session.as_mut().filter(|session| session.has_rom()) {
+                    session.core_mut().set_fidelity_plus(on);
+                }
+            }
             SettingId::EmuLuaSmoothGc => {
                 let smooth = self.settings.get(id).as_bool();
                 if let Some(session) = &self.session {

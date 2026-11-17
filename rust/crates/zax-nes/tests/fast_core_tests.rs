@@ -214,3 +214,35 @@ fn fast_1_widescreen_and_run_ahead_match() {
         );
     }
 }
+
+/// Real-time slices (the host's default loop): about 2.4 slices a frame, as at 144 Hz, cut
+/// anywhere in the frame; the fast core must stop on the same instructions and give the same
+/// machine as the standard core.
+#[test]
+#[ignore = "needs ROMs: set ZAXNES_TEST_ROMS and/or ZAXNES_ROMS"]
+fn fast_1_real_time_slices_match() {
+    let sliced = |core: &mut NesCore| {
+        let step = 29_780 * 10 / 24;
+        let mut until = 0i64;
+        let mut frames = Vec::new();
+        for frame in 0..600u32 {
+            loop {
+                until += step;
+                if let Some(cycles) = core.run_frame_slice(input(frame), until) {
+                    frames.push(record(core, cycles));
+                    break;
+                }
+            }
+        }
+        frames
+    };
+    for (name, image) in fast_roms() {
+        let mut standard = core(&image, &name, false);
+        let mut fast = core(&image, &name, true);
+        same(&name, "slices", &sliced(&mut standard), &sliced(&mut fast));
+        assert!(
+            standard.save_state(false).ok() == fast.save_state(false).ok(),
+            "{name}: savestate after 600 sliced frames"
+        );
+    }
+}

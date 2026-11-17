@@ -2429,7 +2429,7 @@ fn fidelity_plus(out: &mut Vec<SettingDescriptor>) {
             SettingKind::Bool,
             SettingValue::Bool(false),
             SettingScope::User,
-            SettingEffect::NextRomLoad,
+            SettingEffect::Immediate,
             SettingTheme::Emulation,
         )
         .with_domain(Domain::switch())
@@ -2443,7 +2443,7 @@ fn fidelity_plus(out: &mut Vec<SettingDescriptor>) {
             SettingKind::Bool,
             SettingValue::Bool(false),
             SettingScope::User,
-            SettingEffect::NextRomLoad,
+            SettingEffect::Immediate,
             SettingTheme::Emulation,
         )
         .with_domain(Domain::switch())
