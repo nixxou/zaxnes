@@ -23,3 +23,4 @@ Design: `docs/design/FAST-CORE.md`.
 * 2026-11-17: step 2d (runs of off-line sprites in one loop): smb1 0.396, mm2 0.425, metroid 0.440 ms/frame; identical. One golden-core segfault (fast run, 77th ROM) did not reproduce in three runs nor ROM by ROM: watch it.
 * 2026-11-17: step 1a (FastBus, lazy tick, exact): smb1 0.640 -> 0.338, mm2 0.725 -> 0.355, metroid 0.770 -> 0.395 ms/frame (about 2x the standard core); golden in play identical.
 * 2026-11-17: step 4a (MMC3 on the fast path, its A12 events replayed at their clocks, exact): smb3 0.938 -> 0.517 ms/frame; 98/98 identical in play.
+* 2026-11-17: step 1b (idle loops JMP-self and LDA ram/branch repeated by counting, exact): smb1 0.265, mm2 0.291, smb3 0.472 ms/frame; metroid unchanged (other loop shape).

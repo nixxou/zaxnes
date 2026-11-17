@@ -1697,7 +1697,17 @@ impl NesCore {
     /// cycles are handed to the machine before the frame's loop looks at it.
     fn run_fast_frame_steps<K: BoardKind>(&mut self, idle_loop: Option<(u16, u16)>) -> bool {
         self.bus.flush_fast_as::<K>();
+        // The program counters of the last two instructions: a loop of one or two instructions
+        // shows as the counter coming back to one of them.
+        let mut last_pcs = [u16::MAX; 2];
         loop {
+            let pc = self.cpu.pc;
+            if (pc == last_pcs[0] || pc == last_pcs[1]) && self.cpu.quiet_boundary() {
+                if let Some(period) = self.idle_loop_period(pc) {
+                    self.bus.skip_idle_cycles(period);
+                }
+            }
+            last_pcs = [pc, last_pcs[0]];
             self.cpu.step(&mut crate::nes_bus::FastBus::<K>::new(&mut self.bus));
             if let Some((first, last)) = idle_loop {
                 if (first..=last).contains(&self.cpu.pc) && self.bus.ppu().wide().stalling() {
@@ -1710,6 +1720,46 @@ impl NesCore {
                 self.bus.flush_fast_as::<K>();
                 return true;
             }
+        }
+    }
+
+    /// The cycles of one turn of the idle loop at `pc`, when it is one the fast core may repeat by
+    /// counting (lot FAST-1): `JMP` to itself, or a load of a RAM byte followed by a conditional
+    /// branch back to it that the byte makes taken. All of it in plain PRG-ROM, so that a turn
+    /// reads nothing with a side effect and leaves the machine as it found it.
+    fn idle_loop_period(&self, pc: u16) -> Option<i64> {
+        let byte = |offset: u16| self.bus.rom_byte(pc.wrapping_add(offset));
+        match byte(0)? {
+            0x4C => (u16::from_le_bytes([byte(1)?, byte(2)?]) == pc).then_some(3),
+            opcode @ (0xA5 | 0xAD) => {
+                let (address, length, load) = if opcode == 0xA5 {
+                    (u16::from(byte(1)?), 2, 3)
+                } else {
+                    (u16::from_le_bytes([byte(1)?, byte(2)?]), 3, 4)
+                };
+                if address >= 0x2000 {
+                    return None;
+                }
+                let value = self.bus.ram_byte(address);
+                let branch = pc.wrapping_add(length);
+                let taken = match self.bus.rom_byte(branch)? {
+                    0xF0 => value == 0,
+                    0xD0 => value != 0,
+                    0x10 => value & 0x80 == 0,
+                    0x30 => value & 0x80 != 0,
+                    _ => return None,
+                };
+                let offset = self.bus.rom_byte(branch.wrapping_add(1))?;
+                let after = branch.wrapping_add(2);
+                #[allow(clippy::cast_possible_wrap)] // The signed branch offset.
+                let target = after.wrapping_add_signed(i16::from(offset as i8));
+                if !taken || target != pc {
+                    return None;
+                }
+                let cross = (after & 0xFF00) != (target & 0xFF00);
+                Some(load + 3 + i64::from(cross))
+            }
+            _ => None,
         }
     }
 

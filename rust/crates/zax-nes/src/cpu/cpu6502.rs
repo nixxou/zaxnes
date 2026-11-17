@@ -242,6 +242,13 @@ impl Cpu6502 {
 
     /// Executes one instruction, or services a pending interrupt, and returns the number
     /// of CPU cycles it took.
+    /// Whether the next instruction boundary takes no interrupt and none is on its way: the
+    /// fast core may then repeat an idle loop by counting its cycles (lot FAST-1).
+    #[must_use]
+    pub(crate) const fn quiet_boundary(&self) -> bool {
+        !self.jammed && !self.poll_nmi && !self.nmi_pending && !self.poll_irq && !self.irq_sample
+    }
+
     pub fn step<B: CpuBus + ?Sized>(&mut self, bus: &mut B) -> u32 {
         let before = bus.cycle_count();
 

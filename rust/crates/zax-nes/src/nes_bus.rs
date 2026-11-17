@@ -2333,6 +2333,37 @@ impl NesBus {
         self.fast_left = self.fast_horizon();
     }
 
+    /// A byte of plain PRG-ROM, read without a cycle or a side effect; `None` elsewhere.
+    pub(crate) fn rom_byte(&self, address: u16) -> Option<u8> {
+        if address < 0x8000 {
+            return None;
+        }
+        self.cartridge
+            .as_ref()
+            .and_then(|cartridge| cartridge.read_rom_window(address))
+    }
+
+    /// A byte of CPU RAM, read without a cycle.
+    pub(crate) const fn ram_byte(&self, address: u16) -> u8 {
+        self.ram[(address as usize) & (RAM_SIZE - 1)]
+    }
+
+    /// Counts as many whole `period`-cycle repeats of an idle loop as fit before the next flush,
+    /// leaving at least one cycle to run through the loop as usual (lot FAST-1). Nothing a repeat
+    /// does can be seen before that flush: its reads are of RAM and PRG-ROM, and the NMI and IRQ
+    /// lines only move at a flush.
+    pub(crate) fn skip_idle_cycles(&mut self, period: i64) {
+        if self.fast_left <= period {
+            return;
+        }
+        let repeats = (self.fast_left - 1) / period;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // Below a frame.
+        {
+            self.fast_pending += (repeats * period) as u32;
+        }
+        self.fast_left -= repeats * period;
+    }
+
     /// One counted cycle, flushed when a deadline falls on it.
     #[allow(clippy::inline_always)] // Once per CPU cycle on the fast path.
     #[inline(always)]
