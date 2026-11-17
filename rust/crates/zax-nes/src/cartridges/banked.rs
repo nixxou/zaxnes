@@ -465,6 +465,21 @@ impl<'m> ChrView<'m> {
         (plane0, plane1)
     }
 
+    /// The bytes at `address` and `address + 8`, the two planes of one tile row, as two
+    /// [`Self::read`] calls give them (lot FAST-1: one window lookup for both).
+    #[must_use]
+    pub fn read_pair(&self, address: u16) -> (u8, u8) {
+        let index = usize::from(address) & 0x1FFF;
+        let within = index & (BankWindows::CHR_WINDOW_SIZE - 1);
+        if within + 8 < BankWindows::CHR_WINDOW_SIZE && !self.data.is_empty() {
+            let offset = self.offsets[index / BankWindows::CHR_WINDOW_SIZE] + within;
+            if let (Some(&low), Some(&high)) = (self.data.get(offset), self.data.get(offset + 8)) {
+                return (low, high);
+            }
+        }
+        (self.read(address), self.read(address.wrapping_add(8)))
+    }
+
     /// The byte at `address` ($0000-$1FFF), 0 when there is no CHR at all.
     #[must_use]
     pub fn read(&self, address: u16) -> u8 {

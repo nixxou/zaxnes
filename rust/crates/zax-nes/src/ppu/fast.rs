@@ -40,19 +40,15 @@ const SPREAD: [u64; 256] = {
     table
 };
 
-/// The eight 4-bit background entries (`palette << 2 | pixel`) of the two bytes of four
-/// shifters, the high byte's pixels in the low half: `(high byte's, low byte's)`.
+/// The eight 4-bit background entries (`palette << 2 | pixel`) of one byte of each of the four
+/// shifters, the leftmost pixel in the lowest byte.
 #[allow(clippy::inline_always)] // Once per eight pixels on the fast path.
 #[inline(always)]
-fn entries(low: u16, high: u16, attribute_low: u16, attribute_high: u16) -> u128 {
-    let byte = |value: u16, shift: u16| usize::from((value >> shift) & 0xFF);
-    let half = |shift: u16| {
-        SPREAD[byte(low, shift)]
-            | (SPREAD[byte(high, shift)] << 1)
-            | (SPREAD[byte(attribute_low, shift)] << 2)
-            | (SPREAD[byte(attribute_high, shift)] << 3)
-    };
-    u128::from(half(8)) | (u128::from(half(0)) << 64)
+fn decode(low: u8, high: u8, attribute_low: u8, attribute_high: u8) -> u64 {
+    SPREAD[usize::from(low)]
+        | (SPREAD[usize::from(high)] << 1)
+        | (SPREAD[usize::from(attribute_low)] << 2)
+        | (SPREAD[usize::from(attribute_high)] << 3)
 }
 
 impl Ppu2C02 {
@@ -149,24 +145,46 @@ impl Ppu2C02 {
             *color = self.palette_marked[usize::from(entry)] & color_mask;
         }
         let evaluation_from = (self.dot + 1).max(65);
+        let pattern_table: u16 = if (self.control & 0x10) != 0 { 0x1000 } else { 0x0000 };
+        // Fine Y cannot change inside a span: only coarse X moves until dot 256.
+        let fine_y = (self.v >> 12) & 0x07;
+
+        // The high bytes the first group's reload keeps (`(r << 1) & 0xFF00`); after it, each
+        // group's high bytes are the latches the group before loaded, so only the latches are
+        // decoded from then on.
+        let high_byte = |shifter: u16| ((shifter >> 7) & 0xFF) as u8;
+        let mut high = [
+            high_byte(self.pattern_shift_low),
+            high_byte(self.pattern_shift_high),
+            high_byte(self.attribute_shift_low),
+            high_byte(self.attribute_shift_high),
+        ];
+        let mut current = decode(high[0], high[1], high[2], high[3]);
+        let mut loaded = [0u16; 4];
 
         for _ in 0..groups {
             let first = self.dot + 1;
 
-            // Dot `first`'s shift and reload, then the group's eight pixels from them.
-            let attribute_low = if (self.attribute_latch & 1) != 0 { 0xFF } else { 0x00 };
-            let attribute_high = if (self.attribute_latch & 2) != 0 { 0xFF } else { 0x00 };
-            let low = ((self.pattern_shift_low << 1) & 0xFF00) | u16::from(self.pattern_low_latch);
-            let high =
-                ((self.pattern_shift_high << 1) & 0xFF00) | u16::from(self.pattern_high_latch);
-            let attr_low = ((self.attribute_shift_low << 1) & 0xFF00) | attribute_low;
-            let attr_high = ((self.attribute_shift_high << 1) & 0xFF00) | attribute_high;
-            #[allow(clippy::cast_possible_truncation)] // Eight bytes of the window.
-            let window = (entries(low, high, attr_low, attr_high) >> (8 * fine_x)) as u64;
-            self.pattern_shift_low = low << 7;
-            self.pattern_shift_high = high << 7;
-            self.attribute_shift_low = attr_low << 7;
-            self.attribute_shift_high = attr_high << 7;
+            // Dot `first`'s reload, then the group's eight pixels from the two tiles it shows.
+            let attribute_low: u8 = if (self.attribute_latch & 1) != 0 { 0xFF } else { 0x00 };
+            let attribute_high: u8 = if (self.attribute_latch & 2) != 0 { 0xFF } else { 0x00 };
+            let latches = [
+                self.pattern_low_latch,
+                self.pattern_high_latch,
+                attribute_low,
+                attribute_high,
+            ];
+            for ((shifter, high), latch) in loaded.iter_mut().zip(high).zip(latches) {
+                *shifter = (u16::from(high) << 8) | u16::from(latch);
+            }
+            let next = decode(latches[0], latches[1], latches[2], latches[3]);
+            let window = if fine_x == 0 {
+                current
+            } else {
+                (current >> (8 * fine_x)) | (next << (64 - 8 * fine_x))
+            };
+            current = next;
+            high = latches;
 
             if sprites && self.sprite_line_stale {
                 self.rebuild_sprite_line();
@@ -200,21 +218,26 @@ impl Ppu2C02 {
                 0x23C0 | (self.v & 0x0C00) | ((self.v >> 4) & 0x38) | ((self.v >> 2) & 0x07);
             let shift = ((self.v >> 4) & 0x04) | (self.v & 0x02);
             self.attribute_latch = (nametable_byte(&self.vram, address) >> shift) & 0x03;
+            let pattern = pattern_table + (u16::from(self.nametable_latch) * 16) + fine_y;
             if K::A12_ONLY {
                 // A12 moves twice in the group at most: down with the nametable fetch on dot
                 // `first`, up (with background patterns at $1000) with the low plane's address
                 // on dot `first + 3`. The other fetches repeat the level, which a watcher of A12
                 // does not see.
                 events.push(nametable_address, self.ppu_clock + 1, true);
-                events.push(self.pattern_address(0), self.ppu_clock + 4, false);
+                events.push(pattern, self.ppu_clock + 4, false);
             }
-            self.pattern_low_latch = chr.read(self.pattern_address(0));
-            self.pattern_high_latch = chr.read(self.pattern_address(8));
+            (self.pattern_low_latch, self.pattern_high_latch) = chr.read_pair(pattern);
             self.increment_coarse_x();
 
             self.dot += 8;
             self.ppu_clock += 8;
         }
+        // The shifters after the last group: its reload shifted seven times more.
+        self.pattern_shift_low = loaded[0] << 7;
+        self.pattern_shift_high = loaded[1] << 7;
+        self.attribute_shift_low = loaded[2] << 7;
+        self.attribute_shift_high = loaded[3] << 7;
 
         // Sprite evaluation looks at none of the above (it reads OAM and writes the secondary
         // OAM, which no pixel of this line reads): its dots run after the groups, in order.
