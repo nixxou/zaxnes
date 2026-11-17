@@ -162,18 +162,31 @@ impl Ppu2C02 {
         let mut current = decode(high[0], high[1], high[2], high[3]);
         let mut loaded = [0u16; 4];
 
-        for _ in 0..groups {
-            let first = self.dot + 1;
+        // The sprite line cannot go stale inside a span (only the sprite fetches of dots 257 to
+        // 320 make it so), so it is rebuilt here or not at all.
+        if sprites && self.sprite_line_stale {
+            self.rebuild_sprite_line();
+        }
+        // The fields the groups move, held in locals for the loop and stored back after it.
+        let mut v = self.v;
+        let mut nametable_latch = self.nametable_latch;
+        let mut attribute_latch = self.attribute_latch;
+        let mut pattern_low_latch = self.pattern_low_latch;
+        let mut pattern_high_latch = self.pattern_high_latch;
+        let mut clock = self.ppu_clock;
+        let mut zero_hit = false;
+        let palette = self.palette_marked;
+        #[allow(clippy::cast_sign_loss)] // The span is inside dots 2..=255.
+        let mut x0 = self.dot as usize;
+        let vram = &self.vram;
+        let sprite_line = &self.sprite_line;
+        let pixels = &mut self.pixels;
 
-            // Dot `first`'s reload, then the group's eight pixels from the two tiles it shows.
-            let attribute_low: u8 = if (self.attribute_latch & 1) != 0 { 0xFF } else { 0x00 };
-            let attribute_high: u8 = if (self.attribute_latch & 2) != 0 { 0xFF } else { 0x00 };
-            let latches = [
-                self.pattern_low_latch,
-                self.pattern_high_latch,
-                attribute_low,
-                attribute_high,
-            ];
+        for _ in 0..groups {
+            // The group's reload, then its eight pixels from the two tiles it shows.
+            let attribute_low: u8 = if (attribute_latch & 1) != 0 { 0xFF } else { 0x00 };
+            let attribute_high: u8 = if (attribute_latch & 2) != 0 { 0xFF } else { 0x00 };
+            let latches = [pattern_low_latch, pattern_high_latch, attribute_low, attribute_high];
             for ((shifter, high), latch) in loaded.iter_mut().zip(high).zip(latches) {
                 *shifter = (u16::from(high) << 8) | u16::from(latch);
             }
@@ -186,15 +199,10 @@ impl Ppu2C02 {
             current = next;
             high = latches;
 
-            if sprites && self.sprite_line_stale {
-                self.rebuild_sprite_line();
-            }
-            #[allow(clippy::cast_sign_loss)] // first is 9..=241 here.
-            let x0 = (first - 1) as usize;
             let entries = window.to_le_bytes();
             let mut cells = [0u8; 8];
             if sprites {
-                cells.copy_from_slice(&self.sprite_line[x0..x0 + 8]);
+                cells.copy_from_slice(&sprite_line[x0..x0 + 8]);
             }
             let mut colors = [0u8; 8];
             if u64::from_le_bytes(cells) == 0 {
@@ -204,34 +212,52 @@ impl Ppu2C02 {
             } else {
                 for (j, color) in colors.iter_mut().enumerate() {
                     let entry = if background { entries[j] } else { 0 };
-                    *color = self.compose_span_pixel(entry, cells[j], x0 + j, color_mask);
+                    let (value, hit) = compose_pixel(&palette, entry, cells[j], x0 + j, color_mask);
+                    *color = value;
+                    zero_hit |= hit;
                 }
             }
-            if let Some(out) = self.pixels.get_mut(row + x0..row + x0 + 8) {
+            if let Some(out) = pixels.get_mut(row + x0..row + x0 + 8) {
                 out.copy_from_slice(&colors);
             }
 
             // The group's fetches (phases 0, 2, 4, 6, 7), into the latches and `v`.
-            let nametable_address = 0x2000 | (self.v & 0x0FFF);
-            self.nametable_latch = nametable_byte(&self.vram, nametable_address);
-            let address =
-                0x23C0 | (self.v & 0x0C00) | ((self.v >> 4) & 0x38) | ((self.v >> 2) & 0x07);
-            let shift = ((self.v >> 4) & 0x04) | (self.v & 0x02);
-            self.attribute_latch = (nametable_byte(&self.vram, address) >> shift) & 0x03;
-            let pattern = pattern_table + (u16::from(self.nametable_latch) * 16) + fine_y;
+            let nametable_address = 0x2000 | (v & 0x0FFF);
+            nametable_latch = nametable_byte(vram, nametable_address);
+            let address = 0x23C0 | (v & 0x0C00) | ((v >> 4) & 0x38) | ((v >> 2) & 0x07);
+            let shift = ((v >> 4) & 0x04) | (v & 0x02);
+            attribute_latch = (nametable_byte(vram, address) >> shift) & 0x03;
+            let pattern = pattern_table + (u16::from(nametable_latch) * 16) + fine_y;
             if K::A12_ONLY {
-                // A12 moves twice in the group at most: down with the nametable fetch on dot
-                // `first`, up (with background patterns at $1000) with the low plane's address
-                // on dot `first + 3`. The other fetches repeat the level, which a watcher of A12
+                // A12 moves twice in the group at most: down with the nametable fetch on its
+                // first dot, up (with background patterns at $1000) with the low plane's address
+                // three dots later. The other fetches repeat the level, which a watcher of A12
                 // does not see.
-                events.push(nametable_address, self.ppu_clock + 1, true);
-                events.push(pattern, self.ppu_clock + 4, false);
+                events.push(nametable_address, clock + 1, true);
+                events.push(pattern, clock + 4, false);
             }
-            (self.pattern_low_latch, self.pattern_high_latch) = chr.read_pair(pattern);
-            self.increment_coarse_x();
+            (pattern_low_latch, pattern_high_latch) = chr.read_pair(pattern);
+            if (v & 0x001F) == 0x001F {
+                v = (v & !0x001F) ^ 0x0400;
+            } else {
+                v += 1;
+            }
 
-            self.dot += 8;
-            self.ppu_clock += 8;
+            x0 += 8;
+            clock += 8;
+        }
+        self.v = v;
+        self.nametable_latch = nametable_latch;
+        self.attribute_latch = attribute_latch;
+        self.pattern_low_latch = pattern_low_latch;
+        self.pattern_high_latch = pattern_high_latch;
+        self.ppu_clock = clock;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // At most 255.
+        {
+            self.dot = x0 as i32;
+        }
+        if zero_hit {
+            self.sprite_zero_hit = true;
         }
         // The shifters after the last group: its reload shifted seven times more.
         self.pattern_shift_low = loaded[0] << 7;
@@ -246,29 +272,6 @@ impl Ppu2C02 {
         }
     }
 
-    /// The colour of pixel `x` of a span from its background entry and its sprite cell, as
-    /// `span_pixel` composes it.
-    #[allow(clippy::inline_always)] // Once a pixel on the fast path.
-    #[inline(always)]
-    fn compose_span_pixel(&mut self, background: u8, sprite: u8, x: usize, color_mask: u8) -> u8 {
-        let background_opaque = (background & 0x03) != 0;
-        if (sprite & super::render::SPRITE_ZERO) != 0
-            && background_opaque
-            && x != SCREEN_WIDTH - 1
-        {
-            self.sprite_zero_hit = true;
-        }
-        let entry = if (sprite & super::render::SPRITE_OPAQUE) != 0
-            && (!background_opaque || (sprite & super::render::SPRITE_BEHIND) == 0)
-        {
-            0x10 | (sprite & 0x0F)
-        } else if background_opaque {
-            background
-        } else {
-            0
-        };
-        self.palette_marked[usize::from(entry & 0x1F)] & color_mask
-    }
 
     /// Dots `first` to `last` (both at least 65) of the sprite evaluation, as that many
     /// [`Ppu2C02::run_sprite_evaluation`] calls would run them. A whole pair of dots (odd, then
@@ -516,6 +519,31 @@ impl Ppu2C02 {
             self.ppu_clock += 8;
         }
     }
+}
+
+/// The colour of pixel `x` of a span from its background entry and its sprite cell, as
+/// `span_pixel` composes it, and whether it is a sprite 0 hit.
+#[allow(clippy::inline_always)] // Once a pixel under a sprite on the fast path.
+#[inline(always)]
+fn compose_pixel(
+    palette: &[u8; super::PALETTE_SIZE],
+    background: u8,
+    sprite: u8,
+    x: usize,
+    color_mask: u8,
+) -> (u8, bool) {
+    let background_opaque = (background & 0x03) != 0;
+    let hit = (sprite & super::render::SPRITE_ZERO) != 0 && background_opaque && x != SCREEN_WIDTH - 1;
+    let entry = if (sprite & super::render::SPRITE_OPAQUE) != 0
+        && (!background_opaque || (sprite & super::render::SPRITE_BEHIND) == 0)
+    {
+        0x10 | (sprite & 0x0F)
+    } else if background_opaque {
+        background
+    } else {
+        0
+    };
+    (palette[usize::from(entry & 0x1F)] & color_mask, hit)
 }
 
 /// The CHR the fast paths read: the fetch view, or for a board that only watches A12 (whose
