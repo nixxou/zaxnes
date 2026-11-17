@@ -512,6 +512,11 @@ pub struct Ppu2C02 {
     sprite_line: [u8; SCREEN_WIDTH],
     /// True when the slots changed since `sprite_line` was built.
     sprite_line_stale: bool,
+    /// Lot FAST-1: the frame being run is not shown (run-ahead, catch-up), so the fast core's
+    /// line renderer leaves its pixels unpainted. The picture is not in the state and nothing
+    /// else reads a frame's pixels (the Zapper and the capture read the tile records), so the
+    /// machine is the same. Not in the state.
+    skip_pixels: bool,
     /// Whether the picture shows more than eight sprites on a line (see [`SpriteLimit`]).
     sprite_limit: SpriteLimit,
     /// The sprites of the next line past the eight the hardware loads, when the limit is
@@ -718,6 +723,7 @@ impl Ppu2C02 {
             sprite_zero_loaded: false,
             sprite_line: [0; SCREEN_WIDTH],
             sprite_line_stale: true,
+            skip_pixels: false,
             sprite_limit: SpriteLimit::Kept,
             extra_pattern_low: [0; 64],
             extra_pattern_high: [0; 64],
@@ -1588,6 +1594,10 @@ impl Ppu2C02 {
     /// Lot MAPPERS-P (mapper 532): the picture, lent to the font overlay and given back with
     /// [`Self::restore_pixels`].
     #[cfg(feature = "board-532")]
+    pub(crate) const fn set_skip_pixels(&mut self, skip: bool) {
+        self.skip_pixels = skip;
+    }
+
     pub(crate) fn take_pixels(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.pixels)
     }

@@ -1658,6 +1658,13 @@ impl NesCore {
         self.fast_core = enabled;
     }
 
+    /// Lot FAST-1: the next frames are not shown (a host's catch-up), so the fast core may leave
+    /// their pixels unpainted; everything else runs as usual. The host turns it off before the
+    /// frame it shows. No effect on the standard core.
+    pub fn set_frame_hidden(&mut self, hidden: bool) {
+        self.bus.ppu_mut().set_skip_pixels(hidden);
+    }
+
     /// Whether the fast core runs the frames of the boards that have a fast path.
     #[must_use]
     pub const fn fast_core(&self) -> bool {
@@ -1931,9 +1938,11 @@ impl NesCore {
         // be lost by a displayed frame the host dropped.
         self.restore_real_frame();
 
-        // Steps 1 and 3: the real frame and the frames between, silent and unhanded.
+        // Steps 1 and 3: the real frame and the frames between, silent and unhanded (and, on the
+        // fast core, unpainted: lot FAST-1).
         let callback = self.video_callback.take();
         self.bus.apu_mut().set_output_enabled(false);
+        self.bus.ppu_mut().set_skip_pixels(true);
 
         self.run_frame(input_word);
 
@@ -1950,6 +1959,7 @@ impl NesCore {
         }
 
         // Step 4: the displayed frame, with its sound and its picture.
+        self.bus.ppu_mut().set_skip_pixels(false);
         self.bus.apu_mut().set_output_enabled(true);
         self.video_callback = callback;
         self.run_frame(input_word)

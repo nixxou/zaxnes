@@ -173,16 +173,27 @@ pub fn golden_row(rel: &str, image: &[u8], frames: u32) -> Result<Value, Harness
         .ok()
         .and_then(|value| value.trim().parse::<u32>().ok())
         .filter(|&n| n > 0);
+    // `ZAXNES_GOLDEN_RUN_AHEAD=<n>`: every frame through `run_frame_ahead`, the checkpoints read
+    // on the displayed frame before the real one is put back (lot FAST-1).
+    let run_ahead = env_number("ZAXNES_GOLDEN_RUN_AHEAD")
+        .and_then(|value| u8::try_from(value).ok())
+        .unwrap_or(0);
     for frame in 1..=frames {
         // AMD-041 REQ-ARCH-012 amended: `golden-core` runs at **N = 0** and has no option to
         // change it. The digests of the 291 rows were taken without run-ahead and are only
         // comparable at N equal, so this call must stay `run_frame`.
-        core.run_frame(press.as_ref().map_or(0, |script| script.at(frame)));
+        let word = press.as_ref().map_or(0, |script| script.at(frame));
+        if run_ahead == 0 {
+            core.run_frame(word);
+        } else {
+            core.run_frame_ahead(word, run_ahead);
+        }
         audio.drain(&core)?;
 
         if CHECKPOINTS.contains(&frame) || every.is_some_and(|n| frame % n == 0) {
             recorder.record(frame, &core, &audio);
         }
+        core.restore_real_frame();
     }
 
     row.insert("frames".into(), json!(frames));

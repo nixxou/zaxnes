@@ -61,10 +61,9 @@ impl Ppu2C02 {
         count: i64,
         cart: Cart<'_, '_, K>,
     ) -> bool {
-        if !cart
-            .as_deref()
-            .is_some_and(|cartridge| self.fast_nametables(cartridge).is_some() && fast_chr::<K>(cartridge).is_some())
-        {
+        if !cart.as_deref().is_some_and(|cartridge| {
+            self.fast_nametables(cartridge).is_some() && fast_chr::<K>(cartridge).is_some()
+        }) {
             return false;
         }
 
@@ -141,11 +140,19 @@ impl Ppu2C02 {
         // The colour of a background entry with no sprite over it, for the whole span.
         let mut background_colors = [0u8; 16];
         for (entry, color) in (0u8..).zip(background_colors.iter_mut()) {
-            let entry = if background && (entry & 0x03) != 0 { entry } else { 0 };
+            let entry = if background && (entry & 0x03) != 0 {
+                entry
+            } else {
+                0
+            };
             *color = self.palette_marked[usize::from(entry)] & color_mask;
         }
         let evaluation_from = (self.dot + 1).max(65);
-        let pattern_table: u16 = if (self.control & 0x10) != 0 { 0x1000 } else { 0x0000 };
+        let pattern_table: u16 = if (self.control & 0x10) != 0 {
+            0x1000
+        } else {
+            0x0000
+        };
         // Fine Y cannot change inside a span: only coarse X moves until dot 256.
         let fine_y = (self.v >> 12) & 0x07;
 
@@ -176,6 +183,7 @@ impl Ppu2C02 {
         let mut clock = self.ppu_clock;
         let mut zero_hit = false;
         let palette = self.palette_marked;
+        let skip_pixels = self.skip_pixels;
         #[allow(clippy::cast_sign_loss)] // The span is inside dots 2..=255.
         let mut x0 = self.dot as usize;
         let vram = &self.vram;
@@ -184,9 +192,22 @@ impl Ppu2C02 {
 
         for _ in 0..groups {
             // The group's reload, then its eight pixels from the two tiles it shows.
-            let attribute_low: u8 = if (attribute_latch & 1) != 0 { 0xFF } else { 0x00 };
-            let attribute_high: u8 = if (attribute_latch & 2) != 0 { 0xFF } else { 0x00 };
-            let latches = [pattern_low_latch, pattern_high_latch, attribute_low, attribute_high];
+            let attribute_low: u8 = if (attribute_latch & 1) != 0 {
+                0xFF
+            } else {
+                0x00
+            };
+            let attribute_high: u8 = if (attribute_latch & 2) != 0 {
+                0xFF
+            } else {
+                0x00
+            };
+            let latches = [
+                pattern_low_latch,
+                pattern_high_latch,
+                attribute_low,
+                attribute_high,
+            ];
             for ((shifter, high), latch) in loaded.iter_mut().zip(high).zip(latches) {
                 *shifter = (u16::from(high) << 8) | u16::from(latch);
             }
@@ -204,21 +225,33 @@ impl Ppu2C02 {
             if sprites {
                 cells.copy_from_slice(&sprite_line[x0..x0 + 8]);
             }
-            let mut colors = [0u8; 8];
-            if u64::from_le_bytes(cells) == 0 {
-                for (color, entry) in colors.iter_mut().zip(entries) {
-                    *color = background_colors[usize::from(entry & 0x0F)];
+            if skip_pixels {
+                // An unshown frame: no colour, but sprite 0 still hits where it would.
+                if u64::from_le_bytes(cells) != 0 && background {
+                    for (j, (cell, entry)) in cells.iter().zip(entries).enumerate() {
+                        zero_hit |= (cell & super::render::SPRITE_ZERO) != 0
+                            && (entry & 0x03) != 0
+                            && x0 + j != SCREEN_WIDTH - 1;
+                    }
                 }
             } else {
-                for (j, color) in colors.iter_mut().enumerate() {
-                    let entry = if background { entries[j] } else { 0 };
-                    let (value, hit) = compose_pixel(&palette, entry, cells[j], x0 + j, color_mask);
-                    *color = value;
-                    zero_hit |= hit;
+                let mut colors = [0u8; 8];
+                if u64::from_le_bytes(cells) == 0 {
+                    for (color, entry) in colors.iter_mut().zip(entries) {
+                        *color = background_colors[usize::from(entry & 0x0F)];
+                    }
+                } else {
+                    for (j, color) in colors.iter_mut().enumerate() {
+                        let entry = if background { entries[j] } else { 0 };
+                        let (value, hit) =
+                            compose_pixel(&palette, entry, cells[j], x0 + j, color_mask);
+                        *color = value;
+                        zero_hit |= hit;
+                    }
                 }
-            }
-            if let Some(out) = pixels.get_mut(row + x0..row + x0 + 8) {
-                out.copy_from_slice(&colors);
+                if let Some(out) = pixels.get_mut(row + x0..row + x0 + 8) {
+                    out.copy_from_slice(&colors);
+                }
             }
 
             // The group's fetches (phases 0, 2, 4, 6, 7), into the latches and `v`.
@@ -271,7 +304,6 @@ impl Ppu2C02 {
             self.run_sprite_evaluation_range(evaluation_from, self.dot);
         }
     }
-
 
     /// Dots `first` to `last` (both at least 65) of the sprite evaluation, as that many
     /// [`Ppu2C02::run_sprite_evaluation`] calls would run them. A whole pair of dots (odd, then
@@ -427,7 +459,11 @@ impl Ppu2C02 {
                     #[allow(clippy::cast_sign_loss)] // dot is 258..=320, the slot 0..=7.
                     let slot = ((dot - 257) >> 3) as usize;
                     if step == 0 {
-                        events.push(0x2000 | (self.v & 0x0FFF), first_clock + i64::from(dot), true);
+                        events.push(
+                            0x2000 | (self.v & 0x0FFF),
+                            first_clock + i64::from(dot),
+                            true,
+                        );
                     } else if step == 3 {
                         events.push(
                             self.sprite_pattern_address(slot),
@@ -486,8 +522,16 @@ impl Ppu2C02 {
             return;
         };
         for _ in 0..2 {
-            let attribute_low = if (self.attribute_latch & 1) != 0 { 0xFF } else { 0x00 };
-            let attribute_high = if (self.attribute_latch & 2) != 0 { 0xFF } else { 0x00 };
+            let attribute_low = if (self.attribute_latch & 1) != 0 {
+                0xFF
+            } else {
+                0x00
+            };
+            let attribute_high = if (self.attribute_latch & 2) != 0 {
+                0xFF
+            } else {
+                0x00
+            };
             let low = ((self.pattern_shift_low << 1) & 0xFF00) | u16::from(self.pattern_low_latch);
             let high =
                 ((self.pattern_shift_high << 1) & 0xFF00) | u16::from(self.pattern_high_latch);
@@ -533,7 +577,8 @@ fn compose_pixel(
     color_mask: u8,
 ) -> (u8, bool) {
     let background_opaque = (background & 0x03) != 0;
-    let hit = (sprite & super::render::SPRITE_ZERO) != 0 && background_opaque && x != SCREEN_WIDTH - 1;
+    let hit =
+        (sprite & super::render::SPRITE_ZERO) != 0 && background_opaque && x != SCREEN_WIDTH - 1;
     let entry = if (sprite & super::render::SPRITE_OPAQUE) != 0
         && (!background_opaque || (sprite & super::render::SPRITE_BEHIND) == 0)
     {
