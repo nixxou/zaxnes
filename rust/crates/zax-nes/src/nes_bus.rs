@@ -2385,6 +2385,36 @@ impl NesBus {
         let _ = self.skip_idle_cycles(period, i64::MAX);
     }
 
+    /// The repeats of a `$2002` loop on the sprite 0 flag (lot FAST-1), as
+    /// [`Self::skip_status_poll`] does for the vblank flag. Waiting for the hit, the turns
+    /// counted are those [`Ppu2C02::zero_hit_safe_turns`] proves read it clear; waiting for the
+    /// flag to clear, every turn before the horizon, the flag only falling on the pre-render
+    /// line's first dot, which is a deadline.
+    pub(crate) fn skip_zero_hit_poll<K: BoardKind>(
+        &mut self,
+        period: i64,
+        read_offset: i64,
+        waits_for_hit: bool,
+    ) {
+        self.flush_fast_as::<K>();
+        if !self.deferred_ppu || !self.apu_batching || self.dma != 0 {
+            return;
+        }
+        self.catch_up_ppu_as::<K>();
+        self.fast_left = self.fast_horizon();
+        if self.ppu.sprite_zero_hit() == waits_for_hit {
+            return;
+        }
+        let turns = if waits_for_hit {
+            self.ppu.zero_hit_safe_turns(period, read_offset)
+        } else {
+            i64::MAX
+        };
+        if turns > 0 {
+            let _ = self.skip_idle_cycles(period, turns);
+        }
+    }
+
     /// One counted cycle, flushed when a deadline falls on it.
     #[allow(clippy::inline_always)] // Once per CPU cycle on the fast path.
     #[inline(always)]

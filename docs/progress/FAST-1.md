@@ -33,3 +33,28 @@ Design: `docs/design/FAST-CORE.md`.
 * 2026-11-17: step 2f (groups decode one tile, 64-bit window, plane pair read): smb1 0.221, mm2 0.253, metroid 0.335, smb3 0.411 ms/frame; identical.
 * 2026-11-17: widescreen check (golden-core ZAXNES_GOLDEN_WIDE=64, ADVANCED=1, play script): fast == standard on 98/98 (the extension is active: 97/98 tile hashes differ from the narrow run). check.sh WIDE=1 runs it.
 * 2026-11-17: hidden frames (run-ahead, NesCore::set_frame_hidden for hosts) leave pixels unpainted on the fast path, sprite 0 still computed; golden with ZAXNES_GOLDEN_RUN_AHEAD=2 identical (98/98). Gain about 4 % with run-ahead 1. The app does not call set_frame_hidden for its catch-up frames yet.
+* 2026-11-17: sprite 0 polls (`LDA $2002 / AND #$40 / BEQ|BNE`, `BIT $2002 / BVC|BVS`): the turns
+  whose read finds the PPU before the first dot sprite 0 can cover are counted, not run (exact,
+  98/98 identical, widescreen too). Loop detection now looks 3 instructions back.
+  fceux-bench fast core: zelda2 0.622 -> 0.371, smb1 0.278 -> 0.266 ms/frame.
+
+## Where it stands (end of 2026-11-17)
+
+fceux-bench, attract mode, 6000 frames, capture on, ms/frame (FCEUX / standard / fast):
+
+| Game | FCEUX | standard | fast | fast vs FCEUX |
+|---|---|---|---|---|
+| smb1 | 0.218 | 0.913 | 0.266 | 1.22x |
+| smb3 | 0.201 | 1.072 | 0.348 | 1.73x |
+| mm2 | 0.222 | 0.745 | 0.264 | 1.19x |
+| metroid | 0.219 | 0.746 | 0.350 | 1.60x |
+| zelda2 | 0.238 | 0.853 | 0.371 | 1.56x |
+
+Every step so far is exact: golden-core in play (98 ROMs, 1800 frames, checkpoints every 30),
+with a 64-pixel widescreen margin and the advanced patches, and with run-ahead 2, all identical to
+the standard core. zax-nes tests 1526 passed, zax-harness 106 passed.
+
+Left, by expected gain: MMC3 lines cut by IRQ deadlines (per-dot heads/tails through the bus);
+the per-instruction CPU cost; the app's catch-up frames calling `set_frame_hidden`; approximate
+options (line-level timing) if the owner wants to pass FCEUX; the options UI (`emu.fast_core`
+setting, greyed Fidelite+ rows); handheld measurement.

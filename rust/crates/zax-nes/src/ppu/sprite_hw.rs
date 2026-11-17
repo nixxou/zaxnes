@@ -27,7 +27,7 @@ use super::{Ppu2C02, SCREEN_WIDTH, SPRITES_PER_LINE, VISIBLE_SCANLINES};
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct SpriteUnits {
     /// Whether the units are being followed; the rest is meaningless otherwise.
-    disturbed: bool,
+    pub(super) disturbed: bool,
     /// Every unit is where an undisturbed line has it at its dot 0.
     clean: bool,
     /// Where the state stands: the PPU clock of dot 0 of its line, the line and the dot.

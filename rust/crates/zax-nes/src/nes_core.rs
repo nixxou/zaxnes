@@ -1704,12 +1704,12 @@ impl NesCore {
     /// cycles are handed to the machine before the frame's loop looks at it.
     fn run_fast_frame_steps<K: BoardKind>(&mut self, idle_loop: Option<(u16, u16)>) -> bool {
         self.bus.flush_fast_as::<K>();
-        // The program counters of the last two instructions: a loop of one or two instructions
-        // shows as the counter coming back to one of them.
-        let mut last_pcs = [u16::MAX; 2];
+        // The program counters of the last three instructions: a loop of up to three
+        // instructions shows as the counter coming back to one of them.
+        let mut last_pcs = [u16::MAX; 3];
         loop {
             let pc = self.cpu.pc;
-            if (pc == last_pcs[0] || pc == last_pcs[1]) && self.cpu.quiet_boundary() {
+            if last_pcs.contains(&pc) && self.cpu.quiet_boundary() {
                 match self.idle_loop(pc) {
                     Some(IdleLoop::Steady(period)) => {
                         self.bus.skip_idle_cycles(period, i64::MAX);
@@ -1723,10 +1723,14 @@ impl NesCore {
                         self.cpu.count_down(index_y, done);
                     }
                     Some(IdleLoop::StatusPoll(period)) => self.bus.skip_status_poll::<K>(period),
+                    Some(IdleLoop::ZeroHitPoll {
+                        period,
+                        waits_for_hit,
+                    }) => self.bus.skip_zero_hit_poll::<K>(period, 4, waits_for_hit),
                     None => {}
                 }
             }
-            last_pcs = [pc, last_pcs[0]];
+            last_pcs = [pc, last_pcs[0], last_pcs[1]];
             self.cpu.step(&mut crate::nes_bus::FastBus::<K>::new(&mut self.bus));
             if let Some((first, last)) = idle_loop {
                 if (first..=last).contains(&self.cpu.pc) && self.bus.ppu().wide().stalling() {
@@ -1756,6 +1760,9 @@ impl NesCore {
     /// its start, one turn being the same length from either of its instructions.
     fn idle_loop(&self, pc: u16) -> Option<IdleLoop> {
         let byte = |address: u16| self.bus.rom_byte(address);
+        if let Some(found) = self.zero_hit_loop(pc) {
+            return Some(found);
+        }
         let first = byte(pc)?;
         let start = if matches!(first, 0x10 | 0x30 | 0x50 | 0x70 | 0x90 | 0xB0 | 0xD0 | 0xF0) {
             #[allow(clippy::cast_possible_wrap)] // The signed branch offset.
@@ -1829,6 +1836,37 @@ impl NesCore {
                 taken.then_some(IdleLoop::Steady(period))
             }
         }
+    }
+
+    /// A loop on the sprite 0 flag starting at `pc` (lot FAST-1): `LDA $2002`, `AND #$40` and
+    /// `BEQ`/`BNE` back, or `BIT $2002` and `BVC`/`BVS` back, all in plain PRG-ROM. `BEQ` and
+    /// `BVC` wait for the hit, `BNE` and `BVS` for the flag to clear.
+    fn zero_hit_loop(&self, pc: u16) -> Option<IdleLoop> {
+        let byte = |offset: u16| self.bus.rom_byte(pc.wrapping_add(offset));
+        let (branch, waits_for_hit, load) = match (byte(0)?, byte(1)?, byte(2)?) {
+            (0xAD, 0x02, 0x20) if byte(3)? == 0x29 && byte(4)? == 0x40 => match byte(5)? {
+                0xF0 => (5, true, 6),
+                0xD0 => (5, false, 6),
+                _ => return None,
+            },
+            (0x2C, 0x02, 0x20) => match byte(3)? {
+                0x50 => (3, true, 4),
+                0x70 => (3, false, 4),
+                _ => return None,
+            },
+            _ => return None,
+        };
+        let after = pc.wrapping_add(branch + 2);
+        #[allow(clippy::cast_possible_wrap)] // The signed branch offset.
+        let target = after.wrapping_add_signed(i16::from(byte(branch + 1)? as i8));
+        if target != pc {
+            return None;
+        }
+        let period = load + 3 + i64::from((after & 0xFF00) != (target & 0xFF00));
+        Some(IdleLoop::ZeroHitPoll {
+            period,
+            waits_for_hit,
+        })
     }
 
     /// Whether the Fidélité+ loop runs the frames.
@@ -3205,4 +3243,6 @@ enum IdleLoop {
     },
     /// `LDA`/`BIT $2002` and `BPL`, waiting for the vblank flag.
     StatusPoll(i64),
+    /// A `$2002` loop on the sprite 0 flag, waiting for the hit or for the flag to clear.
+    ZeroHitPoll { period: i64, waits_for_hit: bool },
 }

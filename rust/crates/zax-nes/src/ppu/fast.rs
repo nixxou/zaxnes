@@ -566,6 +566,48 @@ impl Ppu2C02 {
     }
 }
 
+impl Ppu2C02 {
+    /// How many turns of a `$2002` loop waiting for the sprite 0 hit cannot see it (lot FAST-1):
+    /// the PPU is caught up to the current cycle, a turn lasts `period` cycles and reads `$2002`
+    /// on its `read_offset`-th. A hit can only be set on a dot of a visible line whose loaded
+    /// sprite 0 covers it (`sprite_x[0]` to `+ 7`), with both layers on; a turn whose read finds
+    /// the PPU before the first such dot reads 0, whatever the picture. The next line's sprite 0
+    /// is not known before its fetches, so the bound stops at its first dot. 0 when anything
+    /// out of the ordinary is on (prepaid dots, disturbed sprite units).
+    pub(crate) fn zero_hit_safe_turns(&self, period: i64, read_offset: i64) -> i64 {
+        if self.sprite_zero_hit || self.prepaid_dots != 0 || self.sprite_units.disturbed {
+            return 0;
+        }
+        if (self.mask & 0x18) != 0x18 {
+            // A layer is off, and nothing in the loop can turn it on: no hit before the horizon.
+            return i64::MAX;
+        }
+        let line = i64::from(super::DOTS_PER_SCANLINE);
+        let dot = i64::from(self.dot);
+        let earliest = if self.scanline < super::VISIBLE_SCANLINES {
+            let sprite_x = i64::from(self.sprite_x[0]);
+            // Dots `x + 1` for the sprite's columns; column 255 never hits.
+            let last = (sprite_x + 8).min(255);
+            if self.sprite_zero_loaded && self.sprites_loaded > 0 && dot < last {
+                (dot + 1).max(sprite_x + 1) - dot
+            } else {
+                line - dot + 1
+            }
+        } else {
+            // To dot 1 of line 0, one dot early for a skipped dot of an odd frame.
+            let lines = i64::from(self.timing.scanlines_per_frame - self.scanline);
+            (lines * line - dot).max(1)
+        };
+        let numerator = i64::from(self.timing.dots_per_cycle_numerator);
+        let denominator = i64::from(self.timing.dots_per_cycle_denominator);
+        let accumulator = i64::from(self.dot_accumulator);
+        // The fewest cycles after which the PPU has run `earliest` dots, then the first turn
+        // whose read comes at or after them.
+        let cycles = (earliest * denominator - accumulator + numerator - 1).div_euclid(numerator);
+        ((cycles - read_offset + period - 1).div_euclid(period)).max(0)
+    }
+}
+
 /// The colour of pixel `x` of a span from its background entry and its sprite cell, as
 /// `span_pixel` composes it, and whether it is a sprite 0 hit.
 #[allow(clippy::inline_always)] // Once a pixel under a sprite on the fast path.
