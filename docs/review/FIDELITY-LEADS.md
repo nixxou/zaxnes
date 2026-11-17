@@ -1527,6 +1527,15 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 - I2. *The Legend of Zelda* sprite-overflow bit (C4).
 - I3. `$2002` open-bus bits and `$2007` reads during rendering vs Mesen (C5).
 - I4. Mega Man 2 widescreen not eyeballed; PAL/Dendy fidelity work unverified.
+- I5. (lot FAST-1, 2026-11-17) **A savestate reload is not always the run that never stopped.**
+  `fast_core_tests.rs`, `fast_1_savestates_cross_both_ways`: after 300 frames with a button
+  pattern, a state saved and loaded on a fresh core continues identically on the standard and
+  the fast core (320 ROMs), but on `RasterChromaLuma.NES` (test ROM) the first frame after the
+  load differs from the same machine left running, **standard core included**. Something that
+  frame depends on is not in the state (candidates: the picture buffer the game only partly
+  redraws, a mid-frame emphasis/palette record, a value outside the PPU block). The sound after
+  a load also restarts differently (the resampler's position is not in the state), expected.
+  Not yet looked into; the test compares against the reload on the same core.
 
 ## J. Cartridge boards (lot MAPPERS-N, 2026-11-15)
 
