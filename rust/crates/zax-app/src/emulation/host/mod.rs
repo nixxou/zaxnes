@@ -1559,7 +1559,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             // music is in its active phase in every other state.
             mixer.set_emulation_audible(self.state == EmulationState::Running);
             mixer.set_volume(self.settings.effective_volume());
-            mixer.set_menu_music_enabled(self.settings.menu_music());
+            // Owner (2026-11-17): no music in the interface (see `application.rs`).
+            mixer.set_menu_music_enabled(false);
         }
         self.publish_audio_state();
     }

@@ -1801,7 +1801,9 @@ fn build_host(parts: HostParts<'_>) -> AppHost {
     };
     let mut mixer = AudioMixer::new(parts.sample_rate, Some(library), TrackRandom::new(seed()));
     mixer.set_volume(parts.model.effective_volume());
-    mixer.set_menu_music_enabled(parts.model.menu_music());
+    // Owner (2026-11-17): no music in the interface, only its sound effects. The setting stays
+    // in the model for the compatibility of settings.json, without effect.
+    mixer.set_menu_music_enabled(false);
     let mut options =
         EmulationHostOptions::new(parts.paths.clone(), parts.model, parts.scene, parts.catalog);
     options.mixer = Some(mixer);

@@ -398,6 +398,10 @@ impl AudioMixer {
         if self.track_suspended {
             return;
         }
+        // Off and faded out: nothing to decode (the interface has no music, owner 2026-11-17).
+        if !self.menu_music_enabled && self.music_gain.value() <= 0.0 {
+            return;
+        }
         let track_count = self
             .assets
             .as_ref()

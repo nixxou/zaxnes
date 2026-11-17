@@ -33,3 +33,4 @@ hardware defects, VS DIPs, ...). Of these the fast core and Fidelity+ are now im
   (volume, console audio profile), Emulation (run-ahead, smooth scrolling, Rainbow network,
   console frame rate, real-time pad) and Achievements whole. The advanced mode's 3D render tab
   takes Light and Camera (FOV) under it; Interface only in advanced. Classic window unchanged.
+* 6. No music in the interface (owner): the mixer's menu music is never enabled, its track never decoded; the sound effects stay. The setting `audio.bg_music` stays in the model, without effect.
