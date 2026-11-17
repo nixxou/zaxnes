@@ -1703,8 +1703,20 @@ impl NesCore {
         loop {
             let pc = self.cpu.pc;
             if (pc == last_pcs[0] || pc == last_pcs[1]) && self.cpu.quiet_boundary() {
-                if let Some(period) = self.idle_loop_period(pc) {
-                    self.bus.skip_idle_cycles(period);
+                match self.idle_loop(pc) {
+                    Some(IdleLoop::Steady(period)) => {
+                        self.bus.skip_idle_cycles(period, i64::MAX);
+                    }
+                    Some(IdleLoop::Countdown {
+                        period,
+                        index_y,
+                        turns,
+                    }) => {
+                        let done = self.bus.skip_idle_cycles(period, turns);
+                        self.cpu.count_down(index_y, done);
+                    }
+                    Some(IdleLoop::StatusPoll(period)) => self.bus.skip_status_poll::<K>(period),
+                    None => {}
                 }
             }
             last_pcs = [pc, last_pcs[0]];
@@ -1723,43 +1735,92 @@ impl NesCore {
         }
     }
 
-    /// The cycles of one turn of the idle loop at `pc`, when it is one the fast core may repeat by
-    /// counting (lot FAST-1): `JMP` to itself, or a load of a RAM byte followed by a conditional
-    /// branch back to it that the byte makes taken. All of it in plain PRG-ROM, so that a turn
-    /// reads nothing with a side effect and leaves the machine as it found it.
-    fn idle_loop_period(&self, pc: u16) -> Option<i64> {
-        let byte = |offset: u16| self.bus.rom_byte(pc.wrapping_add(offset));
-        match byte(0)? {
-            0x4C => (u16::from_le_bytes([byte(1)?, byte(2)?]) == pc).then_some(3),
-            opcode @ (0xA5 | 0xAD) => {
-                let (address, length, load) = if opcode == 0xA5 {
-                    (u16::from(byte(1)?), 2, 3)
+    /// The idle loop at `pc`, when it is one the fast core may repeat by counting (lot FAST-1).
+    /// All of it in plain PRG-ROM, so that a turn reads nothing but RAM, PRG-ROM or `$2002`:
+    ///
+    /// * `JMP` to itself, or a load of a RAM byte and a conditional branch back to it that the
+    ///   byte makes taken ([`IdleLoop::Steady`]): a turn leaves the machine as it found it;
+    /// * `DEX`/`DEY` and `BNE` back to it ([`IdleLoop::Countdown`]): a turn counts the register
+    ///   down, and the turns before the one that falls through can be counted at once;
+    /// * `LDA $2002` or `BIT $2002` and `BPL` back to it ([`IdleLoop::StatusPoll`]): until the
+    ///   vblank flag rises a turn only repeats what the turn before did to the PPU.
+    ///
+    /// `pc` may stand on the branch of a two-instruction steady loop: the loop is then read from
+    /// its start, one turn being the same length from either of its instructions.
+    fn idle_loop(&self, pc: u16) -> Option<IdleLoop> {
+        let byte = |address: u16| self.bus.rom_byte(address);
+        let first = byte(pc)?;
+        let start = if matches!(first, 0x10 | 0x30 | 0x50 | 0x70 | 0x90 | 0xB0 | 0xD0 | 0xF0) {
+            #[allow(clippy::cast_possible_wrap)] // The signed branch offset.
+            let offset = i16::from(byte(pc.wrapping_add(1))? as i8);
+            let target = pc.wrapping_add(2).wrapping_add_signed(offset);
+            if target != pc.wrapping_sub(2) && target != pc.wrapping_sub(3) {
+                return None;
+            }
+            target
+        } else {
+            pc
+        };
+        let at = |offset: u16| byte(start.wrapping_add(offset));
+        let opcode = at(0)?;
+        if opcode == 0x4C {
+            let target = u16::from_le_bytes([at(1)?, at(2)?]);
+            return (target == start).then_some(IdleLoop::Steady(3));
+        }
+        let (length, load) = match opcode {
+            0xA5 => (2, 3),
+            0xAD | 0x2C => (3, 4),
+            0x88 | 0xCA => (1, 2),
+            _ => return None,
+        };
+        let branch = start.wrapping_add(length);
+        let condition = byte(branch)?;
+        let after = branch.wrapping_add(2);
+        #[allow(clippy::cast_possible_wrap)] // The signed branch offset.
+        let offset = i16::from(byte(branch.wrapping_add(1))? as i8);
+        let target = after.wrapping_add_signed(offset);
+        if target != start {
+            return None;
+        }
+        let period = load + 3 + i64::from((after & 0xFF00) != (target & 0xFF00));
+        match opcode {
+            0x88 | 0xCA => {
+                if condition != 0xD0 || start != pc {
+                    return None;
+                }
+                let index_y = opcode == 0x88;
+                let value = if index_y { self.cpu.y } else { self.cpu.x };
+                // The turns that branch back: the one that brings the register to 0 falls through.
+                let turns = if value == 0 { 255 } else { i64::from(value) - 1 };
+                (turns > 0).then_some(IdleLoop::Countdown {
+                    period,
+                    index_y,
+                    turns,
+                })
+            }
+            _ => {
+                let address = if opcode == 0xA5 {
+                    u16::from(at(1)?)
                 } else {
-                    (u16::from_le_bytes([byte(1)?, byte(2)?]), 3, 4)
+                    u16::from_le_bytes([at(1)?, at(2)?])
                 };
-                if address >= 0x2000 {
+                if address == 0x2002 && opcode != 0xA5 {
+                    return (condition == 0x10 && start == pc)
+                        .then_some(IdleLoop::StatusPoll(period));
+                }
+                if opcode == 0x2C || address >= 0x2000 {
                     return None;
                 }
                 let value = self.bus.ram_byte(address);
-                let branch = pc.wrapping_add(length);
-                let taken = match self.bus.rom_byte(branch)? {
+                let taken = match condition {
                     0xF0 => value == 0,
                     0xD0 => value != 0,
                     0x10 => value & 0x80 == 0,
                     0x30 => value & 0x80 != 0,
                     _ => return None,
                 };
-                let offset = self.bus.rom_byte(branch.wrapping_add(1))?;
-                let after = branch.wrapping_add(2);
-                #[allow(clippy::cast_possible_wrap)] // The signed branch offset.
-                let target = after.wrapping_add_signed(i16::from(offset as i8));
-                if !taken || target != pc {
-                    return None;
-                }
-                let cross = (after & 0xFF00) != (target & 0xFF00);
-                Some(load + 3 + i64::from(cross))
+                taken.then_some(IdleLoop::Steady(period))
             }
-            _ => None,
         }
     }
 
@@ -3119,4 +3180,19 @@ impl NesCore {
             rom_name: stored_name,
         })
     }
+}
+
+/// An idle loop the fast core repeats by counting (lot FAST-1, [`NesCore::idle_loop`]).
+#[derive(Debug, Clone, Copy)]
+enum IdleLoop {
+    /// A turn of this many cycles leaves the machine as it found it.
+    Steady(i64),
+    /// `DEX`/`DEY` and `BNE`: `turns` more turns branch back.
+    Countdown {
+        period: i64,
+        index_y: bool,
+        turns: i64,
+    },
+    /// `LDA`/`BIT $2002` and `BPL`, waiting for the vblank flag.
+    StatusPoll(i64),
 }

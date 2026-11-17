@@ -249,6 +249,25 @@ impl Cpu6502 {
         !self.jammed && !self.poll_nmi && !self.nmi_pending && !self.poll_irq && !self.irq_sample
     }
 
+    /// `turns` turns of a `DEX`/`DEY`, `BNE` loop that all branch back (lot FAST-1): the register
+    /// counted down by as much, N and Z as its last decrement leaves them.
+    pub(crate) fn count_down(&mut self, index_y: bool, turns: i64) {
+        if turns <= 0 {
+            return;
+        }
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // At most 255.
+        let turns = turns as u8;
+        let value = if index_y {
+            self.y = self.y.wrapping_sub(turns);
+            self.y
+        } else {
+            self.x = self.x.wrapping_sub(turns);
+            self.x
+        };
+        self.set_flag(Self::FLAG_Z, value == 0);
+        self.set_flag(Self::FLAG_N, value & 0x80 != 0);
+    }
+
     pub fn step<B: CpuBus + ?Sized>(&mut self, bus: &mut B) -> u32 {
         let before = bus.cycle_count();
 

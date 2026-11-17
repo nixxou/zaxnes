@@ -2349,19 +2349,40 @@ impl NesBus {
     }
 
     /// Counts as many whole `period`-cycle repeats of an idle loop as fit before the next flush,
-    /// leaving at least one cycle to run through the loop as usual (lot FAST-1). Nothing a repeat
-    /// does can be seen before that flush: its reads are of RAM and PRG-ROM, and the NMI and IRQ
-    /// lines only move at a flush.
-    pub(crate) fn skip_idle_cycles(&mut self, period: i64) {
+    /// at most `most`, leaving at least one cycle to run through the loop as usual (lot FAST-1).
+    /// Nothing a repeat does can be seen before that flush: its reads are of RAM and PRG-ROM, and
+    /// the NMI and IRQ lines only move at a flush. Returns the repeats counted.
+    pub(crate) fn skip_idle_cycles(&mut self, period: i64, most: i64) -> i64 {
         if self.fast_left <= period {
-            return;
+            return 0;
         }
-        let repeats = (self.fast_left - 1) / period;
+        let repeats = ((self.fast_left - 1) / period).min(most);
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // Below a frame.
         {
             self.fast_pending += (repeats * period) as u32;
         }
         self.fast_left -= repeats * period;
+        repeats
+    }
+
+    /// The repeats of a `$2002` polling loop before the vblank flag can rise (lot FAST-1). The
+    /// PPU is caught up first and its own horizon taken, as `tick` takes it: the loop's reads
+    /// shorten the deadline to one cycle each, which is a choice of when to catch the PPU up,
+    /// not of what it does. Until the flag rises a read of `$2002` only does what the read before
+    /// it did (the write toggle stays clear, the decay latch is refreshed again, the value
+    /// differs at most in bits the `BPL` does not test), and the last turns before the horizon
+    /// run as usual, so the turn that sees the flag is the standard core's.
+    pub(crate) fn skip_status_poll<K: BoardKind>(&mut self, period: i64) {
+        self.flush_fast_as::<K>();
+        if !self.deferred_ppu || !self.apu_batching || self.dma != 0 {
+            return;
+        }
+        self.catch_up_ppu_as::<K>();
+        self.fast_left = self.fast_horizon();
+        if self.ppu.vblank_flag() {
+            return;
+        }
+        let _ = self.skip_idle_cycles(period, i64::MAX);
     }
 
     /// One counted cycle, flushed when a deadline falls on it.
