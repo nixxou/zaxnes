@@ -95,6 +95,9 @@ pub(super) struct FidState {
     /// the address this core read it at. Not part of the state: it never outlives a dot pair.
     pub(super) fetch_pending: u8,
     pub(super) fetch_address: u16,
+    /// `v` before the work of the dot whose edges are being applied: what a `$2007` increment
+    /// landing on dot 257 meets the horizontal copy with. Not part of the state: rebuilt per dot.
+    pub(super) v_before_dot: u16,
 }
 
 impl FidState {
@@ -105,6 +108,7 @@ impl FidState {
         data_latch: 0,
         fetch_pending: 0,
         fetch_address: 0,
+        v_before_dot: 0,
     };
 }
 
@@ -280,6 +284,7 @@ impl Ppu2C02 {
             // coarse-Y wrap of dot 256) or an edge posts counts from the next.
             let mut pending = usize::from(self.fid.edge_count);
             let before = self.v;
+            self.fid.v_before_dot = before;
             self.run_one_dot(cart);
             if self.dot == 256 && self.edges_on() {
                 self.two_phase_y_wrap(before);
@@ -460,11 +465,9 @@ impl Ppu2C02 {
                 if self.fetching() {
                     if self.dot == 257 {
                         // The horizontal copy of X and the read's coarse-X increment drive the
-                        // same lines in the same half: the copy wins, the Y increment is left
-                        // (A5, netlist).
-                        self.increment_y_two_phase();
-                        self.v_row_next = self.v;
-                        self.notify_address_bus(self.v & 0x3FFF, cart);
+                        // same lines in the same half: `v` and `t` keep their AND
+                        // (FIDELITY-LEADS I7).
+                        self.horizontal_copy_meets_increment(cart);
                     } else {
                         let before = self.v;
                         self.increment_vram_address(cart);
@@ -651,6 +654,15 @@ impl Ppu2C02 {
         self.post_edge(dots, EdgeKind::WriteIncrement);
     }
 
+    /// A `$2007` increment applied after the work of dot 257: `v` and `t` keep the AND of their
+    /// horizontal bits ([`Ppu2C02::increment_meets_horizontal_copy`]), with A7's two phases.
+    fn horizontal_copy_meets_increment<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {
+        let before = self.fid.v_before_dot;
+        self.increment_meets_horizontal_copy(before);
+        self.two_phase_y_wrap(before);
+        self.notify_address_bus(self.v & 0x3FFF, cart);
+    }
+
     /// [`EdgeKind::WriteIncrement`], after the work of X: the read's rules without its buffer.
     fn edge_write_increment<K: BoardKind>(&mut self, cart: Cart<'_, '_, K>) {
         if !self.fetching() {
@@ -659,8 +671,9 @@ impl Ppu2C02 {
         }
         let dot = self.dot;
         if dot == 257 {
-            // The horizontal copy of 257 wins over the coarse-X increment; Y is left.
-            self.increment_y_two_phase();
+            // The horizontal copy of 257 meets the coarse-X increment (FIDELITY-LEADS I7).
+            self.horizontal_copy_meets_increment(cart);
+            return;
         } else {
             let natural_x = (dot % 8 == 0 && (8..=256).contains(&dot)) || dot == 328 || dot == 336;
             if !natural_x {

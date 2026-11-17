@@ -1882,6 +1882,9 @@ impl Ppu2C02 {
         }
         self.control = value;
         self.t = (self.t & 0xF3FF) | (u16::from(value & 0x03) << 10);
+        if self.dot == 304 && self.netlist_measured_region() {
+            self.control_write_on_vertical_copy(value);
+        }
         if let Some(cartridge) = cartridge {
             cartridge.on_ppu_control_as::<K>(value);
         }
@@ -2749,10 +2752,9 @@ impl Ppu2C02 {
             self.read_increment_meets_vertical_copy(before_latch);
             self.notify_address_bus(self.v & 0x3FFF, cart);
         } else if latch_dot == 257 && (self.netlist_measured_region() || self.timing.region == NesRegion::Pal) {
-            // Lot FIDPLUS-2 (A5, netlist): on dot 257 the horizontal copy overrides the read's
-            // coarse X increment; only its Y increment is left.
-            self.increment_y();
-            self.v_row_next = self.v;
+            // On dot 257 the horizontal copy and the read's coarse X increment meet: `v` and `t`
+            // keep their AND (FIDELITY-LEADS I7).
+            self.increment_meets_horizontal_copy(before_latch);
             self.notify_address_bus(self.v & 0x3FFF, cart);
         } else {
             self.increment_vram_address(cart);
@@ -2771,7 +2773,8 @@ impl Ppu2C02 {
     /// `v` takes its rendering increment (X and Y) on the same dot X, `D + 6` in this core's
     /// alignment (`D + 5` in the two others), and merges with the pipeline's own increments the
     /// same way: on a dot that increments coarse X anyway, one X increment plus Y; on 256 nothing
-    /// more; on 257 the horizontal copy wins and only Y is left. Measured on the transistor
+    /// more; on 257 `v` and `t` keep the AND of their horizontal bits
+    /// ([`Self::increment_meets_horizontal_copy`]). Measured on the transistor
     /// netlists of the 2A03 and 2C02 (audit `scr` at reset phase e4, `docs/review/FIDELITY-LEADS.md`
     /// I6): line 8, a write on dot 112 leaves `v` = `$652F` until dot 117 and makes it `$7530` on
     /// 118; line 41, a write on dot 66 turns `$1539` into `$253A` on 72. Before this the increment
@@ -2805,8 +2808,7 @@ impl Ppu2C02 {
         {
             self.read_increment_meets_vertical_copy(before_latch);
         } else if latch_dot == 257 {
-            self.increment_y();
-            self.v_row_next = self.v;
+            self.increment_meets_horizontal_copy(before_latch);
         } else if matches!(latch_dot, 8..=256 | 328 | 336) && latch_dot % 8 == 0 {
             if latch_dot != 256 {
                 self.increment_y();
@@ -2871,6 +2873,27 @@ impl Ppu2C02 {
         let kept = self.t & self.v & VERTICAL;
         self.t = (self.t & !VERTICAL) | kept;
         self.v = (self.v & !VERTICAL) | kept;
+        self.v_row_next = self.v;
+    }
+
+    /// A `$2007` read or write whose X+Y increment lands on dot 257, the horizontal copy: as on
+    /// the vertical copy dots ([`Self::read_increment_meets_vertical_copy`]) the incremented `v`
+    /// and `t` meet on the horizontal bits and **both keep their AND**, the vertical bits keep the
+    /// increment. 2C02 netlist, audit `scr` at reset phase e4 (FIDELITY-LEADS I7): a write on dot
+    /// 251 (X = 257) turns `v` = `$0131`, `t` = `$3F6F` into `v` = `$1122`, `t` = `$3B62`; a read
+    /// on 251, `$5111` / `$316F` into `$6102` / `$3162`. The rule this replaces (lot FIDPLUS-2,
+    /// A5: the copy wins, only Y is left) is the case where the AND gives `t`'s bits, as on Zelda
+    /// II's title split. `before_latch` is `v` before the copy of dot 257.
+    #[cold]
+    #[inline(never)]
+    pub(super) fn increment_meets_horizontal_copy(&mut self, before_latch: u16) {
+        const HORIZONTAL: u16 = 0x041F;
+        self.v = before_latch;
+        self.increment_coarse_x();
+        self.increment_y();
+        let kept = self.t & self.v & HORIZONTAL;
+        self.t = (self.t & !HORIZONTAL) | kept;
+        self.v = (self.v & !HORIZONTAL) | kept;
         self.v_row_next = self.v;
     }
 
@@ -3558,6 +3581,26 @@ impl Ppu2C02 {
             value
         };
         self.v = (self.v & !0x0400) | (u16::from(source & 0x04) << 8);
+    }
+
+    /// A `$2000` write on the 2C02's last vertical copy dot (304) of the pre-render line: that
+    /// copy already takes the nametable-Y bit the write puts in `t`, as the first `$2006` write
+    /// does there ([`Self::first_address_write_on_vertical_copy`]). 2C02 netlist, audit `scr` at
+    /// reset phase e4, alignment 3: `$2000` = `$00` on 261:304 leaves `v` = `$316F` with `t` =
+    /// `$316F`, where Zaxnes kept the bit the copy took before the write (`$396F`), and the
+    /// difference ran through the first five lines of the next frame (FIDELITY-LEADS I7).
+    #[cold]
+    #[inline(never)]
+    fn control_write_on_vertical_copy(&mut self, value: u8) {
+        if self.scanline != self.pre_render_scanline() || !self.fetching() {
+            return;
+        }
+        let source = if self.open_bus_on_copies() {
+            self.cpu_open_bus
+        } else {
+            value
+        };
+        self.v = (self.v & !0x0800) | (u16::from(source & 0x02) << 10);
     }
 
     /// A first `$2006` write on the pre-render line's last vertical copy dot (302 on the 2C07, 304

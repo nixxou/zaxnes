@@ -1341,11 +1341,46 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   netlist loads `v` in the middle of W+3 and W+4's ALE already carries the new address, where
   Zaxnes fetches W+4 with the old one (`211 netlist bus=2BF0 | zaxnes bus=2BEF`), invisible
   to `dotcmp.py` (`v`/`t` only); to measure with a dedicated program.
+- I8 (2026-11-17) **Alignment-dependent races of the 2C02 netlist that hardware tests contradict
+  or that are a simulation artefact — not ported** (fidelity audit, gaps 3 and 4). Both replayed
+  on a second bench whose /CS is decoded from the 2A03's own M2 (`visualnes-bench/benchdot2m2`,
+  `fidelity-audit/benchaudm2`, `macros_m2.cpp`) besides the hold-time bench: **identical tables
+  on both**, so neither comes from the /CS model.
+  * `$2002` / start of vblank (`vblA`, `vblC`): alignment 0 (e2) is Zaxnes's, 14 frames of 14.
+    Alignment 1 (e0) takes the NMI on a read at 241:2 (Zaxnes suppresses it); alignments 2-3
+    (e6/e4) also read 0 and suppress the flag on 240:340, and take the NMI on 241:2. A model of
+    exactly that (the /NMI sample one dot later in alignments 1-3, the suppression on 340 in 2-3)
+    **fails `ppu_vbl_nmi` 02/05-08, `vbl_nmi_timing` 2/3/5/6/7, `cpu_interrupts` 2 and
+    AccuracyCoin's `NMI at VBlank end`** in alignments 1 and 2 — hardware-verified tests that
+    pass on consoles of any alignment. Reverted, as I5: the netlist's timing of this race is not
+    the console's. Zaxnes keeps one table for the four alignments.
+  * `$2001` toggles in alignments 0/1 (`scr` e0, 54 runs): at a switch on, on the first dot that
+    fetches, the netlist ANDs the low 12 bits of `v` with the address the pipeline puts on the bus
+    at that dot (`$7114` -> `$7004` with the low pattern address `$0007`, `$7509` -> `$7501` with
+    `$0557` for tile `$55`, `$7110` -> `$7100` with `$0107`; nothing on a nametable address dot,
+    `$2000 | v`), bits 12-14 kept; at a switch off landing on an increment dot, the increment is
+    partial (coarse X wraps without flipping the nametable, X without Y on 256, a coarse-Y carry on
+    113). This is step 33's switch-on race (A3c): the review's half-step trace showed `v` change
+    inside one zero-delay settling step with no copy node high, an evaluation-order effect of the
+    switch-level simulation. The AND model is recorded here, not ported; a console test (a switch
+    on in each alignment, `v` read back through `$2007`) would settle it.
+- I7 (2026-11-17) **`$2007` increment on dot 257, and `$2000` on the last vertical copy dot —
+  fixed** (fidelity audit, `scr` e4). (1) A `$2007` read or write whose increment lands on dot 257
+  meets the horizontal copy: **`v` and `t` both keep the AND** of their horizontal bits (the
+  incremented `v`'s and `t`'s), as on the vertical copy dots; the write on 43:251 turns
+  `$0131` / `$3F6F` into `$1122` / `$3B62`, the read on 129:251 `$5111` / `$316F` into
+  `$6102` / `$3162`. A5's rule (the copy wins, Y only) is the case where the AND gives `t`, which
+  is what Zelda II's split had. (2) A `$2000` write on 261:304 reaches that dot's vertical copy
+  (`v` takes the written nametable-Y bit, `$396F` -> `$316F`), like the first `$2006` write there.
+  `increment_meets_horizontal_copy`, `control_write_on_vertical_copy`, the Fidélité+ edge keeps
+  `v` from before the dot (`v_before_dot`). With I6: **`scr` e4 against alignment 3, Fidélité+,
+  0 differing dots in 4 frames** (136 W2007 runs, 1 W2000 run and 16 inherited before); e0
+  against alignment 1 has only I8's `$2001` runs left.
 - I6 (2026-11-17) **The increment of a `$2007` write made while rendering — fixed** (fidelity
   audit, gap 2). The 2C02 netlist (audit `scr` at reset phase e4) gives the write the read's
   timing: `v` takes its X+Y increment on the read's latch dot X (`D + 6` in alignments 2 and 3,
   `D + 5` in 0 and 1), merged with the pipeline's own increments as the read's is (A5): on a
-  dot that increments coarse X anyway one X plus Y, on 256 nothing more, on 257 Y only. Line 8,
+  dot that increments coarse X anyway one X plus Y, on 256 nothing more, on 257 the AND of I7. Line 8,
   a write on dot 112 leaves `v` = `$652F` to dot 117 and makes it `$7530` on 118; line 41, a
   write on dot 66 turns `$1539` into `$253A` on 72, not `$153A` + X + Y. Zaxnes made it at
   the access: 136 of 150 writes differed for five dots, 14 for a whole line. Now: Fidélité+
