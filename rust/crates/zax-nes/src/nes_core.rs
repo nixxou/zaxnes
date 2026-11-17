@@ -1,5 +1,7 @@
 use crate::apu::{Apu2A03, AudioError, AudioReader};
-use crate::cartridges::{with_board_kind, AnyBoard, BoardKind, Cartridge};
+use crate::cartridges::{
+    has_fast_path, with_board_kind, with_fast_board_kind, AnyBoard, BoardKind, Cartridge,
+};
 use crate::cpu::{Cpu6502, CpuBus};
 use crate::input::{ControllerPortType, InputPorts, InvalidPort, ZapperPosition};
 use crate::nes_bus::{FidelityBus, KindBus};
@@ -121,6 +123,9 @@ pub struct NesCore {
     /// Fidélité+ (`docs/design/HALF-CYCLE.md`): every frame through its own loop
     /// ([`NesCore::run_fidelity_plus_steps`]). Off by default; not in the state (step 4).
     fidelity_plus: bool,
+    /// Runs the frames of the boards that have one through the fast core's loop (lot FAST-1,
+    /// `docs/design/FAST-CORE.md`). Off by default; not in the state, like Fidélité+.
+    fast_core: bool,
     /// The frame a sliced run (`NesCore::run_frame_slice`, lot FIDPLUS-B) has started and not
     /// finished: its first cycle, margin decoder and idle loop. Not part of the state: a state is
     /// taken between frames.
@@ -210,6 +215,7 @@ impl NesCore {
             idle_loop: None,
             generic_path: false,
             fidelity_plus: false,
+            fast_core: false,
             slice: None,
             decoder: None,
             steady_sprites: Vec::new(),
@@ -1282,7 +1288,7 @@ impl NesCore {
                 }
             }
             self.bus.end_deferred_ppu();
-        } else {
+        } else if !(self.fast_core && self.run_fast_frame(idle_loop)) {
             self.run_standard_frame(idle_loop);
         }
         if let Some(decoder) = decoder {
@@ -1643,6 +1649,48 @@ impl NesCore {
         if !enabled {
             self.bus.ppu_mut().set_fidelity_plus(false);
         }
+    }
+
+    /// Runs the frames through the fast core (lot FAST-1, `docs/design/FAST-CORE.md`) when the
+    /// board has a fast path, off by default. Takes effect at the next frame; the state is the
+    /// same for both cores. Fidélité+ wins when both are on.
+    pub const fn set_fast_core(&mut self, enabled: bool) {
+        self.fast_core = enabled;
+    }
+
+    /// Whether the fast core runs the frames of the boards that have a fast path.
+    #[must_use]
+    pub const fn fast_core(&self) -> bool {
+        self.fast_core
+    }
+
+    /// One frame through the fast core, when the board has a fast path: `false` (nothing run)
+    /// otherwise, and the standard loop takes the frame.
+    fn run_fast_frame(&mut self, idle_loop: Option<(u16, u16)>) -> bool {
+        if self.generic_path || self.bus.is_vs_image() {
+            return false;
+        }
+        if !self
+            .bus
+            .cartridge()
+            .is_some_and(|cartridge| has_fast_path(cartridge.board()))
+        {
+            return false;
+        }
+        self.bus.defer_ppu();
+        loop {
+            let done = match self.bus.cartridge() {
+                Some(cartridge) => with_fast_board_kind!(cartridge.board(), K => {
+                    self.run_frame_steps::<K>(idle_loop)
+                }, self.run_frame_steps::<AnyBoard>(idle_loop)),
+                None => true,
+            };
+            if done {
+                break;
+            }
+        }
+        self.bus.end_deferred_ppu();
+        true
     }
 
     /// Whether the Fidélité+ loop runs the frames.

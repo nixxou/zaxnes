@@ -30,11 +30,11 @@ pub(crate) use flash::{FlashCommand, FlashCommandState};
 use crate::rom::{InesHeader, RomImage, RomLoadError, RomLoadFailure};
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
-pub(crate) use board::with_board_kind;
 #[cfg(feature = "board-mmc5-exattr-split")]
 pub use board::Mmc5ExtKind;
+pub(crate) use board::{has_fast_path, with_board_kind, with_fast_board_kind};
 pub use board::{
-    AnyBoard, AxRomKind, BoardKind, CnRomKind, Fid, Mmc1Kind, Mmc3Kind, Mmc5Kind, NromKind,
+    AnyBoard, AxRomKind, BoardKind, CnRomKind, Fast, Fid, Mmc1Kind, Mmc3Kind, Mmc5Kind, NromKind,
     UxRomKind,
 };
 use mappers::Mapper;

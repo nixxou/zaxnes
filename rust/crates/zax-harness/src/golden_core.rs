@@ -114,6 +114,8 @@ pub fn golden_row(rel: &str, image: &[u8], frames: u32) -> Result<Value, Harness
     let mut core = NesCore::new();
     // `ZAXNES_FIDELITY_PLUS=1`: every frame through the Fidelite+ loop (FIDPLUS-A, off by default).
     core.set_fidelity_plus(std::env::var("ZAXNES_FIDELITY_PLUS").is_ok_and(|value| value != "0"));
+    // `ZAXNES_FAST_CORE=1`: every frame through the fast core where the board has one (FAST-1).
+    core.set_fast_core(std::env::var("ZAXNES_FAST_CORE").is_ok_and(|value| value != "0"));
     // The golden rows (`rust/goldens/core-goldens.jsonl`) were taken with the PPU powering on in
     // vblank, so this command keeps that power-on; `ZAXNES_POWER_ON_TOP=1` measures the one the
     // app uses by default since lot FIDELITY step 27.

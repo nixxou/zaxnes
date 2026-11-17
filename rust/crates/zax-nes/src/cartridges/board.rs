@@ -834,6 +834,11 @@ pub trait BoardKind {
     /// frames of A12 watcher calls that never moved it.
     const A12_ONLY: bool = false;
 
+    /// Whether this is the fast core's copy of the path ([`Fast`], lot FAST-1,
+    /// `docs/design/FAST-CORE.md`): a constant, so the standard and Fidélité+ copies carry no
+    /// test and no call of the fast code.
+    const FAST: bool = false;
+
     /// Whether `board` is this kind's variant.
     fn matches(board: &Board) -> bool;
 
@@ -858,6 +863,38 @@ impl<K: BoardKind> BoardKind for Fid<K> {
     const FIDELITY_PLUS: bool = true;
     const WATCHES_BUS: bool = K::WATCHES_BUS;
     const A12_ONLY: bool = K::A12_ONLY;
+
+    #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
+    #[inline(always)]
+    fn matches(board: &Board) -> bool {
+        K::matches(board)
+    }
+
+    #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
+    #[inline(always)]
+    fn board(board: &Board) -> &Self::B {
+        K::board(board)
+    }
+
+    #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
+    #[inline(always)]
+    fn board_mut(board: &mut Board) -> &mut Self::B {
+        K::board_mut(board)
+    }
+}
+
+/// The fast core's copy of the path of the board kind `K` (lot FAST-1,
+/// `docs/design/FAST-CORE.md`): the same board, reached as `K` reaches it, with
+/// [`BoardKind::FAST`] set. Only the boards of [`with_fast_board_kind!`] get one.
+pub struct Fast<K>(std::marker::PhantomData<K>);
+
+impl<K: BoardKind> BoardKind for Fast<K> {
+    type B = K::B;
+    const SWITCHES: bool = K::SWITCHES;
+    const SERVES_NAMETABLES: bool = K::SERVES_NAMETABLES;
+    const WATCHES_BUS: bool = K::WATCHES_BUS;
+    const A12_ONLY: bool = K::A12_ONLY;
+    const FAST: bool = true;
 
     #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
     #[inline(always)]
@@ -1024,6 +1061,54 @@ macro_rules! with_board_kind {
     }};
 }
 pub(crate) use with_board_kind;
+
+/// **The table of the fast core's boards** (lot FAST-1, `docs/design/FAST-CORE.md`): `$run` is
+/// expanded once per entry with `$kind` naming `Fast<that board's kind>`, and `$other` is the
+/// value for every board without a fast path (the frame then runs the standard loop).
+macro_rules! with_fast_board_kind {
+    ($board:expr, $kind:ident => $run:expr, $other:expr) => {{
+        let entry: u8 = match $board {
+            $crate::cartridges::Board::Nrom(_) => 1,
+            $crate::cartridges::Board::Mmc1(_) => 2,
+            $crate::cartridges::Board::UxRom(_) => 3,
+            $crate::cartridges::Board::CnRom(_) => 4,
+            $crate::cartridges::Board::AxRom(_) => 5,
+            _ => 0,
+        };
+        match entry {
+            1 => {
+                type $kind = $crate::cartridges::Fast<$crate::cartridges::NromKind>;
+                $run
+            }
+            2 => {
+                type $kind = $crate::cartridges::Fast<$crate::cartridges::Mmc1Kind>;
+                $run
+            }
+            3 => {
+                type $kind = $crate::cartridges::Fast<$crate::cartridges::UxRomKind>;
+                $run
+            }
+            4 => {
+                type $kind = $crate::cartridges::Fast<$crate::cartridges::CnRomKind>;
+                $run
+            }
+            5 => {
+                type $kind = $crate::cartridges::Fast<$crate::cartridges::AxRomKind>;
+                $run
+            }
+            _ => $other,
+        }
+    }};
+}
+pub(crate) use with_fast_board_kind;
+
+/// Whether `board` is in [`with_fast_board_kind!`]'s table (lot FAST-1).
+pub(crate) const fn has_fast_path(board: &Board) -> bool {
+    matches!(
+        board,
+        Board::Nrom(_) | Board::Mmc1(_) | Board::UxRom(_) | Board::CnRom(_) | Board::AxRom(_)
+    )
+}
 
 board_kind!(
     /// Mapper 0.
