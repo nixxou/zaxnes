@@ -56,8 +56,7 @@ as Zaxnes does (PPU and APU still, the board clocked).
 - Steps 1-2 (04762d5e): `crate::wide` (bus hooks, `read_code`, overclock via
   `run_cpu_cycle::<false>`), harness `ZAXNES_NESHAWK_WIDE=1` attaches a locked extension.
 - Step 3 (cc5f465c): `crate::hacks`, engine API, `FLAG_WIDE` savestate block. `tests/hacks.rs`
-  with `ZAXNES_ROMS=G:\3DSen\demo
-oms`: nothing attached by default; a locked extension leaves
+  with `ZAXNES_ROMS=G:\3DSen\demo\roms`: nothing attached by default; a locked extension leaves
   600 frames of work RAM identical on every demo ROM and its states restore; the 13 patched demo
   ROMs (Adventure Island, Blaster Master, Castlevania x2, Excitebike, FF1, MM2, Metroid, NG3,
   SMB1, SMB3, Zelda II x2) run their patch, unlock the extension, states restore.
