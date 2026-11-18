@@ -56,3 +56,7 @@ hardware defects, VS DIPs, ...). Of these the fast core and Fidelity+ are now im
 * 12. Presets from the owner's review (docs/design/PRESETS.csv): values of any kind (run-ahead, pipeline, resolution, shadows...), exact rate offered unticked in Faithful, OAMADDR write corruption ticked in Most faithful, catch-up last 3D on up to Balanced, resolution offered (native) and experimental Lua offered in Fastest.
 * 13. Every setting a mode sets is shown under the slider (owner); the CSV now reads the presets from the code.
 * 14. Every preset writes the whole managed set (18 settings), each value proposed (shown) or set and hidden, so a mode puts back what another changed (owner's per-mode choices). Essentials lighter: the slider and the widescreen; language, ROM folder and FPS go to a light Interface tab in the simple mode.
+
+## Step 15 (2026-11-18)
+
+The presets also manage render.visual_style and six Enhanced-style parameters (reflections, ssr_quality, ao, ao_quality, pixel_shadow, voxel_grid): Classic in the two fast modes, Enhanced from Balanced on with more effects towards the faithful end. Voxel grid stays Off and hidden (it is a look, not a quality). Tests not run (464 MB free on G:). Commit 637d151e.
