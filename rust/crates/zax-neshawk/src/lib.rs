@@ -82,6 +82,7 @@ pub mod controllers;
 pub mod cpu;
 pub mod engine;
 pub mod gamedb;
+pub mod hacks;
 pub mod nes;
 pub mod ppu;
 pub mod state;
