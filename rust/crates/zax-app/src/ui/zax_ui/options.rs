@@ -93,6 +93,17 @@ impl ZaxUi {
             play(host, UiSound::Confirm);
         }
         ui.separator();
+        self.draw_tab_entries(ui, host, tab);
+    }
+
+    /// The entries of a tab, without its reset button (lot REWRITE-UI: the new window has its
+    /// own, which takes the chosen preset's values).
+    pub(super) fn draw_tab_entries(
+        &mut self,
+        ui: &Ui,
+        host: &mut AppHost,
+        tab: options::OptionsTab,
+    ) {
         if tab == options::OptionsTab::Achievements
             && crate::ui::achievements_view::draw_account(ui, host, &mut self.sign_in)
         {

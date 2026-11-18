@@ -33,9 +33,9 @@ Emulation;Cœur rapide;emu.fast_core;gros gain CPU (2,5 à 3,5× moins de calcul
 Emulation;Cadence de la console;emu.exact_rate;aucun calcul, cadence 60,0988 Hz;non;tout de suite;oui;non;non;non;non;oui;oui;oui;oui;oui (proposé par le mode);oui (proposé par le mode)
 Emulation;Manette en temps réel;emu.realtime_input;coût faible (tranches de temps réel);oui;tout de suite;oui;oui;oui;oui;oui;oui;oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode)
 Emulation;Présentation tardive;emu.late_present;aucun calcul, moins de latence;non;tout de suite;oui;non;non;non;non;non;non;non;non;oui (proposé par le mode);oui (proposé par le mode)
-Video;;video.widescreen_advanced;patchs avancés (suraccélération CPU);oui;au prochain chargement;non;oui;oui;oui;oui;oui;non;non;non;non;non
-Video;Écran large (ROM prévues pour);video.widescreen;plus de tuiles à émuler, convertir et dessiner;Off;tout de suite;non;Off;Off;Off;Off;Off;oui;oui;oui;oui;oui
-Video;Largeur supplémentaire de l'écran large;video.widescreen_extra;marges supplémentaires;+20 %;tout de suite;non;+20 %;+20 %;+20 %;+20 %;+20 %;non;non;non;non;non
+Video;;video.widescreen_advanced;patchs avancés (suraccélération CPU);oui;au prochain chargement;oui;oui;oui;oui;oui;oui;non;non;non;non;non
+Video;Écran large (ROM prévues pour);video.widescreen;plus de tuiles à émuler, convertir et dessiner;Off;tout de suite;oui;Off;Off;Off;Off;Off;oui;oui;oui;oui;oui
+Video;Largeur supplémentaire de l'écran large;video.widescreen_extra;marges supplémentaires;+20 %;tout de suite;oui;+20 %;+20 %;+20 %;+20 %;+20 %;oui;oui;oui;oui;oui
 Emulation;Défilement lissé (interpolé par run-ahead);emu.smooth_scroll_ahead;émule des images en avance pour lisser le défilement;oui;tout de suite;oui;oui;oui;oui;oui;oui;oui;oui;oui;oui;oui
 Video;Supprimer la limite de 8 sprites par ligne;video.remove_sprite_limit;plus de sprites dessinés;Smart;tout de suite;oui;Smart;Smart;Smart;Smart;Smart;non;non;non;non;non
 Video;Signal composite;video.composite_signal;simulation du signal TV (calcul de l image);non;tout de suite;oui;non;non;non;non;non;oui;oui;oui;oui;oui

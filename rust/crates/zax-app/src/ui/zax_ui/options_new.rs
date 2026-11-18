@@ -13,6 +13,7 @@ use zax_settings::values::SettingValue;
 use super::{centre, play, ZaxUi};
 use crate::application::AppHost;
 use crate::audio::UiSound;
+use crate::ui::handheld::hacks::HacksView;
 use crate::ui::options::{self, OptionsGroup, OptionsTab, TabEntry};
 use crate::ui::{strings, text};
 
@@ -200,9 +201,6 @@ const PRESETS: [Preset; 5] = [
     },
 ];
 
-/// The settings of the Essentials tab, under the slider.
-const ESSENTIALS: [SettingId; 1] = [SettingId::VideoWidescreen];
-
 /// What the simple mode shows of a page.
 #[derive(Clone, Copy)]
 enum Simple {
@@ -216,22 +214,44 @@ enum Simple {
     Shaders,
     /// A folder setting, drawn as the classic window draws it.
     Folder(SettingId),
+    /// The buttons that open the widescreen and the hacks of the game in play.
+    GameHacks,
 }
 
-/// One tab of the new window: the classic tabs its advanced mode draws one under the other, and
-/// what its simple mode shows (nothing: the tab is hidden in that mode).
+/// What the advanced mode shows of a page.
+#[derive(Clone, Copy)]
+enum Advanced {
+    /// Classic tabs, one under the other.
+    Tabs(&'static [OptionsTab]),
+    /// A list of its own, for a page no classic tab matches.
+    Items(&'static [Simple]),
+}
+
+/// One tab of the new window: what its advanced mode draws, and what its simple mode shows
+/// (nothing: the tab is hidden in that mode).
 struct Page {
     /// The classic tab whose title it takes and whose groups the simple mode reads.
     tab: OptionsTab,
+    /// A title of its own (a string key) instead of the classic tab's.
+    title: Option<&'static str>,
     simple: &'static [Simple],
-    advanced: &'static [OptionsTab],
+    advanced: Advanced,
+}
+
+impl Page {
+    fn title(&self) -> String {
+        self.title
+            .map_or_else(|| options::title_of(self.tab), strings::get)
+    }
 }
 
 /// The tabs between Essentials and Controllers (owner's selection, 2026-11-17). The 3D render
-/// takes the light and the camera, which are the 3D scene's alone.
-const PAGES: [Page; 7] = [
+/// takes the light and the camera, which are the 3D scene's alone; the widescreen and the hacks
+/// have a tab of their own (owner, 2026-11-18).
+const PAGES: [Page; 8] = [
     Page {
         tab: OptionsTab::Display,
+        title: None,
         simple: &[
             Simple::Row(SettingId::UiFullscreen),
             Simple::Row(SettingId::VideoVSync),
@@ -240,19 +260,38 @@ const PAGES: [Page; 7] = [
             Simple::Row(SettingId::VideoBackend),
             Simple::Shaders,
         ],
-        advanced: &[OptionsTab::Display],
+        advanced: Advanced::Tabs(&[OptionsTab::Display]),
     },
     Page {
         tab: OptionsTab::NesPicture,
+        title: None,
         simple: &[
             Simple::Row(SettingId::VideoNesPalette),
             Simple::Row(SettingId::VideoCompositeSignal),
             Simple::Group(OptionsGroup::Overscan),
         ],
-        advanced: &[OptionsTab::NesPicture],
+        advanced: Advanced::Tabs(&[OptionsTab::NesPicture]),
+    },
+    Page {
+        tab: OptionsTab::NesPicture,
+        title: Some("options.new.tab.widescreen"),
+        simple: &[
+            Simple::Row(SettingId::VideoWidescreen),
+            Simple::Row(SettingId::VideoWidescreenExtra),
+            Simple::GameHacks,
+        ],
+        advanced: Advanced::Items(&[
+            Simple::Row(SettingId::VideoWidescreen),
+            Simple::Row(SettingId::VideoWidescreenExtra),
+            Simple::Row(SettingId::VideoWidescreenAdvanced),
+            Simple::Row(SettingId::VideoWidescreenStrictEdges),
+            Simple::Row(SettingId::EmuBuiltinPatches),
+            Simple::GameHacks,
+        ]),
     },
     Page {
         tab: OptionsTab::Render3d,
+        title: None,
         simple: &[
             Simple::Row(SettingId::RenderVisualStyle),
             Simple::Row(SettingId::RenderStyleReflections),
@@ -261,18 +300,20 @@ const PAGES: [Page; 7] = [
             Simple::Row(SettingId::RenderShadow),
             Simple::Row(SettingId::CameraFov),
         ],
-        advanced: &[OptionsTab::Render3d, OptionsTab::Light, OptionsTab::Camera],
+        advanced: Advanced::Tabs(&[OptionsTab::Render3d, OptionsTab::Light, OptionsTab::Camera]),
     },
     Page {
         tab: OptionsTab::Audio,
+        title: None,
         simple: &[
             Simple::Row(SettingId::AudioVolume),
             Simple::Row(SettingId::AudioConsoleProfile),
         ],
-        advanced: &[OptionsTab::Audio],
+        advanced: Advanced::Tabs(&[OptionsTab::Audio]),
     },
     Page {
         tab: OptionsTab::Emulation,
+        title: None,
         simple: &[
             Simple::Row(SettingId::EmuRunAhead),
             Simple::Row(SettingId::EmuSmoothScrollAhead),
@@ -280,21 +321,23 @@ const PAGES: [Page; 7] = [
             Simple::Row(SettingId::EmuExactRate),
             Simple::Row(SettingId::EmuRealtimeInput),
         ],
-        advanced: &[OptionsTab::Emulation],
+        advanced: Advanced::Tabs(&[OptionsTab::Emulation]),
     },
     Page {
         tab: OptionsTab::Interface,
+        title: None,
         simple: &[
             Simple::Row(SettingId::UiLanguage),
             Simple::Folder(SettingId::UiRomsFolder),
             Simple::Row(SettingId::UiShowFps),
         ],
-        advanced: &[OptionsTab::Interface],
+        advanced: Advanced::Tabs(&[OptionsTab::Interface]),
     },
     Page {
         tab: OptionsTab::Achievements,
+        title: None,
         simple: &[Simple::All],
-        advanced: &[OptionsTab::Achievements],
+        advanced: Advanced::Tabs(&[OptionsTab::Achievements]),
     },
 ];
 
@@ -304,6 +347,21 @@ fn matches(model: &SettingsModel, preset: &Preset) -> bool {
         .values
         .iter()
         .all(|&(id, value, _)| model.get(id) == value.value())
+}
+
+/// Takes `ids` back to their defaults: the value `preset` gives the ones it manages, the
+/// setting's own default to the others (owner, 2026-11-18: Default keeps the preset).
+fn reset_with(model: &mut SettingsModel, preset: &Preset, ids: &[SettingId]) {
+    for &id in ids {
+        match preset.values.iter().find(|&&(managed, ..)| managed == id) {
+            Some(&(_, value, _)) => {
+                model.set(id, value.value());
+            }
+            None => {
+                model.reset(id);
+            }
+        }
+    }
 }
 
 /// The note of a setting that takes effect later; none for one that acts at once.
@@ -358,27 +416,29 @@ impl ZaxUi {
                     self.draw_essentials(ui, host);
                 }
                 for page in &PAGES {
-                    if self.options_advanced && page.advanced.is_empty() {
-                        continue;
-                    }
                     if !self.options_advanced && page.simple.is_empty() {
                         continue;
                     }
-                    let Some(_tab) = TabItem::new(options::title_of(page.tab)).begin(ui) else {
+                    let Some(_tab) = TabItem::new(page.title()).begin(ui) else {
                         continue;
                     };
-                    if self.options_advanced {
-                        for (index, &tab) in page.advanced.iter().enumerate() {
-                            if index > 0 {
-                                ui.spacing();
-                                ui.separator();
-                                ui.text_colored(ACCENT, options::title_of(tab));
+                    self.draw_page_reset(ui, host, page);
+                    match page.advanced {
+                        Advanced::Tabs(tabs) if self.options_advanced => {
+                            for (index, &tab) in tabs.iter().enumerate() {
+                                if index > 0 {
+                                    ui.spacing();
+                                    ui.separator();
+                                    ui.text_colored(ACCENT, options::title_of(tab));
+                                }
+                                let _id = ui.push_id_usize(index);
+                                self.draw_tab_entries(ui, host, tab);
                             }
-                            let _id = ui.push_id_usize(index);
-                            self.draw_tab_body(ui, host, tab);
                         }
-                    } else {
-                        self.draw_simple_page(ui, host, page);
+                        Advanced::Items(items) if self.options_advanced => {
+                            self.draw_items(ui, host, page.tab, items);
+                        }
+                        _ => self.draw_items(ui, host, page.tab, page.simple),
                     }
                 }
                 if let Some(_tab) =
@@ -396,16 +456,93 @@ impl ZaxUi {
         self.state.options = open;
     }
 
-    /// A page in the simple mode: the rows the owner chose, a group of the classic tab, or all
-    /// of it.
-    fn draw_simple_page(&mut self, ui: &Ui, host: &mut AppHost, page: &Page) {
+    /// The settings a page shows in the mode in force, the ones its Default button resets.
+    fn page_ids(&self, page: &Page) -> Vec<SettingId> {
+        let items = match page.advanced {
+            Advanced::Tabs(tabs) if self.options_advanced => {
+                return tabs
+                    .iter()
+                    .flat_map(|&tab| self.options.rows(tab))
+                    .map(|row| row.descriptor.id())
+                    .collect();
+            }
+            Advanced::Items(items) if self.options_advanced => items,
+            _ => page.simple,
+        };
+        let mut ids = Vec::new();
+        for item in items {
+            match *item {
+                Simple::Row(id) | Simple::Folder(id) => ids.push(id),
+                Simple::All => ids.extend(
+                    self.options
+                        .rows(page.tab)
+                        .iter()
+                        .map(|row| row.descriptor.id()),
+                ),
+                Simple::Group(group) => {
+                    let mut inside = false;
+                    for entry in self.options.entries(page.tab) {
+                        match entry {
+                            TabEntry::Group(heading) => inside = *heading == group,
+                            TabEntry::Row(row) if inside => ids.push(row.descriptor.id()),
+                            TabEntry::Compact(_, cells) if inside => {
+                                ids.extend(cells.iter().map(|row| row.descriptor.id()));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Simple::Shaders | Simple::GameHacks => {}
+            }
+        }
+        ids
+    }
+
+    /// A page's Default button: what the page shows goes back to the chosen preset's values,
+    /// and to the settings' own defaults where the preset has none. The preset stays chosen.
+    fn draw_page_reset(&mut self, ui: &Ui, host: &mut AppHost, page: &Page) {
+        if ui.button(text::reset_defaults()) {
+            let ids = self.page_ids(page);
+            let preset = &PRESETS[self.options_preset.min(PRESETS.len() - 1)];
+            host.update_settings(|model| reset_with(model, preset, &ids));
+            play(host, UiSound::Confirm);
+        }
+        ui.separator();
+    }
+
+    /// The buttons that open the widescreen and the hacks of the game in play (its own hacks
+    /// window), greyed without a game.
+    fn draw_game_hacks(&mut self, ui: &Ui, host: &mut AppHost) {
+        ui.spacing();
+        ui.separator();
+        ui.text_disabled(strings::get("options.new.game_hacks_line"));
+        let no_game = host.current_rom_path().is_none();
+        let _disabled = ui.begin_disabled(no_game);
+        if ui.button(strings::get("options.new.game_widescreen")) {
+            self.open_hacks(host, HacksView::Widescreen);
+            play(host, UiSound::Confirm);
+        }
+        ui.same_line();
+        if ui.button(strings::get("options.new.game_hacks")) {
+            self.open_hacks(host, HacksView::Aids);
+            play(host, UiSound::Confirm);
+        }
+        if no_game {
+            ui.text_disabled(strings::get("options.new.no_game"));
+        }
+    }
+
+    /// The items of a page: the rows the owner chose, a group of the classic tab, or all of
+    /// it.
+    fn draw_items(&mut self, ui: &Ui, host: &mut AppHost, tab: OptionsTab, items: &[Simple]) {
         let run_ahead_forced = host
             .session()
             .is_some_and(crate::game_session::GameSession::forces_run_ahead_to_zero);
         let fceux_validation = host.fceux_validation();
-        for item in page.simple {
+        for item in items {
             match *item {
-                Simple::All => self.draw_tab_body(ui, host, page.tab),
+                Simple::All => self.draw_tab_entries(ui, host, tab),
+                Simple::GameHacks => self.draw_game_hacks(ui, host),
                 Simple::Folder(id) => {
                     let row = options::row_of(id);
                     self.draw_folder_row(ui, host, &row);
@@ -429,7 +566,7 @@ impl ZaxUi {
                     ui.spacing();
                     ui.text_disabled(group.title());
                     let mut inside = false;
-                    for entry in self.options.entries(page.tab).to_vec() {
+                    for entry in self.options.entries(tab).to_vec() {
                         match entry {
                             TabEntry::Group(heading) => inside = heading == group,
                             TabEntry::Row(row) if inside => super::options::draw_row(
@@ -452,6 +589,16 @@ impl ZaxUi {
 
     /// The Essentials tab: the slider, its box and check boxes, then the essential settings.
     fn draw_essentials(&mut self, ui: &Ui, host: &mut AppHost) {
+        if ui.button(text::reset_defaults()) {
+            let preset = &PRESETS[self.options_preset.min(PRESETS.len() - 1)];
+            host.update_settings(|model| {
+                for &(id, value, _) in preset.values {
+                    model.set(id, value.value());
+                }
+            });
+            play(host, UiSound::Confirm);
+        }
+        ui.separator();
         ui.spacing();
         ui.text(strings::get("options.new.preset_title"));
         let chosen = self.options_preset.min(PRESETS.len() - 1);
@@ -529,18 +676,6 @@ impl ZaxUi {
             if !shown {
                 continue;
             }
-            let row = options::row_of(id);
-            super::options::draw_row(ui, host, &row, run_ahead_forced, fceux_validation);
-            if let Some(note) = later_note(id) {
-                ui.same_line();
-                ui.text_colored(LATER, note);
-            }
-        }
-
-        ui.spacing();
-        ui.separator();
-        ui.text(strings::get("options.new.essentials"));
-        for id in ESSENTIALS {
             let row = options::row_of(id);
             super::options::draw_row(ui, host, &row, run_ahead_forced, fceux_validation);
             if let Some(note) = later_note(id) {

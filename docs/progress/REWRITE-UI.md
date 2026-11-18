@@ -65,3 +65,7 @@ The presets also manage render.visual_style and six Enhanced-style parameters (r
 
 Owner: reflections off by default in every mode (still offered from Balanced on); voxel grid and emu.lua_smooth_gc (on by default) no longer managed by the presets; emu.pause_3d_in_2d stays in the presets, on and offered in the two fast modes, off and hidden elsewhere (default unchanged: some scripts lose frame hooks in 2D). Real line breaks in the preset strings turned back into 
 . Freed target/debug (13 GB). zax-app lib, desktop_options_golden, pause_3d and handheld_tree tests pass.
+
+## Step 17 (2026-11-18)
+
+A Default button on every tab of the new window, Essentials included. It does not change the chosen preset: what the tab shows (in the mode in force) goes back to the chosen preset's value where the preset manages the setting, to the setting's own default elsewhere; on Essentials it writes the chosen preset again. New tab Widescreen & Hacks: simple = widescreen, extra width, buttons opening the widescreen / hacks windows of the game in play; advanced adds the advanced mode, strict edges and built-in patches. Widescreen left Essentials. draw_tab_body split (draw_tab_entries) so that the new window draws its own reset. zax-app lib and desktop_options_golden tests pass.
