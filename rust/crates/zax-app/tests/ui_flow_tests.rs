@@ -132,10 +132,7 @@ fn req_ui_201_the_menu_entry_opens_the_file_dialog() {
     );
 
     // The filters of SPEC-10 §4 plus "every file", as REQ-UI-201 asks.
-    assert_eq!(
-        ["nes", "unf", "unif", "studybox", "fds", "qd", "zip"],
-        harness.ui.browser.extensions()
-    );
+    assert_eq!(["nes", "unf", "unif", "studybox", "fds", "qd", "zip"], harness.ui.browser.extensions());
     assert!(harness
         .ui
         .browser
