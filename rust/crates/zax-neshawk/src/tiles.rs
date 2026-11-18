@@ -30,6 +30,7 @@
 use zax_core_api::TileRecord;
 
 use crate::nes::Nes;
+use crate::wide::CapturedRow;
 
 /// Visible scanlines, `zax_nes::ppu::VISIBLE_SCANLINES`.
 const VISIBLE_SCANLINES: i32 = 240;
@@ -212,11 +213,24 @@ impl Nes {
         };
         let row_index = line / 8;
         let y = (line - 1) as i16;
+        if self.b.wide.as_ref().is_some_and(|wide| wide.capture_rows) {
+            self.keep_wide_row(line, shadow, fine_x_scroll, y, pattern_table);
+        }
 
-        for k in 0..=32 {
+        // Zaxnes's widescreen extension (lot NESHAWK-HACKS): `extra` more columns on each side,
+        // read on through the neighbouring nametables, only those inside the band's visible
+        // range kept, as `zax_nes` does. 0 without the extension or its margin, and the loop is
+        // then the standard row exactly.
+        let (extra, visible_low, visible_high) = self.wide_row(line);
+        let row_width = ROW_WIDTH + (2 * extra);
+
+        for k in -extra..=(32 + extra) {
             let x = (8 * k) - fine_x_scroll;
-            if x >= SCREEN_WIDTH {
+            if x >= SCREEN_WIDTH + (8 * extra) {
                 // k = 32 with fine X at 0: a row has 32 records, otherwise 33 (REQ-CORE-038).
+                continue;
+            }
+            if extra > 0 && (x + 8 <= visible_low || x >= visible_high) {
                 continue;
             }
 
@@ -244,7 +258,7 @@ impl Nes {
                 plane1,
                 x as i16,
                 y,
-                (row_index * ROW_WIDTH) + k,
+                (row_index * row_width) + k + extra,
                 false,
                 false,
                 false,
@@ -296,7 +310,11 @@ impl Nes {
             let mirror_v = (attribute & 0x80) != 0;
             let hidden = (attribute & 0x20) != 0;
             let palette = attribute & 0x03;
-            let x = i16::from(oam_x);
+            // Zaxnes's widescreen extension: the sprite's x high byte, the tint, and the
+            // sprites outside the visible range left out (lot NESHAWK-HACKS).
+            let Some(x) = self.wide_sprite_x(n, oam_x) else {
+                continue;
+            };
             let top = i16::from(oam_y) + 1;
             let index = n as i32;
 
@@ -341,6 +359,125 @@ impl Nes {
                     palette,
                 );
             }
+        }
+        if self.b.wide.is_some() {
+            self.capture_extra_sprites(band, sprite_table);
+        }
+    }
+
+    /// Keeps the row of line `line` for the margin decoder (`Ppu2C02::keep_captured_row`): its
+    /// scroll, and the pattern table and nametable map as they are while it is drawn.
+    fn keep_wide_row(&mut self, line: i32, shadow: u16, fine_x: i32, y: i16, pattern_table: i32) {
+        let chr: Box<[u8]> = (0..0x1000)
+            .map(|i| self.peek_ppu(pattern_table + i))
+            .collect();
+        let base = self.b.board.base();
+        let map = [
+            base.apply_mirroring(0x2000) >> 10,
+            base.apply_mirroring(0x2400) >> 10,
+            base.apply_mirroring(0x2800) >> 10,
+            base.apply_mirroring(0x2C00) >> 10,
+        ];
+        let Some(wide) = self.b.wide.as_deref_mut() else {
+            return;
+        };
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..8.
+        let captured = CapturedRow {
+            row: zax_nes::wide_decode::BackgroundRow {
+                line,
+                v: shadow,
+                fine_x: fine_x as u8,
+            },
+            y,
+            chr,
+            map,
+        };
+        if let Some(slot) = usize::try_from(line / 8)
+            .ok()
+            .and_then(|row| wide.rows.get_mut(row))
+        {
+            *slot = Some(captured);
+        }
+    }
+
+    /// The extension's row geometry of line `line`: its extra columns and the visible x range,
+    /// `(0, 0, 256)` for a standard row. Records the band's range for the frame batch.
+    fn wide_row(&mut self, line: i32) -> (i32, i32, i32) {
+        let Some(wide) = self.b.wide.as_deref_mut() else {
+            return (0, 0, SCREEN_WIDTH);
+        };
+        let extra = wide.frame.margin / 8;
+        if extra == 0 {
+            return (0, 0, SCREEN_WIDTH);
+        }
+        let (low, high) = wide.ext.visible_range();
+        if let Some(row) = usize::try_from(line / 8)
+            .ok()
+            .and_then(|row| wide.frame.visible_rows.get_mut(row))
+        {
+            #[allow(clippy::cast_possible_truncation)] // -128 to 384.
+            let range = (low as i16, high as i16);
+            *row = range;
+        }
+        (extra, low, high)
+    }
+
+    /// The x of sprite `n` whose OAM x is `oam_x`: with the extension's margin, its high byte
+    /// applied and `None` outside the visible range (`zax_nes`'s `capture_sprites`).
+    fn wide_sprite_x(&mut self, n: usize, oam_x: u8) -> Option<i16> {
+        let Some(wide) = self
+            .b
+            .wide
+            .as_deref_mut()
+            .filter(|wide| wide.frame.margin > 0)
+        else {
+            return Some(i16::from(oam_x));
+        };
+        if wide.ext.sprite_tinted(n) {
+            wide.frame.tinted |= 1 << n;
+        }
+        let x = wide.ext.sprite_x(n, oam_x);
+        let (low, high) = wide.ext.sprite_range();
+        if x + 8 <= low || x >= high {
+            return None;
+        }
+        #[allow(clippy::cast_possible_truncation)] // In the visible range.
+        Some(x as i16)
+    }
+
+    /// The sprites of the extension's second page whose band is `band` (8 x 8 only), indices
+    /// 128 and up (`zax_nes`'s `capture_extra_sprites`).
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // n < 64, x in range.
+    fn capture_extra_sprites(&mut self, band: i32, sprite_table: i32) {
+        let Some(wide) = self.b.wide.as_deref().filter(|wide| wide.ext.unlocked()) else {
+            return;
+        };
+        let (low, high) = wide.ext.sprite_range();
+        let oam = *wide.ext.extra_oam();
+        let xs: Vec<i32> = (0..64)
+            .map(|n| wide.ext.extra_sprite_x(n, oam[(n * 4) + 3]))
+            .collect();
+        for n in 0..64usize {
+            let top = i32::from(oam[n * 4]) + 1;
+            if top >= VISIBLE_SCANLINES || top / 8 != band {
+                continue;
+            }
+            let x = xs[n];
+            if x + 8 <= low || x >= high {
+                continue;
+            }
+            let attribute = oam[(n * 4) + 2];
+            let tile = i32::from(oam[(n * 4) + 1]);
+            self.emit_sprite(
+                128 + n as i32,
+                x as i16,
+                top as i16,
+                sprite_table + (tile * 16),
+                (attribute & 0x40) != 0,
+                (attribute & 0x80) != 0,
+                (attribute & 0x20) != 0,
+                attribute & 0x03,
+            );
         }
     }
 

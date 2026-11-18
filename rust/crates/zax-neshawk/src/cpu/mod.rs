@@ -37,6 +37,15 @@ pub trait Mos6502xLink {
     /// method because the 6502X is shared with cores where it is not.
     fn dummy_read_memory(&mut self, address: u16) -> u8;
 
+    /// A read of the instruction stream: an opcode, an operand, or one of the 6502's dummy reads
+    /// of `PC`. The C# makes these plain `ReadMemory`/`DummyReadMemory` calls, and so does this
+    /// default: the only bus that answers them otherwise is Zaxnes's widescreen extension, whose
+    /// execution zone shows a hack pack's code to instruction fetches alone (lot NESHAWK-HACKS,
+    /// `zax_nes::wide`). Without it, the cycle is exactly the C#'s.
+    fn read_code(&mut self, address: u16) -> u8 {
+        self.read_memory(address)
+    }
+
     /// A read with no side effects at all, for a debugger or a trace.
     fn peek_memory(&self, address: u16) -> u8;
 

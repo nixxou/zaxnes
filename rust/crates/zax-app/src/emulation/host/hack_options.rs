@@ -30,6 +30,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// The option bits for the options as they are (the low byte: `$500A`).
     #[must_use]
     pub fn hack_option_bits(&self) -> u16 {
+        // No aid while a `.bk2` plays: its hooks would change the game it replays.
+        if self.plain_for_bk2() {
+            return 0;
+        }
         self.hack_options()
             .iter()
             .filter(|(_, on)| *on)

@@ -636,13 +636,15 @@ impl GameOptionsModel {
     /// [`options::engine_lock`] locks.
     #[must_use]
     pub fn selected_locked_by_engine(&self) -> bool {
-        if self.page_rows().is_none()
-            && matches!(
-                GAME_MAIN.get(self.selected),
-                Some(GameRow::Widescreen | GameRow::Hacks)
-            )
-        {
-            return crate::ui::options::engine_is_not_zaxnes(&self.edited);
+        if self.page_rows().is_none() {
+            let capability = match GAME_MAIN.get(self.selected) {
+                Some(GameRow::Widescreen) => Some(zax_core_api::Capability::Widescreen),
+                Some(GameRow::Hacks) => Some(zax_core_api::Capability::HackPacks),
+                _ => None,
+            };
+            if let Some(capability) = capability {
+                return !crate::ui::options::engine_has(&self.edited, capability);
+            }
         }
         self.selected_row()
             .is_some_and(|row| options::engine_lock(row, &self.edited).is_some())

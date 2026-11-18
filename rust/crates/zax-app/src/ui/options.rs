@@ -734,6 +734,9 @@ pub fn engine_reason(id: SettingId, model: &SettingsModel) -> Option<&'static st
     if !engine_is_not_zaxnes(model) {
         return None;
     }
+    // What the chosen engine has of Zaxnes's own controls: NesHawk carries the widescreen
+    // extension and the hack packs since lot NESHAWK-HACKS, FCEUX none of the four.
+    let has = |capability| engine_has(model, capability);
     Some(match id {
         // Lot FCEUX-23 step 5, §4 of `docs/review/FCEUX-ENGINE.md`: with FCEUX chosen for this
         // game the widescreen extension, the hack packs, the sprite limit and the run-ahead are
@@ -743,8 +746,14 @@ pub fn engine_reason(id: SettingId, model: &SettingsModel) -> Option<&'static st
         SettingId::VideoWidescreen
         | SettingId::VideoWidescreenExtra
         | SettingId::VideoWidescreenAdvanced
-        | SettingId::VideoWidescreenStrictEdges => keys::HINT_FCEUX_NO_WIDESCREEN,
-        SettingId::EmuBuiltinPatches | SettingId::EmuForcedPatch | SettingId::EmuHackOptions => {
+        | SettingId::VideoWidescreenStrictEdges
+            if !has(zax_core_api::Capability::Widescreen) =>
+        {
+            keys::HINT_FCEUX_NO_WIDESCREEN
+        }
+        SettingId::EmuBuiltinPatches | SettingId::EmuForcedPatch | SettingId::EmuHackOptions
+            if !has(zax_core_api::Capability::HackPacks) =>
+        {
             keys::HINT_FCEUX_NO_HACKS
         }
         SettingId::VideoRemoveSpriteLimit => keys::HINT_FCEUX_NO_SPRITE_LIMIT,
@@ -772,14 +781,16 @@ fn chosen_engine(model: &SettingsModel) -> zax_core_api::EngineKind {
     chosen
 }
 
-/// Whether the engine in force for the game in play is **not** Zaxnes's own core, which is what
-/// greys the four groups of controls above.
-///
-/// The widescreen extension, the hack packs, the sprite limit and the run-ahead are all patches to
-/// *Zaxnes's* bus or PPU rather than features of an emulator, so neither FCEUX nor NesHawk has
-/// them (`Capabilities::FCEUX` and `Capabilities::NESHAWK` agree on all four). The test is
-/// therefore "is the engine Zaxnes" and not "is the engine FCEUX": a lot that adds a third engine
-/// without those features needs no change here.
+/// Whether the engine chosen for the game in play has `capability`, read from
+/// [`zax_core_api::Capabilities::of_kind`]: Zaxnes has them all, NesHawk the widescreen and the
+/// hack packs (lot NESHAWK-HACKS), FCEUX none of the four groups above.
+#[must_use]
+pub fn engine_has(model: &SettingsModel, capability: zax_core_api::Capability) -> bool {
+    zax_core_api::Capabilities::of_kind(chosen_engine(model)).has(capability)
+}
+
+/// Whether the engine in force for the game in play is **not** Zaxnes's own core: only then can
+/// one of the four groups of controls above be greyed, each as [`engine_has`] says.
 #[must_use]
 pub fn engine_is_not_zaxnes(model: &SettingsModel) -> bool {
     chosen_engine(model) != zax_core_api::EngineKind::Zaxnes

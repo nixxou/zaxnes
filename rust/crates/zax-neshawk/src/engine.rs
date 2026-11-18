@@ -26,7 +26,7 @@ use zax_core_api::{
     state_core_name, state_magic, AudioError, Capabilities, ControllerPortType, Engine, EngineKind,
     FrameBatch, InputWord, InvalidPort, InvalidState, NesRegion, NoRomLoaded, PaletteSnapshot,
     RomLoadFailure, RomLoadResult, StateLoadFailure, StateLoaded, TileRecord, MAX_SAMPLE_RATE,
-    MIN_SAMPLE_RATE, STANDARD_ROWS,
+    MIN_SAMPLE_RATE,
 };
 
 use crate::controllers::PortDevice;
@@ -59,6 +59,13 @@ const HEADER_FIXED: usize = 4 + 4 + 1 + 1 + 8 + 1 + 4;
 /// not a rollback slot). Bit 1: the block carries the ROM image.
 const FLAG_FULL: u8 = 1 << 0;
 const FLAG_ROM_IMAGE: u8 = 1 << 1;
+/// Bit 2: Zaxnes's widescreen extension follows the payload, a `u32` length then its registers
+/// (`zax_nes::wide::WideExtension::save_state`). Lot NESHAWK-HACKS; never set on a machine
+/// without the extension, so those blocks are unchanged.
+const FLAG_WIDE: u8 = 1 << 2;
+
+/// Where the flags byte sits in a block: after the magic and the version.
+const FLAGS_AT: usize = 4 + 4;
 
 /// The NesHawk port as an [`Engine`].
 ///
@@ -112,6 +119,16 @@ pub struct NesHawkEngine {
     audio_last_clock: u32,
     audio_accumulated: f64,
     audio_filled: f64,
+    /// The built-in patches, the hack packs and their aids (lot NESHAWK-HACKS, [`crate::hacks`]):
+    /// all off unless the host turns them on.
+    hacks: crate::hacks::Hacks,
+    /// The widescreen part of the frame just run, copied off the machine with its records:
+    /// the margin (0 for a standard frame), each band's visible x range, the tinted sprites, and
+    /// whether the PPU showed its first 8 columns.
+    wide_frame: crate::wide::WideFrame,
+    left_column_shown: bool,
+    /// What the margin decoder added to the frame just run.
+    decoded: crate::wide_decode::Decoded,
 }
 
 impl std::fmt::Debug for NesHawkEngine {
@@ -162,6 +179,10 @@ impl NesHawkEngine {
             audio_last_clock: 0,
             audio_accumulated: 0.0,
             audio_filled: 0.0,
+            hacks: crate::hacks::Hacks::default(),
+            wide_frame: crate::wide::WideFrame::default(),
+            left_column_shown: true,
+            decoded: crate::wide_decode::Decoded::default(),
         };
         if let Some(dir) = dir {
             engine.set_gamedb_dir(&dir);
@@ -255,7 +276,14 @@ impl NesHawkEngine {
     /// shortcut that keeps it.
     fn build(&mut self) -> Result<Nes, LoadError> {
         let ports = [Self::device(self.ports[0]), Self::device(self.ports[1])];
-        let mut nes = Nes::load(&self.image, &self.db, ports[0], ports[1])?;
+        // The built-in patch, when the host turned the patches on and one is made for the ROM
+        // (lot NESHAWK-HACKS); the image the host loaded otherwise, as before the lot.
+        let patched = self.hacks.patch_image(&self.image);
+        self.hacks.applied = patched.as_ref().map(|patched| patched.name);
+        let source = patched
+            .as_ref()
+            .map_or(&self.image[..], |patched| &patched.image[..]);
+        let mut nes = Nes::load(source, &self.db, ports[0], ports[1])?;
         // `_display_type` and `InitialWRamStatePattern` are both read by `HardReset`, so they are
         // set and the machine powered on again rather than patched over afterwards.
         nes.set_display_type(Self::display_type(self.region));
@@ -263,7 +291,122 @@ impl NesHawkEngine {
             .clone_from(&self.wram_pattern);
         nes.hard_reset();
         nes.set_tile_capture(self.capture_tiles);
+        // Nothing at all unless a patch runs, an aid is on or a margin is offered.
+        self.hacks.attach(&mut nes);
         Ok(nes)
+    }
+
+    // ------------------------------------------- hacks and widescreen (NESHAWK-HACKS)
+    //
+    // The names and meanings of `zax_nes::NesCore`'s, so that the host drives both engines the
+    // same way. All of it is off by default; see `crate::hacks` for why that is the C#'s machine.
+
+    /// Turns the built-in patches on or off for the next load and power-on (off by default).
+    pub fn set_builtin_patches(&mut self, enabled: bool) {
+        self.hacks.builtin_patches = enabled;
+    }
+
+    /// Turns the advanced patches on or off for the next load and power-on.
+    pub fn set_advanced_patches(&mut self, enabled: bool) {
+        self.hacks.advanced_patches = enabled;
+    }
+
+    /// The two switches above, as they are set.
+    #[must_use]
+    pub const fn patch_switches(&self) -> (bool, bool) {
+        (self.hacks.builtin_patches, self.hacks.advanced_patches)
+    }
+
+    /// The patch applied to a ROM none is made for, while the patches are on.
+    pub fn set_forced_patch(
+        &mut self,
+        patch: Option<&'static zax_nes::builtin_patches::BuiltinPatch>,
+    ) {
+        self.hacks.forced = patch;
+    }
+
+    /// The widescreen margin the host offers on each side, in pixels (0 = off). A ROM sees it
+    /// only through the extension it has to unlock.
+    pub fn set_widescreen_margin(&mut self, pixels: i32) {
+        let vertical = self.hacks.host_vertical_margin;
+        self.hacks.set_margins(pixels, vertical, self.nes.as_mut());
+    }
+
+    /// The margin the host offers above and below, in pixels (0 = off).
+    pub fn set_widescreen_vertical_margin(&mut self, pixels: i32) {
+        let horizontal = self.hacks.host_margin;
+        self.hacks
+            .set_margins(horizontal, pixels, self.nes.as_mut());
+    }
+
+    /// The widescreen margin the host offers on each side.
+    #[must_use]
+    pub const fn widescreen_margin(&self) -> i32 {
+        self.hacks.host_margin
+    }
+
+    /// The options of the patch or the pack's aids, one bit each (`NesCore::set_hack_options`).
+    pub fn set_hack_options(&mut self, options: u16) {
+        self.hacks.set_hack_options(options, self.nes.as_mut());
+    }
+
+    /// The options of the patch applied, or of the pack's aids.
+    #[must_use]
+    pub fn hack_options(&self) -> Vec<zax_nes::builtin_patches::HackOption> {
+        self.hacks.hack_options()
+    }
+
+    /// The patch whose options apply to the loaded ROM.
+    #[must_use]
+    pub fn options_patch(&self) -> Option<&'static str> {
+        self.hacks.options_patch().map(|patch| patch.name)
+    }
+
+    /// The built-in patch the loaded ROM runs.
+    #[must_use]
+    pub const fn builtin_patch(&self) -> Option<&'static str> {
+        self.hacks.applied
+    }
+
+    /// The pack's components the machine runs.
+    #[must_use]
+    pub fn applied_components(&self) -> Vec<&'static str> {
+        self.hacks.applied_components()
+    }
+
+    /// The image the host loaded, when a built-in patch was applied to it (`None` otherwise, as
+    /// on `NesCore`).
+    #[must_use]
+    pub fn original_image(&self) -> Option<&[u8]> {
+        self.hacks.applied.map(|_| self.image.as_slice())
+    }
+
+    /// The picture of the frame just run, widened by its widescreen margin: `256 + 2 * margin`
+    /// NES colour indices a row with the opacity bit (`zax_nes::ppu::OPAQUE_PIXEL`) set where a
+    /// pixel is drawn, 240 rows; returns the number of rows (`NesCore::wide_picture_into`).
+    pub fn wide_picture_into(&self, out: &mut Vec<u8>) -> usize {
+        let Some(nes) = self.nes.as_ref() else {
+            out.clear();
+            out.resize(FRAME_LEN, zax_nes::ppu::OPAQUE_PIXEL);
+            return 240;
+        };
+        let pixels: Vec<u8> = nes.ppu.xbuf.iter().map(|&p| (p & 0x3F) as u8).collect();
+        crate::wide_picture::WideFrameView {
+            records: &self.records,
+            palette: &self.palette,
+            pixels: &pixels,
+            margin: self.wide_frame.margin,
+            left_column_shown: self.left_column_shown,
+            tinted: self.wide_frame.tinted,
+            decoded: self.decoded,
+        }
+        .compose(out)
+    }
+
+    /// Whether the machine carries Zaxnes's widescreen extension.
+    #[must_use]
+    pub fn has_wide_extension(&self) -> bool {
+        self.nes.as_ref().is_some_and(|nes| nes.b.wide.is_some())
     }
 
     /// Takes the frame's palette and tile records off the machine.
@@ -274,6 +417,24 @@ impl NesHawkEngine {
         self.palette = nes.ppu.palram;
         self.records.clear();
         self.records.extend_from_slice(nes.tile_records());
+        self.wide_frame = nes
+            .b
+            .wide
+            .as_deref()
+            .map_or_else(crate::wide::WideFrame::default, |wide| wide.frame);
+        self.left_column_shown =
+            nes.ppu.reg_2001.show_bg_leftmost != 0 && nes.ppu.reg_2001.show_obj_leftmost != 0;
+        // The margin decoder, on the engine's copy of the records (lot NESHAWK-HACKS).
+        self.decoded = match self.hacks.decoder() {
+            Some(decoder) if self.wide_frame.margin > 0 => crate::wide_decode::decode_margins(
+                decoder,
+                nes,
+                &mut self.records,
+                &mut self.wide_frame,
+                nes.ppu.reg_2001.show_bg_leftmost == 0,
+            ),
+            _ => crate::wide_decode::Decoded::default(),
+        };
     }
 
     /// Whether the 3D tile capture is running. Off until a host asks for it, because a host that
@@ -462,6 +623,7 @@ impl Engine for NesHawkEngine {
 
     fn load_rom(&mut self, image: &[u8], name: &str) -> RomLoadResult {
         self.image = image.to_vec();
+        self.hacks.on_load(image);
         self.rom_name = Some(name.to_owned());
         self.frame_offset = 0;
         self.records.clear();
@@ -530,6 +692,7 @@ impl Engine for NesHawkEngine {
 
     fn close_rom(&mut self) {
         self.nes = None;
+        self.hacks.on_close();
         self.image.clear();
         self.rom_name = None;
         self.frame_offset = 0;
@@ -615,13 +778,15 @@ impl Engine for NesHawkEngine {
         FrameBatch {
             records: &self.records,
             palette: self.palette,
-            margin_palette: None,
+            margin_palette: self.decoded.margin_palette,
             // The unreliable-band widths of REQ-CORE-046 are the margin decoder's, which is
             // Zaxnes's bus; a NesHawk frame is a standard frame with no margin.
             mask_x: 0,
             mask_y: 0,
-            margin: 0,
-            visible_rows: STANDARD_ROWS,
+            // Zaxnes's widescreen extension's margin (lot NESHAWK-HACKS); 0 and the standard rows
+            // for every frame without it.
+            margin: self.wide_frame.margin,
+            visible_rows: self.wide_frame.visible_rows,
             margin_y: 0,
         }
     }
@@ -722,7 +887,18 @@ impl Engine for NesHawkEngine {
         nes.write_state(&mut writer);
         let payload = (writer.len() - header_len) as u32;
         writer.patch_u32(length_at, payload);
-        *buffer = writer.finish();
+        let mut out = writer.finish();
+        // Zaxnes's widescreen extension, after the payload and only when the machine has one
+        // (`FLAG_WIDE`): a block without it is byte for byte the one before lot NESHAWK-HACKS.
+        if let Some(wide) = nes.b.wide.as_deref() {
+            out[FLAGS_AT] |= FLAG_WIDE;
+            let mut ext = zax_nes::state::StateWriter::with_capacity(0x1000);
+            wide.ext.save_state(&mut ext);
+            let bytes = ext.into_vec();
+            out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+            out.extend_from_slice(&bytes);
+        }
+        *buffer = out;
         Ok(())
     }
 
@@ -845,6 +1021,28 @@ impl Engine for NesHawkEngine {
             )));
         }
 
+        // The widescreen extension's block, when the state has one.
+        let mut wide_len = 0;
+        if flags & FLAG_WIDE != 0 {
+            let at_wide = at + payload_len;
+            let len = block
+                .get(at_wide..at_wide + 4)
+                .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize)
+                .ok_or_else(|| {
+                    InvalidState::corrupt("The savestate's widescreen block is truncated.")
+                })?;
+            let bytes = block.get(at_wide + 4..at_wide + 4 + len).ok_or_else(|| {
+                InvalidState::corrupt("The savestate's widescreen block is truncated.")
+            })?;
+            let mut reader = zax_nes::state::StateReader::new(bytes, 0)?;
+            let wide = restored
+                .b
+                .wide
+                .get_or_insert_with(crate::wide::WideHooks::new);
+            wide.ext.load_state(&mut reader, true, true)?;
+            wide_len = 4 + len;
+        }
+
         if let Some(image) = image {
             self.image = image;
         }
@@ -857,7 +1055,7 @@ impl Engine for NesHawkEngine {
         self.capture_frame();
 
         Ok(StateLoaded {
-            consumed: at + payload_len,
+            consumed: at + payload_len + wide_len,
             rom_name,
         })
     }

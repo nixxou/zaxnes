@@ -331,6 +331,22 @@ impl EngineHandle {
         self.engine.as_any_mut().downcast_mut::<NesCore>()
     }
 
+    /// The NesHawk port, or `None` on another engine. It carries Zaxnes's widescreen extension
+    /// and hack packs too (lot NESHAWK-HACKS), behind the same names as `NesCore`'s.
+    #[must_use]
+    pub fn neshawk(&self) -> Option<&zax_neshawk::NesHawkEngine> {
+        self.engine
+            .as_any()
+            .downcast_ref::<zax_neshawk::NesHawkEngine>()
+    }
+
+    /// The same, mutably.
+    pub fn neshawk_mut(&mut self) -> Option<&mut zax_neshawk::NesHawkEngine> {
+        self.engine
+            .as_any_mut()
+            .downcast_mut::<zax_neshawk::NesHawkEngine>()
+    }
+
     // ------------------------------------------------------------------ the game
 
     /// Loads a ROM and keeps the image, so that [`EngineHandle::original_image`] can answer on
@@ -488,6 +504,9 @@ impl EngineHandle {
     pub fn wide_picture_into(&self, out: &mut Vec<u8>) -> usize {
         if let Some(core) = self.zaxnes() {
             return core.wide_picture_into(out);
+        }
+        if let Some(engine) = self.neshawk() {
+            return engine.wide_picture_into(out);
         }
         self.engine.pixel_frame_indices_into(out);
         for pixel in out.iter_mut() {
@@ -726,6 +745,9 @@ impl EngineHandle {
     /// empty on an engine with no built-in patches.
     #[must_use]
     pub fn applied_components(&self) -> Vec<&'static str> {
+        if let Some(engine) = self.neshawk() {
+            return engine.applied_components();
+        }
         self.zaxnes()
             .map(NesCore::applied_components)
             .unwrap_or_default()
@@ -771,6 +793,8 @@ impl EngineHandle {
     pub fn set_widescreen_margin(&mut self, pixels: i32) {
         if let Some(core) = self.zaxnes_mut() {
             core.set_widescreen_margin(pixels);
+        } else if let Some(engine) = self.neshawk_mut() {
+            engine.set_widescreen_margin(pixels);
         }
     }
 
@@ -778,12 +802,17 @@ impl EngineHandle {
     pub fn set_widescreen_vertical_margin(&mut self, pixels: i32) {
         if let Some(core) = self.zaxnes_mut() {
             core.set_widescreen_vertical_margin(pixels);
+        } else if let Some(engine) = self.neshawk_mut() {
+            engine.set_widescreen_vertical_margin(pixels);
         }
     }
 
     /// The margin in force; 0 on an engine without the extension.
     #[must_use]
     pub fn widescreen_margin(&self) -> i32 {
+        if let Some(engine) = self.neshawk() {
+            return engine.widescreen_margin();
+        }
         self.zaxnes().map_or(0, NesCore::widescreen_margin)
     }
 
@@ -807,6 +836,9 @@ impl EngineHandle {
     /// an engine they cannot patch.
     #[must_use]
     pub fn patch_switches(&self) -> (bool, bool) {
+        if let Some(engine) = self.neshawk() {
+            return engine.patch_switches();
+        }
         self.zaxnes()
             .map_or((false, false), NesCore::patch_switches)
     }
@@ -829,6 +861,8 @@ impl EngineHandle {
     pub fn set_builtin_patches(&mut self, enabled: bool) {
         if let Some(core) = self.zaxnes_mut() {
             core.set_builtin_patches(enabled);
+        } else if let Some(engine) = self.neshawk_mut() {
+            engine.set_builtin_patches(enabled);
         }
     }
 
@@ -1049,6 +1083,8 @@ impl EngineHandle {
     pub fn set_advanced_patches(&mut self, enabled: bool) {
         if let Some(core) = self.zaxnes_mut() {
             core.set_advanced_patches(enabled);
+        } else if let Some(engine) = self.neshawk_mut() {
+            engine.set_advanced_patches(enabled);
         }
     }
 
@@ -1056,24 +1092,35 @@ impl EngineHandle {
     pub fn set_forced_patch(&mut self, patch: Option<&'static BuiltinPatch>) {
         if let Some(core) = self.zaxnes_mut() {
             core.set_forced_patch(patch);
+        } else if let Some(engine) = self.neshawk_mut() {
+            engine.set_forced_patch(patch);
         }
     }
 
     /// The built-in patch applied to the ROM loaded; `None` on an engine without them.
     #[must_use]
     pub fn builtin_patch(&self) -> Option<&'static str> {
+        if let Some(engine) = self.neshawk() {
+            return engine.builtin_patch();
+        }
         self.zaxnes().and_then(NesCore::builtin_patch)
     }
 
     /// The pack whose options the game offers; `None` on an engine without them.
     #[must_use]
     pub fn options_patch(&self) -> Option<&'static str> {
+        if let Some(engine) = self.neshawk() {
+            return engine.options_patch();
+        }
         self.zaxnes().and_then(NesCore::options_patch)
     }
 
     /// Those options; empty on an engine without them.
     #[must_use]
     pub fn hack_options(&self) -> Vec<HackOption> {
+        if let Some(engine) = self.neshawk() {
+            return engine.hack_options();
+        }
         self.zaxnes().map(NesCore::hack_options).unwrap_or_default()
     }
 
@@ -1081,6 +1128,8 @@ impl EngineHandle {
     pub fn set_hack_options(&mut self, options: u16) {
         if let Some(core) = self.zaxnes_mut() {
             core.set_hack_options(options);
+        } else if let Some(engine) = self.neshawk_mut() {
+            engine.set_hack_options(options);
         }
     }
 

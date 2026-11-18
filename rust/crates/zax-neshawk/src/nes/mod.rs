@@ -216,6 +216,10 @@ pub struct Bus {
 
     /// What the load decided, and from where. `None` only in a machine built by hand in a test.
     pub load_report: Option<LoadReport>,
+
+    /// Zaxnes's widescreen extension (lot NESHAWK-HACKS), **`None` unless the host asked for
+    /// it**: see [`crate::wide`] for why `None` is the C#'s machine to the cycle.
+    pub wide: Option<Box<crate::wide::WideHooks>>,
 }
 
 impl Clone for Bus {
@@ -273,6 +277,7 @@ impl Clone for Bus {
             audio_deltas: self.audio_deltas.clone(),
             bus_log: self.bus_log.clone(),
             load_report: self.load_report.clone(),
+            wide: self.wide.clone(),
             rdy: self.rdy,
             rdy_freeze: self.rdy_freeze,
             total_executed_cycles: self.total_executed_cycles,
@@ -305,6 +310,12 @@ impl Mos6502xLink for Bus {
     }
     fn write_memory(&mut self, address: u16, value: u8) {
         self.write_memory(address, value);
+    }
+    fn read_code(&mut self, address: u16) -> u8 {
+        if self.wide.is_some() {
+            return self.read_code_wide(address);
+        }
+        self.read_memory(address)
     }
     fn on_exec_fetch(&mut self, address: u16, a: u8, x: u8, y: u8, s: u8) {
         self.exec_fetch(address, a, x, y, s);
@@ -524,6 +535,30 @@ impl Nes {
 
     /// `NES.RunCpuOne`: one CPU cycle, in the C#'s order, which is the whole point of the port.
     pub fn run_cpu_one(&mut self) {
+        self.run_cpu_cycle::<true>();
+    }
+
+    /// One CPU cycle of Zaxnes's widescreen overclock (lot NESHAWK-HACKS): [`Self::run_cpu_one`]
+    /// with the APU held still, as `NesBus::tick_as` holds it on Zaxnes; the board is clocked.
+    pub(crate) fn run_cpu_stalled(&mut self) {
+        self.run_cpu_cycle::<false>();
+        // The cartridge still sees the time pass, as on Zaxnes. NesHawk's boards that count it
+        // count **PPU** clocks (`ClockPPU`): MMC1 ignores a write closer than 4 of them to the
+        // previous one, so with the PPU held they would never come and every bank switch of the
+        // overclock after the first would be lost. Three per CPU cycle, the NTSC ratio.
+        // The PPU's delayed register installs land as the time passes (`ppu_latches`), the PPU
+        // itself staying where it is.
+        for _ in 0..3 {
+            self.ppu_latches();
+            if self.b.ppu.has_clock_ppu {
+                self.b.board.clock_ppu();
+            }
+        }
+    }
+
+    /// The body of [`Self::run_cpu_one`]; `APU` false leaves out the APU's two half-cycles and
+    /// its sample, and nothing else. Monomorphised, so `run_cpu_one` is the C#'s cycle exactly.
+    fn run_cpu_cycle<const APU: bool>(&mut self) {
         ///////////////////////////
         // OAM DMA start
         ///////////////////////////
@@ -540,6 +575,13 @@ impl Nes {
                 self.b.oam_dma_index += 1;
                 if self.b.oam_dma_index == 512 {
                     self.b.oam_dma_exec = false;
+                    // Zaxnes's widescreen extension takes the sprite x high bytes of the page
+                    // just copied, as `NesBus` does at the end of its OAM DMA (lot
+                    // NESHAWK-HACKS). The address has stepped past the page by now.
+                    if let Some(wide) = self.b.wide.as_deref_mut() {
+                        let page = (self.b.oam_dma_addr.wrapping_sub(1) >> 8) as u8;
+                        wide.ext.latch_sprites(page);
+                    }
                 }
             } else {
                 self.b.cpu_deadcounter -= 1;
@@ -600,7 +642,9 @@ impl Nes {
         /////////////////////////////
         // dmc dma end
         /////////////////////////////
-        self.b.apu_run_one_first();
+        if APU {
+            self.b.apu_run_one_first();
+        }
 
         self.cpu.irq = self.b.irq_apu || self.b.board.irq_signal();
 
@@ -616,17 +660,19 @@ impl Nes {
         self.cpu_execute_one();
         self.b.board.clock_cpu();
 
-        let s = self.b.apu.emit_sample();
+        if APU {
+            let s = self.b.apu.emit_sample();
 
-        if s != self.b.old_s {
-            self.b
-                .audio_deltas
-                .push((self.b.apu.sampleclock, s - self.b.old_s));
-            self.b.old_s = s;
+            if s != self.b.old_s {
+                self.b
+                    .audio_deltas
+                    .push((self.b.apu.sampleclock, s - self.b.old_s));
+                self.b.old_s = s;
+            }
+            self.b.apu.sampleclock += 1;
+
+            self.b.apu_run_one_last();
         }
-        self.b.apu.sampleclock += 1;
-
-        self.b.apu_run_one_last();
 
         if !self.b.rdy && !self.b.dmc_dma_exec && !self.b.oam_dma_exec {
             self.b.rdy = true;
@@ -863,6 +909,9 @@ impl Bus {
             ret = self.ram[addr as usize];
         } else if addr < 0x2000 {
             ret = self.ram[(addr & 0x7FF) as usize];
+        } else if self.wide.is_some() && addr >= 0x2000 {
+            // Zaxnes's widescreen extension (lot NESHAWK-HACKS); only ever with it present.
+            ret = self.read_memory_wide(addr);
         } else if addr < 0x4000 {
             // Board.ReadReg2xxx; no board in scope overrides it
             ret = self.ppu_read_reg(iaddr & 7);
@@ -916,6 +965,9 @@ impl Bus {
             self.ram[addr as usize] = value;
         } else if addr < 0x2000 {
             self.ram[(addr & 0x7FF) as usize] = value;
+        } else if self.wide.is_some() && addr < 0x6000 && !(0x4000..0x4020).contains(&addr) {
+            // Zaxnes's widescreen extension (lot NESHAWK-HACKS); only ever with it present.
+            self.write_memory_wide(addr, value);
         } else if addr < 0x4000 {
             // Board.WriteReg2xxx; no board in scope overrides it
             self.ppu_write_reg(iaddr, value);
@@ -997,6 +1049,19 @@ impl Bus {
             self.board.address_ppu(addr);
         }
 
+        // Zaxnes's widescreen extension stamps the nametable byte with the frame it was
+        // written in, for the margin decoders (lot NESHAWK-HACKS); nothing without it.
+        if let Some(wide) = self.wide.as_deref_mut() {
+            let address = addr & 0x3FFF;
+            if (0x2000..0x3F00).contains(&address) {
+                #[allow(clippy::cast_sign_loss)] // 0..0x1000.
+                let offset = (self.board.base().apply_mirroring(address) & 0x7FF) as usize;
+                if let Some(stamp) = wide.vram_written.get_mut(offset) {
+                    *stamp = wide.vram_clock;
+                }
+            }
+        }
+
         let (board, mut env) = self.board_env();
         board.write_ppu(addr, value, &mut env);
     }
@@ -1061,6 +1126,9 @@ crate::state::sync_struct!(inherent Bus {
 } skip: {
     game_name, cart, board_kind, origin, load_report, initial_wram_state_pattern, bus_log,
     board,
+    // Zaxnes's widescreen extension: not NesHawk state. The engine saves it in a block of its
+    // own and only when present (lot NESHAWK-HACKS), so a block without it is unchanged.
+    wide,
 });
 
 impl crate::state::SyncState for Bus {
