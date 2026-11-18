@@ -293,9 +293,16 @@ fn select_and_start_held_for_a_second_quit_and_a_tap_does_not() {
 #[test]
 fn the_options_change_the_settings_of_the_host() {
     let (mut harness, mut handheld) = start(&[], &["Game.nes"]);
+    // Lot REWRITE-UI: the advanced mode, whose main page this walk follows.
+    harness.host.update_settings(|settings| {
+        settings.set(SettingId::UiOptionsAdvanced, SettingValue::Bool(true));
+    });
     tap(&mut harness, &mut handheld, PadButton::Y);
     assert_eq!(Screen::Options, handheld.screen());
-    tap(&mut harness, &mut handheld, PadButton::Down); // volume
+    // Mode, preset, preset page, language, then the volume.
+    for _ in 0..4 {
+        tap(&mut harness, &mut handheld, PadButton::Down);
+    }
     tap(&mut harness, &mut handheld, PadButton::Left);
     assert!((harness.host.settings().volume() - 0.9).abs() < 1.0e-6);
     for _ in 0..4 {
@@ -317,8 +324,9 @@ fn the_options_change_the_settings_of_the_host() {
     tap(&mut harness, &mut handheld, PadButton::B);
     assert_eq!(Screen::Options, handheld.screen());
     // RO-3: Show FPS and the camera view left the main page for the *Advanced options* hub, so
-    // the region, the shaders (come up from the hub) and the optimisations are the next rows.
-    for _ in 0..3 {
+    // the region, the shaders (come up from the hub) and the optimisations are the next rows;
+    // lot REWRITE-UI put the widescreen page between the region and the shaders.
+    for _ in 0..4 {
         tap(&mut harness, &mut handheld, PadButton::Down);
     }
     // The optimizations page, on its frame cap row.

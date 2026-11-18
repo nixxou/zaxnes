@@ -45,7 +45,7 @@ fn req_pers_072_the_layout_is_created_on_the_first_start() {
         &paths.saves_directory,
         &paths.battery_directory,
         &paths.profiles_directory,
-        &paths.covers_directory,
+        // REWRITE-UI step 9: no covers any more, so no covers folder.
         &paths.logs_directory,
     ] {
         assert!(folder.is_dir());
