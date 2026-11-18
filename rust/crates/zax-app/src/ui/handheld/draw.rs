@@ -231,7 +231,8 @@ impl Painter<'_> {
             return;
         }
         let metrics = &self.metrics;
-        let width = (metrics.padding * 0.5).max(6.0).round();
+        // Four times the first width (owner request): wide enough for a finger.
+        let width = (metrics.padding * 2.0).max(24.0).round();
         let left = (metrics.padding * 0.25).round();
         let top = metrics.title_band() + metrics.padding * 0.5;
         let room = self.list_room();
