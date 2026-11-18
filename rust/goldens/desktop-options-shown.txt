@@ -110,6 +110,17 @@ video.max_queued_frames
 video.nes_palette
 video.composite_signal
 video.emphasis_3d
+video.signal_kind
+video.tv_model
+video.decoder_sharpness
+video.comb_filter
+video.frozen_dot_crawl
+video.rf_noise
+video.rf_ghost
+video.tv_hue
+video.tv_saturation
+video.tv_contrast
+video.tv_brightness
 video.overscan_mode
 video.overscan_ntsc_bottom
 video.overscan_ntsc_left

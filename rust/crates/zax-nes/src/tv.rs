@@ -9,7 +9,7 @@
 //! The curves, the chromaticities and the gamut rule are those of `BeesNES` (L. Spiro, MIT,
 //! `Src/Utilities/LSNUtilities.h` `CrtProperToLinear` / `CrtProper2ToLinear`,
 //! `Src/ColorSpace/LSNColorSpace.cpp` `ConvertLinear` and the tables of measured sets);
-//! recorded as FIDELITY-LEADS H9.
+//! recorded as FIDELITY-LEADS H4.
 
 /// The television of `video.tv_model`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -390,7 +390,11 @@ mod tests {
 
     #[test]
     fn a_tube_keeps_black_and_grey_order_and_tints_white_with_its_own() {
-        for model in [TvModel::NtscRca, TvModel::JapanToshiba, TvModel::PalTrinitron] {
+        for model in [
+            TvModel::NtscRca,
+            TvModel::JapanToshiba,
+            TvModel::PalTrinitron,
+        ] {
             let transform = TvTransform::new(model).unwrap();
             let black = transform.apply([0.0; 3]);
             assert!(black.iter().all(|&c| c < 0.05), "{model:?} {black:?}");

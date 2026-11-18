@@ -55,6 +55,7 @@ fn row_key(row: OptionRow) -> String {
         OptionRow::Mode => "row.mode".to_owned(),
         OptionRow::Preset => "row.preset".to_owned(),
         OptionRow::WidescreenOn => "row.widescreen_on".to_owned(),
+        OptionRow::Signal => "row.signal".to_owned(),
         OptionRow::HackDefault(key) => format!("row.hack_default.{key}"),
         OptionRow::Reset => "row.reset".to_owned(),
     }
@@ -154,6 +155,7 @@ fn settings_of(row: OptionRow) -> Vec<SettingId> {
     match row {
         OptionRow::Setting(id) | OptionRow::Switch(id) => vec![id],
         OptionRow::WidescreenOn => vec![SettingId::VideoWidescreen],
+        OptionRow::Signal => vec![SettingId::VideoCompositeSignal, SettingId::VideoSignalKind],
         // The camera view asks the application for a preset, the controls open their own screen
         // and a title or a page row holds nothing: none of them is a setting of the model.
         OptionRow::Group(_) | OptionRow::Page(_) | OptionRow::Controls | OptionRow::Camera => {

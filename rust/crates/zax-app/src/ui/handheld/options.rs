@@ -94,6 +94,9 @@ pub enum OptionRow {
     Preset,
     /// The widescreen of every game by default, on or off (`video.widescreen`).
     WidescreenOn,
+    /// The video signal: off, composite, S-Video or RF (`video.composite_signal` and
+    /// `video.signal_kind`, lot REWRITE-UI).
+    Signal,
     /// A switch of a setting the desktop's classic window does not show (the widescreen ones).
     Switch(SettingId),
     /// The common default of a hack pack option (`hack_options::COMMON_OPTIONS`).
@@ -292,9 +295,10 @@ pub const SIMPLE_DISPLAY_ROWS: [OptionRow; 6] = [
 ];
 
 /// *NES picture* in the simple mode.
-pub const SIMPLE_NES_PICTURE_ROWS: [OptionRow; 4] = [
+pub const SIMPLE_NES_PICTURE_ROWS: [OptionRow; 5] = [
+    OptionRow::Signal,
+    OptionRow::Setting(SettingId::VideoTvModel),
     OptionRow::Palette,
-    OptionRow::Setting(SettingId::VideoCompositeSignal),
     OptionRow::Overscan,
     OptionRow::Reset,
 ];
@@ -549,11 +553,22 @@ pub const LIGHT_SHADOWS_ROWS: [OptionRow; 10] = [
 
 /// *Advanced options › NES picture*. The palette is the main page's row and the overscan its own
 /// screen, so what is left is what the console puts out beyond them.
-pub const NES_PICTURE_ROWS: [OptionRow; 4] = [
+pub const NES_PICTURE_ROWS: [OptionRow; 14] = [
     OptionRow::Setting(SettingId::VideoRemoveSpriteLimit),
-    // Lot FIDPLUS-D2b: the composite signal (Fidélité+) and the emphasis in 3D.
-    OptionRow::Setting(SettingId::VideoCompositeSignal),
+    // Lot FIDPLUS-D2b: the signal (Fidélité+) and the emphasis in 3D; lot REWRITE-UI: the
+    // signal's kind, its decoder and the television.
+    OptionRow::Signal,
+    OptionRow::Setting(SettingId::VideoTvModel),
     OptionRow::Setting(SettingId::VideoEmphasis3d),
+    OptionRow::Setting(SettingId::VideoDecoderSharpness),
+    OptionRow::Setting(SettingId::VideoCombFilter),
+    OptionRow::Setting(SettingId::VideoFrozenDotCrawl),
+    OptionRow::Setting(SettingId::VideoRfNoise),
+    OptionRow::Setting(SettingId::VideoRfGhost),
+    OptionRow::Setting(SettingId::VideoTvHue),
+    OptionRow::Setting(SettingId::VideoTvSaturation),
+    OptionRow::Setting(SettingId::VideoTvContrast),
+    OptionRow::Setting(SettingId::VideoTvBrightness),
     OptionRow::Reset,
 ];
 
@@ -960,6 +975,20 @@ fn step_options_row(row: OptionRow, settings: &mut SettingsModel, step: i32) {
             let next = *cycled(&indices, &crate::ui::presets::chosen(settings), step);
             crate::ui::presets::choose(settings, next);
         }
+        OptionRow::Signal => {
+            let on = settings.get(SettingId::VideoCompositeSignal).as_bool();
+            let kind = settings
+                .get(SettingId::VideoSignalKind)
+                .as_int()
+                .clamp(0, 2);
+            let current = if on {
+                usize::try_from(kind + 1).unwrap_or(1)
+            } else {
+                0
+            };
+            let next = *cycled(&[0, 1, 2, 3], &current, step);
+            signal_choose(settings, next);
+        }
         OptionRow::WidescreenOn => {
             let on = settings.get(SettingId::VideoWidescreen).as_int() != 0;
             settings.set(
@@ -1096,6 +1125,7 @@ pub fn step_row(row: OptionRow, settings: &mut SettingsModel, step: i32) -> Opti
         OptionRow::Mode
         | OptionRow::Preset
         | OptionRow::WidescreenOn
+        | OptionRow::Signal
         | OptionRow::Switch(_)
         | OptionRow::HackDefault(_) => step_options_row(row, settings, step),
         OptionRow::Setting(id) => super::advanced::step(id, settings, step),
@@ -1158,6 +1188,7 @@ fn reset_ids(row: OptionRow) -> Vec<SettingId> {
     match row {
         OptionRow::Language => vec![SettingId::UiLanguage],
         OptionRow::WidescreenOn => vec![SettingId::VideoWidescreen],
+        OptionRow::Signal => vec![SettingId::VideoCompositeSignal, SettingId::VideoSignalKind],
         OptionRow::Setting(id) | OptionRow::Switch(id) | OptionRow::Choice(id) => vec![id],
         OptionRow::ShaderBackend => vec![SettingId::VideoBackend],
         OptionRow::Mode
@@ -1235,6 +1266,7 @@ pub fn label(row: OptionRow) -> String {
         OptionRow::Mode => strings::get("options.new.mode"),
         OptionRow::Preset => strings::get("options.new.preset_title"),
         OptionRow::WidescreenOn => strings::get("options.new.widescreen_default"),
+        OptionRow::Signal => strings::get("options.new.signal"),
         OptionRow::HackDefault(key) => strings::get(&format!("options.new.hack.{key}")),
         OptionRow::Reset => strings::get(keys::BUTTON_RESET_DEFAULTS),
     }
@@ -1363,6 +1395,16 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
             }
         }
         OptionRow::WidescreenOn => switch(settings.get(SettingId::VideoWidescreen).as_int() != 0),
+        OptionRow::Signal => {
+            if settings.get(SettingId::VideoCompositeSignal).as_bool() {
+                let kind = settings.get(SettingId::VideoSignalKind).as_int();
+                text::label_of_option(
+                    ["Composite", "S-Video", "RF"][usize::try_from(kind.clamp(0, 2)).unwrap_or(0)],
+                )
+            } else {
+                strings::get("options.new.signal.off")
+            }
+        }
         OptionRow::Switch(id) => switch(settings.get(id).as_bool()),
         OptionRow::HackDefault(key) => switch(hack_default(
             settings.get(SettingId::EmuHackOptions).as_text(),
@@ -1525,6 +1567,19 @@ fn set_render_scale(settings: &mut SettingsModel, step: i32) {
     } else {
         DIRECT_METHOD
     });
+}
+
+/// Sets the video signal to choice `chosen` of its list: off, composite, S-Video, RF (lot
+/// REWRITE-UI).
+pub fn signal_choose(model: &mut SettingsModel, chosen: usize) {
+    model.set(
+        SettingId::VideoCompositeSignal,
+        SettingValue::Bool(chosen > 0),
+    );
+    if chosen > 0 {
+        let kind = i32::try_from(chosen - 1).unwrap_or(0);
+        model.set(SettingId::VideoSignalKind, SettingValue::Enum(kind));
+    }
 }
 
 #[cfg(test)]

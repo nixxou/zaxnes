@@ -38,7 +38,7 @@ Video;Écran large (ROM prévues pour);video.widescreen;plus de tuiles à émule
 Video;Largeur supplémentaire de l'écran large;video.widescreen_extra;marges supplémentaires;+20 %;tout de suite;oui;+20 %;+20 %;+20 %;+20 %;+20 %;oui;oui;oui;oui;oui
 Emulation;Défilement lissé (interpolé par run-ahead);emu.smooth_scroll_ahead;émule des images en avance pour lisser le défilement;oui;tout de suite;oui;oui;oui;oui;oui;oui;oui;oui;oui;oui;oui
 Video;Supprimer la limite de 8 sprites par ligne;video.remove_sprite_limit;plus de sprites dessinés;Smart;tout de suite;oui;Smart;Smart;Smart;Smart;Smart;non;non;non;non;non
-Video;Signal composite;video.composite_signal;simulation du signal TV (calcul de l image);non;tout de suite;oui;non;non;non;non;non;oui;oui;oui;oui;oui
+Video;Signal composite;video.composite_signal;simulation du signal TV (calcul de l image);non;tout de suite;oui;non;non;non;oui;oui;oui;oui;oui;oui (proposé par le mode);oui (proposé par le mode)
 Video;Résolution du shader;video.shader_resolution;résolution des shaders (GPU);100 %;tout de suite;oui;100 %;100 %;100 %;100 %;100 %;non;non;non;non;non
 Render;Occlusion ambiante;render.style.ao;occlusion ambiante (GPU lourd);Off;tout de suite;oui;Off;Off;Off;MSVO;MSVO;non;non;oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode)
 Render;Rayon;render.style.ao_radius;rayon de l occlusion (GPU);3;tout de suite;oui;3;3;3;3;3;non;non;non;non;non

@@ -47,7 +47,22 @@ enum Simple {
     WidescreenDefault(bool),
     /// The common default of a hack pack option (`hack_options::COMMON_OPTIONS`).
     HackDefault(&'static str),
+    /// The video signal: off (the palette), composite, S-Video or RF, one list over
+    /// `video.composite_signal` and `video.signal_kind` (lot REWRITE-UI).
+    Signal,
+    /// A heading (a string key).
+    Heading(&'static str),
+    /// The button that puts the four knobs of the television back at rest.
+    TvNeutral,
 }
+
+/// The television's knobs (`video.tv_*`).
+const TV_KNOBS: [SettingId; 4] = [
+    SettingId::VideoTvHue,
+    SettingId::VideoTvSaturation,
+    SettingId::VideoTvContrast,
+    SettingId::VideoTvBrightness,
+];
 
 /// What the advanced mode shows of a page.
 #[derive(Clone, Copy)]
@@ -96,16 +111,31 @@ const PAGES: [Page; 8] = [
     Page {
         tab: OptionsTab::NesPicture,
         title: None,
+        // The signal, the television and the palette (owner, 2026-11-18).
         simple: &[
+            Simple::Signal,
+            Simple::Row(SettingId::VideoTvModel),
             Simple::Row(SettingId::VideoNesPalette),
-            Simple::Row(SettingId::VideoCompositeSignal),
             Simple::Group(OptionsGroup::Overscan),
         ],
         // The classic tab without its widescreen group, which went to Widescreen & Hacks.
         advanced: Advanced::Items(&[
+            Simple::Signal,
+            Simple::Row(SettingId::VideoTvModel),
             Simple::Row(SettingId::VideoNesPalette),
-            Simple::Row(SettingId::VideoCompositeSignal),
             Simple::Row(SettingId::VideoEmphasis3d),
+            Simple::Heading("options.new.signal.decoder"),
+            Simple::Row(SettingId::VideoDecoderSharpness),
+            Simple::Row(SettingId::VideoCombFilter),
+            Simple::Row(SettingId::VideoFrozenDotCrawl),
+            Simple::Row(SettingId::VideoRfNoise),
+            Simple::Row(SettingId::VideoRfGhost),
+            Simple::Heading("options.new.signal.knobs"),
+            Simple::TvNeutral,
+            Simple::Row(SettingId::VideoTvHue),
+            Simple::Row(SettingId::VideoTvSaturation),
+            Simple::Row(SettingId::VideoTvContrast),
+            Simple::Row(SettingId::VideoTvBrightness),
             Simple::Row(SettingId::VideoRemoveSpriteLimit),
             Simple::Group(OptionsGroup::Overscan),
         ]),
@@ -302,6 +332,9 @@ impl ZaxUi {
             match *item {
                 Simple::Row(id) | Simple::Folder(id) => ids.push(id),
                 Simple::WidescreenDefault(_) => ids.push(SettingId::VideoWidescreen),
+                Simple::Signal => {
+                    ids.extend([SettingId::VideoCompositeSignal, SettingId::VideoSignalKind]);
+                }
                 Simple::All => ids.extend(
                     self.options
                         .rows(page.tab)
@@ -323,7 +356,11 @@ impl ZaxUi {
                 }
                 // The common hack defaults live in `emu.hack_options` with the games' own
                 // choices: the Default button takes out the common ones only.
-                Simple::Shaders | Simple::GameHacks | Simple::HackDefault(_) => {}
+                Simple::Shaders
+                | Simple::GameHacks
+                | Simple::HackDefault(_)
+                | Simple::TvNeutral
+                | Simple::Heading(_) => {}
             }
         }
         ids
@@ -467,6 +504,21 @@ impl ZaxUi {
                     Self::draw_widescreen_default(ui, host, with_ratio);
                 }
                 Simple::HackDefault(key) => Self::draw_hack_default(ui, host, key),
+                Simple::Signal => Self::draw_signal(ui, host),
+                Simple::Heading(key) => {
+                    ui.spacing();
+                    ui.text_disabled(strings::get(key));
+                }
+                Simple::TvNeutral => {
+                    if ui.small_button(strings::get("options.new.signal.neutral")) {
+                        host.update_settings(|model| {
+                            for id in TV_KNOBS {
+                                model.reset(id);
+                            }
+                        });
+                        play(host, UiSound::Confirm);
+                    }
+                }
                 Simple::Folder(id) => {
                     let row = options::row_of(id);
                     self.draw_folder_row(ui, host, &row);
@@ -508,6 +560,42 @@ impl ZaxUi {
                     }
                 }
             }
+        }
+    }
+
+    /// The video signal (lot REWRITE-UI): one list over `video.composite_signal` and
+    /// `video.signal_kind`.
+    fn draw_signal(ui: &Ui, host: &mut AppHost) {
+        let on = host
+            .settings()
+            .get(SettingId::VideoCompositeSignal)
+            .as_bool();
+        let kind = host.settings().get(SettingId::VideoSignalKind).as_int();
+        let current = if on {
+            usize::try_from(kind.clamp(0, 2) + 1).unwrap_or(1)
+        } else {
+            0
+        };
+        let names = [
+            strings::get("options.new.signal.off"),
+            text::label_of_option("Composite"),
+            text::label_of_option("S-Video"),
+            text::label_of_option("RF"),
+        ];
+        let mut chosen = current;
+        if ui.combo_simple_string(strings::get("options.new.signal"), &mut chosen, &names)
+            && chosen != current
+        {
+            host.update_settings(|model| {
+                crate::ui::handheld::options::signal_choose(model, chosen);
+            });
+            play(host, UiSound::Confirm);
+        }
+        if ui.is_item_hovered() {
+            ui.tooltip_text(strings::get("options.new.signal.help"));
+        }
+        if on {
+            ui.text_disabled(strings::get("options.new.signal.palette_note"));
         }
     }
 

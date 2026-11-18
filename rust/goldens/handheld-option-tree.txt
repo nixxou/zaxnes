@@ -114,8 +114,18 @@ options
         row.reset
     page.nes_picture
       video.remove_sprite_limit
-      video.composite_signal
+      row.signal
+      video.tv_model
       video.emphasis_3d
+      video.decoder_sharpness
+      video.comb_filter
+      video.frozen_dot_crawl
+      video.rf_noise
+      video.rf_ghost
+      video.tv_hue
+      video.tv_saturation
+      video.tv_contrast
+      video.tv_brightness
       row.reset
     page.camera
       row.camera
@@ -199,8 +209,9 @@ simple options
       row.reset
     row.reset
   page.simple_nes_picture
+    row.signal
+    video.tv_model
     row.palette
-    video.composite_signal
     page.overscan
       video.overscan_ntsc_top
       video.overscan_ntsc_bottom

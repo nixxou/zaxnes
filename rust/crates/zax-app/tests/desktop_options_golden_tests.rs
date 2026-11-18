@@ -511,8 +511,8 @@ fn ro_3_every_console_setting_is_a_row_the_console_can_step() {
     // `emu.exact_rate` and `emu.realtime_input`, FIDPLUS-E `emu.cpu_apu_parity`,
     // FIDPLUS-D3a `emu.late_present`,
     // MAPPERS-N `emu.rainbow_network` (mapper 682's ESP) and the eight `emu.vs_dip_N`, FAST-1
-    // `emu.fast_core`.
-    assert_eq!(96, advanced::ROW_SETTINGS.len());
+    // `emu.fast_core`. REWRITE-UI step 23 adds the ten rows of the signal options.
+    assert_eq!(106, advanced::ROW_SETTINGS.len());
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::EmuEngine));
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::AudioClassicOutput));
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::EmuSmoothScrollAhead));

@@ -221,6 +221,7 @@ pub const fn row_settings(row: OptionRow) -> &'static [SettingId] {
         | OptionRow::Mode
         | OptionRow::Preset
         | OptionRow::WidescreenOn
+        | OptionRow::Signal
         | OptionRow::Switch(_)
         | OptionRow::HackDefault(_)
         | OptionRow::Reset => &[],

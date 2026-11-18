@@ -461,10 +461,7 @@ impl RowDecoder {
                 }
             }
             if let Some(means) = means.as_deref_mut() {
-                means.extend(std::iter::repeat_n(
-                    tables.means[entry],
-                    SAMPLES_PER_PIXEL,
-                ));
+                means.extend(std::iter::repeat_n(tables.means[entry], SAMPLES_PER_PIXEL));
             }
         }
     }
@@ -501,8 +498,7 @@ impl RowDecoder {
         let mut at = pal_pixel_phase(line, first_x);
         for (x, &pixel) in pixels.iter().enumerate() {
             let bits = emphasis.get(x).copied().unwrap_or(0) & 7;
-            let entry =
-                (usize::from(pixel & 0x3F) << 3 | usize::from(bits)) * 2 + usize::from(odd);
+            let entry = (usize::from(pixel & 0x3F) << 3 | usize::from(bits)) * 2 + usize::from(odd);
             let levels = &tables.levels[entry * PHASES..][..PHASES];
             for _ in 0..PAL_SAMPLES_PER_PIXEL {
                 self.levels.push(levels[at]);
@@ -521,9 +517,8 @@ impl RowDecoder {
         self.degrade();
         self.separate(false);
         self.sum_up();
-        let (luma_width, chroma_width) = self
-            .options
-            .windows(self.options.signal == Signal::SVideo);
+        let (luma_width, chroma_width) =
+            self.options.windows(self.options.signal == Signal::SVideo);
         let delayed = self.previous_line == Some(line - 1) && self.previous_u.len() == pixels.len();
         self.previous_u.resize(pixels.len(), 0.0);
         self.previous_v.resize(pixels.len(), 0.0);
@@ -700,7 +695,11 @@ pub fn pal_signal(pixel: u8, emphasis: u8, phase: usize, odd: bool) -> f32 {
         0 => row + 4,
         13 => row,
         _ => {
-            let start = if odd { hue } else { (PHASES + 5 - hue) % PHASES };
+            let start = if odd {
+                hue
+            } else {
+                (PHASES + 5 - hue) % PHASES
+            };
             if in_half_cycle(start, phase) {
                 row + 4
             } else {
@@ -1095,7 +1094,10 @@ mod tests {
                 let expected = decode_uniform(pixel, 0, 0.0);
                 for (channel, &value) in expected.iter().enumerate() {
                     let got = f32::from(out[32 * 3 + channel]) / 255.0;
-                    assert!((got - value).abs() < 0.02, "{options:?} {pixel:#x}: {got} {value}");
+                    assert!(
+                        (got - value).abs() < 0.02,
+                        "{options:?} {pixel:#x}: {got} {value}"
+                    );
                 }
             }
         }
@@ -1123,7 +1125,10 @@ mod tests {
         let mut out = [0u8; 64 * 3];
         decoder.decode_row(&[0x16; 64], &[], 0, &mut out);
         let rgb = &out[32 * 3..33 * 3];
-        assert!(rgb.iter().max().unwrap() - rgb.iter().min().unwrap() <= 1, "{rgb:?}");
+        assert!(
+            rgb.iter().max().unwrap() - rgb.iter().min().unwrap() <= 1,
+            "{rgb:?}"
+        );
     }
 
     #[test]

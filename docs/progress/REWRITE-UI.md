@@ -96,3 +96,14 @@ Console: Page Up / Page Down (new pad buttons) move a screenful of rows, stoppin
 ## Step 22 (2026-11-18)
 
 Shader families (owner, proposal researched by a Fable 5.2 sub-agent from the slang-shaders sources): ui/shader_looks.rs, 8 families (CRT Guest, Mega Bezel, CRT light, CRT classic, CRT Royale, composite signal, LCD, smoothing) with picks that choose the preset file (TV frame, quality, signal, model, method) and steps that set parameters (curvature, scanlines, mask, brightness, reflections...), the same names in every family; a step of no parameter is the preset's own value, a value set by hand reads Custom. PC: Style menu (families + every preset of the pack), pre-filter, sub-options, and the full parameter editor folded under them (shader and pre-filter). Console: the slot row steps through the families, rows of sub-options under each slot (dynamic rows). Guest switches to its HD version behind a pre-filter. Step values are a first proposal, to tune by eye.
+
+## Step 23 (2026-11-18)
+
+Signal options (owner, from the BeesNES study): the composite switch became a small family.
+- Core: `zax-nes/src/tv.rs` (television models from BeesNES's measured tubes: CRT gamma, primaries, gamut mapping; TV knobs), `composite.rs` DecoderOptions (signal composite / S-Video / RF, sharpness, 3-line comb filter, RF snow and ghost, knobs and tube on the decoded colour), `decode_row_with` (rows around for the comb).
+- Palette: `zax_engine3d::palette::set_tv_look`, the 64 shown colours worked out once per change (atomics), so the television colours the 2D palette and the 3D view the same way.
+- Settings: video.signal_kind, tv_model, decoder_sharpness, comb_filter (on), frozen_dot_crawl, rf_noise, rf_ghost, tv_hue, tv_saturation, tv_contrast, tv_brightness. Presets: the signal off up to Balanced, proposed on from Faithful.
+- PC new window, NES picture: simple = Signal (off / composite / S-Video / RF, one list over two settings), Television, Palette, overscan; advanced adds emphasis in 3D, Decoder group, TV knobs with a Neutral button. Rows with no effect are greyed with their reason (signal off, comb with S-Video, RF only).
+- Console: Signal row (cycles the four), Television; advanced NES picture page with every row.
+- Recorded as FIDELITY-LEADS H4. Note: the comb is 3 lines, not 2 as in the sketch (the 2C02's phase moves a third of a cycle a line, so it is three lines that cancel).
+

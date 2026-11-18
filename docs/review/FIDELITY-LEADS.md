@@ -1282,11 +1282,37 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
 
 ## H. Video output (shaders lot, not core)
 
-### H1. Composite / RF signal, CRT gamma, phosphor decay — open
+### H1. Composite / RF signal, CRT gamma, phosphor decay — partly done (H2, H4)
 - BeesNES: NTSC-CRT / PAL-CRT (LMP88959), own L. Spiro filters, measured CRT gamma, phosphor
   decay, signal noise (README "Visual Samples"); palette generator palgen-persune.
 - Zaxnes: librashader slang shaders (branch feat/librashader). These are generic shaders, not a
   signal model. Candidate shaders/palettes to port; not a core item.
+
+### H4. Signal options and television colours — done (REWRITE-UI step 23, 2026-11-18)
+- Source: BeesNES (L. Spiro, MIT, `ext-tools/bees-src`). Its plain "palette" output differs from a
+  raw palette because `CBeesNes::BakedPalette()` bakes into every entry a measured CRT gamma curve
+  to linear light (`CrtProper2` on NTSC: power 2.31 above 0.36, blended with Rec. 709 below;
+  `CrtProper` on PAL: BT.1886 annex 1, alpha 2.6/3.0, lift 0.0181 x 8), a conversion from the
+  tube's primaries and white to the monitor's (no white adaptation by default) with gamut mapping
+  "preserve hue" (towards the luminance until every channel fits), then the sRGB encoding; plus a
+  5x internal upscale and a gamma-aware convolution down. Default palettes `2C02G_wiki.fpal` /
+  `2C07_wiki.fpal`. The README's "HDMI" / "HDMI Mod" captions name no option in the code.
+- Zaxnes (`zax-nes/src/tv.rs`): `video.tv_model` = modern screen / NTSC tube (RCA ColorTrak
+  E13169GM, patchy68k's measures, CrtProper2) / Japanese tube (Toshiba CF2005, CrtProper2) / PAL
+  tube (Sony Trinitron 6900 K, DariusG's measures, CrtProper). Applied to the 64-colour palette
+  (`zax_engine3d::palette`, 2D and 3D) and to the composite decoder's output, with the TV knobs
+  (tint, colour, contrast, brightness on YIQ / YUV).
+- Decoder (`composite.rs`): `video.signal_kind` composite / S-Video (luma = the pixel's mean
+  level, chroma = the rest: no cross-colour) / RF (wider filters, snow, a ghost 20 samples late);
+  `video.decoder_sharpness` (luma 18/12/8, chroma 36/24/16 samples); `video.comb_filter`: a
+  3-line comb, not BeesNES's — the 2C02 subcarrier moves 4 of 12 phases a line, so three lines
+  cancel the chroma of a vertically flat area exactly; the line difference is high-passed over a
+  cycle so that vertical luma edges stay luma. `video.frozen_dot_crawl`: constant phase.
+- Approximations to check: the RF snow and ghost amplitudes are by eye; S-Video's split is
+  perfect (a real Y/C separation of a NES needs a mod and has its own filters); the knob ranges;
+  BeesNES's phosphor decay and its gamma-aware resampling are not taken (shaders' business).
+- Open: BeesNES's `2C02G_wiki` palette as a `video.nes_palette` choice; its other measured sets
+  (Panasonic CT-36D30B, Sony CXA2025/2060 decoders: `LSN_DM_*` demodulator matrices).
 
 ### H3. Colour emphasis on screen — done in the 2D picture (FIDPLUS-D2b, 2026-11-15)
 - Found while preparing D2b: the picture carried colour index and opacity only; PPUMASK bits 5-7

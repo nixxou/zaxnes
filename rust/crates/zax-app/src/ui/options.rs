@@ -222,6 +222,18 @@ const NES_PICTURE: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::VideoNesPalette),
     LayoutEntry::Row(SettingId::VideoCompositeSignal),
     LayoutEntry::Row(SettingId::VideoEmphasis3d),
+    // Lot REWRITE-UI: the signal options.
+    LayoutEntry::Row(SettingId::VideoSignalKind),
+    LayoutEntry::Row(SettingId::VideoTvModel),
+    LayoutEntry::Row(SettingId::VideoDecoderSharpness),
+    LayoutEntry::Row(SettingId::VideoCombFilter),
+    LayoutEntry::Row(SettingId::VideoFrozenDotCrawl),
+    LayoutEntry::Row(SettingId::VideoRfNoise),
+    LayoutEntry::Row(SettingId::VideoRfGhost),
+    LayoutEntry::Row(SettingId::VideoTvHue),
+    LayoutEntry::Row(SettingId::VideoTvSaturation),
+    LayoutEntry::Row(SettingId::VideoTvContrast),
+    LayoutEntry::Row(SettingId::VideoTvBrightness),
     LayoutEntry::Row(SettingId::VideoRemoveSpriteLimit),
     LayoutEntry::Group(OptionsGroup::Overscan),
     LayoutEntry::Row(SettingId::VideoOverscanMode),
@@ -677,6 +689,27 @@ pub fn inert_reason(id: SettingId, model: &SettingsModel) -> Option<&'static str
         // the same reason as the core index, and greyed for the same reason — a live widget over
         // a setting nothing reads is the confusion this lot is about.
         SettingId::InputEmulatedMenuButton => keys::HINT_MENU_BUTTON_UNUSED,
+        // `application.rs::composite_options`: the decoder runs only with the signal on.
+        SettingId::VideoSignalKind
+        | SettingId::VideoDecoderSharpness
+        | SettingId::VideoCombFilter
+        | SettingId::VideoFrozenDotCrawl
+        | SettingId::VideoRfNoise
+        | SettingId::VideoRfGhost
+            if !model.get(SettingId::VideoCompositeSignal).as_bool() =>
+        {
+            "hint.needs_signal"
+        }
+        // `composite.rs`: the comb filter is skipped for S-Video.
+        SettingId::VideoCombFilter if model.get(SettingId::VideoSignalKind).as_int() == 1 => {
+            "hint.comb_svideo"
+        }
+        // `composite.rs::degrade`: the snow and the ghost are the RF signal's alone.
+        SettingId::VideoRfNoise | SettingId::VideoRfGhost
+            if model.get(SettingId::VideoSignalKind).as_int() != 2 =>
+        {
+            "hint.needs_rf"
+        }
         // `achievements/mod.rs`: without the switch there is no client at all, so the options are
         // never forwarded, no unlock can fire the sound, and the challenge view returns at once.
         SettingId::AchievementsEncore

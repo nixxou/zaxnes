@@ -1049,7 +1049,8 @@ impl Running {
             );
             let (taps, swipe) = (self.input.touch.take_taps(), self.input.touch.take_scroll());
             let point = self.input.touch.free_point();
-            self.ui.set_touch_pad(self.input.touch.view(), taps, swipe, point);
+            self.ui
+                .set_touch_pad(self.input.touch.view(), taps, swipe, point);
         }
         operation(&mut self.ui, &mut frame, sizes, &debug);
     }
@@ -2776,18 +2777,75 @@ fn tint_scene(host: &AppHost, state: &mut RunState, two_dimensional: bool) {
     zax_engine3d::palette::set_scene_emphasis(emphasis);
 }
 
-/// Whether `video.composite_signal` is on.
-fn composite_on(host: &AppHost) -> bool {
-    host.settings()
-        .get(SettingId::VideoCompositeSignal)
-        .as_bool()
+/// The television of the signal options (lot REWRITE-UI): `video.tv_model` and its knobs.
+pub(crate) fn tv_look(settings: &SettingsModel) -> zax_nes::tv::TvLook {
+    let knob = |id: SettingId| settings.get(id).as_int();
+    let byte = |id: SettingId, low: i32, high: i32| knob(id).clamp(low, high);
+    zax_nes::tv::TvLook {
+        model: zax_nes::tv::TvModel::from_index(knob(SettingId::VideoTvModel)),
+        knobs: zax_nes::tv::TvKnobs {
+            hue: i8::try_from(byte(SettingId::VideoTvHue, -30, 30)).unwrap_or(0),
+            saturation: u8::try_from(byte(SettingId::VideoTvSaturation, 0, 200)).unwrap_or(100),
+            contrast: u8::try_from(byte(SettingId::VideoTvContrast, 50, 150)).unwrap_or(100),
+            brightness: i8::try_from(byte(SettingId::VideoTvBrightness, -50, 50)).unwrap_or(0),
+        },
+    }
+}
+
+/// What the composite decoder is set to (`video.composite_signal` on), and whether the dot crawl
+/// is frozen; `None` with the signal off.
+fn composite_options(host: &AppHost) -> Option<(zax_nes::composite::DecoderOptions, bool)> {
+    use zax_nes::composite::{DecoderOptions, Sharpness, Signal};
+    let settings = host.settings();
+    if !settings.get(SettingId::VideoCompositeSignal).as_bool() {
+        return None;
+    }
+    #[allow(clippy::cast_precision_loss)] // 0 to 100
+    let fraction = |id: SettingId| settings.get(id).as_int().clamp(0, 100) as f32 / 100.0;
+    let options = DecoderOptions {
+        signal: match settings.get(SettingId::VideoSignalKind).as_int() {
+            1 => Signal::SVideo,
+            2 => Signal::Rf,
+            _ => Signal::Composite,
+        },
+        sharpness: match settings.get(SettingId::VideoDecoderSharpness).as_int() {
+            0 => Sharpness::Soft,
+            2 => Sharpness::Sharp,
+            _ => Sharpness::Normal,
+        },
+        comb: settings.get(SettingId::VideoCombFilter).as_bool(),
+        rf_noise: fraction(SettingId::VideoRfNoise),
+        rf_ghost: fraction(SettingId::VideoRfGhost),
+        look: tv_look(settings),
+    };
+    Some((
+        options,
+        settings.get(SettingId::VideoFrozenDotCrawl).as_bool(),
+    ))
 }
 
 /// The 2D picture's colours beside its indices (lot FIDPLUS-D2b): its emphasis, and with
 /// `composite` the whole picture decoded from the composite signal.
-fn colour_picture(state: &mut RunState, session: &GameSession, width: usize, composite: bool) {
+fn colour_picture(
+    state: &mut RunState,
+    session: &GameSession,
+    width: usize,
+    composite: Option<(zax_nes::composite::DecoderOptions, bool)>,
+) {
     session.copy_nes_emphasis(&mut state.picture_emphasis);
-    decode_composite(state, width, composite.then(|| session.nes_video_phase()));
+    let video_phase = composite.map(|(options, frozen)| {
+        if state.composite.options() != &options {
+            state.composite.set_options(options);
+        }
+        let phase = session.nes_video_phase();
+        // Frozen: every frame at the same phase (the 2C07's does not crawl anyway).
+        if frozen {
+            phase & zax_nes::composite::PAL_VIDEO
+        } else {
+            phase
+        }
+    });
+    decode_composite(state, width, video_phase);
 }
 
 /// `video.composite_signal` (lot FIDPLUS-D2b step 2): the 2D picture decoded from the 2C02's
@@ -2812,12 +2870,21 @@ fn decode_composite(state: &mut RunState, width: usize, video_phase: Option<usiz
         // Phases mod 12, the margins counted backwards from the screen's first row and column.
         let line = (row + PHASES * 60 - margin_y % PHASES) % PHASES;
         let phase = (video_phase + 4 * line + PHASES * 1000 - (margin * 8) % PHASES) % PHASES;
-        let pixels = &state.picture[row * width..(row + 1) * width];
-        let emphasis = if emphasis_ok {
-            &state.picture_emphasis[row * width..(row + 1) * width]
-        } else {
-            &[]
+        let line_of = |row: usize| {
+            let pixels = &state.picture[row * width..(row + 1) * width];
+            let emphasis: &[u8] = if emphasis_ok {
+                &state.picture_emphasis[row * width..(row + 1) * width]
+            } else {
+                &[]
+            };
+            (pixels, emphasis)
         };
+        let (pixels, emphasis) = line_of(row);
+        // The comb filter's rows around (none at the picture's top and bottom).
+        let neighbours = (row > 0 && row + 1 < rows).then(|| zax_nes::composite::Neighbours {
+            above: line_of(row - 1),
+            below: line_of(row + 1),
+        });
         let out = &mut state.picture_rgb[row * width * 3..(row + 1) * width * 3];
         if video_phase & zax_nes::composite::PAL_VIDEO != 0 {
             // The 2C07 (lot FIDPLUS-D2c): the phase follows the picture line and column.
@@ -2827,7 +2894,9 @@ fn decode_composite(state: &mut RunState, width: usize, video_phase: Option<usiz
                 .composite
                 .decode_row_pal(pixels, emphasis, line, first_x, out);
         } else {
-            state.composite.decode_row(pixels, emphasis, phase, out);
+            state
+                .composite
+                .decode_row_with(pixels, emphasis, phase, neighbours, out);
         }
     }
 }
@@ -2835,7 +2904,7 @@ fn decode_composite(state: &mut RunState, width: usize, video_phase: Option<usiz
 #[allow(clippy::too_many_lines)] // The scene of a frame, each source of motion in its order.
 fn update_scene(host: &mut AppHost, state: &mut RunState) {
     let two_dimensional = host.showing_two_dimensional();
-    let composite = composite_on(host);
+    let composite = composite_options(host);
     tint_scene(host, state, two_dimensional);
     // How far into the emulated frame the display is, for the experimental 120 Hz scrolling.
     let phase = host.pacer.phase_at(state.frame_time);
@@ -2865,6 +2934,8 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     zax_engine3d::palette::select_nes_palette(
         u8::try_from(host.settings().get(SettingId::VideoNesPalette).as_int()).unwrap_or(0),
     );
+    // And the television they are shown on (lot REWRITE-UI), the 3D scene's as the picture's.
+    zax_engine3d::palette::set_tv_look(tv_look(host.settings()));
     let hack_options = host.hack_option_bits();
     // The smooth scrolling from the run-ahead: nothing to draw between two frames at 60 frames a
     // second or less, nor a real frame to slide from without run-ahead; then nothing is done.
