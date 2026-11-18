@@ -61,8 +61,7 @@ oms`: nothing attached by default; a locked extension leaves
   600 frames of work RAM identical on every demo ROM and its states restore; the 13 patched demo
   ROMs (Adventure Island, Blaster Master, Castlevania x2, Excitebike, FF1, MM2, Metroid, NG3,
   SMB1, SMB3, Zelda II x2) run their patch, unlock the extension, states restore.
-- Proof runs: `tools/neshawk-hacks/bk2-trace.sh`, outputs in `G:\3DSen
-eshawk-hacks-runs`
+- Proof runs: `tools/neshawk-hacks/bk2-trace.sh`, outputs in `G:\3DSen\neshawk-hacks-runs`
   (baseline = rewrite-ui 70516d6b build, the core being identical up to 91ffefce).
 - Step 4 (443e3f9c): `tiles.rs` (wide rows, sprite x high bytes, second page), `wide_decode.rs`
   (zax_nes's decoders run after the frame on the engine's copy of the records, each kept row with
