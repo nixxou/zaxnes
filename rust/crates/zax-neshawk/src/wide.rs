@@ -34,13 +34,63 @@ pub struct WideHooks {
     /// there ends the overclock, the cycles left would only run that loop. First and last
     /// address, as `NesCore` keeps it.
     pub idle_loop: Option<(u16, u16)>,
+    /// What the frame being drawn latched of the extension for the tile capture (step 4).
+    pub frame: WideFrame,
+    /// Whether the game has a margin decoder: the capture then keeps each background row for it
+    /// ([`Self::rows`]).
+    pub capture_rows: bool,
+    /// The background rows of the frame being drawn, by row number, for the margin decoder.
+    pub rows: Vec<Option<CapturedRow>>,
+    /// When each byte of CIRAM was last written, in rendered frames (0: never), and the frame
+    /// count it is stamped with (`Ppu2C02`'s `vram_written` and `vram_clock`).
+    pub vram_written: Vec<u32>,
+    pub vram_clock: u32,
+}
+
+/// A background row kept for the margin decoder: where the PPU read it from, and the pattern
+/// table and nametable map it was drawn with, which a game may change during the frame
+/// (`zax_nes`'s `CapturedRow`, the CHR banks kept as the bytes they showed).
+#[derive(Debug, Clone)]
+pub struct CapturedRow {
+    pub row: zax_nes::wide_decode::BackgroundRow,
+    /// The picture line the row's tiles start at.
+    pub y: i16,
+    /// The 4 KiB pattern table the row's tiles came from, as it was then.
+    pub chr: Box<[u8]>,
+    /// The board's nametable map then (`BoardBase::apply_mirroring`'s four blocks).
+    pub map: [i32; 4],
+}
+
+/// The widescreen part of a frame's tile capture, latched at the start of the frame's
+/// rendering as `zax_nes`'s `Ppu2C02::begin_rendered_frame` latches it.
+#[derive(Debug, Clone, Copy)]
+pub struct WideFrame {
+    /// The margin in use, in pixels on each side (0: a standard frame).
+    pub margin: i32,
+    /// The range of x each band of 8 lines showed tiles in.
+    pub visible_rows: zax_core_api::VisibleRows,
+    /// The sprites drawn in the "asleep" tint, one bit per OAM number.
+    pub tinted: u64,
+}
+
+impl Default for WideFrame {
+    fn default() -> Self {
+        Self {
+            margin: 0,
+            visible_rows: zax_core_api::STANDARD_ROWS,
+            tinted: 0,
+        }
+    }
 }
 
 impl WideHooks {
     /// A fresh, locked extension.
     #[must_use]
     pub fn new() -> Box<Self> {
-        Box::default()
+        Box::new(Self {
+            vram_written: vec![0; 0x800],
+            ..Self::default()
+        })
     }
 
     /// The extension's register a data access of `address` reaches from the zone's own code, as
@@ -193,5 +243,28 @@ impl crate::nes::Nes {
                 }
             }
         }
+    }
+}
+
+impl crate::nes::Nes {
+    /// The start of a frame's rendering (the pre-render line): the margin the frame's capture
+    /// uses is latched (`Ppu2C02::begin_rendered_frame`).
+    pub(crate) fn begin_wide_frame(&mut self) {
+        let Some(wide) = self.b.wide.as_deref_mut() else {
+            return;
+        };
+        let margin = wide.ext.margin();
+        wide.vram_clock = wide.vram_clock.wrapping_add(1);
+        if wide.capture_rows {
+            wide.rows.clear();
+            wide.rows.resize(31, None);
+        }
+        #[allow(clippy::cast_possible_truncation)] // At most `MAX_MARGIN`.
+        let half = margin as i16;
+        wide.frame = WideFrame {
+            margin,
+            visible_rows: [(-half, 256 + half); 30],
+            tinted: 0,
+        };
     }
 }

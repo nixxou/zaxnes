@@ -26,7 +26,7 @@ use zax_core_api::{
     state_core_name, state_magic, AudioError, Capabilities, ControllerPortType, Engine, EngineKind,
     FrameBatch, InputWord, InvalidPort, InvalidState, NesRegion, NoRomLoaded, PaletteSnapshot,
     RomLoadFailure, RomLoadResult, StateLoadFailure, StateLoaded, TileRecord, MAX_SAMPLE_RATE,
-    MIN_SAMPLE_RATE, STANDARD_ROWS,
+    MIN_SAMPLE_RATE,
 };
 
 use crate::controllers::PortDevice;
@@ -122,6 +122,13 @@ pub struct NesHawkEngine {
     /// The built-in patches, the hack packs and their aids (lot NESHAWK-HACKS, [`crate::hacks`]):
     /// all off unless the host turns them on.
     hacks: crate::hacks::Hacks,
+    /// The widescreen part of the frame just run, copied off the machine with its records:
+    /// the margin (0 for a standard frame), each band's visible x range, the tinted sprites, and
+    /// whether the PPU showed its first 8 columns.
+    wide_frame: crate::wide::WideFrame,
+    left_column_shown: bool,
+    /// What the margin decoder added to the frame just run.
+    decoded: crate::wide_decode::Decoded,
 }
 
 impl std::fmt::Debug for NesHawkEngine {
@@ -173,6 +180,9 @@ impl NesHawkEngine {
             audio_accumulated: 0.0,
             audio_filled: 0.0,
             hacks: crate::hacks::Hacks::default(),
+            wide_frame: crate::wide::WideFrame::default(),
+            left_column_shown: true,
+            decoded: crate::wide_decode::Decoded::default(),
         };
         if let Some(dir) = dir {
             engine.set_gamedb_dir(&dir);
@@ -371,6 +381,28 @@ impl NesHawkEngine {
         self.hacks.applied.map(|_| self.image.as_slice())
     }
 
+    /// The picture of the frame just run, widened by its widescreen margin: `256 + 2 * margin`
+    /// NES colour indices a row with the opacity bit (`zax_nes::ppu::OPAQUE_PIXEL`) set where a
+    /// pixel is drawn, 240 rows; returns the number of rows (`NesCore::wide_picture_into`).
+    pub fn wide_picture_into(&self, out: &mut Vec<u8>) -> usize {
+        let Some(nes) = self.nes.as_ref() else {
+            out.clear();
+            out.resize(FRAME_LEN, zax_nes::ppu::OPAQUE_PIXEL);
+            return 240;
+        };
+        let pixels: Vec<u8> = nes.ppu.xbuf.iter().map(|&p| (p & 0x3F) as u8).collect();
+        crate::wide_picture::WideFrameView {
+            records: &self.records,
+            palette: &self.palette,
+            pixels: &pixels,
+            margin: self.wide_frame.margin,
+            left_column_shown: self.left_column_shown,
+            tinted: self.wide_frame.tinted,
+            decoded: self.decoded,
+        }
+        .compose(out)
+    }
+
     /// Whether the machine carries Zaxnes's widescreen extension.
     #[must_use]
     pub fn has_wide_extension(&self) -> bool {
@@ -385,6 +417,24 @@ impl NesHawkEngine {
         self.palette = nes.ppu.palram;
         self.records.clear();
         self.records.extend_from_slice(nes.tile_records());
+        self.wide_frame = nes
+            .b
+            .wide
+            .as_deref()
+            .map_or_else(crate::wide::WideFrame::default, |wide| wide.frame);
+        self.left_column_shown =
+            nes.ppu.reg_2001.show_bg_leftmost != 0 && nes.ppu.reg_2001.show_obj_leftmost != 0;
+        // The margin decoder, on the engine's copy of the records (lot NESHAWK-HACKS).
+        self.decoded = match self.hacks.decoder() {
+            Some(decoder) if self.wide_frame.margin > 0 => crate::wide_decode::decode_margins(
+                decoder,
+                nes,
+                &mut self.records,
+                &mut self.wide_frame,
+                nes.ppu.reg_2001.show_bg_leftmost == 0,
+            ),
+            _ => crate::wide_decode::Decoded::default(),
+        };
     }
 
     /// Whether the 3D tile capture is running. Off until a host asks for it, because a host that
@@ -728,13 +778,15 @@ impl Engine for NesHawkEngine {
         FrameBatch {
             records: &self.records,
             palette: self.palette,
-            margin_palette: None,
+            margin_palette: self.decoded.margin_palette,
             // The unreliable-band widths of REQ-CORE-046 are the margin decoder's, which is
             // Zaxnes's bus; a NesHawk frame is a standard frame with no margin.
             mask_x: 0,
             mask_y: 0,
-            margin: 0,
-            visible_rows: STANDARD_ROWS,
+            // Zaxnes's widescreen extension's margin (lot NESHAWK-HACKS); 0 and the standard rows
+            // for every frame without it.
+            margin: self.wide_frame.margin,
+            visible_rows: self.wide_frame.visible_rows,
             margin_y: 0,
         }
     }

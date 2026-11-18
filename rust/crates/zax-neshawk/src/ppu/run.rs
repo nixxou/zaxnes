@@ -83,10 +83,12 @@ impl Nes {
         }
     }
 
-    /// `PPU.runppu`: one PPU cycle, and every `cpu_sequence[cpu_step]` of them, one CPU cycle.
-    pub(crate) fn runppu(&mut self) {
-        //run one ppu cycle at a time so we can interact with the ppu and clockPPU at high
-        //granularity
+    /// The start of `PPU.runppu`: the delayed installs of `$2006` and `$2001` counting down by
+    /// one PPU cycle. Split out, unchanged, so that Zaxnes's widescreen overclock (lot
+    /// NESHAWK-HACKS) can let them land while it holds the PPU still: a game that turns the
+    /// picture off and then writes `$2007` in its overclocked time must reach the address it
+    /// set, as it does on Zaxnes, not the background fetch address of a picture still "on".
+    pub(crate) fn ppu_latches(&mut self) {
         if self.b.ppu.install_2006 > 0 {
             self.b.ppu.install_2006 -= 1;
             if self.b.ppu.install_2006 == 0 {
@@ -117,6 +119,13 @@ impl Nes {
                 self.b.ppu.show_obj_new = self.b.ppu.reg_2001.show_obj != 0;
             }
         }
+    }
+
+    /// `PPU.runppu`: one PPU cycle, and every `cpu_sequence[cpu_step]` of them, one CPU cycle.
+    pub(crate) fn runppu(&mut self) {
+        //run one ppu cycle at a time so we can interact with the ppu and clockPPU at high
+        //granularity
+        self.ppu_latches();
 
         self.b.ppu.ppur.status.cycle += 1;
         self.b.ppu.is_even_cycle = !self.b.ppu.is_even_cycle;
@@ -211,12 +220,19 @@ impl Nes {
                 self.b.ppu.do_vbl = false;
                 self.b.ppu.ppur.status.sl = 0;
                 self.b.ppu.do_active_sl = true;
+                // Zaxnes's widescreen extension latches the frame's margin here (lot
+                // NESHAWK-HACKS); nothing without it.
+                if self.b.wide.is_some() {
+                    self.begin_wide_frame();
+                }
             }
         }
     }
 
     /// The sprite-evaluation half of `TickPPU_active`'s visible dots.
     fn sprite_evaluation(&mut self) {
+        // Zaxnes's widescreen extension (lot NESHAWK-HACKS), borrowed beside the PPU.
+        let wide = self.b.wide.as_deref();
         let p = &mut self.b.ppu;
         if p.sprite_eval_cycle < 64 {
             // the first 64 cycles of each scanline are used to initialize secondary OAM
@@ -251,7 +267,20 @@ impl Nes {
         }
 
         let read_value = i32::from(p.read_value);
-        let in_range = p.yp >= read_value && p.yp < read_value + p.sprite_height;
+        let mut in_range = p.yp >= read_value && p.yp < read_value + p.sprite_height;
+        // A sprite the extension's x high byte puts in a margin is off the screen: it takes no
+        // place among the line's eight nor raises the overflow, as `zax_nes`'s
+        // `sprite_in_margin` rules. Only with the extension, and only for a sprite whose high
+        // byte is set (`WideExtension::sprite_x` is the OAM x otherwise).
+        if in_range && p.spr_true_count == 0 {
+            if let Some(wide) = wide {
+                #[allow(clippy::cast_sign_loss)] // Masked to 0..64.
+                let n = ((p.oam_index >> 2) & 63) as usize;
+                if !(0..256).contains(&wide.ext.sprite_x(n, p.oam[(n * 4) + 3])) {
+                    in_range = false;
+                }
+            }
+        }
 
         if p.soam_index < 8 {
             //look for sprites
@@ -657,7 +686,14 @@ impl Nes {
                     let si = self.b.ppu.soam_index_aux as usize;
                     self.b.ppu.soam[si * 4] = self.b.ppu.oam[oi * 4];
                     let y = i32::from(self.b.ppu.oam[oi * 4]);
-                    if self.b.ppu.yp >= y && self.b.ppu.yp < y + self.b.ppu.sprite_height {
+                    // The extension's margin sprites stay out (see `sprite_evaluation`).
+                    let in_margin = self.b.wide.as_deref().is_some_and(|wide| {
+                        !(0..256).contains(&wide.ext.sprite_x(oi & 63, self.b.ppu.oam[oi * 4 + 3]))
+                    });
+                    if self.b.ppu.yp >= y
+                        && self.b.ppu.yp < y + self.b.ppu.sprite_height
+                        && !in_margin
+                    {
                         self.b.ppu.soam[si * 4 + 1] = self.b.ppu.oam[oi * 4 + 1];
                         self.b.ppu.soam[si * 4 + 2] = self.b.ppu.oam[oi * 4 + 2];
                         self.b.ppu.soam[si * 4 + 3] = self.b.ppu.oam[oi * 4 + 3];

@@ -88,6 +88,8 @@ pub mod ppu;
 pub mod state;
 pub mod tiles;
 pub mod wide;
+pub mod wide_decode;
+pub mod wide_picture;
 
 pub use cpu::{Mos6502x, Mos6502xLink};
 pub use engine::NesHawkEngine;

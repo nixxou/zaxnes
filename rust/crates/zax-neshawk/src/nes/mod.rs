@@ -542,6 +542,18 @@ impl Nes {
     /// with the APU held still, as `NesBus::tick_as` holds it on Zaxnes; the board is clocked.
     pub(crate) fn run_cpu_stalled(&mut self) {
         self.run_cpu_cycle::<false>();
+        // The cartridge still sees the time pass, as on Zaxnes. NesHawk's boards that count it
+        // count **PPU** clocks (`ClockPPU`): MMC1 ignores a write closer than 4 of them to the
+        // previous one, so with the PPU held they would never come and every bank switch of the
+        // overclock after the first would be lost. Three per CPU cycle, the NTSC ratio.
+        // The PPU's delayed register installs land as the time passes (`ppu_latches`), the PPU
+        // itself staying where it is.
+        for _ in 0..3 {
+            self.ppu_latches();
+            if self.b.ppu.has_clock_ppu {
+                self.b.board.clock_ppu();
+            }
+        }
     }
 
     /// The body of [`Self::run_cpu_one`]; `APU` false leaves out the APU's two half-cycles and
@@ -1035,6 +1047,19 @@ impl Bus {
     pub(crate) fn ppubus_write(&mut self, addr: i32, value: u8) {
         if self.ppu.ppur.status.sl >= 241 || !self.ppu.ppuon() {
             self.board.address_ppu(addr);
+        }
+
+        // Zaxnes's widescreen extension stamps the nametable byte with the frame it was
+        // written in, for the margin decoders (lot NESHAWK-HACKS); nothing without it.
+        if let Some(wide) = self.wide.as_deref_mut() {
+            let address = addr & 0x3FFF;
+            if (0x2000..0x3F00).contains(&address) {
+                #[allow(clippy::cast_sign_loss)] // 0..0x1000.
+                let offset = (self.board.base().apply_mirroring(address) & 0x7FF) as usize;
+                if let Some(stamp) = wide.vram_written.get_mut(offset) {
+                    *stamp = wide.vram_clock;
+                }
+            }
         }
 
         let (board, mut env) = self.board_env();

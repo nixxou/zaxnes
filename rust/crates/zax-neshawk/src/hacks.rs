@@ -44,6 +44,8 @@ pub struct Hacks {
     pub pack: Option<(&'static BuiltinPatch, AppliedPack)>,
     /// The aids whose hooks are in the board's PRG-ROM now, one bit each.
     pub aids_on: u16,
+    /// The CRC of the loaded ROM's data (`builtin_patches::data_crc`), which finds a decoder.
+    pub rom_crc: Option<u32>,
 }
 
 impl Hacks {
@@ -65,6 +67,7 @@ impl Hacks {
         self.applied = self.patch_image(image).map(|patched| patched.name);
         self.pack = builtin_patches::pack_for(image);
         self.aids_on = 0;
+        self.rom_crc = Some(builtin_patches::data_crc(image));
         self.host_options = self
             .applied
             .and_then(builtin_patches::by_name)
@@ -77,6 +80,24 @@ impl Hacks {
         self.applied = None;
         self.pack = None;
         self.aids_on = 0;
+        self.rom_crc = None;
+    }
+
+    /// `NesCore::find_margin_decoder`: the margin decoder of the loaded ROM, while the
+    /// built-in patches are on.
+    #[must_use]
+    pub fn decoder(&self) -> Option<&'static dyn zax_nes::wide_decode::MarginDecoder> {
+        if !self.builtin_patches {
+            return None;
+        }
+        self.applied
+            .and_then(zax_nes::wide_decode::for_patch)
+            .or_else(|| self.rom_crc.and_then(zax_nes::wide_decode::for_rom))
+            .or_else(|| {
+                self.pack
+                    .as_ref()
+                    .and_then(|(patch, _)| zax_nes::wide_decode::for_patch(patch.name))
+            })
     }
 
     /// The built-in patch whose properties count: the one applied, or the one whose pack gives
@@ -157,8 +178,12 @@ impl Hacks {
     /// The values the extension reads from the host and the patch, after either changed.
     fn refresh(&self, nes: &mut Nes) {
         let idle_loop = self.options_patch().and_then(|patch| patch.idle_loop);
+        let decoded = self.decoder().is_some();
         if let Some(wide) = nes.b.wide.as_deref_mut() {
             wide.idle_loop = idle_loop;
+            // A game with a margin decoder gets the host's margin whatever its ROM asks for.
+            wide.ext.set_decoded(decoded);
+            wide.capture_rows = decoded;
             wide.ext.set_host_margin(self.host_margin);
             wide.ext.set_host_vertical_margin(self.host_vertical_margin);
             wide.ext

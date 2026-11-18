@@ -3,6 +3,7 @@
 //! `G:\3DSen\demo\roms`) and are `#[ignore]`d like every ROM test of the crate.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test code
+#![allow(clippy::cast_possible_truncation)] // test code: picture sizes
 
 use std::path::PathBuf;
 
@@ -136,4 +137,137 @@ fn the_built_in_patches_run_on_neshawk() {
         patched > 0 || roms().is_empty(),
         "no ROM of ZAXNES_ROMS has a built-in patch"
     );
+}
+
+/// Writes, for every patched ROM, the wide picture of frame 1 500 of a scripted run on both
+/// engines (`<rom>.neshawk.raw` and `<rom>.zaxnes.raw`: u32 width, u32 height, then one NES
+/// colour index a pixel with the opacity bit), into `ZAXNES_WIDE_DUMP`, for a look by eye.
+#[test]
+#[ignore = "needs ZAXNES_ROMS and ZAXNES_WIDE_DUMP"]
+fn dump_wide_pictures_of_both_engines() {
+    let Some(out) = std::env::var_os("ZAXNES_WIDE_DUMP").map(PathBuf::from) else {
+        return;
+    };
+    std::fs::create_dir_all(&out).expect("dump directory");
+    let script = |frame: u32| -> u16 {
+        let mut input = match frame % 120 {
+            30..=33 => 0x08,
+            _ => 0,
+        };
+        if frame > 600 {
+            input = 0x80 | u16::from(frame % 40 < 5);
+        }
+        input
+    };
+    let write = |name: &str, picture: &[u8], height: usize| {
+        let width = picture.len() / height;
+        let mut bytes = (width as u32).to_le_bytes().to_vec();
+        bytes.extend_from_slice(&(height as u32).to_le_bytes());
+        bytes.extend_from_slice(picture);
+        std::fs::write(out.join(name), bytes).expect("write");
+    };
+    for (name, image) in roms() {
+        let mut hawk = NesHawkEngine::new();
+        hawk.set_builtin_patches(true);
+        hawk.set_advanced_patches(true);
+        hawk.set_tile_capture(true);
+        if !hawk.load_rom(&image, &name).success || hawk.builtin_patch().is_none() {
+            continue;
+        }
+        hawk.set_widescreen_margin(64);
+        let mut zax = zax_nes::NesCore::new();
+        zax.set_advanced_patches(true);
+        assert!(zax.load_rom(&image, &name).success);
+        zax.set_widescreen_margin(64);
+        for frame in 0..1500 {
+            hawk.run_frame(script(frame));
+            zax.run_frame(script(frame));
+        }
+        let ext = &hawk.nes().unwrap().b.wide.as_ref().unwrap().ext;
+        println!(
+            "{name}: layout {:02X?} margin {} overclock {:02X?}",
+            ext.read(0x5007),
+            ext.margin(),
+            ext.read(0x5006)
+        );
+        let mut picture = Vec::new();
+        let height = hawk.wide_picture_into(&mut picture);
+        write(&format!("{name}.neshawk.raw"), &picture, height);
+        let height = zax.wide_picture_into(&mut picture);
+        write(&format!("{name}.zaxnes.raw"), &picture, height);
+    }
+}
+
+/// Diagnostic: lit pixels every 300 frames, NesHawk without and with the patch, Zaxnes with it.
+#[test]
+#[ignore = "diagnostic; needs ZAXNES_ROMS and ZAXNES_DIAG (a ROM name fragment)"]
+fn diagnose_patched_run() {
+    let Some(want) = std::env::var_os("ZAXNES_DIAG") else {
+        return;
+    };
+    let want = want.to_string_lossy().into_owned();
+    let script = |frame: u32| -> u16 {
+        let mut input = match frame % 120 {
+            30..=33 => 0x08,
+            _ => 0,
+        };
+        if frame > 600 {
+            input = 0x80 | u16::from(frame % 40 < 5);
+        }
+        input
+    };
+    for (name, image) in roms().into_iter().filter(|(name, _)| name.contains(&want)) {
+        let mut plain = NesHawkEngine::new();
+        assert!(plain.load_rom(&image, &name).success);
+        let mut hawk = NesHawkEngine::new();
+        hawk.set_builtin_patches(true);
+        hawk.set_advanced_patches(true);
+        hawk.set_widescreen_margin(64);
+        assert!(hawk.load_rom(&image, &name).success);
+        let mut zax = zax_nes::NesCore::new();
+        zax.set_advanced_patches(true);
+        assert!(zax.load_rom(&image, &name).success);
+        zax.set_widescreen_margin(64);
+        let mut zplain = zax_nes::NesCore::new();
+        zplain.set_builtin_patches(false);
+        assert!(zplain.load_rom(&image, &name).success);
+        let lit = |picture: &[u8]| {
+            picture
+                .iter()
+                .filter(|&&p| p & 0x3F != 0x0F && p & 0x3F != 0x0D)
+                .count()
+        };
+        let mut pic = Vec::new();
+        for frame in 0..1500 {
+            plain.run_frame(script(frame));
+            hawk.run_frame(script(frame));
+            zax.run_frame(script(frame));
+            zplain.run_frame(script(frame));
+            if frame % 150 == 149 {
+                let mut p1 = Vec::new();
+                let mut p2 = Vec::new();
+                plain.pixel_frame_indices_into(&mut p1);
+                zplain.pixel_frame_indices_into(&mut p2);
+                let same = p1
+                    .iter()
+                    .zip(&p2)
+                    .filter(|(a, b)| (**a & 0x3F) == (**b & 0x3F))
+                    .count();
+                println!(
+                    "  plain neshawk vs plain zaxnes: {same} of {} pixels equal",
+                    p1.len()
+                );
+                plain.pixel_frame_indices_into(&mut pic);
+                let a = lit(&pic);
+                hawk.pixel_frame_indices_into(&mut pic);
+                let b = lit(&pic);
+                zax.pixel_frame_indices_into(&mut pic);
+                let c = lit(&pic);
+                let pc = hawk.nes().map_or(0, |nes| nes.cpu.PC);
+                println!(
+                    "{name} f{frame}: plain {a} hawk+patch {b} zaxnes+patch {c} hawkPC {pc:04X}"
+                );
+            }
+        }
+    }
 }
