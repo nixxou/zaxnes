@@ -44,13 +44,15 @@ impl V {
     }
 }
 
-/// One preset of the slider: the values it sets, every one of them shown under it (owner,
-/// 2026-11-18: what a mode sets is always shown).
+/// One preset of the slider. Every preset writes the whole set of settings the slider manages,
+/// so that a mode puts back what another one changed; each value is either proposed (shown
+/// under the slider, to be changed) or set and hidden (owner, 2026-11-18).
 struct Preset {
     /// Its key in the string tables: `options.preset.<key>.name`, `.summary`, `.acts`.
     key: &'static str,
-    /// The values the preset writes, shown under the slider in this order.
-    values: &'static [(SettingId, V)],
+    /// The values the preset writes, in the order the proposed ones are shown, each with
+    /// whether it is proposed.
+    values: &'static [(SettingId, V, bool)],
 }
 
 /// The five presets, from the fastest to the most faithful (owner's table,
@@ -59,99 +61,122 @@ const PRESETS: [Preset; 5] = [
     Preset {
         key: "fastest",
         values: &[
-            (SettingId::EmuFastCore, V::B(true)),
-            (SettingId::EmuFidelityPlus, V::B(false)),
-            (SettingId::EmuLuaOptimized, V::B(true)),
-            (SettingId::EmuLuaExperimental, V::B(false)),
-            (SettingId::EmuCatchUpLast3d, V::B(true)),
-            (SettingId::EmuExactRate, V::B(false)),
-            (SettingId::EmuRunAhead, V::I(0)),
-            (SettingId::EmuPipeline, V::E(1)),
-            (SettingId::VideoDynamicResolution, V::B(true)),
-            (SettingId::EmuPause3dIn2d, V::B(true)),
-            (SettingId::RenderShadow, V::B(false)),
-            (SettingId::VideoHalfRate3d, V::B(false)),
-            (SettingId::VideoResScale, V::E(0)),
+            (SettingId::EmuFastCore, V::B(true), true),
+            (SettingId::EmuFidelityPlus, V::B(false), false),
+            (SettingId::EmuRunAhead, V::I(0), true),
+            (SettingId::EmuRealtimeInput, V::B(true), true),
+            (SettingId::EmuExactRate, V::B(false), false),
+            (SettingId::EmuLatePresent, V::B(false), false),
+            (SettingId::EmuCatchUpLast3d, V::B(true), true),
+            (SettingId::EmuPause3dIn2d, V::B(true), false),
+            (SettingId::EmuPipeline, V::E(1), true),
+            (SettingId::EmuLuaOptimized, V::B(true), true),
+            (SettingId::EmuLuaExperimental, V::B(true), true),
+            (SettingId::EmuLuaSmoothGc, V::B(true), true),
+            (SettingId::VideoDynamicResolution, V::B(true), true),
+            (SettingId::VideoResScale, V::E(0), true),
+            (SettingId::VideoHalfRate3d, V::B(false), true),
+            (SettingId::RenderShadow, V::B(false), true),
+            (SettingId::EmuOamDecay, V::B(false), false),
+            (SettingId::EmuOamaddrWriteCorruption, V::B(false), false),
         ],
     },
     Preset {
         key: "fast",
         values: &[
-            (SettingId::EmuFastCore, V::B(true)),
-            (SettingId::EmuFidelityPlus, V::B(false)),
-            (SettingId::EmuLuaOptimized, V::B(false)),
-            (SettingId::EmuLuaExperimental, V::B(false)),
-            (SettingId::EmuCatchUpLast3d, V::B(true)),
-            (SettingId::EmuExactRate, V::B(false)),
-            (SettingId::EmuRunAhead, V::I(1)),
-            (SettingId::EmuPipeline, V::E(0)),
-            (SettingId::VideoDynamicResolution, V::B(true)),
-            (SettingId::EmuPause3dIn2d, V::B(true)),
-            (SettingId::RenderShadow, V::B(true)),
-            (SettingId::VideoHalfRate3d, V::B(false)),
+            (SettingId::EmuFastCore, V::B(true), true),
+            (SettingId::EmuFidelityPlus, V::B(false), false),
+            (SettingId::EmuRunAhead, V::I(1), true),
+            (SettingId::EmuRealtimeInput, V::B(true), true),
+            (SettingId::EmuExactRate, V::B(false), false),
+            (SettingId::EmuLatePresent, V::B(false), false),
+            (SettingId::EmuCatchUpLast3d, V::B(true), true),
+            (SettingId::EmuPause3dIn2d, V::B(true), false),
+            (SettingId::EmuPipeline, V::E(0), true),
+            (SettingId::EmuLuaOptimized, V::B(false), true),
+            (SettingId::EmuLuaExperimental, V::B(false), false),
+            (SettingId::EmuLuaSmoothGc, V::B(true), false),
+            (SettingId::VideoDynamicResolution, V::B(true), true),
+            (SettingId::VideoResScale, V::E(0), false),
+            (SettingId::VideoHalfRate3d, V::B(false), false),
+            (SettingId::RenderShadow, V::B(true), true),
+            (SettingId::EmuOamDecay, V::B(false), false),
+            (SettingId::EmuOamaddrWriteCorruption, V::B(false), false),
         ],
     },
     Preset {
         key: "balanced",
         values: &[
-            (SettingId::EmuFastCore, V::B(false)),
-            (SettingId::EmuFidelityPlus, V::B(false)),
-            (SettingId::EmuLuaOptimized, V::B(false)),
-            (SettingId::EmuLuaExperimental, V::B(false)),
-            (SettingId::EmuCatchUpLast3d, V::B(true)),
-            (SettingId::EmuExactRate, V::B(false)),
-            (SettingId::EmuRealtimeInput, V::B(true)),
-            (SettingId::EmuRunAhead, V::I(1)),
-            (SettingId::EmuPipeline, V::E(0)),
-            (SettingId::VideoDynamicResolution, V::B(false)),
-            (SettingId::EmuPause3dIn2d, V::B(false)),
-            (SettingId::RenderShadow, V::B(true)),
-            (SettingId::VideoHalfRate3d, V::B(false)),
+            (SettingId::EmuFastCore, V::B(false), false),
+            (SettingId::EmuFidelityPlus, V::B(false), false),
+            (SettingId::EmuRunAhead, V::I(1), true),
+            (SettingId::EmuRealtimeInput, V::B(true), true),
+            (SettingId::EmuExactRate, V::B(false), false),
+            (SettingId::EmuLatePresent, V::B(false), false),
+            (SettingId::EmuCatchUpLast3d, V::B(true), true),
+            (SettingId::EmuPause3dIn2d, V::B(false), false),
+            (SettingId::EmuPipeline, V::E(0), false),
+            (SettingId::EmuLuaOptimized, V::B(false), false),
+            (SettingId::EmuLuaExperimental, V::B(false), false),
+            (SettingId::EmuLuaSmoothGc, V::B(true), false),
+            (SettingId::VideoDynamicResolution, V::B(false), false),
+            (SettingId::VideoResScale, V::E(0), false),
+            (SettingId::VideoHalfRate3d, V::B(false), false),
+            (SettingId::RenderShadow, V::B(true), false),
+            (SettingId::EmuOamDecay, V::B(false), false),
+            (SettingId::EmuOamaddrWriteCorruption, V::B(false), false),
         ],
     },
     Preset {
         key: "faithful",
         values: &[
-            (SettingId::EmuFastCore, V::B(false)),
-            (SettingId::EmuFidelityPlus, V::B(false)),
-            (SettingId::EmuLuaOptimized, V::B(false)),
-            (SettingId::EmuCatchUpLast3d, V::B(false)),
-            (SettingId::EmuExactRate, V::B(false)),
-            (SettingId::EmuRealtimeInput, V::B(true)),
-            (SettingId::EmuLatePresent, V::B(false)),
-            (SettingId::EmuRunAhead, V::I(1)),
-            (SettingId::EmuPipeline, V::E(0)),
-            (SettingId::VideoDynamicResolution, V::B(false)),
-            (SettingId::EmuPause3dIn2d, V::B(false)),
+            (SettingId::EmuFastCore, V::B(false), false),
+            (SettingId::EmuFidelityPlus, V::B(false), true),
+            (SettingId::EmuRunAhead, V::I(1), true),
+            (SettingId::EmuRealtimeInput, V::B(true), true),
+            (SettingId::EmuExactRate, V::B(false), true),
+            (SettingId::EmuLatePresent, V::B(false), true),
+            (SettingId::EmuCatchUpLast3d, V::B(false), true),
+            (SettingId::EmuPause3dIn2d, V::B(false), false),
+            (SettingId::EmuPipeline, V::E(0), false),
+            (SettingId::EmuLuaOptimized, V::B(false), false),
+            (SettingId::EmuLuaExperimental, V::B(false), false),
+            (SettingId::EmuLuaSmoothGc, V::B(true), false),
+            (SettingId::VideoDynamicResolution, V::B(false), false),
+            (SettingId::VideoResScale, V::E(0), false),
+            (SettingId::VideoHalfRate3d, V::B(false), false),
+            (SettingId::RenderShadow, V::B(true), false),
+            (SettingId::EmuOamDecay, V::B(false), false),
+            (SettingId::EmuOamaddrWriteCorruption, V::B(false), false),
         ],
     },
     Preset {
         key: "most_faithful",
         values: &[
-            (SettingId::EmuFastCore, V::B(false)),
-            (SettingId::EmuFidelityPlus, V::B(true)),
-            (SettingId::EmuLuaOptimized, V::B(false)),
-            (SettingId::EmuCatchUpLast3d, V::B(false)),
-            (SettingId::EmuExactRate, V::B(true)),
-            (SettingId::EmuRealtimeInput, V::B(true)),
-            (SettingId::EmuOamDecay, V::B(false)),
-            (SettingId::EmuOamaddrWriteCorruption, V::B(true)),
-            (SettingId::EmuRunAhead, V::I(1)),
-            (SettingId::EmuPipeline, V::E(0)),
-            (SettingId::VideoDynamicResolution, V::B(false)),
-            (SettingId::EmuPause3dIn2d, V::B(false)),
+            (SettingId::EmuFastCore, V::B(false), false),
+            (SettingId::EmuFidelityPlus, V::B(true), true),
+            (SettingId::EmuRunAhead, V::I(1), true),
+            (SettingId::EmuRealtimeInput, V::B(true), true),
+            (SettingId::EmuExactRate, V::B(true), true),
+            (SettingId::EmuLatePresent, V::B(false), true),
+            (SettingId::EmuCatchUpLast3d, V::B(false), false),
+            (SettingId::EmuPause3dIn2d, V::B(false), false),
+            (SettingId::EmuPipeline, V::E(0), false),
+            (SettingId::EmuLuaOptimized, V::B(false), false),
+            (SettingId::EmuLuaExperimental, V::B(false), false),
+            (SettingId::EmuLuaSmoothGc, V::B(true), false),
+            (SettingId::VideoDynamicResolution, V::B(false), false),
+            (SettingId::VideoResScale, V::E(0), false),
+            (SettingId::VideoHalfRate3d, V::B(false), false),
+            (SettingId::RenderShadow, V::B(true), false),
+            (SettingId::EmuOamDecay, V::B(false), true),
+            (SettingId::EmuOamaddrWriteCorruption, V::B(true), true),
         ],
     },
 ];
 
 /// The settings of the Essentials tab, under the slider.
-const ESSENTIALS: [SettingId; 5] = [
-    SettingId::UiFullscreen,
-    SettingId::VideoWidescreen,
-    SettingId::AudioVolume,
-    SettingId::EmuRunAhead,
-    SettingId::UiLanguage,
-];
+const ESSENTIALS: [SettingId; 1] = [SettingId::VideoWidescreen];
 
 /// What the simple mode shows of a page.
 #[derive(Clone, Copy)]
@@ -164,6 +189,8 @@ enum Simple {
     All,
     /// The button that opens the shaders window.
     Shaders,
+    /// A folder setting, drawn as the classic window draws it.
+    Folder(SettingId),
 }
 
 /// One tab of the new window: the classic tabs its advanced mode draws one under the other, and
@@ -232,7 +259,11 @@ const PAGES: [Page; 7] = [
     },
     Page {
         tab: OptionsTab::Interface,
-        simple: &[],
+        simple: &[
+            Simple::Row(SettingId::UiLanguage),
+            Simple::Folder(SettingId::UiRomsFolder),
+            Simple::Row(SettingId::UiShowFps),
+        ],
         advanced: &[OptionsTab::Interface],
     },
     Page {
@@ -247,7 +278,7 @@ fn matches(model: &SettingsModel, preset: &Preset) -> bool {
     preset
         .values
         .iter()
-        .all(|&(id, value)| model.get(id) == value.value())
+        .all(|&(id, value, _)| model.get(id) == value.value())
 }
 
 /// The note of a setting that takes effect later; none for one that acts at once.
@@ -350,6 +381,10 @@ impl ZaxUi {
         for item in page.simple {
             match *item {
                 Simple::All => self.draw_tab_body(ui, host, page.tab),
+                Simple::Folder(id) => {
+                    let row = options::row_of(id);
+                    self.draw_folder_row(ui, host, &row);
+                }
                 Simple::Shaders => {
                     if ui.button(strings::get("options.new.shaders_open")) {
                         self.state.shaders = true;
@@ -425,7 +460,7 @@ impl ZaxUi {
             if ui.button_with_size(format!("{label}##preset{index}"), [step_width, 34.0]) {
                 self.options_preset = index;
                 host.update_settings(|model| {
-                    for &(id, value) in preset.values {
+                    for &(id, value, _) in preset.values {
                         model.set(id, value.value());
                     }
                 });
@@ -465,7 +500,10 @@ impl ZaxUi {
             .session()
             .is_some_and(crate::game_session::GameSession::forces_run_ahead_to_zero);
         let fceux_validation = host.fceux_validation();
-        for &(id, _) in preset.values {
+        for &(id, _, shown) in preset.values {
+            if !shown {
+                continue;
+            }
             let row = options::row_of(id);
             super::options::draw_row(ui, host, &row, run_ahead_forced, fceux_validation);
             if let Some(note) = later_note(id) {
@@ -485,7 +523,5 @@ impl ZaxUi {
                 ui.text_colored(LATER, note);
             }
         }
-        let folder = options::row_of(SettingId::UiRomsFolder);
-        self.draw_folder_row(ui, host, &folder);
     }
 }
