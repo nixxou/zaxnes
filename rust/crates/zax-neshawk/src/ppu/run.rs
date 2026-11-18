@@ -634,6 +634,11 @@ impl Nes {
             if self.b.ppu.ppur.status.sl == 241 {
                 self.b.ppu.do_active_sl = false;
                 self.b.ppu.do_pre_vbl = true;
+                // The picture is done: Zaxnes's widescreen overclock, when a ROM asked for it
+                // (lot NESHAWK-HACKS). Nothing at all without the extension.
+                if self.b.wide.is_some() {
+                    self.run_overclock();
+                }
             }
         }
     }

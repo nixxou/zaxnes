@@ -86,6 +86,7 @@ pub mod nes;
 pub mod ppu;
 pub mod state;
 pub mod tiles;
+pub mod wide;
 
 pub use cpu::{Mos6502x, Mos6502xLink};
 pub use engine::NesHawkEngine;

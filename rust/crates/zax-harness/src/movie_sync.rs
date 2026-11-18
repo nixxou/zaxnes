@@ -2497,8 +2497,15 @@ impl NeshawkMachine {
             // report says which device each port got so that the substitution is visible.
             _ => zax_neshawk::controllers::PortDevice::ControllerNes,
         };
-        zax_neshawk::Nes::load(image, db, port(ports[0]), port(ports[1]))
-            .map_err(|why| why.to_string())
+        let mut nes = zax_neshawk::Nes::load(image, db, port(ports[0]), port(ports[1]))
+            .map_err(|why| why.to_string())?;
+        // Lot NESHAWK-HACKS's proof: with `ZAXNES_NESHAWK_WIDE=1` the machine carries Zaxnes's
+        // widescreen extension, present and locked, which must change nothing at all for a game
+        // that never unlocks it (the same trace as without it, frame for frame).
+        if std::env::var_os("ZAXNES_NESHAWK_WIDE").is_some_and(|value| value == "1") {
+            nes.b.wide = Some(zax_neshawk::wide::WideHooks::new());
+        }
+        Ok(nes)
     }
 
     /// One frame, with the cycle ledger taken around it when one was asked for.
