@@ -8,16 +8,17 @@ use zax_platform::input::{Key, KeyboardDevice};
 use super::pad::{PadButton, PadState};
 use crate::input::{InputAction, InputBindings};
 
-/// The fixed keys of each button.
-const FIXED: [(PadButton, &[Key]); 14] = [
+/// The fixed keys of each button, by position.
+const FIXED: [(PadButton, &[Key]); 16] = [
     (PadButton::Up, &[Key::Up]),
     (PadButton::Down, &[Key::Down]),
     (PadButton::Left, &[Key::Left]),
     (PadButton::Right, &[Key::Right]),
     (PadButton::A, &[Key::Enter, Key::KeypadEnter, Key::Space]),
     (PadButton::B, &[Key::Escape, Key::Backspace]),
-    (PadButton::X, &[Key::X]),
-    (PadButton::Y, &[Key::Y]),
+    // X and Y by their letters only ([`PRINTED`]).
+    (PadButton::X, &[]),
+    (PadButton::Y, &[]),
     (PadButton::Menu, &[Key::Tab, Key::F1]),
     // The widescreen of a game and its hacks, on the list (Rust-only, owner request).
     (PadButton::L1, &[Key::Q]),
@@ -26,7 +27,23 @@ const FIXED: [(PadButton, &[Key]); 14] = [
     // The achievements of a game, on the list (Rust-only, owner request).
     (PadButton::R2, &[Key::R]),
     (PadButton::Start, &[Key::H]),
+    // A screenful of rows (owner request).
+    (PadButton::PageUp, &[Key::PageUp]),
+    (PadButton::PageDown, &[Key::PageDown]),
 ];
+
+/// The buttons whose name the hints print, pressed by the key that **prints** that letter in the
+/// system's layout (owner request: A, B, X and Y, QWERTY, AZERTY or another).
+const PRINTED: [(PadButton, char); 4] = [
+    (PadButton::A, 'A'),
+    (PadButton::B, 'B'),
+    (PadButton::X, 'X'),
+    (PadButton::Y, 'Y'),
+];
+
+/// The letter keys of [`FIXED`]: they type text while the console's keyboard screen types, and
+/// press no button then (nor do those of [`PRINTED`]).
+const LETTERS: [Key; 5] = [Key::Q, Key::E, Key::W, Key::R, Key::H];
 
 /// The buttons that also follow a configured keyboard binding.
 const CONFIGURED: [(PadButton, InputAction); 6] = [
@@ -54,15 +71,30 @@ impl KeyboardPad {
         }
     }
 
-    /// Passes the changes of the keyboard on to `pad`.
+    /// Passes the changes of the keyboard on to `pad`; while `typing`, the letters type text
+    /// and press nothing.
     pub fn update(
         &mut self,
         pad: &mut PadState,
         bindings: &InputBindings,
         keyboard: &dyn KeyboardDevice,
+        typing: bool,
     ) {
+        // The letters the held keys print, for the buttons of [`PRINTED`].
+        let mut held = Vec::new();
+        if !typing {
+            keyboard.collect_held_keys(&mut held);
+        }
+        let printed: Vec<char> = held
+            .iter()
+            .filter_map(|&code| Key::ALL.iter().find(|key| **key as i32 == code))
+            .filter_map(|key| key.printed_letter())
+            .collect();
         for (index, button) in PadButton::ALL.into_iter().enumerate() {
-            let down = Self::is_down(button, bindings, keyboard);
+            let down = Self::is_down(button, bindings, keyboard, typing)
+                || PRINTED
+                    .iter()
+                    .any(|&(target, letter)| target == button && printed.contains(&letter));
             if down != self.held[index] {
                 self.held[index] = down;
                 pad.set(button, down);
@@ -81,11 +113,17 @@ impl KeyboardPad {
         }
     }
 
-    fn is_down(button: PadButton, bindings: &InputBindings, keyboard: &dyn KeyboardDevice) -> bool {
+    fn is_down(
+        button: PadButton,
+        bindings: &InputBindings,
+        keyboard: &dyn KeyboardDevice,
+        typing: bool,
+    ) -> bool {
         let fixed = FIXED
             .iter()
             .filter(|(target, _)| *target == button)
             .flat_map(|(_, keys)| keys.iter())
+            .filter(|key| !(typing && LETTERS.contains(key)))
             .any(|key| keyboard.is_down(*key as i32));
         fixed
             || CONFIGURED
@@ -125,10 +163,10 @@ mod tests {
         let (mut keyboard_pad, mut pad) = (KeyboardPad::new(), PadState::new());
         let (bindings, keys) = (InputBindings::new(), Keys(RefCell::default()));
         keys.hold(&[Key::Down, Key::Enter]);
-        keyboard_pad.update(&mut pad, &bindings, &keys);
+        keyboard_pad.update(&mut pad, &bindings, &keys, false);
         assert!(pad.was_pressed(PadButton::Down) && pad.was_pressed(PadButton::A));
         pad.end_frame();
-        keyboard_pad.update(&mut pad, &bindings, &keys);
+        keyboard_pad.update(&mut pad, &bindings, &keys, false);
         assert!(pad.is_held(PadButton::A) && !pad.was_pressed(PadButton::A));
     }
 
@@ -137,10 +175,10 @@ mod tests {
         let (mut keyboard_pad, mut pad) = (KeyboardPad::new(), PadState::new());
         let (bindings, keys) = (InputBindings::new(), Keys(RefCell::default()));
         keys.hold(&[Key::Space, Key::Enter]);
-        keyboard_pad.update(&mut pad, &bindings, &keys);
+        keyboard_pad.update(&mut pad, &bindings, &keys, false);
         assert!(pad.is_held(PadButton::Select) && pad.is_held(PadButton::Start));
         keys.hold(&[]);
-        keyboard_pad.update(&mut pad, &bindings, &keys);
+        keyboard_pad.update(&mut pad, &bindings, &keys, false);
         assert!(!pad.is_held(PadButton::Select) && !pad.is_held(PadButton::Start));
     }
 
@@ -149,9 +187,27 @@ mod tests {
         let (mut keyboard_pad, mut pad) = (KeyboardPad::new(), PadState::new());
         let (bindings, keys) = (InputBindings::new(), Keys(RefCell::default()));
         keys.hold(&[Key::Escape, Key::Tab]);
-        keyboard_pad.update(&mut pad, &bindings, &keys);
+        keyboard_pad.update(&mut pad, &bindings, &keys, false);
         assert!(pad.is_held(PadButton::B) && pad.is_held(PadButton::Menu));
         keyboard_pad.release(&mut pad);
         assert!(!pad.is_held(PadButton::B));
+    }
+
+    /// Owner request: the letters the hints print press their buttons, and press nothing while
+    /// the keyboard screen types; Page Up and Page Down are buttons of their own.
+    #[test]
+    fn the_printed_letters_and_the_pages_press_their_buttons() {
+        let (mut keyboard_pad, mut pad) = (KeyboardPad::new(), PadState::new());
+        let (bindings, keys) = (InputBindings::new(), Keys(RefCell::default()));
+        keys.hold(&[Key::A, Key::PageDown]);
+        keyboard_pad.update(&mut pad, &bindings, &keys, false);
+        assert!(pad.was_pressed(PadButton::A) && pad.was_pressed(PadButton::PageDown));
+        pad.end_frame();
+        keys.hold(&[]);
+        keyboard_pad.update(&mut pad, &bindings, &keys, false);
+        pad.end_frame();
+        keys.hold(&[Key::B, Key::Q]);
+        keyboard_pad.update(&mut pad, &bindings, &keys, true);
+        assert!(!pad.is_held(PadButton::B) && !pad.is_held(PadButton::L1));
     }
 }

@@ -163,6 +163,26 @@ keys! {
 }
 
 impl Key {
+    /// The letter the key prints in the keyboard layout of the system, upper case: on an
+    /// AZERTY keyboard the position of `Q` prints `A`. Where SDL knows no layout (no video
+    /// subsystem, as in the tests), the letter of the position's QWERTY name. None for a key
+    /// that prints no letter.
+    #[must_use]
+    pub fn printed_letter(self) -> Option<char> {
+        let single = |name: &str| {
+            let mut chars = name.chars();
+            let letter = chars.next()?;
+            (chars.next().is_none() && letter.is_ascii_alphabetic())
+                .then(|| letter.to_ascii_uppercase())
+        };
+        self.scancode()
+            .and_then(sdl2::keyboard::Keycode::from_scancode)
+            .and_then(|keycode| single(&keycode.name()))
+            .or_else(|| single(self.name()))
+    }
+}
+
+impl Key {
     /// The persisted code of this key, for the default tables of §4.2.
     #[must_use]
     pub fn code(self) -> i32 {

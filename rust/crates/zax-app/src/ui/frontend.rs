@@ -415,8 +415,9 @@ impl ImguiFrontend {
             if binding_capture_active || self.system_typing {
                 self.keyboard_pad.release(self.platform.pad_mut());
             } else {
+                let typing = self.handheld.as_ref().is_some_and(HandheldUi::typing);
                 self.keyboard_pad
-                    .update(self.platform.pad_mut(), bindings, keyboard);
+                    .update(self.platform.pad_mut(), bindings, keyboard, typing);
             }
             return;
         }

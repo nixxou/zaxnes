@@ -119,6 +119,8 @@ struct Painter<'ui> {
     titles: Cell<usize>,
     /// The rank of the selected row of the list drawn, for the clicks.
     focus_rank: &'ui Cell<Option<usize>>,
+    /// The rows it shows and how many a selection can rest on, for Page Up and Page Down.
+    list_span: &'ui Cell<(usize, usize)>,
     /// The first row the scrollbar, the wheel or a finger scrolled the list to; none while the
     /// list follows its selection (owner request).
     view_first: Option<usize>,
@@ -219,6 +221,7 @@ impl Painter<'_> {
         self.rank_base.set(first);
         self.titles.set(0);
         self.focus_rank.set(Some(selected));
+        self.list_span.set((rows, total));
         self.scrollbar(first, rows, total);
         first
     }
@@ -315,6 +318,8 @@ impl Painter<'_> {
         self.titles.set(0);
         self.focus_rank
             .set(Some(selected.saturating_sub(titles_before(selected))));
+        self.list_span
+            .set((count, specs.len() - titles_before(specs.len())));
         self.scrollbar(first, count, specs.len());
         let x1 = self.size[0] - self.metrics.padding * 0.5;
         for (slot, (index, spec)) in specs.iter().enumerate().skip(first).take(count).enumerate() {
@@ -710,6 +715,7 @@ impl HandheldUi {
     pub fn draw(&mut self, ui: &Ui, frame: &UiFrame<'_>) {
         self.zones.get_mut().clear();
         self.focus_rank.set(None);
+        self.list_span.set((0, 0));
         let size = ui.io().display_size;
         // By the shorter side: the sizes of the landscape in portrait (owner request), which are
         // the sizes the fonts were baked at.
@@ -755,6 +761,7 @@ impl HandheldUi {
             rank_base: Cell::new(0),
             titles: Cell::new(0),
             focus_rank: &self.focus_rank,
+            list_span: &self.list_span,
             view_first: self.scroll.first,
             hold_ring: self
                 .widescreen_hold

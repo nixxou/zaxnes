@@ -35,10 +35,14 @@ pub enum PadButton {
     L2,
     /// The right trigger, pressed past half way.
     R2,
+    /// A screenful of rows up (the keyboard's Page Up, owner request).
+    PageUp,
+    /// A screenful of rows down (the keyboard's Page Down).
+    PageDown,
 }
 
 impl PadButton {
-    const COUNT: usize = 15;
+    const COUNT: usize = 17;
 
     pub const ALL: [Self; Self::COUNT] = [
         Self::Up,
@@ -56,6 +60,8 @@ impl PadButton {
         Self::Menu,
         Self::L2,
         Self::R2,
+        Self::PageUp,
+        Self::PageDown,
     ];
 
     const fn index(self) -> usize {
@@ -63,7 +69,10 @@ impl PadButton {
     }
 
     const fn repeats(self) -> bool {
-        matches!(self, Self::Up | Self::Down | Self::Left | Self::Right)
+        matches!(
+            self,
+            Self::Up | Self::Down | Self::Left | Self::Right | Self::PageUp | Self::PageDown
+        )
     }
 }
 

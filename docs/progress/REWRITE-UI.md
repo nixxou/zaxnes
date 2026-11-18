@@ -88,3 +88,7 @@ Console options get the simple / advanced logic (owner: "fais-moi une propositio
 ## Step 20 (2026-11-18)
 
 Console lists get a scrollbar on the left when they are longer than the screen (owner): ROM list, profiles, controls, save states, achievements and every options page. Dragging it (mouse, or a finger on Android), the wheel and a finger sliding over a list scroll the view without moving the selection; a press of the pad brings the list back round its selection; a click or tap on a row selects it even with the selection scrolled out of sight (rows carry their rank, group titles not counted). Touch: TouchPad::free_point feeds the drag.
+
+## Step 21 (2026-11-18)
+
+Console: Page Up / Page Down (new pad buttons) move a screenful of rows, stopping at the list ends. The keys printing A, B, X, Y in the system layout (QWERTY, AZERTY...) press those buttons (Key::printed_letter via SDL keycodes); the letter keys press nothing while the keyboard screen types.

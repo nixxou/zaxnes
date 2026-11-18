@@ -174,6 +174,9 @@ pub struct HandheldUi {
     zones: RefCell<Vec<Zone>>,
     /// The rank of the selected row of the list drawn last, for the clicks.
     focus_rank: Cell<Option<usize>>,
+    /// The rows the list drawn last shows and how many a selection can rest on: a page of
+    /// Page Up and Page Down.
+    list_span: Cell<(usize, usize)>,
     /// The list scrolled by its scrollbar, the wheel or a finger (owner request).
     scroll: ListScroll,
     /// How many lines the bar of hints took at the last drawing.
@@ -271,6 +274,7 @@ impl HandheldUi {
             confirming: false,
             zones: RefCell::new(Vec::new()),
             focus_rank: Cell::new(None),
+            list_span: Cell::new((0, 0)),
             scroll: ListScroll::default(),
             hint_lines: Cell::new(1),
             achievements: AchievementsModel::new(),
@@ -832,9 +836,43 @@ impl HandheldUi {
         }
     }
 
+    /// A screenful of rows (owner request): that many presses of up or down, stopping at the
+    /// list's ends rather than going round.
+    fn press_page(&mut self, button: PadButton, frame: &mut UiFrame<'_>) {
+        let (rows, count) = self.list_span.get();
+        let focus = self.focus_rank.get().unwrap_or(0);
+        let room = rows.saturating_sub(1).max(1);
+        let (step, presses) = if button == PadButton::PageUp {
+            (PadButton::Up, room.min(focus))
+        } else {
+            (
+                PadButton::Down,
+                room.min(count.saturating_sub(1).saturating_sub(focus)),
+            )
+        };
+        for _ in 0..presses {
+            self.press(step, frame);
+        }
+        // The rank the presses reached, for a second page before the next drawing.
+        self.focus_rank.set(Some(if button == PadButton::PageUp {
+            focus - presses
+        } else {
+            focus + presses
+        }));
+    }
+
     fn press(&mut self, button: PadButton, frame: &mut UiFrame<'_>) {
         // A press brings the list back round its selection (a scrolled list follows it again).
         self.scroll.first = None;
+        if let PadButton::PageUp | PadButton::PageDown = button {
+            self.press_page(button, frame);
+        } else {
+            self.press_button(button, frame);
+        }
+    }
+
+    /// One press of a button of the pad on the screen shown.
+    fn press_button(&mut self, button: PadButton, frame: &mut UiFrame<'_>) {
         // A question of the host (a save state made with the built-in patches set the other
         // way, for instance) is answered first: A agrees, B declines.
         if frame.host.pending_confirmation().is_some() {
