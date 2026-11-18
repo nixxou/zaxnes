@@ -1,0 +1,33 @@
+﻿Groupe;Réglage;Clé;Défaut actuel;Effet sur la vitesse;Effet sur la fidélité / le ressenti;Rapidité max;Rapide;Équilibré;Fidèle;Fidélité max;Question ouverte
+Émulation;Cœur rapide;emu.fast_core;non;gros gain (2,5 à 3,5× moins de calcul en 2D);aucun (même machine, 320 ROMs identiques);oui;oui;non;non;non;
+Émulation;Fidélité+;emu.fidelity_plus;non;plus lent;plus fidèle (écritures vidéo au demi-cycle);non;non;non;case affichée, décochée;oui;Q4 : coché dès Fidèle ?
+Émulation;Anticipation (run-ahead);emu.run_ahead;1;chaque cran ajoute une émulation complète (1 = ×2);-1 image de latence par cran;0;1;1;1;1;Q1 : 0 en Rapidité max ?
+Émulation;Manette temps réel;emu.realtime_input;oui;coût faible;moins de latence;oui;oui;oui;oui;oui;
+Émulation;Cadence exacte (60,0988 Hz);emu.exact_rate;non;aucun;rythme exact, petite saccade possible sur écran 60 Hz;non;non;non;oui;oui;Q3 : seulement en Fidélité max ?
+Émulation;Présentation tardive;emu.late_present;non;aucun;moins de latence, risque d'images ratées;non;non;non;case affichée, décochée;case affichée, décochée;
+Émulation;Défauts matériels courants (corruption OAM, palette, glitchs $2000/$2006, conflits de bus);emu.oam_corruption, emu.palette_corruption, emu.ppu_*;oui;négligeable;fidélité;inchangé;inchangé;inchangé;inchangé;inchangé;
+Émulation;Dégradation de l'OAM;emu.oam_decay;non;négligeable;plus fidèle, peut casser certains jeux;non;non;non;non;case affichée, décochée;Q5
+Émulation;Corruption à l'écriture d'OAMADDR;emu.oamaddr_write_corruption;non;négligeable;plus fidèle, peut casser certains jeux;non;non;non;non;case affichée, décochée;Q5
+Émulation;Ligne reset du PPU;emu.ppu_reset_line;non;aucun;plus fidèle au démarrage;inchangé;inchangé;inchangé;inchangé;à décider;Q5 : l'ajouter en Fidélité max ?
+Émulation;RAM à l'allumage;emu.power_on_ram;(valeur 1);aucun;fidélité du démarrage;inchangé;inchangé;inchangé;inchangé;à décider;Q5 : aléatoire en Fidélité max ?
+Scripts;Lua optimisé;emu.lua_optimized;non;gain sur les profils 3D à scripts;moins de vérifications (au prochain jeu);oui;non;non;non;non;
+Scripts;Nettoyage mémoire Lua lissé;emu.lua_smooth_gc;oui;évite les à-coups;aucun;oui;oui;oui;oui;oui;
+Scripts;Scripts en parallèle du dessin;emu.pipeline;Off;gain sur multicœur;+1 image de latence;Auto;Off;Off;Off;Off;Q10 : avec l'anticipation à 0, +2 images au total
+Cadence;Rendu accéléré (saut d'images);video.skip_frame;oui;gain gratuit;aucun;oui;oui;oui;oui;oui;
+Cadence;Rattrapage en cas de retard;emu.catch_up;2;borne le travail en retard;aucun;2;2;2;2;2;
+Cadence;Rattrapage : dernière image seule en 3D;emu.catch_up_last_3d;non;gros gain en retard;images rattrapées non converties;oui;oui;non;non;non;Q2 : aussi en Rapide ?
+Cadence;3D à 30 i/s (jeu à pleine vitesse);video.half_rate_3d;non;moitié du coût 3D;mouvement 3D moins fluide;case affichée, décochée;non;non;non;non;Q9 : coché en Rapidité max ?
+Cadence;3D en pause en 2D;emu.pause_3d_in_2d;non;gain quand l'image 2D est affichée;aucun;oui;oui;inchangé;inchangé;inchangé;
+Cadence;Frames en file GPU;video.max_queued_frames;2;moins = moins de latence, risque d'à-coups;latence;inchangé;inchangé;inchangé;inchangé;inchangé;
+Résolution;Échelle de résolution;video.res_scale;native;gros gain GPU;image plus douce;1/2;2/3;native;native;native;Q7 et Q8 : le curseur touche-t-il au visuel ?
+Résolution;Résolution automatique;video.dynamic_resolution;non;gain GPU dans les scènes lourdes;image plus douce par moments;oui;oui;non;non;non;Q8
+Résolution;Résolution du shader;video.shader_resolution;100 %;gain GPU avec shader;image plus douce;inchangé;inchangé;inchangé;inchangé;inchangé;
+Résolution;Méthode de rendu;video.render_method;Direct;Render Tex coûte une texture intermédiaire;aucun;inchangé;inchangé;inchangé;inchangé;inchangé;
+Scène 3D;Style (Classique / Amélioré);render.visual_style;Classique;Amélioré = reflets, occlusion, ombres pixel (lourd GPU);goût;inchangé;inchangé;inchangé;inchangé;inchangé;Q7 : laissé hors du curseur ?
+Scène 3D;Ombres;render.shadow;oui;un passage d'ombre en plus;visuel;non;oui;oui;oui;oui;Q7
+Scène 3D;Éclairage du backdrop;render.backdrop_lighting;oui;léger;visuel;inchangé;inchangé;inchangé;inchangé;inchangé;
+Scène 3D;Anticrénelage (lissage des maillages);video.anti_alias;MARCHING;GREEDY moins de calcul CPU;bords moins lissés;inchangé;inchangé;inchangé;inchangé;inchangé;Q7
+Scène 3D;Algorithme de maillage;render.mesh_algo;0;coût CPU de construction;visuel;inchangé;inchangé;inchangé;inchangé;inchangé;
+Image 2D;Signal composite;video.composite_signal;non;coût de calcul de l'image;rendu TV;inchangé;inchangé;inchangé;inchangé;inchangé;Q11 : hors préréglages
+Affichage;Synchronisation verticale;video.vsync;chaque rafraîchissement;aucun direct;fluidité, latence;inchangé;inchangé;inchangé;inchangé;inchangé;
+Affichage;Shaders (CRT, etc.);shader.*;aucun;coût GPU selon le shader;rendu;inchangé;inchangé;inchangé;inchangé;inchangé;
