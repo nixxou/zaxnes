@@ -54,3 +54,4 @@ hardware defects, VS DIPs, ...). Of these the fast core and Fidelity+ are now im
 * 10. Fidelity+ with the widescreen overclock (owner's savestate, black bands): no edges while the extension stalls the PPU (`edges_on_for`); FIDELITY-LEADS I6. fidplus test files pass (equivalence 764 s).
 * 11. Simple mode shows the 3D render tab: visual style, reflections, the Geometry group, light intensity, shadows, field of view (owner).
 * 12. Presets from the owner's review (docs/design/PRESETS.csv): values of any kind (run-ahead, pipeline, resolution, shadows...), exact rate offered unticked in Faithful, OAMADDR write corruption ticked in Most faithful, catch-up last 3D on up to Balanced, resolution offered (native) and experimental Lua offered in Fastest.
+* 13. Every setting a mode sets is shown under the slider (owner); the CSV now reads the presets from the code.

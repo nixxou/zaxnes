@@ -44,15 +44,13 @@ impl V {
     }
 }
 
-/// One preset of the slider: the values it sets, and the check boxes it shows under it (each
-/// with the value the preset gives it).
+/// One preset of the slider: the values it sets, every one of them shown under it (owner,
+/// 2026-11-18: what a mode sets is always shown).
 struct Preset {
     /// Its key in the string tables: `options.preset.<key>.name`, `.summary`, `.acts`.
     key: &'static str,
-    /// The values the preset writes, the check boxes' included.
+    /// The values the preset writes, shown under the slider in this order.
     values: &'static [(SettingId, V)],
-    /// The check boxes shown under the preset.
-    boxes: &'static [SettingId],
 }
 
 /// The five presets, from the fastest to the most faithful (owner's table,
@@ -75,13 +73,6 @@ const PRESETS: [Preset; 5] = [
             (SettingId::VideoHalfRate3d, V::B(false)),
             (SettingId::VideoResScale, V::E(0)),
         ],
-        boxes: &[
-            SettingId::EmuFastCore,
-            SettingId::EmuLuaOptimized,
-            SettingId::EmuLuaExperimental,
-            SettingId::VideoResScale,
-            SettingId::VideoHalfRate3d,
-        ],
     },
     Preset {
         key: "fast",
@@ -99,7 +90,6 @@ const PRESETS: [Preset; 5] = [
             (SettingId::RenderShadow, V::B(true)),
             (SettingId::VideoHalfRate3d, V::B(false)),
         ],
-        boxes: &[SettingId::EmuFastCore, SettingId::EmuLuaOptimized],
     },
     Preset {
         key: "balanced",
@@ -118,7 +108,6 @@ const PRESETS: [Preset; 5] = [
             (SettingId::RenderShadow, V::B(true)),
             (SettingId::VideoHalfRate3d, V::B(false)),
         ],
-        boxes: &[SettingId::EmuRealtimeInput],
     },
     Preset {
         key: "faithful",
@@ -134,11 +123,6 @@ const PRESETS: [Preset; 5] = [
             (SettingId::EmuPipeline, V::E(0)),
             (SettingId::VideoDynamicResolution, V::B(false)),
             (SettingId::EmuPause3dIn2d, V::B(false)),
-        ],
-        boxes: &[
-            SettingId::EmuFidelityPlus,
-            SettingId::EmuExactRate,
-            SettingId::EmuLatePresent,
         ],
     },
     Preset {
@@ -156,11 +140,6 @@ const PRESETS: [Preset; 5] = [
             (SettingId::EmuPipeline, V::E(0)),
             (SettingId::VideoDynamicResolution, V::B(false)),
             (SettingId::EmuPause3dIn2d, V::B(false)),
-        ],
-        boxes: &[
-            SettingId::EmuFidelityPlus,
-            SettingId::EmuOamDecay,
-            SettingId::EmuOamaddrWriteCorruption,
         ],
     },
 ];
@@ -486,7 +465,7 @@ impl ZaxUi {
             .session()
             .is_some_and(crate::game_session::GameSession::forces_run_ahead_to_zero);
         let fceux_validation = host.fceux_validation();
-        for &id in preset.boxes {
+        for &(id, _) in preset.values {
             let row = options::row_of(id);
             super::options::draw_row(ui, host, &row, run_ahead_forced, fceux_validation);
             if let Some(note) = later_note(id) {
