@@ -2,8 +2,7 @@
 
 Branch `advanced-neshawk`, from `rewrite-ui` 91ffefce, worktree `G:\3DSen\wt-advanced-neshawk`
 (its own target directory). Steps 1-2 were first written on a branch inside `wt-rewrite-ui`, which
-another session was using: set aside in `G:\3DSen
-eshawk-hacks-parked`, re-applied here.
+another session was using: set aside in `G:\3DSen\neshawk-hacks-parked`, re-applied here.
 
 ## The request (owner, 2026-11-18)
 
