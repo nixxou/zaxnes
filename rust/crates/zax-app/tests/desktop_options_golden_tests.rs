@@ -103,6 +103,8 @@ fn ro_1_the_excluded_list_is_unchanged() {
         [
             SettingId::UiLastBrowseDir,
             SettingId::UiWindowRect,
+            SettingId::UiOptionsAdvanced,
+            SettingId::UiOptionsPreset,
             SettingId::AudioBgMusic,
             SettingId::EmuHackOptions,
             SettingId::EmuBuiltinPatches,
@@ -553,6 +555,10 @@ fn ro_3_the_handheld_main_pages_are_the_mockups() {
 
     assert_eq!(
         [
+            // Lot REWRITE-UI: the mode, the preset and its page first.
+            OptionRow::Mode,
+            OptionRow::Preset,
+            OptionRow::Page(OptionsPage::PresetOptions),
             OptionRow::Language,
             OptionRow::Volume,
             OptionRow::RenderScale,
@@ -560,17 +566,23 @@ fn ro_3_the_handheld_main_pages_are_the_mockups() {
             OptionRow::Palette,
             OptionRow::Overscan,
             OptionRow::Region,
+            OptionRow::Page(OptionsPage::Widescreen),
             OptionRow::Page(OptionsPage::Shaders),
             OptionRow::Page(OptionsPage::Optimizations),
             OptionRow::Page(OptionsPage::Advanced),
             OptionRow::Controls,
             OptionRow::Achievements,
             OptionRow::Profiler,
+            OptionRow::Reset,
         ],
         ROWS
     );
     assert_eq!(
         [
+            // Lot REWRITE-UI: the mode, the preset and its page first.
+            OptionRow::Mode,
+            OptionRow::Preset,
+            OptionRow::Page(OptionsPage::PresetOptions),
             OptionRow::Language,
             OptionRow::Volume,
             OptionRow::RenderScale,
@@ -580,6 +592,7 @@ fn ro_3_the_handheld_main_pages_are_the_mockups() {
             OptionRow::Region,
             // Owner request: the orientation of the screen, on the main page.
             OptionRow::Choice(SettingId::UiOrientation),
+            OptionRow::Page(OptionsPage::Widescreen),
             OptionRow::Page(OptionsPage::Shaders),
             OptionRow::Page(OptionsPage::Optimizations),
             OptionRow::Page(OptionsPage::Advanced),
@@ -589,6 +602,7 @@ fn ro_3_the_handheld_main_pages_are_the_mockups() {
             OptionRow::Page(OptionsPage::Touch),
             OptionRow::Achievements,
             OptionRow::Profiler,
+            OptionRow::Reset,
         ],
         TOUCH_ROWS
     );
@@ -603,6 +617,7 @@ fn ro_3_the_handheld_main_pages_are_the_mockups() {
             OptionRow::LuaOptimized,
             OptionRow::LuaExperimental,
             OptionRow::Setting(SettingId::EmuLuaSmoothGc),
+            OptionRow::Reset,
         ],
         OPTIMIZATION_ROWS
     );

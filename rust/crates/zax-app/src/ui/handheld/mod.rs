@@ -1122,6 +1122,7 @@ impl HandheldUi {
                 Screen::Home
             };
         }
+        self.options.sync(host.settings());
         self.screen = Screen::Options;
     }
 

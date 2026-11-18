@@ -73,3 +73,14 @@ A Default button on every tab of the new window, Essentials included. It does no
 ## Step 18 (2026-11-18)
 
 Widescreen & Hacks tab = defaults of every game with a widescreen patch (owner): widescreen on by default + ratio (video.widescreen), extra width, advanced mode, and common defaults of the pack options no_slowdown, invincible, level_select and Kirby's margin_enemies / margin_freeze / margin_freeze_tint (meant for other games). Stored in emu.hack_options as */key entries; a pack reads its own entry, then the common one, then its default. Default on that tab drops the */ entries only. NES picture (new window) lost its widescreen group to this tab. Simple mode: widescreen + ratio, advanced mode, no slowdown, game buttons.
+
+## Step 19 (2026-11-18)
+
+Console options get the simple / advanced logic (owner: "fais-moi une proposition au mieux").
+- ui.options_advanced and ui.options_preset: new settings shared by the window and the console (saved).
+- ui/presets.rs: the presets out of options_new.rs, shared (choose, chosen, matches, reset_with).
+- Console simple main page: mode, preset, preset page (rows the preset proposes), language, volume, widescreen on/off, region, simple pages Display / NES picture / 3D / Audio / Emulation (the window's simple tabs), controls, achievements, reset.
+- Advanced main page: mode, preset, preset page, then the RO-3 tree plus a Widescreen & Hacks page (default ratio, extra width, advanced mode, common hack defaults, strict edges, built-in patches), reset. Strict edges left NES picture for it.
+- A reset row ends every global page: preset values for what the preset manages, own defaults elsewhere; on the preset page it writes the preset again.
+- Handheld defaults: the fastest preset, plus the handheld list; automatic resolution kept off (earlier owner decision).
+- PC simple Widescreen tab: on/off only.

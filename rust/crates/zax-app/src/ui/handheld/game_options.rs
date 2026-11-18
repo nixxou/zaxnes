@@ -144,7 +144,14 @@ pub const fn page_rows(page: OptionsPage) -> &'static [OptionRow] {
         | OptionsPage::Camera
         | OptionsPage::Audio
         | OptionsPage::Shaders
-        | OptionsPage::Touch => &[],
+        | OptionsPage::Touch
+        | OptionsPage::PresetOptions
+        | OptionsPage::Widescreen
+        | OptionsPage::SimpleDisplay
+        | OptionsPage::SimpleNesPicture
+        | OptionsPage::SimpleRendering3d
+        | OptionsPage::SimpleAudio
+        | OptionsPage::SimpleEmulation => &[],
     }
 }
 
@@ -208,7 +215,14 @@ pub const fn row_settings(row: OptionRow) -> &'static [SettingId] {
         | OptionRow::Shader(_)
         | OptionRow::ShaderPreFilter(_)
         | OptionRow::ShaderBackend
-        | OptionRow::Group(_) => &[],
+        | OptionRow::Group(_)
+        // Lot REWRITE-UI: the global options' own rows.
+        | OptionRow::Mode
+        | OptionRow::Preset
+        | OptionRow::WidescreenOn
+        | OptionRow::Switch(_)
+        | OptionRow::HackDefault(_)
+        | OptionRow::Reset => &[],
     }
 }
 

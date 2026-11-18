@@ -10,6 +10,10 @@
 # Checked by `crates/zax-app/tests/handheld_tree_tests.rs`.
 
 options
+  row.mode
+  row.preset
+  page.preset_options
+    row.reset
   row.language
   row.volume
   row.render_scale
@@ -26,6 +30,19 @@ options
     video.overscan_pal_right
     video.overscan_mode
   row.region
+  page.widescreen
+    video.widescreen
+    video.widescreen_extra
+    video.widescreen_advanced
+    row.hack_default.no_slowdown
+    row.hack_default.invincible
+    row.hack_default.level_select
+    row.hack_default.margin_enemies
+    row.hack_default.margin_freeze
+    row.hack_default.margin_freeze_tint
+    video.widescreen_strict_edges
+    emu.builtin_patches
+    row.reset
   page.shaders
     video.backend
     video.shader_resolution
@@ -37,6 +54,7 @@ options
     row.shader_pre_filter.shader.3d.preset
     row.shader.shader.3d_ws.mode
     row.shader_pre_filter.shader.3d_ws.preset
+    row.reset
   page.optimizations
     row.frame_cap
     row.half_rate_3d
@@ -47,6 +65,7 @@ options
     row.lua_optimized
     row.lua_experimental
     emu.lua_smooth_gc
+    row.reset
   page.advanced
     page.display
       row.show_fps
@@ -60,6 +79,7 @@ options
         video.anti_alias
       [group.advanced]
         video.max_queued_frames
+        row.reset
     page.rendering_3d
       render.visual_style
       page.enhanced_effects
@@ -70,14 +90,17 @@ options
           render.style.ssr_clarity
           render.style.ssr_length
           render.style.ssr_quality
+          row.reset
       page.geometry
         scene.bend_lr
         scene.bend_tb
         scene.arc_h
         scene.arc_center
         scene.bend_2d_mode
+        row.reset
       scene.skybox
       render.mesh_algo
+      row.reset
     page.light_shadows
       light.intensity
       render.backdrop_lighting
@@ -88,14 +111,16 @@ options
         render.style.ao_radius
         render.style.ao_thickness
         render.style.ao_quality
+        row.reset
     page.nes_picture
       video.remove_sprite_limit
-      video.widescreen_strict_edges
       video.composite_signal
       video.emphasis_3d
+      row.reset
     page.camera
       row.camera
       camera.fov
+      row.reset
     page.emulation
       emu.engine
       emu.cartridge_db
@@ -137,12 +162,84 @@ options
       emu.auto_tv_mode
       emu.tv_mode
       input.emulated_menu_button
+      row.reset
     page.audio
       audio.classic_output
       audio.console_profile
+      row.reset
   page.controls
   page.achievements
   row.profiler
+  row.reset
+simple options
+  row.mode
+  row.preset
+  page.preset_options
+    row.reset
+  row.language
+  row.volume
+  row.widescreen_on
+  row.region
+  page.simple_display
+    row.show_fps
+    video.vsync
+    video.anti_alias
+    video.skip_frame
+    page.shaders
+      video.backend
+      video.shader_resolution
+      row.shader.shader.2d.mode
+      row.shader_pre_filter.shader.2d.preset
+      row.shader.shader.2d_ws.mode
+      row.shader_pre_filter.shader.2d_ws.preset
+      row.shader.shader.3d.mode
+      row.shader_pre_filter.shader.3d.preset
+      row.shader.shader.3d_ws.mode
+      row.shader_pre_filter.shader.3d_ws.preset
+      row.reset
+    row.reset
+  page.simple_nes_picture
+    row.palette
+    video.composite_signal
+    page.overscan
+      video.overscan_ntsc_top
+      video.overscan_ntsc_bottom
+      video.overscan_ntsc_left
+      video.overscan_ntsc_right
+      video.overscan_pal_top
+      video.overscan_pal_bottom
+      video.overscan_pal_left
+      video.overscan_pal_right
+      video.overscan_mode
+    row.reset
+  page.simple_rendering_3d
+    render.visual_style
+    render.style.reflections
+    page.geometry
+      scene.bend_lr
+      scene.bend_tb
+      scene.arc_h
+      scene.arc_center
+      scene.bend_2d_mode
+      row.reset
+    light.intensity
+    row.shadows
+    camera.fov
+    row.reset
+  page.simple_audio
+    row.volume
+    audio.console_profile
+    row.reset
+  page.simple_emulation
+    emu.run_ahead
+    emu.smooth_scroll_ahead
+    emu.rainbow_network
+    emu.exact_rate
+    emu.realtime_input
+    row.reset
+  page.controls
+  page.achievements
+  row.reset
 game options
   row.reset_all
   row.volume

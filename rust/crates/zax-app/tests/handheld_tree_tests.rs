@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 
 use zax_app::ui::handheld::game_options::{self, GameRow};
-use zax_app::ui::handheld::options::{OptionRow, OptionsPage, ROWS, TOUCH_ROWS};
+use zax_app::ui::handheld::options::{OptionRow, OptionsPage, ROWS, SIMPLE_ROWS, TOUCH_ROWS};
 use zax_app::ui::handheld::{advanced, overscan};
 use zax_settings::catalogue::SettingId;
 
@@ -18,7 +18,9 @@ use zax_settings::catalogue::SettingId;
 /// settings-file key, every other row a name of its own that no translation can move.
 fn row_key(row: OptionRow) -> String {
     match row {
-        OptionRow::Setting(id) | OptionRow::Choice(id) => id.key().into_owned(),
+        OptionRow::Setting(id) | OptionRow::Choice(id) | OptionRow::Switch(id) => {
+            id.key().into_owned()
+        }
         OptionRow::Group(key) => format!("[{key}]"),
         OptionRow::Page(page) => format!("page.{}", page_name(page)),
         OptionRow::Language => "row.language".to_owned(),
@@ -47,6 +49,11 @@ fn row_key(row: OptionRow) -> String {
         OptionRow::ShaderPreFilter(slot) => {
             format!("row.shader_pre_filter.{}", slot.ids().preset.key())
         }
+        OptionRow::Mode => "row.mode".to_owned(),
+        OptionRow::Preset => "row.preset".to_owned(),
+        OptionRow::WidescreenOn => "row.widescreen_on".to_owned(),
+        OptionRow::HackDefault(key) => format!("row.hack_default.{key}"),
+        OptionRow::Reset => "row.reset".to_owned(),
     }
 }
 
@@ -65,6 +72,13 @@ fn page_name(page: OptionsPage) -> &'static str {
         OptionsPage::Audio => "audio",
         OptionsPage::Shaders => "shaders",
         OptionsPage::Touch => "touch",
+        OptionsPage::PresetOptions => "preset_options",
+        OptionsPage::Widescreen => "widescreen",
+        OptionsPage::SimpleDisplay => "simple_display",
+        OptionsPage::SimpleNesPicture => "simple_nes_picture",
+        OptionsPage::SimpleRendering3d => "simple_rendering_3d",
+        OptionsPage::SimpleAudio => "simple_audio",
+        OptionsPage::SimpleEmulation => "simple_emulation",
     }
 }
 
@@ -135,7 +149,8 @@ fn descend(
 /// camera) and this walk has to see those too.
 fn settings_of(row: OptionRow) -> Vec<SettingId> {
     match row {
-        OptionRow::Setting(id) => vec![id],
+        OptionRow::Setting(id) | OptionRow::Switch(id) => vec![id],
+        OptionRow::WidescreenOn => vec![SettingId::VideoWidescreen],
         // The camera view asks the application for a preset, the controls open their own screen
         // and a title or a page row holds nothing: none of them is a setting of the model.
         OptionRow::Group(_) | OptionRow::Page(_) | OptionRow::Controls | OptionRow::Camera => {
@@ -262,7 +277,8 @@ fn ro_3_no_row_is_reachable_from_two_places() {
     let mut places: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (path, row) in walk(Tree::Global) {
         // A group title is a label, not a row: the same title may head a group on two pages.
-        if matches!(row, OptionRow::Group(_)) {
+        // The reset row of lot REWRITE-UI ends every page.
+        if matches!(row, OptionRow::Group(_) | OptionRow::Reset) {
             continue;
         }
         places
@@ -463,6 +479,8 @@ fn ro_3_write_the_option_tree_golden() {
 fn tree_text() -> String {
     let mut out = String::from("options\n");
     emit(Tree::Global, &ROWS, 1, &mut out);
+    out.push_str("simple options\n");
+    emit(Tree::Global, &SIMPLE_ROWS, 1, &mut out);
     out.push_str("game options\n");
     for row in game_options::GAME_MAIN {
         match row {

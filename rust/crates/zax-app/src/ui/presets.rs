@@ -247,10 +247,10 @@ mod tests {
     #[test]
     fn choosing_a_preset_writes_it_and_remembers_it() {
         let mut model = SettingsModel::new();
-        for index in 0..PRESETS.len() {
+        for (index, preset) in PRESETS.iter().enumerate() {
             choose(&mut model, index);
             assert_eq!(chosen(&model), index);
-            assert!(matches(&model, &PRESETS[index]));
+            assert!(matches(&model, preset));
         }
     }
 
