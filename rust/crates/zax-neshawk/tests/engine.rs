@@ -80,10 +80,11 @@ fn the_engine_reports_itself_as_neshawk() {
         zax_core_api::state_core_name(EngineKind::NesHawk),
         "NesHawk"
     );
-    // The capabilities the user interface reads: none of Zaxnes's bus features, rollback yes.
+    // The capabilities the user interface reads: rollback yes; the widescreen and the hack packs
+    // since NESHAWK-HACKS step 5; still none of Zaxnes's machine internals.
     let caps = engine.capabilities();
     assert!(caps.rollback);
-    assert!(!caps.widescreen && !caps.hack_packs && !caps.machine_internals);
+    assert!(caps.widescreen && caps.hack_packs && !caps.machine_internals);
     assert!(!caps.fast_core_snapshot && !caps.run_ahead);
 }
 
