@@ -214,6 +214,7 @@ pub const fn row_settings(row: OptionRow) -> &'static [SettingId] {
         | OptionRow::Page(_)
         | OptionRow::Shader(_)
         | OptionRow::ShaderPreFilter(_)
+        | OptionRow::ShaderOption(..)
         | OptionRow::ShaderBackend
         | OptionRow::Group(_)
         // Lot REWRITE-UI: the global options' own rows.

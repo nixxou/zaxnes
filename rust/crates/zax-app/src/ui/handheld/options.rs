@@ -77,6 +77,9 @@ pub enum OptionRow {
     /// The pre-filter of a slot of the slang shaders: none, then those of
     /// [`shader_panel::PRE_FILTERS`] (owner request).
     ShaderPreFilter(ShaderSlot),
+    /// Sub-option `n` of the shader family of a slot (lot REWRITE-UI): its choices or its steps,
+    /// as `shader_looks::sub_options` lists them for the family the slot holds.
+    ShaderOption(ShaderSlot, u8),
     /// The graphics API of the shaders page: OpenGL draws none, Vulkan draws them (owner
     /// decision: the slang shaders are offered on Vulkan only). Applied at the next start.
     ShaderBackend,
@@ -745,7 +748,7 @@ pub fn step_selection(rows: &[OptionRow], from: usize, step: i32) -> usize {
 }
 
 /// The list and its selection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HandheldOptionsModel {
     selected: usize,
     /// The pages open over the main one, innermost last: each the page shown and the row of the
@@ -757,6 +760,9 @@ pub struct HandheldOptionsModel {
     /// ([`Self::sync`]): they decide the main page's rows and the preset page's.
     advanced: bool,
     preset: usize,
+    /// The rows of the shaders page as the settings last held them: each slot's sub-options
+    /// follow the family it holds.
+    shader_rows: Vec<OptionRow>,
 }
 
 impl Default for HandheldOptionsModel {
@@ -775,6 +781,7 @@ impl HandheldOptionsModel {
             depth: 0,
             advanced: false,
             preset: 2,
+            shader_rows: Vec::new(),
         }
     }
 
@@ -783,6 +790,7 @@ impl HandheldOptionsModel {
     pub fn sync(&mut self, settings: &SettingsModel) {
         let advanced = crate::ui::presets::advanced(settings);
         self.preset = crate::ui::presets::chosen(settings);
+        self.shader_rows = shader_rows(settings);
         if advanced != self.advanced {
             self.advanced = advanced;
             self.depth = 0;
@@ -819,10 +827,11 @@ impl HandheldOptionsModel {
 
     /// The rows of the page shown.
     #[must_use]
-    pub fn rows(&self) -> &'static [OptionRow] {
+    pub fn rows(&self) -> &[OptionRow] {
         match self.depth.checked_sub(1) {
             Some(last) => match self.trail[last].0 {
                 OptionsPage::PresetOptions => preset_rows(self.preset),
+                OptionsPage::Shaders => &self.shader_rows,
                 page => page.rows(),
             },
             None if self.advanced => Self::main_rows(),
@@ -932,7 +941,7 @@ impl HandheldOptionsModel {
         None
     }
 
-    fn step(self, settings: &mut SettingsModel, step: i32) -> Option<OptionsCommand> {
+    fn step(&self, settings: &mut SettingsModel, step: i32) -> Option<OptionsCommand> {
         step_row(self.selected(), settings, step)
     }
 }
@@ -967,6 +976,41 @@ fn step_options_row(row: OptionRow, settings: &mut SettingsModel, step: i32) {
             let on = hack_default(stored.as_text(), key);
             let text = hack_options::with_common(stored.as_text(), key, !on);
             settings.set(SettingId::EmuHackOptions, SettingValue::Text(text));
+        }
+        _ => {}
+    }
+}
+
+/// Steps a row of the shaders page: a slot's family, the graphics API, a pre-filter or a
+/// sub-option of the family.
+fn step_shader_row(row: OptionRow, settings: &mut SettingsModel, step: i32) {
+    match row {
+        OptionRow::Shader(slot) => {
+            let picks = shader_panel::slot_picks(slot);
+            let next = cycled(&picks, &shader_panel::slot_pick(settings, slot), step).clone();
+            shader_panel::set_slot_pick(settings, slot, &next);
+        }
+        OptionRow::ShaderBackend => {
+            // OpenGL (0) and Vulkan (1); DirectX 12 is the desktop's, and a console is not one.
+            let next = i32::from(settings.get(SettingId::VideoBackend).as_int() != 1);
+            settings.set(SettingId::VideoBackend, SettingValue::Enum(next));
+        }
+        OptionRow::ShaderPreFilter(slot) => {
+            let choices: Vec<Option<&shader_panel::PreFilter>> = std::iter::once(None)
+                .chain(shader_panel::pre_filters().map(Some))
+                .collect();
+            let next = *cycled(&choices, &shader_panel::pre_filter_of(settings, slot), step);
+            crate::ui::shader_looks::set_pre_filter(settings, slot, next);
+        }
+        OptionRow::ShaderOption(slot, index) => {
+            if let Some(state) = crate::ui::shader_looks::state_of(settings, slot) {
+                if let Some(option) = crate::ui::shader_looks::sub_options(&state)
+                    .get(usize::from(index))
+                    .copied()
+                {
+                    crate::ui::shader_looks::step_sub_option(settings, slot, option, step);
+                }
+            }
         }
         _ => {}
     }
@@ -1056,23 +1100,10 @@ pub fn step_row(row: OptionRow, settings: &mut SettingsModel, step: i32) -> Opti
         | OptionRow::HackDefault(_) => step_options_row(row, settings, step),
         OptionRow::Setting(id) => super::advanced::step(id, settings, step),
         OptionRow::Achievements => return Some(OptionsCommand::OpenAchievements),
-        OptionRow::Shader(slot) => {
-            let picks = shader_panel::slot_picks(slot);
-            let next = cycled(&picks, &shader_panel::slot_pick(settings, slot), step).clone();
-            shader_panel::set_slot_pick(settings, slot, &next);
-        }
-        OptionRow::ShaderBackend => {
-            // OpenGL (0) and Vulkan (1); DirectX 12 is the desktop's, and a console is not one.
-            let next = i32::from(settings.get(SettingId::VideoBackend).as_int() != 1);
-            settings.set(SettingId::VideoBackend, SettingValue::Enum(next));
-        }
-        OptionRow::ShaderPreFilter(slot) => {
-            let choices: Vec<Option<&shader_panel::PreFilter>> = std::iter::once(None)
-                .chain(shader_panel::pre_filters().map(Some))
-                .collect();
-            let next = *cycled(&choices, &shader_panel::pre_filter_of(settings, slot), step);
-            shader_panel::set_pre_filter(settings, slot, next);
-        }
+        OptionRow::Shader(_)
+        | OptionRow::ShaderBackend
+        | OptionRow::ShaderPreFilter(_)
+        | OptionRow::ShaderOption(..) => step_shader_row(row, settings, step),
     }
     None
 }
@@ -1134,7 +1165,8 @@ fn reset_ids(row: OptionRow) -> Vec<SettingId> {
         | OptionRow::HackDefault(_)
         | OptionRow::Reset
         | OptionRow::Shader(_)
-        | OptionRow::ShaderPreFilter(_) => Vec::new(),
+        | OptionRow::ShaderPreFilter(_)
+        | OptionRow::ShaderOption(..) => Vec::new(),
         // The others are the rows a game may set too: the same settings.
         row => super::game_options::row_settings(row).to_vec(),
     }
@@ -1198,12 +1230,69 @@ pub fn label(row: OptionRow) -> String {
         OptionRow::Shader(slot) => shader_panel::slot_label(slot),
         OptionRow::ShaderPreFilter(_) => format!("  {}", strings::get("shaders.prefilter")),
         OptionRow::ShaderBackend => strings::get("shaders.backend"),
+        // Its text depends on the family the slot holds: `row_label`.
+        OptionRow::ShaderOption(..) => String::new(),
         OptionRow::Mode => strings::get("options.new.mode"),
         OptionRow::Preset => strings::get("options.new.preset_title"),
         OptionRow::WidescreenOn => strings::get("options.new.widescreen_default"),
         OptionRow::HackDefault(key) => strings::get(&format!("options.new.hack.{key}")),
         OptionRow::Reset => strings::get(keys::BUTTON_RESET_DEFAULTS),
     }
+}
+
+/// The label of `row` with the settings at hand: a shader sub-option's depends on the family its
+/// slot holds; any other row's is [`label`]'s.
+#[must_use]
+pub fn row_label(row: OptionRow, settings: &SettingsModel) -> String {
+    match row {
+        OptionRow::ShaderOption(slot, index) => shader_option(settings, slot, index)
+            .map_or_else(String::new, |(label, _)| format!("  {label}")),
+        row => label(row),
+    }
+}
+
+/// The label and the value of sub-option `index` of the family `slot` holds.
+fn shader_option(
+    settings: &SettingsModel,
+    slot: ShaderSlot,
+    index: u8,
+) -> Option<(String, String)> {
+    let state = crate::ui::shader_looks::state_of(settings, slot)?;
+    let option = *crate::ui::shader_looks::sub_options(&state).get(usize::from(index))?;
+    Some(crate::ui::shader_looks::sub_option_text(&state, option))
+}
+
+/// The rows of the shaders page for `settings`: the graphics API and the resolution, then each
+/// slot, its pre-filter and the sub-options of its family when it holds a preset, then the reset
+/// row (lot REWRITE-UI).
+#[must_use]
+pub fn shader_rows(settings: &SettingsModel) -> Vec<OptionRow> {
+    let mut rows = vec![
+        OptionRow::ShaderBackend,
+        OptionRow::Setting(SettingId::VideoShaderResolution),
+    ];
+    for slot in [
+        ShaderSlot::TwoD,
+        ShaderSlot::TwoDWide,
+        ShaderSlot::ThreeD,
+        ShaderSlot::ThreeDWide,
+    ] {
+        rows.push(OptionRow::Shader(slot));
+        if settings.get(slot.ids().mode).as_int() != zax_settings::shader_slots::PRESET {
+            continue;
+        }
+        rows.push(OptionRow::ShaderPreFilter(slot));
+        if let Some(state) = crate::ui::shader_looks::state_of(settings, slot) {
+            let count = crate::ui::shader_looks::sub_options(&state).len();
+            rows.extend(
+                (0..count)
+                    .filter_map(|index| u8::try_from(index).ok())
+                    .map(|index| OptionRow::ShaderOption(slot, index)),
+            );
+        }
+    }
+    rows.push(OptionRow::Reset);
+    rows
 }
 
 /// The value of `row` as the screen shows it; empty for a row that opens a list.
@@ -1286,6 +1375,9 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
         }
         OptionRow::ShaderPreFilter(slot) => {
             shader_panel::pre_filter_label(shader_panel::pre_filter_of(settings, slot))
+        }
+        OptionRow::ShaderOption(slot, index) => {
+            shader_option(settings, slot, index).map_or_else(String::new, |(_, value)| value)
         }
         OptionRow::ShaderBackend => strings::get(if !cfg!(feature = "wgpu") {
             "shaders.backend.not_built"
@@ -1593,7 +1685,7 @@ mod tests {
         );
         assert_eq!(MAX_DEPTH, model.path().len(), "the tree is three deep");
         // A fourth level does not exist, and asking for one changes nothing.
-        let before = model;
+        let before = model.clone();
         model.handle(PadButton::A, &mut settings);
         assert_eq!(Some(OptionsPage::EnhancedEffects), model.page());
 

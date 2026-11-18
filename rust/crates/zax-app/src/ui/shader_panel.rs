@@ -532,6 +532,9 @@ pub enum SlotPick {
     Off,
     /// A preset, by its path in the pack.
     Preset(String),
+    /// A family of [`super::shader_looks::LOOKS`] (lot REWRITE-UI: the console offers the
+    /// families and their sub-options, not the presets).
+    Look(usize),
 }
 
 /// Every pick of `slot`, in the order the console steps through them.
@@ -542,7 +545,7 @@ pub fn slot_picks(slot: ShaderSlot) -> Vec<SlotPick> {
         picks.push(SlotPick::Follow);
     }
     picks.push(SlotPick::Off);
-    picks.extend(catalogue().map(|preset| SlotPick::Preset(preset.path.to_owned())));
+    picks.extend(super::shader_looks::looks().map(|(index, _)| SlotPick::Look(index)));
     picks
 }
 
@@ -554,6 +557,9 @@ pub fn slot_pick(model: &SettingsModel, slot: ShaderSlot) -> SlotPick {
         shader_slots::FOLLOW if slot.fallback().is_some() => SlotPick::Follow,
         // A combination of the catalogue is one of the picks; otherwise the preset behind the
         // pre-filter, which has a row of its own.
+        PRESET if super::shader_looks::state_of(model, slot).is_some() => {
+            SlotPick::Look(super::shader_looks::state_of(model, slot).map_or(0, |state| state.look))
+        }
         PRESET => {
             let value = model.get(ids.preset);
             let stored = value.as_text();
@@ -578,6 +584,7 @@ pub fn set_slot_pick(model: &mut SettingsModel, slot: ShaderSlot, pick: &SlotPic
             model.set(ids.mode, SettingValue::Enum(OFF));
         }
         SlotPick::Preset(path) => choose_preset(model, slot, path),
+        SlotPick::Look(look) => super::shader_looks::choose_look(model, slot, *look),
     }
 }
 
@@ -592,6 +599,9 @@ pub fn pick_label(slot: ShaderSlot, pick: &SlotPick) -> String {
         SlotPick::Off => strings::get("shaders.mode.off"),
         SlotPick::Preset(path) if path.is_empty() => strings::get("shaders.none"),
         SlotPick::Preset(path) => preset_label(path),
+        SlotPick::Look(look) => super::shader_looks::LOOKS
+            .get(*look)
+            .map_or_else(String::new, super::shader_looks::Look::name),
     }
 }
 

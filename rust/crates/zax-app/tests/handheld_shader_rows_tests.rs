@@ -5,6 +5,7 @@ use zax_app::ui::handheld::options::{
     step_row, value_text, OptionRow, OptionsPage, ADVANCED_HUB, ROWS, TOUCH_ROWS,
 };
 use zax_app::ui::handheld::overlay::CameraPreset;
+use zax_app::ui::shader_looks::LOOKS;
 use zax_app::ui::shader_panel::{self, SlotPick, CATALOGUE};
 use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
@@ -27,28 +28,27 @@ fn the_2d_row_steps_from_off_to_the_first_preset_and_back() {
     let mut settings = SettingsModel::new();
     let row = OptionRow::Shader(ShaderSlot::TwoD);
     assert_eq!(settings.get(SettingId::Shader2dMode).as_int(), OFF);
+    // Lot REWRITE-UI: the row steps through the shader families, not the presets.
+    let first = &LOOKS[0];
     step_row(row, &mut settings, 1);
     assert_eq!(settings.get(SettingId::Shader2dMode).as_int(), PRESET);
     assert_eq!(
         settings.get(SettingId::Shader2dPreset).as_text(),
-        CATALOGUE[0].path
+        first.variants[0].path
     );
-    assert_eq!(
-        value_text(row, &settings, CameraPreset::Orbit),
-        shader_panel::preset_label(CATALOGUE[0].path)
-    );
+    assert_eq!(value_text(row, &settings, CameraPreset::Orbit), first.name());
     // Every 3D and widescreen mode follows the 2D slot by default.
     assert_eq!(
         resolve(&settings, true, true).map(|choice| choice.preset),
-        Some(CATALOGUE[0].path.to_owned())
+        Some(first.variants[0].path.to_owned())
     );
     step_row(row, &mut settings, -1);
     assert_eq!(settings.get(SettingId::Shader2dMode).as_int(), OFF);
-    // The 2D slot has no slot to follow: back once more wraps to the last preset.
+    // The 2D slot has no slot to follow: back once more wraps to the last family.
     step_row(row, &mut settings, -1);
     assert_eq!(
         shader_panel::slot_pick(&settings, ShaderSlot::TwoD),
-        SlotPick::Preset(CATALOGUE[CATALOGUE.len() - 1].path.to_owned())
+        SlotPick::Look(LOOKS.len() - 1)
     );
 }
 
@@ -102,10 +102,11 @@ fn the_pre_filter_stays_in_front_of_the_preset() {
         settings.get(SettingId::Shader2dPreset).as_text(),
         format!("{}|crt/crt-easymode.slangp", PRE_FILTERS[0].path)
     );
-    // The preset row still names the preset behind it.
+    // The preset row still names the family of the preset behind it.
+    let light = LOOKS.iter().position(|look| look.key == "crt_light").unwrap();
     assert_eq!(
         shader_panel::slot_pick(&settings, slot),
-        SlotPick::Preset("crt/crt-easymode.slangp".to_owned())
+        SlotPick::Look(light)
     );
     shader_panel::choose_preset(&mut settings, slot, "crt/zfast-crt.slangp");
     assert_eq!(

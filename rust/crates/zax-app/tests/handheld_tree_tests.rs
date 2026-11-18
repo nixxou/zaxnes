@@ -49,6 +49,9 @@ fn row_key(row: OptionRow) -> String {
         OptionRow::ShaderPreFilter(slot) => {
             format!("row.shader_pre_filter.{}", slot.ids().preset.key())
         }
+        OptionRow::ShaderOption(slot, index) => {
+            format!("row.shader_option.{}.{index}", slot.ids().preset.key())
+        }
         OptionRow::Mode => "row.mode".to_owned(),
         OptionRow::Preset => "row.preset".to_owned(),
         OptionRow::WidescreenOn => "row.widescreen_on".to_owned(),

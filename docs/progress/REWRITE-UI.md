@@ -92,3 +92,7 @@ Console lists get a scrollbar on the left when they are longer than the screen (
 ## Step 21 (2026-11-18)
 
 Console: Page Up / Page Down (new pad buttons) move a screenful of rows, stopping at the list ends. The keys printing A, B, X, Y in the system layout (QWERTY, AZERTY...) press those buttons (Key::printed_letter via SDL keycodes); the letter keys press nothing while the keyboard screen types.
+
+## Step 22 (2026-11-18)
+
+Shader families (owner, proposal researched by a Fable 5.2 sub-agent from the slang-shaders sources): ui/shader_looks.rs, 8 families (CRT Guest, Mega Bezel, CRT light, CRT classic, CRT Royale, composite signal, LCD, smoothing) with picks that choose the preset file (TV frame, quality, signal, model, method) and steps that set parameters (curvature, scanlines, mask, brightness, reflections...), the same names in every family; a step of no parameter is the preset's own value, a value set by hand reads Custom. PC: Style menu (families + every preset of the pack), pre-filter, sub-options, and the full parameter editor folded under them (shader and pre-filter). Console: the slot row steps through the families, rows of sub-options under each slot (dynamic rows). Guest switches to its HD version behind a pre-filter. Step values are a first proposal, to tune by eye.

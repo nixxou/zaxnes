@@ -1131,7 +1131,7 @@ impl HandheldUi {
                 None => shown,
             };
             specs.push(RowSpec::Row {
-                left: options::label(*row),
+                left: options::row_label(*row, frame.host.settings()),
                 badges: Vec::new(),
                 right: shown,
                 colour: DIM,

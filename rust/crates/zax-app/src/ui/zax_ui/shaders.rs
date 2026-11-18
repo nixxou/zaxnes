@@ -17,7 +17,8 @@ use super::{centre, play, ZaxUi};
 use crate::application::AppHost;
 use crate::audio::UiSound;
 use crate::shader_pack;
-use crate::ui::shader_panel::{self, Family, PresetFolder, ShaderState};
+use crate::ui::shader_looks::{self, SubOption};
+use crate::ui::shader_panel::{self, PresetFolder, ShaderState};
 use crate::ui::strings;
 
 /// The window's default size.
@@ -247,37 +248,39 @@ impl ZaxUi {
 
     /// The presets the catalogue recommends for the mode of `slot`, one button each; a click
     /// gives the slot that preset.
+    /// The families put forward for the slot, one click each (lot REWRITE-UI: the families
+    /// replaced the presets).
     fn draw_quick_row(ui: &Ui, host: &mut AppHost, slot: ShaderSlot) {
-        let ids = slot.ids();
-        let using = host.settings().get(ids.mode).as_int() == PRESET;
-        let stored = host.settings().get(ids.preset).as_text().to_owned();
+        let current = shader_looks::state_of(host.settings(), slot).map(|state| state.look);
         ui.text(tr("shaders.quick"));
         let spacing = ui.clone_style().item_spacing[0];
         let padding = ui.clone_style().frame_padding[0] * 2.0;
-        for (index, preset) in shader_panel::catalogue()
-            .filter(|preset| shader_panel::featured_for(preset, slot))
-            .enumerate()
-        {
-            // The buttons wrap at the window's edge (owner review: the eighth one was cut).
-            let width = ui.calc_text_size(tr(preset.label))[0] + padding;
+        for (index, look) in shader_looks::looks().filter(|(_, look)| {
+            matches!(
+                (look.featured, shader_panel::mode_of(slot).1),
+                (shader_panel::Featured::Always, _)
+                    | (shader_panel::Featured::Narrow, false)
+                    | (shader_panel::Featured::Wide, true)
+            )
+        }) {
+            let name = look.name();
+            let width = ui.calc_text_size(&name)[0] + padding;
             let right = ui.item_rect_max()[0] + spacing + width;
             if right <= ui.window_pos()[0] + ui.window_content_region_max()[0] {
                 ui.same_line();
             }
-            let chosen = using && stored == preset.path;
+            let chosen = current == Some(index);
             let _style = chosen
                 .then(|| ui.push_style_color(imgui::StyleColor::Button, [0.25, 0.5, 0.3, 1.0]));
-            if ui.button(format!("{}##quick{index}", tr(preset.label))) && !chosen {
-                host.update_settings(|model| {
-                    shader_panel::choose_preset(model, slot, preset.path);
-                });
+            if ui.button(format!("{name}##quick{index}")) && !chosen {
+                host.update_settings(|model| shader_looks::choose_look(model, slot, index));
                 play(host, UiSound::Confirm);
             }
             if ui.is_item_hovered() {
                 ui.tooltip_text(format!(
                     "{}\n{}",
-                    tr(&format!("{}.help", preset.label)),
-                    tr(preset.cost.label())
+                    tr(&format!("shaders.look.{}.help", look.key)),
+                    tr(look.cost().label())
                 ));
             }
         }
@@ -312,7 +315,7 @@ impl ZaxUi {
             }
         }
         if let Some(filter) = chosen {
-            host.update_settings(|model| shader_panel::set_pre_filter(model, slot, filter));
+            host.update_settings(|model| shader_looks::set_pre_filter(model, slot, filter));
             play(host, UiSound::Confirm);
         }
     }
@@ -320,73 +323,115 @@ impl ZaxUi {
     /// The preset of the slot, and the menu that changes it.
     fn draw_preset_menu(&mut self, ui: &Ui, host: &mut AppHost, slot: ShaderSlot) {
         let ids = slot.ids();
-        Self::draw_pre_filter(ui, host, slot);
         let stored = host.settings().get(ids.preset).as_text().to_owned();
-        // The preset behind the pre-filter, which the row above shows; a combination of the
-        // catalogue keeps its own name.
         let (_, behind) = shader_panel::split_pre_filter(&stored);
         let behind = behind.to_owned();
-        let shown = if stored.is_empty() {
-            tr("shaders.preset.choose")
-        } else if shader_panel::catalogue_entry(&stored).is_some() {
-            preset_label(&stored)
-        } else {
-            preset_label(&behind)
+        let state = shader_looks::state_of(host.settings(), slot);
+        let shown = match &state {
+            Some(state) => state.look().name(),
+            None if stored.is_empty() => tr("shaders.look.choose"),
+            None => format!("{} ({})", tr("shaders.look.custom"), preset_label(&behind)),
         };
-        let combo = ui.begin_combo(tr("shaders.preset"), &shown);
+        let combo = ui.begin_combo(tr("shaders.look.title"), &shown);
         if combo.is_none() && ui.is_item_hovered() && !stored.is_empty() {
             ui.tooltip_text(&stored);
         }
-        let Some(_combo) = combo else {
-            return;
-        };
-        let mut chosen: Option<String> = None;
-        ui.text_disabled(tr("shaders.menu.recommended"));
-        for preset in
-            shader_panel::catalogue().filter(|preset| shader_panel::featured_for(preset, slot))
-        {
-            if ui
-                .menu_item_config(format!("{}##rec{}", tr(preset.label), preset.path))
-                .selected(stored == preset.path || behind == preset.path)
-                .build()
-            {
-                chosen = Some(preset.path.to_owned());
-            }
-        }
-        ui.separator();
-        for family in Family::ALL {
-            let Some(_menu) = ui.begin_menu(tr(family.label())) else {
-                continue;
-            };
-            for preset in shader_panel::catalogue().filter(|preset| preset.family == family) {
+        if let Some(_combo) = combo {
+            let mut chosen_look = None;
+            let mut chosen_path: Option<String> = None;
+            for (index, look) in shader_looks::looks() {
                 let clicked = ui
-                    .menu_item_config(format!("{}##cat{}", tr(preset.label), preset.path))
-                    .shortcut(tr(preset.cost.label()))
-                    .selected(stored == preset.path || behind == preset.path)
+                    .menu_item_config(format!("{}##look{index}", look.name()))
+                    .shortcut(tr(look.cost().label()))
+                    .selected(state.as_ref().is_some_and(|state| state.look == index))
                     .build();
                 if ui.is_item_hovered() {
-                    ui.tooltip_text(tr(&format!("{}.help", preset.label)));
+                    ui.tooltip_text(tr(&format!("shaders.look.{}.help", look.key)));
                 }
                 if clicked {
-                    chosen = Some(preset.path.to_owned());
+                    chosen_look = Some(index);
+                }
+            }
+            ui.separator();
+            // Every preset of the pack, for the ones no family offers.
+            if let Some(_menu) = ui.begin_menu(tr("shaders.look.all_presets")) {
+                let pack = self.shader_window.pack.get_or_insert_with(|| {
+                    PresetFolder::read(&shader_pack::folder(&host.paths().root), "")
+                });
+                if pack.is_empty() {
+                    ui.text_disabled(tr("shaders.menu.empty"));
+                } else if let Some(path) = folder_menu(ui, pack, &stored) {
+                    chosen_path = Some(path);
+                }
+            }
+            if let Some(look) = chosen_look {
+                if state.as_ref().is_none_or(|state| state.look != look) {
+                    host.update_settings(|model| shader_looks::choose_look(model, slot, look));
+                    play(host, UiSound::Confirm);
+                }
+            } else if let Some(path) = chosen_path {
+                if path != stored {
+                    host.update_settings(|model| shader_panel::choose_preset(model, slot, &path));
+                    play(host, UiSound::Confirm);
                 }
             }
         }
-        ui.separator();
-        if let Some(_menu) = ui.begin_menu(tr("shaders.menu.all")) {
-            let pack = self.shader_window.pack.get_or_insert_with(|| {
-                PresetFolder::read(&shader_pack::folder(&host.paths().root), "")
-            });
-            if pack.is_empty() {
-                ui.text_disabled(tr("shaders.menu.empty"));
-            } else if let Some(path) = folder_menu(ui, pack, &stored) {
-                chosen = Some(path);
-            }
-        }
-        if let Some(path) = chosen {
-            if path != stored {
-                host.update_settings(|model| shader_panel::choose_preset(model, slot, &path));
-                play(host, UiSound::Confirm);
+        Self::draw_pre_filter(ui, host, slot);
+        Self::draw_look_options(ui, host, slot);
+    }
+
+    /// The sub-options of the family the slot holds: its choices and its steps (lot
+    /// REWRITE-UI). A value set by hand in the parameters below reads "Custom".
+    fn draw_look_options(ui: &Ui, host: &mut AppHost, slot: ShaderSlot) {
+        let Some(state) = shader_looks::state_of(host.settings(), slot) else {
+            return;
+        };
+        let look = state.look();
+        for option in shader_looks::sub_options(&state) {
+            let (label, value) = shader_looks::sub_option_text(&state, option);
+            let Some(_combo) = ui.begin_combo(format!("{label}##{option:?}"), &value) else {
+                continue;
+            };
+            match option {
+                SubOption::Pick(pick) => {
+                    let current = state.variant().choice.get(pick).copied();
+                    for (choice, key) in look.picks[pick].choices.iter().enumerate() {
+                        if !shader_looks::choice_offered(look, pick, choice) {
+                            continue;
+                        }
+                        if ui
+                            .menu_item_config(format!(
+                                "{}##c{choice}",
+                                shader_looks::choice_label(key)
+                            ))
+                            .selected(current == Some(choice))
+                            .build()
+                            && current != Some(choice)
+                        {
+                            host.update_settings(|model| {
+                                shader_looks::choose_pick(model, slot, pick, choice);
+                            });
+                            play(host, UiSound::Confirm);
+                        }
+                    }
+                }
+                SubOption::Knob(knob) => {
+                    let entry = &look.knobs[knob];
+                    let current = state.steps.get(knob).copied().flatten();
+                    for (step, key) in entry.steps.iter().enumerate() {
+                        if ui
+                            .menu_item_config(format!("{}##s{step}", shader_looks::step_label(key)))
+                            .selected(current == Some(step))
+                            .build()
+                            && current != Some(step)
+                        {
+                            host.update_settings(|model| {
+                                shader_looks::choose_step(model, slot, knob, step);
+                            });
+                            play(host, UiSound::Confirm);
+                        }
+                    }
+                }
             }
         }
     }
@@ -469,7 +514,7 @@ impl ZaxUi {
         let title = strings::format(&tr("shaders.parameters"), &[&changed_count.to_string()]);
         if !ui.collapsing_header(
             format!("{title}###parameters"),
-            imgui::TreeNodeFlags::DEFAULT_OPEN,
+            imgui::TreeNodeFlags::empty(),
         ) {
             return;
         }
