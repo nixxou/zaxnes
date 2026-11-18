@@ -69,3 +69,7 @@ Owner: reflections off by default in every mode (still offered from Balanced on)
 ## Step 17 (2026-11-18)
 
 A Default button on every tab of the new window, Essentials included. It does not change the chosen preset: what the tab shows (in the mode in force) goes back to the chosen preset's value where the preset manages the setting, to the setting's own default elsewhere; on Essentials it writes the chosen preset again. New tab Widescreen & Hacks: simple = widescreen, extra width, buttons opening the widescreen / hacks windows of the game in play; advanced adds the advanced mode, strict edges and built-in patches. Widescreen left Essentials. draw_tab_body split (draw_tab_entries) so that the new window draws its own reset. zax-app lib and desktop_options_golden tests pass.
+
+## Step 18 (2026-11-18)
+
+Widescreen & Hacks tab = defaults of every game with a widescreen patch (owner): widescreen on by default + ratio (video.widescreen), extra width, advanced mode, and common defaults of the pack options no_slowdown, invincible, level_select and Kirby's margin_enemies / margin_freeze / margin_freeze_tint (meant for other games). Stored in emu.hack_options as */key entries; a pack reads its own entry, then the common one, then its default. Default on that tab drops the */ entries only. NES picture (new window) lost its widescreen group to this tab. Simple mode: widescreen + ratio, advanced mode, no slowdown, game buttons.

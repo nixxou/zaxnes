@@ -10,7 +10,7 @@ mod bk2_movies;
 mod commands;
 mod game_options;
 mod games;
-mod hack_options;
+pub mod hack_options;
 mod hack_switch;
 mod hacks;
 mod jobs;

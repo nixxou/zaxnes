@@ -13,6 +13,7 @@ use zax_settings::values::SettingValue;
 use super::{centre, play, ZaxUi};
 use crate::application::AppHost;
 use crate::audio::UiSound;
+use crate::emulation::host::hack_options;
 use crate::ui::handheld::hacks::HacksView;
 use crate::ui::options::{self, OptionsGroup, OptionsTab, TabEntry};
 use crate::ui::{strings, text};
@@ -216,6 +217,10 @@ enum Simple {
     Folder(SettingId),
     /// The buttons that open the widescreen and the hacks of the game in play.
     GameHacks,
+    /// The widescreen of every game by default: a check box, and the ratio beside it.
+    WidescreenDefault,
+    /// The common default of a hack pack option (`hack_options::COMMON_OPTIONS`).
+    HackDefault(&'static str),
 }
 
 /// What the advanced mode shows of a page.
@@ -270,20 +275,36 @@ const PAGES: [Page; 8] = [
             Simple::Row(SettingId::VideoCompositeSignal),
             Simple::Group(OptionsGroup::Overscan),
         ],
-        advanced: Advanced::Tabs(&[OptionsTab::NesPicture]),
+        // The classic tab without its widescreen group, which went to Widescreen & Hacks.
+        advanced: Advanced::Items(&[
+            Simple::Row(SettingId::VideoNesPalette),
+            Simple::Row(SettingId::VideoCompositeSignal),
+            Simple::Row(SettingId::VideoEmphasis3d),
+            Simple::Row(SettingId::VideoRemoveSpriteLimit),
+            Simple::Group(OptionsGroup::Overscan),
+        ]),
     },
     Page {
         tab: OptionsTab::NesPicture,
         title: Some("options.new.tab.widescreen"),
+        // The defaults of every game whose ROM has a widescreen patch; a game's own choices, in
+        // its hacks window, come first (owner, 2026-11-18).
         simple: &[
-            Simple::Row(SettingId::VideoWidescreen),
-            Simple::Row(SettingId::VideoWidescreenExtra),
+            Simple::WidescreenDefault,
+            Simple::Row(SettingId::VideoWidescreenAdvanced),
+            Simple::HackDefault("no_slowdown"),
             Simple::GameHacks,
         ],
         advanced: Advanced::Items(&[
-            Simple::Row(SettingId::VideoWidescreen),
+            Simple::WidescreenDefault,
             Simple::Row(SettingId::VideoWidescreenExtra),
             Simple::Row(SettingId::VideoWidescreenAdvanced),
+            Simple::HackDefault("no_slowdown"),
+            Simple::HackDefault("invincible"),
+            Simple::HackDefault("level_select"),
+            Simple::HackDefault("margin_enemies"),
+            Simple::HackDefault("margin_freeze"),
+            Simple::HackDefault("margin_freeze_tint"),
             Simple::Row(SettingId::VideoWidescreenStrictEdges),
             Simple::Row(SettingId::EmuBuiltinPatches),
             Simple::GameHacks,
@@ -473,6 +494,7 @@ impl ZaxUi {
         for item in items {
             match *item {
                 Simple::Row(id) | Simple::Folder(id) => ids.push(id),
+                Simple::WidescreenDefault => ids.push(SettingId::VideoWidescreen),
                 Simple::All => ids.extend(
                     self.options
                         .rows(page.tab)
@@ -492,7 +514,9 @@ impl ZaxUi {
                         }
                     }
                 }
-                Simple::Shaders | Simple::GameHacks => {}
+                // The common hack defaults live in `emu.hack_options` with the games' own
+                // choices: the Default button takes out the common ones only.
+                Simple::Shaders | Simple::GameHacks | Simple::HackDefault(_) => {}
             }
         }
         ids
@@ -503,11 +527,100 @@ impl ZaxUi {
     fn draw_page_reset(&mut self, ui: &Ui, host: &mut AppHost, page: &Page) {
         if ui.button(text::reset_defaults()) {
             let ids = self.page_ids(page);
+            let common = self.shows_hack_defaults(page);
             let preset = &PRESETS[self.options_preset.min(PRESETS.len() - 1)];
-            host.update_settings(|model| reset_with(model, preset, &ids));
+            host.update_settings(|model| {
+                reset_with(model, preset, &ids);
+                if common {
+                    let stored = model.get(SettingId::EmuHackOptions);
+                    let text = hack_options::without_common(stored.as_text());
+                    model.set(SettingId::EmuHackOptions, SettingValue::Text(text));
+                }
+            });
             play(host, UiSound::Confirm);
         }
         ui.separator();
+    }
+
+    /// Whether the page shows common hack defaults in the mode in force.
+    fn shows_hack_defaults(&self, page: &Page) -> bool {
+        let items = match page.advanced {
+            Advanced::Items(items) if self.options_advanced => items,
+            Advanced::Tabs(_) if self.options_advanced => return false,
+            _ => page.simple,
+        };
+        items
+            .iter()
+            .any(|item| matches!(item, Simple::HackDefault(_)))
+    }
+
+    /// The widescreen of every game by default: on or off, and its ratio when on.
+    fn draw_widescreen_default(ui: &Ui, host: &mut AppHost) {
+        ui.text_wrapped(strings::get("options.new.widescreen_line"));
+        ui.spacing();
+        let value = host.settings().get(SettingId::VideoWidescreen).as_int();
+        let mut on = value != 0;
+        if ui.checkbox(strings::get("options.new.widescreen_default"), &mut on) {
+            host.update_settings(|model| {
+                model.set(
+                    SettingId::VideoWidescreen,
+                    SettingValue::Enum(i32::from(on)),
+                );
+            });
+            play(host, UiSound::Confirm);
+        }
+        if on {
+            let descriptor = zax_settings::catalogue::descriptor(SettingId::VideoWidescreen);
+            // The ratios: every choice but Off.
+            let ratios: Vec<(i32, String)> = (1..=4)
+                .map(|ratio| {
+                    (
+                        ratio,
+                        descriptor
+                            .domain()
+                            .label_of(f64::from(ratio))
+                            .unwrap_or_default()
+                            .to_owned(),
+                    )
+                })
+                .collect();
+            let mut index = ratios
+                .iter()
+                .position(|&(ratio, _)| ratio == value)
+                .unwrap_or(0);
+            ui.same_line();
+            ui.set_next_item_width(140.0);
+            if ui.combo(
+                strings::get("options.new.widescreen_ratio"),
+                &mut index,
+                &ratios,
+                |(_, label)| label.as_str().into(),
+            ) {
+                let ratio = ratios[index].0;
+                host.update_settings(|model| {
+                    model.set(SettingId::VideoWidescreen, SettingValue::Enum(ratio));
+                });
+            }
+        }
+    }
+
+    /// The common default of a hack pack option, for every pack that has it.
+    fn draw_hack_default(ui: &Ui, host: &mut AppHost, key: &'static str) {
+        let Some(&(_, pack_default)) = hack_options::COMMON_OPTIONS
+            .iter()
+            .find(|&&(common, _)| common == key)
+        else {
+            return;
+        };
+        let stored = host.settings().get(SettingId::EmuHackOptions);
+        let mut on = hack_options::common_value(stored.as_text(), key).unwrap_or(pack_default);
+        if ui.checkbox(strings::get(&format!("options.new.hack.{key}")), &mut on) {
+            let text = hack_options::with_common(stored.as_text(), key, on);
+            host.update_settings(|model| {
+                model.set(SettingId::EmuHackOptions, SettingValue::Text(text));
+            });
+            play(host, UiSound::Confirm);
+        }
     }
 
     /// The buttons that open the widescreen and the hacks of the game in play (its own hacks
@@ -543,6 +656,8 @@ impl ZaxUi {
             match *item {
                 Simple::All => self.draw_tab_entries(ui, host, tab),
                 Simple::GameHacks => self.draw_game_hacks(ui, host),
+                Simple::WidescreenDefault => Self::draw_widescreen_default(ui, host),
+                Simple::HackDefault(key) => Self::draw_hack_default(ui, host, key),
                 Simple::Folder(id) => {
                     let row = options::row_of(id);
                     self.draw_folder_row(ui, host, &row);
