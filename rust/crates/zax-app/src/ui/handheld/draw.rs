@@ -29,6 +29,10 @@ use crate::ui::menu_bar;
 use crate::ui::zax_ui::{UiFrame, ZaxUi};
 use crate::ui::{key_config, keys, strings, text};
 
+/// The track of a list's scrollbar.
+const SCROLL_TRACK: [f32; 4] = [1.0, 1.0, 1.0, 0.10];
+/// Its thumb: the rows shown.
+const SCROLL_THUMB: [f32; 4] = [1.0, 1.0, 1.0, 0.45];
 const BACKGROUND: [f32; 4] = [0.03, 0.03, 0.06, 1.0];
 const PANEL: [f32; 4] = [0.05, 0.05, 0.09, 0.96];
 const TEXT: [f32; 4] = [0.96, 0.96, 0.96, 1.0];
@@ -107,6 +111,17 @@ struct Painter<'ui> {
     hint_lines: &'ui Cell<u8>,
     /// How much lower the next rows lie, for the rows drawn on two lines above them.
     lift: Cell<f32>,
+    /// How far right the rows start: the room of the list's scrollbar, when it has one.
+    inset: Cell<f32>,
+    /// The rank of the first row of the list drawn (group titles not counted), and how many
+    /// titles it drew so far: the rank of each row's zone.
+    rank_base: Cell<usize>,
+    titles: Cell<usize>,
+    /// The rank of the selected row of the list drawn, for the clicks.
+    focus_rank: &'ui Cell<Option<usize>>,
+    /// The first row the scrollbar, the wheel or a finger scrolled the list to; none while the
+    /// list follows its selection (owner request).
+    view_first: Option<usize>,
 }
 
 /// One row of a list, as a screen describes it before the painter lays the list out.
@@ -193,6 +208,65 @@ impl Painter<'_> {
         self.metrics.row + if wrapped { self.wrap_step() } else { 0.0 }
     }
 
+    /// The first row of a list of `total` rows, `rows` of them shown, its selection `selected`:
+    /// where the scrollbar put it, else round the selection. Draws the scrollbar, and records
+    /// the ranks of the rows the list draws.
+    fn window(&self, selected: usize, rows: usize, total: usize) -> usize {
+        let first = self.view_first.map_or_else(
+            || first_visible(selected, rows, total),
+            |first| first.min(total.saturating_sub(rows)),
+        );
+        self.rank_base.set(first);
+        self.titles.set(0);
+        self.focus_rank.set(Some(selected));
+        self.scrollbar(first, rows, total);
+        first
+    }
+
+    /// The scrollbar of a list longer than the screen, on its left (owner request): the track
+    /// over the list's height and the thumb of the rows shown. The rows start after it.
+    fn scrollbar(&self, first: usize, rows: usize, total: usize) {
+        if rows == 0 || total <= rows {
+            self.inset.set(0.0);
+            return;
+        }
+        let metrics = &self.metrics;
+        let width = (metrics.padding * 0.5).max(6.0).round();
+        let left = (metrics.padding * 0.25).round();
+        let top = metrics.title_band() + metrics.padding * 0.5;
+        let room = self.list_room();
+        let bottom = top + room;
+        self.list
+            .add_rect([left, top], [left + width, bottom], SCROLL_TRACK)
+            .filled(true)
+            .rounding(width * 0.5)
+            .build();
+        #[allow(clippy::cast_precision_loss)] // A list of a few thousand rows at most.
+        let (thumb, offset) = {
+            let thumb = (room * rows as f32 / total as f32).max(room * 0.05);
+            let hidden = (total - rows) as f32;
+            (
+                thumb,
+                (room - thumb) * first.min(total - rows) as f32 / hidden,
+            )
+        };
+        self.list
+            .add_rect(
+                [left, top + offset],
+                [left + width, top + offset + thumb],
+                SCROLL_THUMB,
+            )
+            .filled(true)
+            .rounding(width * 0.5)
+            .build();
+        self.zone(
+            [0.0, top],
+            [left + width + left, bottom],
+            ZoneAction::Scrollbar { first, rows, total },
+        );
+        self.inset.set(width + left);
+    }
+
     /// The pixels a list has between the title and the hints.
     fn list_room(&self) -> f32 {
         self.size[1] - self.metrics.title_band() - self.metrics.hint_band() - self.metrics.padding
@@ -222,8 +296,25 @@ impl Painter<'_> {
     fn spec_list(&self, specs: &[RowSpec], selected: usize, room: f32) {
         let heights: Vec<f32> = specs.iter().map(|spec| self.spec_height(spec)).collect();
         let rows = self.metrics.visible_rows(self.size[1]);
-        let start = first_visible(selected, rows, specs.len());
-        let (first, count) = layout::list_window(&heights, selected, room, start);
+        // Scrolled (owner request): the rows from there, the end of the list kept full.
+        let (first, count) = if let Some(first) = self.view_first {
+            let first = first.min(specs.len().saturating_sub(1));
+            layout::list_window(&heights, first, room, first)
+        } else {
+            let start = first_visible(selected, rows, specs.len());
+            layout::list_window(&heights, selected, room, start)
+        };
+        let titles_before = |index: usize| {
+            specs[..index.min(specs.len())]
+                .iter()
+                .filter(|spec| matches!(spec, RowSpec::Group(_)))
+                .count()
+        };
+        self.rank_base.set(first - titles_before(first));
+        self.titles.set(0);
+        self.focus_rank
+            .set(Some(selected.saturating_sub(titles_before(selected))));
+        self.scrollbar(first, count, specs.len());
         let x1 = self.size[0] - self.metrics.padding * 0.5;
         for (slot, (index, spec)) in specs.iter().enumerate().skip(first).take(count).enumerate() {
             match spec {
@@ -289,7 +380,7 @@ impl Painter<'_> {
     ) {
         let metrics = &self.metrics;
         let top = self.row_top(slot);
-        let x0 = metrics.padding * 0.5;
+        let x0 = metrics.padding * 0.5 + self.inset.get();
         // Owner request: a value that does not fit beside its label goes under it.
         let wrapped = self.wraps(left, badges, right.0, (x0, x1));
         let height = self.row_height(wrapped);
@@ -329,7 +420,7 @@ impl Painter<'_> {
             [x0, top],
             [x1, top + height],
             ZoneAction::Row {
-                slot,
+                rank: (self.rank_base.get() + slot).saturating_sub(self.titles.get()),
                 selected,
                 value,
             },
@@ -372,9 +463,15 @@ impl Painter<'_> {
         const SCALE: f32 = 0.8;
         let metrics = &self.metrics;
         let top = self.row_top(slot);
+        self.titles.set(self.titles.get() + 1);
         self.ui.set_window_font_scale(SCALE);
         let y = top + (metrics.row - metrics.font * SCALE) * 0.6;
-        self.text(metrics.padding * 1.5, y, GROUP_TITLE, title);
+        self.text(
+            metrics.padding * 1.5 + self.inset.get(),
+            y,
+            GROUP_TITLE,
+            title,
+        );
         self.ui.set_window_font_scale(1.0);
     }
 
@@ -611,6 +708,7 @@ impl HandheldUi {
     /// Draws the screen in front, the hold of the exit combination and the notification.
     pub fn draw(&mut self, ui: &Ui, frame: &UiFrame<'_>) {
         self.zones.get_mut().clear();
+        self.focus_rank.set(None);
         let size = ui.io().display_size;
         // By the shorter side: the sizes of the landscape in portrait (owner request), which are
         // the sizes the fonts were baked at.
@@ -652,6 +750,11 @@ impl HandheldUi {
             zones: &self.zones,
             hint_lines: &self.hint_lines,
             lift: Cell::new(0.0),
+            inset: Cell::new(0.0),
+            rank_base: Cell::new(0),
+            titles: Cell::new(0),
+            focus_rank: &self.focus_rank,
+            view_first: self.scroll.first,
             hold_ring: self
                 .widescreen_hold
                 .as_ref()
@@ -680,7 +783,7 @@ impl HandheldUi {
             painter.message(&message, WARNING);
         }
         let rows = self.metrics.visible_rows(painter.size[1]);
-        let first = first_visible(self.roms.selected(), rows, total);
+        let first = painter.window(self.roms.selected(), rows, total);
         for (slot, (index, entry)) in self
             .roms
             .entries()
@@ -957,7 +1060,7 @@ impl HandheldUi {
         painter.title(&title, "");
         let rows = self.metrics.visible_rows(painter.size[1]);
         let total = profiles.choices().len();
-        let first = first_visible(profiles.selected(), rows, total);
+        let first = painter.window(profiles.selected(), rows, total);
         for (slot, (index, choice)) in profiles
             .choices()
             .iter()
@@ -1100,7 +1203,7 @@ impl HandheldUi {
         }
         // The list scrolls with the selection when it is longer than the screen.
         let visible = self.metrics.visible_rows(painter.size[1]);
-        let first = first_visible(self.controls.selected, visible, rows.len());
+        let first = painter.window(self.controls.selected, visible, rows.len());
         for (slot, (index, row)) in rows
             .iter()
             .enumerate()
@@ -1225,7 +1328,7 @@ impl HandheldUi {
                 [left + metrics.padding * 0.5, row_top],
                 [left + width - metrics.padding * 0.5, row_top + height],
                 ZoneAction::Row {
-                    slot: index,
+                    rank: index,
                     selected,
                     value: (!value.is_empty()).then_some((value_x, value_end)),
                 },
@@ -1352,7 +1455,7 @@ impl HandheldUi {
         let split = (size[0] * 0.56).round();
         let total = crate::persistence::save_slots::EXPOSED_SLOT_COUNT;
         let rows = metrics.visible_rows(size[1]);
-        let first = first_visible(states.selected_index(), rows, total);
+        let first = painter.window(states.selected_index(), rows, total);
         for (row, index) in (first..total).take(rows).enumerate() {
             let slot = i32::try_from(index + 1).unwrap_or(1);
             let record = frame.host.slots.find(&numbered_slot_id(slot));
@@ -1581,7 +1684,7 @@ impl HandheldUi {
         let rows = self.metrics.visible_rows(painter.size[1]).saturating_sub(1);
         let selected = self.achievements.selected_index();
         let all = super::achievements::ROWS;
-        let first = first_visible(selected, rows, all.len());
+        let first = painter.window(selected, rows, all.len());
         for (slot, (index, row)) in all.iter().enumerate().skip(first).take(rows).enumerate() {
             let switch = |id| {
                 let on = settings.get(id).as_bool();

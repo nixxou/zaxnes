@@ -16,17 +16,51 @@ pub struct PointerInput {
     pub right_clicked: bool,
     /// The wheel's notches, positive up.
     pub wheel: f32,
+    /// The left button (or a finger): what grabs and drags the scrollbar.
+    pub button: Hold,
+}
+
+/// The left button or a finger, for the scrollbar of a list.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Hold {
+    /// Up.
+    #[default]
+    Up,
+    /// Gone down this frame: it grabs the scrollbar under it.
+    Pressed,
+    /// Down since an earlier frame: the scrollbar follows it.
+    Down,
+}
+
+impl Hold {
+    /// The state of a button down `now` and down or not the frame `before`.
+    #[must_use]
+    pub const fn of(now: bool, before: bool) -> Self {
+        match (now, before) {
+            (false, _) => Self::Up,
+            (true, false) => Self::Pressed,
+            (true, true) => Self::Down,
+        }
+    }
 }
 
 /// What a click on a zone does.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ZoneAction {
-    /// A row of a list: shown in slot `slot` of the screen, focused or not; `value` is the span
-    /// of its "< value >", whose halves step it down and up.
+    /// A row of a list: the `rank`-th row a selection can rest on (group titles are not
+    /// counted), focused or not; `value` is the span of its "< value >", whose halves step it
+    /// down and up.
     Row {
-        slot: usize,
+        rank: usize,
         selected: bool,
         value: Option<(f32, f32)>,
+    },
+    /// The scrollbar of a list longer than the screen (owner request): `rows` of `total` shown
+    /// from `first`. A click or a drag on it scrolls the list without selecting a row.
+    Scrollbar {
+        first: usize,
+        rows: usize,
+        total: usize,
     },
     /// A hint of the bottom bar: its button.
     Button(PadButton),
@@ -43,7 +77,9 @@ pub struct Zone {
 }
 
 impl Zone {
-    fn contains(&self, [x, y]: [f32; 2]) -> bool {
+    /// Whether the point is in the zone.
+    #[must_use]
+    pub fn contains(&self, [x, y]: [f32; 2]) -> bool {
         (self.min[0]..self.max[0]).contains(&x) && (self.min[1]..self.max[1]).contains(&y)
     }
 }
@@ -69,11 +105,37 @@ pub fn hint_action(button: &str) -> Option<ZoneAction> {
     })
 }
 
+/// The first row a scrollbar `zone` shows with the pointer at height `y`: the thumb centred on
+/// it, as far as the list goes.
+#[must_use]
+pub fn scrolled_first(zone: &Zone, y: f32) -> Option<usize> {
+    let ZoneAction::Scrollbar { rows, total, .. } = zone.action else {
+        return None;
+    };
+    let hidden = total.saturating_sub(rows);
+    if hidden == 0 {
+        return Some(0);
+    }
+    let room = zone.max[1] - zone.min[1];
+    #[allow(clippy::cast_precision_loss)] // A list of a few thousand rows at most.
+    let thumb = (room * rows as f32 / total as f32).max(room * 0.05);
+    let travel = (room - thumb).max(1.0);
+    let fraction = ((y - zone.min[1] - thumb * 0.5) / travel).clamp(0.0, 1.0);
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
+    let first = (fraction * hidden as f32).round() as usize;
+    Some(first.min(hidden))
+}
+
 /// The presses `pointer` makes over `zones` (the last one drawn wins where they overlap): the
 /// wheel moves the selection, a click on a row selects it and a click on the selected row
-/// accepts it (A), or steps its value; the right button goes back.
+/// accepts it (A), or steps its value; the right button goes back. `focus` is the rank of the
+/// selected row, which a click moves from even when the list is scrolled away from it.
 #[must_use]
-pub fn presses(zones: &[Zone], pointer: &PointerInput) -> Vec<PadButton> {
+pub fn presses(zones: &[Zone], pointer: &PointerInput, focus: Option<usize>) -> Vec<PadButton> {
     let mut out = Vec::new();
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // a few notches
     let notches = pointer.wheel.abs().round() as usize;
@@ -115,34 +177,30 @@ pub fn presses(zones: &[Zone], pointer: &PointerInput) -> Vec<PadButton> {
             });
         }
         ZoneAction::Row { selected: true, .. } => out.push(PadButton::A),
-        ZoneAction::Row { slot, .. } => {
-            let focused = zones.iter().find_map(|zone| match zone.action {
-                ZoneAction::Row {
-                    slot,
-                    selected: true,
-                    ..
-                } => Some(slot),
-                _ => None,
+        // One press per row the selection has to cross: the ranks count the rows a press moves
+        // through, the group titles of RO-3 (which up and down skip) left out.
+        ZoneAction::Row { rank, .. } => {
+            let focus = focus.or_else(|| {
+                zones.iter().find_map(|zone| match zone.action {
+                    ZoneAction::Row {
+                        rank,
+                        selected: true,
+                        ..
+                    } => Some(rank),
+                    _ => None,
+                })
             });
-            if let Some(focused) = focused {
-                let (step, span) = if slot > focused {
-                    (PadButton::Down, focused + 1..=slot)
+            if let Some(focus) = focus {
+                let (step, count) = if rank > focus {
+                    (PadButton::Down, rank - focus)
                 } else {
-                    (PadButton::Up, slot..=focused.saturating_sub(1))
+                    (PadButton::Up, focus - rank)
                 };
-                // One press per row the selection has to cross — not `slot - focused`, because a
-                // group title of RO-3 holds a slot and **records no zone**, up and down skipping
-                // it. Counting the zones in the span is counting exactly the rows a press moves
-                // through.
-                let steps = zones
-                    .iter()
-                    .filter(|zone| {
-                        matches!(zone.action, ZoneAction::Row { slot, .. } if span.contains(&slot))
-                    })
-                    .count();
-                out.extend(std::iter::repeat_n(step, steps));
+                out.extend(std::iter::repeat_n(step, count));
             }
         }
+        // The scrollbar scrolls (`HandheldUi::update_pointer`), it presses nothing.
+        ZoneAction::Scrollbar { .. } => {}
     }
     out
 }
@@ -151,17 +209,22 @@ pub fn presses(zones: &[Zone], pointer: &PointerInput) -> Vec<PadButton> {
 mod tests {
     use super::*;
 
-    fn row(slot: usize, selected: bool) -> Zone {
+    /// A row drawn in `slot`, the `rank`-th row a selection rests on.
+    fn ranked(slot: usize, rank: usize, selected: bool) -> Zone {
         let top = 100.0 + 40.0 * f32::from(u16::try_from(slot).unwrap());
         Zone {
             min: [0.0, top],
             max: [600.0, top + 40.0],
             action: ZoneAction::Row {
-                slot,
+                rank,
                 selected,
                 value: Some((400.0, 600.0)),
             },
         }
+    }
+
+    fn row(slot: usize, selected: bool) -> Zone {
+        ranked(slot, slot, selected)
     }
 
     fn click(x: f32, y: f32) -> PointerInput {
@@ -177,10 +240,16 @@ mod tests {
         let zones = [row(0, false), row(1, true), row(2, false), row(3, false)];
         assert_eq!(
             vec![PadButton::Down, PadButton::Down],
-            presses(&zones, &click(10.0, 225.0))
+            presses(&zones, &click(10.0, 225.0), Some(1))
         );
-        assert_eq!(vec![PadButton::Up], presses(&zones, &click(10.0, 110.0)));
-        assert_eq!(vec![PadButton::A], presses(&zones, &click(10.0, 150.0)));
+        assert_eq!(
+            vec![PadButton::Up],
+            presses(&zones, &click(10.0, 110.0), Some(1))
+        );
+        assert_eq!(
+            vec![PadButton::A],
+            presses(&zones, &click(10.0, 150.0), Some(1))
+        );
     }
 
     /// RO-3: a group title holds a slot and records no zone, so the selection crossing it moves
@@ -188,28 +257,67 @@ mod tests {
     /// Down, and a click on slot 0 from slot 3 is two Ups.
     #[test]
     fn ro_3_a_click_past_a_group_title_moves_by_one_row() {
-        let zones = [row(0, false), row(1, true), row(3, false)];
-        assert_eq!(vec![PadButton::Down], presses(&zones, &click(10.0, 225.0)));
-        let zones = [row(0, false), row(1, false), row(3, true)];
+        let zones = [row(0, false), row(1, true), ranked(3, 2, false)];
+        assert_eq!(
+            vec![PadButton::Down],
+            presses(&zones, &click(10.0, 225.0), Some(1))
+        );
+        let zones = [row(0, false), row(1, false), ranked(3, 2, true)];
         assert_eq!(
             vec![PadButton::Up, PadButton::Up],
-            presses(&zones, &click(10.0, 110.0))
+            presses(&zones, &click(10.0, 110.0), Some(2))
         );
         // A click on the title itself reaches nothing: it records no zone of its own, and the row
         // zones do not cover it.
         assert_eq!(
             Vec::<PadButton>::new(),
-            presses(&zones, &click(10.0, 190.0))
+            presses(&zones, &click(10.0, 190.0), Some(2))
         );
+    }
+
+    /// Owner request: a list scrolled away from its selection still moves it to the row
+    /// clicked, and the scrollbar presses nothing.
+    #[test]
+    fn a_click_in_a_scrolled_list_moves_from_the_selection_out_of_sight() {
+        // Rows of ranks 10 to 12 shown, the selection on rank 2.
+        let zones = [
+            ranked(0, 10, false),
+            ranked(1, 11, false),
+            ranked(2, 12, false),
+        ];
+        assert_eq!(
+            vec![PadButton::Down; 9],
+            presses(&zones, &click(10.0, 145.0), Some(2))
+        );
+        let bar = Zone {
+            min: [0.0, 100.0],
+            max: [8.0, 500.0],
+            action: ZoneAction::Scrollbar {
+                first: 0,
+                rows: 10,
+                total: 50,
+            },
+        };
+        assert_eq!(
+            Vec::<PadButton>::new(),
+            presses(&[bar], &click(4.0, 300.0), Some(2))
+        );
+        // The thumb at the top shows the first rows, at the bottom the last.
+        assert_eq!(Some(0), scrolled_first(&bar, 100.0));
+        assert_eq!(Some(40), scrolled_first(&bar, 500.0));
+        assert_eq!(Some(20), scrolled_first(&bar, 300.0));
     }
 
     #[test]
     fn a_click_on_the_value_of_the_selected_row_steps_it() {
         let zones = [row(0, true)];
-        assert_eq!(vec![PadButton::Left], presses(&zones, &click(450.0, 110.0)));
+        assert_eq!(
+            vec![PadButton::Left],
+            presses(&zones, &click(450.0, 110.0), Some(0))
+        );
         assert_eq!(
             vec![PadButton::Right],
-            presses(&zones, &click(550.0, 110.0))
+            presses(&zones, &click(550.0, 110.0), Some(0))
         );
     }
 
@@ -227,12 +335,21 @@ mod tests {
                 action: hint_action("L/R").unwrap(),
             },
         ];
-        assert_eq!(vec![PadButton::X], presses(&zones, &click(50.0, 420.0)));
-        assert_eq!(vec![PadButton::L1], presses(&zones, &click(120.0, 420.0)));
-        assert_eq!(vec![PadButton::R1], presses(&zones, &click(180.0, 420.0)));
+        assert_eq!(
+            vec![PadButton::X],
+            presses(&zones, &click(50.0, 420.0), None)
+        );
+        assert_eq!(
+            vec![PadButton::L1],
+            presses(&zones, &click(120.0, 420.0), None)
+        );
+        assert_eq!(
+            vec![PadButton::R1],
+            presses(&zones, &click(180.0, 420.0), None)
+        );
         assert_eq!(
             Vec::<PadButton>::new(),
-            presses(&zones, &click(300.0, 420.0))
+            presses(&zones, &click(300.0, 420.0), None)
         );
         assert!(hint_action("?").is_none());
         let wheel = PointerInput {
@@ -242,7 +359,7 @@ mod tests {
         };
         assert_eq!(
             vec![PadButton::Down, PadButton::Down, PadButton::B],
-            presses(&zones, &wheel)
+            presses(&zones, &wheel, None)
         );
     }
 }

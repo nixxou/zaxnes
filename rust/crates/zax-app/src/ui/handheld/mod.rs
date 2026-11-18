@@ -107,6 +107,16 @@ struct ControlsState {
     capture_left: Option<f32>,
 }
 
+/// A list scrolled away from its selection (owner request).
+#[derive(Debug, Clone, Copy, Default)]
+struct ListScroll {
+    /// The first row the scrollbar, the wheel or a finger scrolled the list to; none while the
+    /// list follows its selection, which any press of the pad brings back.
+    first: Option<usize>,
+    /// Whether the pointer holds the scrollbar.
+    dragging: bool,
+}
+
 /// The handheld interface.
 pub struct HandheldUi {
     screen: Screen,
@@ -162,6 +172,10 @@ pub struct HandheldUi {
     body_font: Option<imgui::FontId>,
     /// Where the rows and the hints of the last drawn screen lie, for the mouse.
     zones: RefCell<Vec<Zone>>,
+    /// The rank of the selected row of the list drawn last, for the clicks.
+    focus_rank: Cell<Option<usize>>,
+    /// The list scrolled by its scrollbar, the wheel or a finger (owner request).
+    scroll: ListScroll,
     /// How many lines the bar of hints took at the last drawing.
     hint_lines: Cell<u8>,
     /// The RetroAchievements screen.
@@ -256,6 +270,8 @@ impl HandheldUi {
             pictures: Vec::new(),
             confirming: false,
             zones: RefCell::new(Vec::new()),
+            focus_rank: Cell::new(None),
+            scroll: ListScroll::default(),
             hint_lines: Cell::new(1),
             achievements: AchievementsModel::new(),
             keyboard: None,
@@ -542,12 +558,63 @@ impl HandheldUi {
     /// drawn last frame, as presses of the pad. Nothing in game.
     pub fn update_pointer(&mut self, input: &PointerInput, frame: &mut UiFrame<'_>) {
         if self.screen == Screen::InGame && frame.host.pending_confirmation().is_none() {
+            self.scroll.dragging = false;
             return;
         }
-        let presses = pointer::presses(&self.zones.borrow(), input);
+        // The scrollbar of the list (owner request): grabbed, it scrolls the list as long as it
+        // is held, and selects nothing; let go, it presses nothing either.
+        let bar = self
+            .zones
+            .borrow()
+            .iter()
+            .find(|zone| matches!(zone.action, pointer::ZoneAction::Scrollbar { .. }))
+            .copied();
+        if self.scroll.dragging {
+            if input.button == pointer::Hold::Up {
+                self.scroll.dragging = false;
+            } else if let Some(first) =
+                bar.and_then(|bar| pointer::scrolled_first(&bar, input.position[1]))
+            {
+                self.scroll.first = Some(first);
+            }
+            return;
+        }
+        if input.button == pointer::Hold::Pressed {
+            if let Some(bar) = bar.filter(|bar| bar.contains(input.position)) {
+                self.scroll.dragging = true;
+                self.scroll.first = pointer::scrolled_first(&bar, input.position[1]);
+                return;
+            }
+        }
+        // The wheel and a finger's slide scroll the list too, without moving its selection.
+        let mut input = *input;
+        if let Some(pointer::Zone {
+            action: pointer::ZoneAction::Scrollbar { first, rows, total },
+            ..
+        }) = bar
+        {
+            #[allow(clippy::cast_possible_truncation)] // a few notches
+            let notches = input.wheel.round() as i64;
+            if notches != 0 {
+                let last = i64::try_from(total.saturating_sub(rows)).unwrap_or(0);
+                let first = i64::try_from(first).unwrap_or(0);
+                let next = (first - notches).clamp(0, last);
+                self.scroll.first = usize::try_from(next).ok();
+            }
+            input.wheel = 0.0;
+        } else {
+            input.wheel = 0.0;
+        }
+        let presses = pointer::presses(&self.zones.borrow(), &input, self.focus_rank.get());
         for button in presses {
             self.press(button, frame);
         }
+    }
+
+    /// Whether the pointer holds the scrollbar of a list: a finger doing so does not swipe.
+    #[must_use]
+    pub const fn scroll_dragging(&self) -> bool {
+        self.scroll.dragging
     }
 
     /// The list resting [`STUDY_AFTER_SECONDS`] on a game not studied yet studies its ROM (owner
@@ -766,6 +833,8 @@ impl HandheldUi {
     }
 
     fn press(&mut self, button: PadButton, frame: &mut UiFrame<'_>) {
+        // A press brings the list back round its selection (a scrolled list follows it again).
+        self.scroll.first = None;
         // A question of the host (a save state made with the built-in patches set the other
         // way, for instance) is answered first: A agrees, B declines.
         if frame.host.pending_confirmation().is_some() {

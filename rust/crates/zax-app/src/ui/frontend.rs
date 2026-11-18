@@ -97,6 +97,10 @@ pub struct ImguiFrontend {
     touch_pad: Option<zax_platform::input::touch::TouchPadView>,
     /// Where fingers tapped off the touch pad since the last frame (Rust-only).
     taps: Vec<[f32; 2]>,
+    /// Where a free finger is on the screen (a handheld), and whether one was down last frame:
+    /// the scrollbar of the console's lists.
+    touch_point: Option<[f32; 2]>,
+    touch_was_down: bool,
     /// How far fingers slid down off the pad, in pixels, not yet turned into rows (Rust-only).
     swipe: f32,
     /// The system's keyboard is up for the console's keyboard screen (Android, Rust-only).
@@ -230,6 +234,8 @@ impl ImguiFrontend {
             roms_setting: roms_setting(host),
             touch_pad: None,
             taps: Vec::new(),
+            touch_point: None,
+            touch_was_down: false,
             swipe: 0.0,
             system_typing: false,
         })
@@ -515,27 +521,15 @@ impl ImguiFrontend {
                     if self.system_typing && !taps.is_empty() {
                         zax_platform::input::text::show_system_keyboard(true);
                     }
-                    // A finger sliding over a menu scrolls it: a row per row's height, the list
-                    // following the finger (Rust-only, owner request).
                     if device {
-                        let row = handheld.row_height().max(1.0);
-                        let rows = (self.swipe / row).trunc();
-                        self.swipe -= rows * row;
-                        if rows != 0.0 {
-                            let input = super::handheld::pointer::PointerInput {
-                                wheel: rows,
-                                ..Default::default()
-                            };
-                            handheld.update_pointer(&input, frame);
-                        }
-                    }
-                    for tap in taps.into_iter().filter(|_| device) {
-                        let input = super::handheld::pointer::PointerInput {
-                            position: tap,
-                            clicked: true,
-                            ..Default::default()
-                        };
-                        handheld.update_pointer(&input, frame);
+                        touch_on_console(
+                            handheld,
+                            frame,
+                            taps,
+                            &mut self.swipe,
+                            self.touch_point,
+                            &mut self.touch_was_down,
+                        );
                     }
                 }
                 handheld.draw(ui, frame);
@@ -601,10 +595,12 @@ impl ImguiFrontend {
         view: Option<zax_platform::input::touch::TouchPadView>,
         taps: Vec<[f32; 2]>,
         swipe: f32,
+        point: Option<[f32; 2]>,
     ) {
         self.touch_pad = view;
         self.taps = taps;
         self.swipe += swipe;
+        self.touch_point = point;
     }
 
     /// Whether a game is on the screen, not a menu: the touch pad is shown only then.
@@ -663,6 +659,59 @@ impl ImguiFrontend {
     }
 }
 
+/// The fingers on the screen of a handheld, over the console's screens: a finger on a list's
+/// scrollbar drags it (owner request), one sliding over a menu scrolls it — a row per row's
+/// height, the list following the finger (Rust-only, owner request) — and a tap is a click.
+fn touch_on_console(
+    handheld: &mut HandheldUi,
+    frame: &mut UiFrame<'_>,
+    taps: Vec<[f32; 2]>,
+    swipe: &mut f32,
+    point: Option<[f32; 2]>,
+    was_down: &mut bool,
+) {
+    if finger_on_scrollbar(handheld, frame, point, was_down) {
+        // The finger dragging the scrollbar does not slide the list as well.
+        *swipe = 0.0;
+    }
+    let row = handheld.row_height().max(1.0);
+    let rows = (*swipe / row).trunc();
+    *swipe -= rows * row;
+    if rows != 0.0 {
+        let input = PointerInput {
+            wheel: rows,
+            ..Default::default()
+        };
+        handheld.update_pointer(&input, frame);
+    }
+    for tap in taps {
+        let input = PointerInput {
+            position: tap,
+            clicked: true,
+            ..Default::default()
+        };
+        handheld.update_pointer(&input, frame);
+    }
+}
+
+/// A finger on the screen of a handheld, for the scrollbar of the console's lists (owner
+/// request): it grabs it as it goes down there and drags it while it stays. Whether it holds it.
+fn finger_on_scrollbar(
+    handheld: &mut HandheldUi,
+    frame: &mut UiFrame<'_>,
+    point: Option<[f32; 2]>,
+    was_down: &mut bool,
+) -> bool {
+    let input = PointerInput {
+        position: point.unwrap_or_default(),
+        button: super::handheld::pointer::Hold::of(point.is_some(), *was_down),
+        ..Default::default()
+    };
+    *was_down = point.is_some();
+    handheld.update_pointer(&input, frame);
+    handheld.scroll_dragging()
+}
+
 /// What the mouse did this frame, for the console mode of the desktop.
 fn pointer_input(ui: &imgui::Ui) -> PointerInput {
     PointerInput {
@@ -670,6 +719,13 @@ fn pointer_input(ui: &imgui::Ui) -> PointerInput {
         clicked: ui.is_mouse_clicked(imgui::MouseButton::Left),
         right_clicked: ui.is_mouse_clicked(imgui::MouseButton::Right),
         wheel: ui.io().mouse_wheel,
+        button: if ui.is_mouse_clicked(imgui::MouseButton::Left) {
+            super::handheld::pointer::Hold::Pressed
+        } else if ui.is_mouse_down(imgui::MouseButton::Left) {
+            super::handheld::pointer::Hold::Down
+        } else {
+            super::handheld::pointer::Hold::Up
+        },
     }
 }
 

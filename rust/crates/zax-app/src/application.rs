@@ -1048,7 +1048,8 @@ impl Running {
                 pad_top,
             );
             let (taps, swipe) = (self.input.touch.take_taps(), self.input.touch.take_scroll());
-            self.ui.set_touch_pad(self.input.touch.view(), taps, swipe);
+            let point = self.input.touch.free_point();
+            self.ui.set_touch_pad(self.input.touch.view(), taps, swipe, point);
         }
         operation(&mut self.ui, &mut frame, sizes, &debug);
     }

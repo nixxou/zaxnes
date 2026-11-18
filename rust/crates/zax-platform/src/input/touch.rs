@@ -737,6 +737,12 @@ impl TouchPad {
         std::mem::take(&mut self.taps)
     }
 
+    /// Where the first free finger is, in drawable pixels: what drags the scrollbar of a menu.
+    #[must_use]
+    pub fn free_point(&self) -> Option<[f32; 2]> {
+        self.fingers.free_points().first().copied()
+    }
+
     /// How far fingers off the pad slid down since the last call, in drawable pixels (up is
     /// negative): the scroll of a menu.
     pub fn take_scroll(&mut self) -> f32 {

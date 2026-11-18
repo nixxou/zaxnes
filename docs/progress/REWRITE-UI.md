@@ -84,3 +84,7 @@ Console options get the simple / advanced logic (owner: "fais-moi une propositio
 - A reset row ends every global page: preset values for what the preset manages, own defaults elsewhere; on the preset page it writes the preset again.
 - Handheld defaults: the fastest preset, plus the handheld list; automatic resolution kept off (earlier owner decision).
 - PC simple Widescreen tab: on/off only.
+
+## Step 20 (2026-11-18)
+
+Console lists get a scrollbar on the left when they are longer than the screen (owner): ROM list, profiles, controls, save states, achievements and every options page. Dragging it (mouse, or a finger on Android), the wheel and a finger sliding over a list scroll the view without moving the selection; a press of the pad brings the list back round its selection; a click or tap on a row selects it even with the selection scrolled out of sight (rows carry their rank, group titles not counted). Touch: TouchPad::free_point feeds the drag.
