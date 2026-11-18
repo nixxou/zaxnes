@@ -569,6 +569,15 @@ impl RowDecoder {
     ) {
         let samples = pixels.len() * SAMPLES_PER_PIXEL;
         let tables = decode_tables();
+        let plain = self.options.signal == Signal::Composite
+            && !(self.options.comb && neighbours.is_some());
+        if plain {
+            // The plain composite (the default): the running sums in one pass, as lot
+            // FIDPLUS-D2b wrote them, without the buffers the other signals need.
+            self.plain_sums(pixels, emphasis, phase);
+            self.finish_ntsc(samples, false, out);
+            return;
+        }
         Self::ntsc_samples(
             &mut self.levels,
             Some(&mut self.means),
@@ -615,10 +624,48 @@ impl RowDecoder {
         self.degrade();
         self.separate(comb);
         self.sum_up();
+        self.finish_ntsc(samples, comb, out);
+    }
+
+    /// The running sums of the plain composite signal of a row, in one pass.
+    fn plain_sums(&mut self, pixels: &[u8], emphasis: &[u8], phase: usize) {
+        let tables = decode_tables();
+        let samples = pixels.len() * SAMPLES_PER_PIXEL;
+        for sums in [&mut self.luma, &mut self.in_phase, &mut self.quadrature] {
+            sums.clear();
+            sums.resize(samples + 1, 0.0);
+        }
+        let (mut y, mut i, mut q) = (0.0_f32, 0.0_f32, 0.0_f32);
+        let mut at = phase % PHASES;
+        let mut index = 1;
+        for (x, &pixel) in pixels.iter().enumerate() {
+            let bits = emphasis.get(x).copied().unwrap_or(0) & 7;
+            let levels = &tables.levels
+                [(usize::from(pixel & 0x3F) << 3 | usize::from(bits)) * PHASES..][..PHASES];
+            for _ in 0..SAMPLES_PER_PIXEL {
+                let level = levels[at];
+                y += level;
+                i += level * tables.cos[at];
+                q += level * tables.sin[at];
+                self.luma[index] = y;
+                self.in_phase[index] = i;
+                self.quadrature[index] = q;
+                index += 1;
+                at += 1;
+                if at == PHASES {
+                    at = 0;
+                }
+            }
+        }
+    }
+
+    /// The NTSC row's colours from its running sums.
+    fn finish_ntsc(&self, samples: usize, comb: bool, out: &mut [u8]) {
         let (luma_width, chroma_width) = self
             .options
             .windows(comb || self.options.signal == Signal::SVideo);
-        for (x, rgb) in out.chunks_exact_mut(3).take(pixels.len()).enumerate() {
+        let pixels = samples / SAMPLES_PER_PIXEL;
+        for (x, rgb) in out.chunks_exact_mut(3).take(pixels).enumerate() {
             let centre = x * SAMPLES_PER_PIXEL + SAMPLES_PER_PIXEL / 2;
             let y = window(&self.luma, samples, centre, luma_width);
             let i = 2.0 * window(&self.in_phase, samples, centre, chroma_width);
