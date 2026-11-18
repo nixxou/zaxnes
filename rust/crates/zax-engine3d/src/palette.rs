@@ -1,7 +1,9 @@
 //! The NES colour table and the palette of one frame (SPEC-04 §4.1, REQ-E3D-250, REQ-E3D-251).
 
 use std::fmt;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
+
+use zax_nes::tv::TvLook;
 
 /// An opaque 24-bit colour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -263,6 +265,77 @@ static SELECTED: AtomicU8 = AtomicU8::new(0);
 /// Shows the NES colours in `index`'s palette of `video.nes_palette` from now on.
 pub fn select_nes_palette(index: u8) {
     SELECTED.store(index, Ordering::Relaxed);
+    refresh_display();
+}
+
+/// The television the NES colours are shown on (lot REWRITE-UI, `video.tv_model` and the
+/// `video.tv_*` knobs): the whole process's, as [`SELECTED`]; a modern screen at rest by default.
+static TV_LOOK: AtomicU64 = AtomicU64::new(0);
+static TV_LOOK_VALUE: std::sync::Mutex<TvLook> = std::sync::Mutex::new(TvLook::NEUTRAL);
+
+/// Shows the NES colours on `look` from now on: the palette goes through its knobs and its tube.
+pub fn set_tv_look(look: TvLook) {
+    let packed = look.packed();
+    if TV_LOOK.swap(packed, Ordering::Relaxed) == packed {
+        return;
+    }
+    if let Ok(mut value) = TV_LOOK_VALUE.lock() {
+        *value = look;
+    }
+    refresh_display();
+}
+
+/// The television the NES colours are shown on.
+#[must_use]
+pub fn tv_look() -> TvLook {
+    TV_LOOK_VALUE.lock().map_or(TvLook::NEUTRAL, |value| *value)
+}
+
+/// The 64 colours as shown: the palette chosen through the television ([`set_tv_look`]), worked
+/// out when either changes so that [`nes_color`] stays a load.
+static DISPLAY: [AtomicU32; NES_COLOR_COUNT] = {
+    let mut table = [const { AtomicU32::new(0) }; NES_COLOR_COUNT];
+    let mut index = 0;
+    while index < NES_COLOR_COUNT {
+        #[allow(clippy::cast_sign_loss)] // 24-bit colours
+        let packed = PACKED[index] as u32;
+        table[index] = AtomicU32::new(packed);
+        index += 1;
+    }
+    table
+};
+
+/// The palette and television [`DISPLAY`] was last worked out for.
+static DISPLAY_KEY: AtomicU64 = AtomicU64::new(0);
+
+fn refresh_display() {
+    let palette = selected_nes_palette();
+    let look = tv_look();
+    let key = look.packed() << 8 | u64::from(SELECTED.load(Ordering::Relaxed));
+    if DISPLAY_KEY.swap(key, Ordering::Relaxed) == key {
+        return;
+    }
+    let transform = zax_nes::tv::TvTransform::new(look.model);
+    for (index, slot) in DISPLAY.iter().enumerate() {
+        let raw = nes_color_in(palette, index);
+        let shown = if look.is_neutral() {
+            raw
+        } else {
+            let rgb = [raw.r, raw.g, raw.b].map(|channel| f32::from(channel) / 255.0);
+            // The knobs, then the tube (`TvLook::show`), the transform made once for the 64.
+            let knobs = TvLook {
+                model: zax_nes::tv::TvModel::Modern,
+                ..look
+            };
+            let rgb = knobs.show(rgb);
+            let rgb = transform.as_ref().map_or(rgb, |tube| tube.apply(rgb));
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0 to 255
+            let [r, g, b] = rgb.map(|value| (value.clamp(0.0, 1.0) * 255.0).round() as u8);
+            Rgb24::new(r, g, b)
+        };
+        #[allow(clippy::cast_sign_loss)] // 24-bit colours
+        slot.store(shown.packed() as u32, Ordering::Relaxed);
+    }
 }
 
 /// The palette the NES colours are shown in.
@@ -276,7 +349,8 @@ pub fn selected_nes_palette() -> NesPalette {
 /// REQ-E3D-251, DEC-04B-Q1).
 #[must_use]
 pub fn nes_color(index: usize) -> Rgb24 {
-    nes_color_in(selected_nes_palette(), index)
+    #[allow(clippy::cast_possible_wrap)] // 24-bit colours
+    Rgb24::from_packed(DISPLAY[index & 0x3F].load(Ordering::Relaxed) as i32)
 }
 
 /// The RGB colour of NES colour index `index` (six bits used) in `palette`.

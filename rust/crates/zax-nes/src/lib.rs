@@ -24,6 +24,7 @@ mod region_timing;
 pub use power_on_ram::{Mmc3Revision, PowerOnPpuRam, PowerOnRam, BLARGG_POWER_UP_PALETTE};
 pub mod rom;
 pub mod state;
+pub mod tv;
 mod video_info;
 #[cfg(feature = "board-vs-system")]
 pub mod vs;

@@ -2861,6 +2861,100 @@ fn video_nes_palette(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("Colour emphasis in 3D"),
     );
+    video_signal(out);
+}
+
+fn video_signal(out: &mut Vec<SettingDescriptor>) {
+    // Lot REWRITE-UI, the signal options (owner, 2026-11-18): what the composite decoder of
+    // `video.composite_signal` takes and how, and the television the picture is shown on
+    // (`zax_nes::tv`), the palette included. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoSignalKind,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Composite"),
+            opt(1, "S-Video"),
+            opt(2, "RF"),
+        ]))
+        .with_label("Signal kind"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoTvModel,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Modern screen"),
+            opt(1, "NTSC tube (RCA ColorTrak)"),
+            opt(2, "Japanese tube (Toshiba)"),
+            opt(3, "PAL tube (Trinitron)"),
+        ]))
+        .with_label("Television"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoDecoderSharpness,
+            SettingKind::Enum,
+            SettingValue::Enum(1),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Soft"),
+            opt(1, "Normal"),
+            opt(2, "Sharp"),
+        ]))
+        .with_label("Decoder sharpness"),
+    );
+    for (id, default, label) in [
+        (SettingId::VideoCombFilter, true, "Comb filter"),
+        (SettingId::VideoFrozenDotCrawl, false, "Frozen dot crawl"),
+    ] {
+        out.push(
+            SettingDescriptor::new(
+                id,
+                SettingKind::Bool,
+                SettingValue::Bool(default),
+                SettingScope::User,
+                SettingEffect::Immediate,
+                SettingTheme::Video,
+            )
+            .with_domain(Domain::switch())
+            .with_label(label),
+        );
+    }
+    for (id, default, minimum, maximum, label) in [
+        (SettingId::VideoRfNoise, 30, 0, 100, "RF snow"),
+        (SettingId::VideoRfGhost, 15, 0, 100, "RF ghost"),
+        (SettingId::VideoTvHue, 0, -30, 30, "Tint"),
+        (SettingId::VideoTvSaturation, 100, 0, 200, "Colour"),
+        (SettingId::VideoTvContrast, 100, 50, 150, "Contrast"),
+        (SettingId::VideoTvBrightness, 0, -50, 50, "Brightness"),
+    ] {
+        out.push(
+            SettingDescriptor::new(
+                id,
+                SettingKind::Int,
+                SettingValue::Int(default),
+                SettingScope::User,
+                SettingEffect::Immediate,
+                SettingTheme::Video,
+            )
+            .with_domain(Domain::range(f64::from(minimum), f64::from(maximum)))
+            .with_label(label),
+        );
+    }
 }
 
 fn achievements(out: &mut Vec<SettingDescriptor>) {

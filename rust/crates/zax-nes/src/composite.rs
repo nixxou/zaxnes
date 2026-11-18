@@ -11,6 +11,8 @@
 //!
 //! Nothing here runs unless a host asks for it: the core's picture is unchanged.
 
+use crate::tv::{TvLook, TvTransform};
+
 /// Half-clock samples in one colour subcarrier cycle.
 pub const PHASES: usize = 12;
 
@@ -142,6 +144,8 @@ fn phase_angle(phase: usize) -> f32 {
 /// sine of every phase.
 struct DecodeTables {
     levels: Vec<f32>,
+    /// Per colour and emphasis, its level's mean over a cycle (what S-Video's luma carries).
+    means: Vec<f32>,
     cos: [f32; PHASES],
     sin: [f32; PHASES],
 }
@@ -165,13 +169,126 @@ fn decode_tables() -> &'static DecodeTables {
             cos[phase] = angle.cos();
             sin[phase] = angle.sin();
         }
-        DecodeTables { levels, cos, sin }
+        let means = levels
+            .chunks_exact(PHASES)
+            .map(|cycle| cycle.iter().sum::<f32>() / 12.0)
+            .collect();
+        DecodeTables {
+            levels,
+            means,
+            cos,
+            sin,
+        }
     })
 }
 
-/// Working buffers of [`decode_row`], kept by the caller from row to row.
+/// The signal the set takes (`video.signal_kind`, lot REWRITE-UI).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Signal {
+    /// The console's composite output: luma and chroma on one wire, leaking into each other.
+    #[default]
+    Composite,
+    /// Luma and chroma apart, as a set with an S-Video input separates them: no colour fringes,
+    /// no dot crawl, the composite's colours. (A NES has no such output; this is the picture of
+    /// a perfect separation, as the RGB/S-Video mods give.)
+    SVideo,
+    /// The composite through the aerial input: blurrier, with snow and a faint ghost.
+    Rf,
+}
+
+/// How many samples the set's filters average (`video.decoder_sharpness`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Sharpness {
+    /// Wider filters: softer edges, fewer fringes.
+    Soft,
+    /// The decoder of lot FIDPLUS-D2b: luma over one subcarrier cycle, chroma over two.
+    #[default]
+    Normal,
+    /// Narrower filters: sharper edges, a faint chroma pattern left in flat colours.
+    Sharp,
+}
+
+/// The settings of [`RowDecoder`] (lot REWRITE-UI, the signal options).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DecoderOptions {
+    /// The signal.
+    pub signal: Signal,
+    /// The filters' width.
+    pub sharpness: Sharpness,
+    /// NTSC: the three-line comb filter, when the rows around are given
+    /// ([`RowDecoder::decode_row_with`]). The 2C02's subcarrier advances a third of a cycle a
+    /// line, so the chroma of three lines cancels where the picture does not change vertically.
+    pub comb: bool,
+    /// RF: the snow, 0 to 1.
+    pub rf_noise: f32,
+    /// RF: the ghost, 0 to 1.
+    pub rf_ghost: f32,
+    /// The set's knobs and tube.
+    pub look: TvLook,
+}
+
+impl Default for DecoderOptions {
+    fn default() -> Self {
+        Self {
+            signal: Signal::Composite,
+            sharpness: Sharpness::Normal,
+            comb: false,
+            rf_noise: 0.3,
+            rf_ghost: 0.15,
+            look: TvLook::NEUTRAL,
+        }
+    }
+}
+
+impl DecoderOptions {
+    /// The luma and the chroma filters' widths, in samples; `separated` when the luma carries no
+    /// chroma any more (S-Video, or after the comb filter).
+    const fn windows(&self, separated: bool) -> (usize, usize) {
+        let (luma, chroma) = match self.sharpness {
+            Sharpness::Soft => (18, 36),
+            Sharpness::Normal => (LUMA_WINDOW, CHROMA_WINDOW),
+            Sharpness::Sharp => (8, 16),
+        };
+        let luma = if separated { luma * 2 / 3 } else { luma };
+        match self.signal {
+            Signal::Rf => (luma + 6, chroma + 6),
+            Signal::Composite | Signal::SVideo => (luma, chroma),
+        }
+    }
+}
+
+/// The rows above and below the one decoded, for the comb filter: their colour indices and
+/// emphasis (empty for none).
+#[derive(Debug, Clone, Copy)]
+pub struct Neighbours<'a> {
+    /// The row above: pixels, emphasis.
+    pub above: (&'a [u8], &'a [u8]),
+    /// The row below: pixels, emphasis.
+    pub below: (&'a [u8], &'a [u8]),
+}
+
+/// Samples between the picture and its RF ghost (about two and a half pixels).
+const GHOST_DELAY: usize = 20;
+
+/// Working buffers of [`RowDecoder::decode_row`], kept by the caller from row to row, and the
+/// set's settings.
 #[derive(Debug, Default)]
 pub struct RowDecoder {
+    options: DecoderOptions,
+    transform: Option<TvTransform>,
+    /// Per sample: the signal (0 black, 1 white), the pixel's mean level, the demodulation's
+    /// cosine and sine.
+    levels: Vec<f32>,
+    means: Vec<f32>,
+    cos: Vec<f32>,
+    sin: Vec<f32>,
+    /// The comb filter's rows around.
+    above: Vec<f32>,
+    below: Vec<f32>,
+    /// What the luma and the chroma filters read.
+    luma_source: Vec<f32>,
+    chroma_source: Vec<f32>,
+    /// Running sums: entry k is the sum of the first k samples.
     luma: Vec<f32>,
     in_phase: Vec<f32>,
     quadrature: Vec<f32>,
@@ -179,9 +296,179 @@ pub struct RowDecoder {
     previous_u: Vec<f32>,
     previous_v: Vec<f32>,
     previous_line: Option<i64>,
+    /// The RF snow's generator.
+    noise: u32,
+}
+
+/// The mean of `sums` (running sums of `samples` values) over `width` samples around `centre`.
+fn window(sums: &[f32], samples: usize, centre: usize, width: usize) -> f32 {
+    let from = centre.saturating_sub(width / 2);
+    let to = (from + width).min(samples);
+    let from = to.saturating_sub(width);
+    #[allow(clippy::cast_precision_loss)] // at most a few tens
+    let count = (to - from).max(1) as f32;
+    (sums[to] - sums[from]) / count
+}
+
+fn running_sums(out: &mut Vec<f32>, values: impl Iterator<Item = f32>) {
+    out.clear();
+    out.push(0.0);
+    let mut sum = 0.0;
+    for value in values {
+        sum += value;
+        out.push(sum);
+    }
 }
 
 impl RowDecoder {
+    /// The set's settings from now on.
+    pub fn set_options(&mut self, options: DecoderOptions) {
+        if options.look.model != self.options.look.model {
+            self.transform = TvTransform::new(options.look.model);
+        }
+        self.options = options;
+    }
+
+    /// The set's settings.
+    #[must_use]
+    pub const fn options(&self) -> &DecoderOptions {
+        &self.options
+    }
+
+    /// The RF signal's ghost and snow on the samples of the row.
+    fn degrade(&mut self) {
+        if self.options.signal != Signal::Rf {
+            return;
+        }
+        let ghost = self.options.rf_ghost.clamp(0.0, 1.0) * 0.35;
+        if ghost > 0.0 {
+            for samples in [&mut self.levels, &mut self.above, &mut self.below] {
+                for k in (GHOST_DELAY..samples.len()).rev() {
+                    samples[k] += ghost * samples[k - GHOST_DELAY];
+                }
+            }
+        }
+        let snow = self.options.rf_noise.clamp(0.0, 1.0) * 0.25;
+        if snow > 0.0 {
+            if self.noise == 0 {
+                self.noise = 0x9E37_79B9;
+            }
+            for level in &mut self.levels {
+                self.noise ^= self.noise << 13;
+                self.noise ^= self.noise >> 17;
+                self.noise ^= self.noise << 5;
+                #[allow(clippy::cast_precision_loss)] // a 24-bit fraction
+                let random = (self.noise >> 8) as f32 / 16_777_216.0;
+                *level += (random - 0.5) * snow;
+            }
+        }
+    }
+
+    /// What the luma and chroma filters read: the signal itself (composite), the pixel's mean
+    /// and the rest (S-Video), or the comb filter's split (`comb`).
+    fn separate(&mut self, comb: bool) {
+        self.luma_source.clear();
+        self.chroma_source.clear();
+        if self.options.signal == Signal::SVideo {
+            self.luma_source.extend_from_slice(&self.means);
+            self.chroma_source
+                .extend(self.levels.iter().zip(&self.means).map(|(l, m)| l - m));
+            return;
+        }
+        if !comb {
+            self.luma_source.extend_from_slice(&self.levels);
+            self.chroma_source.extend_from_slice(&self.levels);
+            return;
+        }
+        // The three lines' mean cancels the chroma where the picture is the same vertically;
+        // what it leaves of the line's own signal, high-passed so that a change of brightness
+        // from line to line stays luma, is the chroma.
+        let samples = self.levels.len();
+        self.chroma_source.extend(
+            (0..samples)
+                .map(|k| self.levels[k] - (self.above[k] + self.levels[k] + self.below[k]) / 3.0),
+        );
+        running_sums(&mut self.luma, self.chroma_source.iter().copied());
+        for k in 0..samples {
+            let low = window(&self.luma, samples, k, PHASES);
+            self.chroma_source[k] -= low;
+        }
+        self.luma_source.extend(
+            self.levels
+                .iter()
+                .zip(&self.chroma_source)
+                .map(|(l, c)| l - c),
+        );
+    }
+
+    /// The running sums of luma and of the two demodulated chroma components.
+    fn sum_up(&mut self) {
+        running_sums(&mut self.luma, self.luma_source.iter().copied());
+        running_sums(
+            &mut self.in_phase,
+            self.chroma_source
+                .iter()
+                .zip(&self.cos)
+                .map(|(c, cos)| c * cos),
+        );
+        running_sums(
+            &mut self.quadrature,
+            self.chroma_source
+                .iter()
+                .zip(&self.sin)
+                .map(|(c, sin)| c * sin),
+        );
+    }
+
+    /// A decoded colour (0 to 1 before clamping) into three bytes, through the tube.
+    fn emit(&self, rgb: [f32; 3], out: &mut [u8]) {
+        let rgb = rgb.map(|value| value.clamp(0.0, 1.0));
+        let rgb = self
+            .transform
+            .as_ref()
+            .map_or(rgb, |transform| transform.apply(rgb));
+        for (byte, value) in out.iter_mut().zip(rgb) {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0 to 255
+            let value = (value * 255.0).round() as u8;
+            *byte = value;
+        }
+    }
+
+    /// The NTSC samples of a row starting at subcarrier phase `phase` into `levels` (and, with
+    /// `means`, each pixel's mean level).
+    fn ntsc_samples(
+        levels: &mut Vec<f32>,
+        mut means: Option<&mut Vec<f32>>,
+        pixels: &[u8],
+        emphasis: &[u8],
+        phase: usize,
+    ) {
+        let tables = decode_tables();
+        levels.clear();
+        if let Some(means) = means.as_deref_mut() {
+            means.clear();
+        }
+        let mut at = phase % PHASES;
+        for (x, &pixel) in pixels.iter().enumerate() {
+            let bits = emphasis.get(x).copied().unwrap_or(0) & 7;
+            let entry = usize::from(pixel & 0x3F) << 3 | usize::from(bits);
+            let row = &tables.levels[entry * PHASES..][..PHASES];
+            for _ in 0..SAMPLES_PER_PIXEL {
+                levels.push(row[at]);
+                at += 1;
+                if at == PHASES {
+                    at = 0;
+                }
+            }
+            if let Some(means) = means.as_deref_mut() {
+                means.extend(std::iter::repeat_n(
+                    tables.means[entry],
+                    SAMPLES_PER_PIXEL,
+                ));
+            }
+        }
+    }
+
     /// Decodes one row of the picture as a PAL television sees the 2C07's signal (lot
     /// FIDPLUS-D2c): `line` the picture line (0 the first; the rows of a widescreen margin above
     /// are negative), `first_x` the screen column of `pixels[0]` (negative in a left margin).
@@ -197,53 +484,54 @@ impl RowDecoder {
         out: &mut [u8],
     ) {
         let samples = pixels.len() * PAL_SAMPLES_PER_PIXEL;
-        for sums in [&mut self.luma, &mut self.in_phase, &mut self.quadrature] {
-            sums.clear();
-            sums.resize(samples + 1, 0.0);
-        }
         let tables = pal_decode_tables();
         let odd = line.rem_euclid(2) == 1;
         let sign = pal_v_sign(odd);
-        let (mut y, mut u, mut v) = (0.0_f32, 0.0_f32, 0.0_f32);
+        for buffer in [
+            &mut self.levels,
+            &mut self.means,
+            &mut self.cos,
+            &mut self.sin,
+        ] {
+            buffer.clear();
+            buffer.reserve(samples);
+        }
+        self.above.clear();
+        self.below.clear();
         let mut at = pal_pixel_phase(line, first_x);
-        let mut index = 1;
         for (x, &pixel) in pixels.iter().enumerate() {
             let bits = emphasis.get(x).copied().unwrap_or(0) & 7;
-            let base = ((usize::from(pixel & 0x3F) << 3 | usize::from(bits)) * 2
-                + usize::from(odd))
-                * PHASES;
-            let levels = &tables.levels[base..base + PHASES];
+            let entry =
+                (usize::from(pixel & 0x3F) << 3 | usize::from(bits)) * 2 + usize::from(odd);
+            let levels = &tables.levels[entry * PHASES..][..PHASES];
             for _ in 0..PAL_SAMPLES_PER_PIXEL {
-                let level = levels[at];
-                y += level;
-                u += level * tables.cos[at];
-                v += sign * level * tables.sin[at];
-                self.luma[index] = y;
-                self.in_phase[index] = u;
-                self.quadrature[index] = v;
-                index += 1;
+                self.levels.push(levels[at]);
+                self.cos.push(tables.cos[at]);
+                self.sin.push(sign * tables.sin[at]);
                 at += 1;
                 if at == PHASES {
                     at = 0;
                 }
             }
+            self.means.extend(std::iter::repeat_n(
+                tables.means[entry],
+                PAL_SAMPLES_PER_PIXEL,
+            ));
         }
-        let window = |sums: &[f32], centre: usize, width: usize| -> f32 {
-            let from = centre.saturating_sub(width / 2);
-            let to = (from + width).min(samples);
-            let from = to.saturating_sub(width);
-            #[allow(clippy::cast_precision_loss)] // at most 24
-            let count = (to - from) as f32;
-            (sums[to] - sums[from]) / count
-        };
+        self.degrade();
+        self.separate(false);
+        self.sum_up();
+        let (luma_width, chroma_width) = self
+            .options
+            .windows(self.options.signal == Signal::SVideo);
         let delayed = self.previous_line == Some(line - 1) && self.previous_u.len() == pixels.len();
         self.previous_u.resize(pixels.len(), 0.0);
         self.previous_v.resize(pixels.len(), 0.0);
         for (x, rgb) in out.chunks_exact_mut(3).take(pixels.len()).enumerate() {
             let centre = x * PAL_SAMPLES_PER_PIXEL + PAL_SAMPLES_PER_PIXEL / 2;
-            let y = window(&self.luma, centre, LUMA_WINDOW);
-            let mut u = 2.0 * window(&self.in_phase, centre, CHROMA_WINDOW);
-            let mut v = 2.0 * window(&self.quadrature, centre, CHROMA_WINDOW);
+            let y = window(&self.luma, samples, centre, luma_width);
+            let mut u = 2.0 * window(&self.in_phase, samples, centre, chroma_width);
+            let mut v = 2.0 * window(&self.quadrature, samples, centre, chroma_width);
             let (here_u, here_v) = (u, v);
             if delayed {
                 u = f32::midpoint(u, self.previous_u[x]);
@@ -251,11 +539,8 @@ impl RowDecoder {
             }
             self.previous_u[x] = here_u;
             self.previous_v[x] = here_v;
-            for (byte, value) in rgb.iter_mut().zip(yuv_to_rgb(y, u, v)) {
-                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0 to 255
-                let value = (value * 255.0).round() as u8;
-                *byte = value;
-            }
+            let (y, u, v) = self.options.look.knobs.adjust(y, u, v);
+            self.emit(yuv_to_rgb(y, u, v), rgb);
         }
         self.previous_line = Some(line);
     }
@@ -270,64 +555,88 @@ impl RowDecoder {
     /// two cycles, then the matrix of [`decode_uniform`]. A flat colour decodes exactly as
     /// `decode_uniform` does; where colours meet, luma and chroma leak into each other as on a
     /// set (the colour fringes), and since the phase moves by 4 a line and by 4 or 8 a frame the
-    /// fringes move with it (the dot crawl).
+    /// fringes move with it (the dot crawl). The settings ([`Self::set_options`]) change the
+    /// signal, the filters and the set's colours; the comb filter needs
+    /// [`Self::decode_row_with`].
     pub fn decode_row(&mut self, pixels: &[u8], emphasis: &[u8], phase: usize, out: &mut [u8]) {
+        self.decode_row_with(pixels, emphasis, phase, None, out);
+    }
+
+    /// [`Self::decode_row`] with the rows around, which the comb filter reads (the row above
+    /// starts 4 half-clocks before this one, the row below 4 after).
+    pub fn decode_row_with(
+        &mut self,
+        pixels: &[u8],
+        emphasis: &[u8],
+        phase: usize,
+        neighbours: Option<Neighbours<'_>>,
+        out: &mut [u8],
+    ) {
         let samples = pixels.len() * SAMPLES_PER_PIXEL;
-        // Running sums: entry k is the sum of the first k samples.
-        for sums in [&mut self.luma, &mut self.in_phase, &mut self.quadrature] {
-            sums.clear();
-            sums.reserve(samples + 1);
-            sums.push(0.0);
-        }
         let tables = decode_tables();
-        self.luma.resize(samples + 1, 0.0);
-        self.in_phase.resize(samples + 1, 0.0);
-        self.quadrature.resize(samples + 1, 0.0);
-        let (mut y, mut i, mut q) = (0.0_f32, 0.0_f32, 0.0_f32);
+        Self::ntsc_samples(
+            &mut self.levels,
+            Some(&mut self.means),
+            pixels,
+            emphasis,
+            phase,
+        );
+        let comb = match neighbours {
+            Some(rows)
+                if self.options.comb
+                    && self.options.signal != Signal::SVideo
+                    && rows.above.0.len() == pixels.len()
+                    && rows.below.0.len() == pixels.len() =>
+            {
+                let (above, above_emphasis) = rows.above;
+                let (below, below_emphasis) = rows.below;
+                Self::ntsc_samples(
+                    &mut self.above,
+                    None,
+                    above,
+                    above_emphasis,
+                    phase + PHASES - 4,
+                );
+                Self::ntsc_samples(&mut self.below, None, below, below_emphasis, phase + 4);
+                true
+            }
+            _ => {
+                self.above.clear();
+                self.below.clear();
+                false
+            }
+        };
+        self.cos.clear();
+        self.sin.clear();
         let mut at = phase % PHASES;
-        let mut index = 1;
-        for (x, &pixel) in pixels.iter().enumerate() {
-            let bits = emphasis.get(x).copied().unwrap_or(0) & 7;
-            let levels = &tables.levels
-                [(usize::from(pixel & 0x3F) << 3 | usize::from(bits)) * PHASES..][..PHASES];
-            for _ in 0..SAMPLES_PER_PIXEL {
-                let level = levels[at];
-                y += level;
-                i += level * tables.cos[at];
-                q += level * tables.sin[at];
-                self.luma[index] = y;
-                self.in_phase[index] = i;
-                self.quadrature[index] = q;
-                index += 1;
-                at += 1;
-                if at == PHASES {
-                    at = 0;
-                }
+        for _ in 0..samples {
+            self.cos.push(tables.cos[at]);
+            self.sin.push(tables.sin[at]);
+            at += 1;
+            if at == PHASES {
+                at = 0;
             }
         }
-        let window = |sums: &[f32], centre: usize, width: usize| -> f32 {
-            let from = centre.saturating_sub(width / 2);
-            let to = (from + width).min(samples);
-            let from = to.saturating_sub(width);
-            #[allow(clippy::cast_precision_loss)] // at most 24
-            let count = (to - from) as f32;
-            (sums[to] - sums[from]) / count
-        };
+        self.degrade();
+        self.separate(comb);
+        self.sum_up();
+        let (luma_width, chroma_width) = self
+            .options
+            .windows(comb || self.options.signal == Signal::SVideo);
         for (x, rgb) in out.chunks_exact_mut(3).take(pixels.len()).enumerate() {
             let centre = x * SAMPLES_PER_PIXEL + SAMPLES_PER_PIXEL / 2;
-            let y = window(&self.luma, centre, LUMA_WINDOW);
-            let i = 2.0 * window(&self.in_phase, centre, CHROMA_WINDOW);
-            let q = 2.0 * window(&self.quadrature, centre, CHROMA_WINDOW);
-            let channels = [
-                y + 0.956 * i + 0.621 * q,
-                y - 0.272 * i - 0.647 * q,
-                y - 1.106 * i + 1.703 * q,
-            ];
-            for (byte, value) in rgb.iter_mut().zip(channels) {
-                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0 to 255
-                let value = (value.clamp(0.0, 1.0) * 255.0).round() as u8;
-                *byte = value;
-            }
+            let y = window(&self.luma, samples, centre, luma_width);
+            let i = 2.0 * window(&self.in_phase, samples, centre, chroma_width);
+            let q = 2.0 * window(&self.quadrature, samples, centre, chroma_width);
+            let (y, i, q) = self.options.look.knobs.adjust(y, i, q);
+            self.emit(
+                [
+                    y + 0.956 * i + 0.621 * q,
+                    y - 0.272 * i - 0.647 * q,
+                    y - 1.106 * i + 1.703 * q,
+                ],
+                rgb,
+            );
         }
     }
 }
@@ -464,6 +773,8 @@ const fn pal_v_sign(odd: bool) -> f32 {
 /// axis.
 struct PalDecodeTables {
     levels: Vec<f32>,
+    /// Per colour, emphasis and line parity, its level's mean over a cycle.
+    means: Vec<f32>,
     cos: [f32; PHASES],
     sin: [f32; PHASES],
 }
@@ -491,7 +802,16 @@ fn pal_decode_tables() -> &'static PalDecodeTables {
             cos[phase] = angle.cos();
             sin[phase] = angle.sin();
         }
-        PalDecodeTables { levels, cos, sin }
+        let means = levels
+            .chunks_exact(PHASES)
+            .map(|cycle| cycle.iter().sum::<f32>() / 12.0)
+            .collect();
+        PalDecodeTables {
+            levels,
+            means,
+            cos,
+            sin,
+        }
     })
 }
 
@@ -702,6 +1022,108 @@ mod tests {
 
     fn signal_high(pixel: u8, phase: usize, odd: bool) -> bool {
         pal_signal(pixel, 0, phase, odd) > LEVELS[usize::from(pixel >> 4)] + 0.01
+    }
+
+    /// A black-to-white edge at column 32, decoded with `options` (and the same rows around).
+    fn edge(options: DecoderOptions, phase: usize) -> Vec<u8> {
+        let mut decoder = RowDecoder::default();
+        decoder.set_options(options);
+        let mut row = [0x0F_u8; 64];
+        row[32..].fill(0x30);
+        let mut out = vec![0u8; 64 * 3];
+        let rows = Neighbours {
+            above: (&row, &[]),
+            below: (&row, &[]),
+        };
+        decoder.decode_row_with(&row, &[], phase, Some(rows), &mut out);
+        out
+    }
+
+    /// How coloured the pixels round the edge are: the largest gap between two channels.
+    fn fringe(out: &[u8]) -> u8 {
+        out[29 * 3..36 * 3]
+            .chunks_exact(3)
+            .map(|rgb| rgb.iter().max().unwrap() - rgb.iter().min().unwrap())
+            .max()
+            .unwrap()
+    }
+
+    #[test]
+    fn rewrite_ui_s_video_and_the_comb_filter_take_the_fringes_away() {
+        let composite = fringe(&edge(DecoderOptions::default(), 0));
+        let svideo = fringe(&edge(
+            DecoderOptions {
+                signal: Signal::SVideo,
+                ..DecoderOptions::default()
+            },
+            0,
+        ));
+        let comb = fringe(&edge(
+            DecoderOptions {
+                comb: true,
+                ..DecoderOptions::default()
+            },
+            0,
+        ));
+        assert!(composite > 8, "composite {composite}");
+        assert!(svideo <= 2, "s-video {svideo}");
+        assert!(comb <= 2, "comb {comb}");
+    }
+
+    #[test]
+    fn rewrite_ui_flat_colours_stay_themselves_with_s_video_and_the_comb() {
+        for options in [
+            DecoderOptions {
+                signal: Signal::SVideo,
+                ..DecoderOptions::default()
+            },
+            DecoderOptions {
+                comb: true,
+                ..DecoderOptions::default()
+            },
+        ] {
+            let mut decoder = RowDecoder::default();
+            decoder.set_options(options);
+            for pixel in [0x16_u8, 0x2A, 0x12, 0x30] {
+                let row = [pixel; 64];
+                let mut out = [0u8; 64 * 3];
+                let rows = Neighbours {
+                    above: (&row, &[]),
+                    below: (&row, &[]),
+                };
+                decoder.decode_row_with(&row, &[], 4, Some(rows), &mut out);
+                let expected = decode_uniform(pixel, 0, 0.0);
+                for (channel, &value) in expected.iter().enumerate() {
+                    let got = f32::from(out[32 * 3 + channel]) / 255.0;
+                    assert!((got - value).abs() < 0.02, "{options:?} {pixel:#x}: {got} {value}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rewrite_ui_rf_snows_and_the_knobs_take_the_colour_away() {
+        let rf = DecoderOptions {
+            signal: Signal::Rf,
+            ..DecoderOptions::default()
+        };
+        assert_ne!(edge(rf, 0), edge(DecoderOptions::default(), 0));
+        let grey = DecoderOptions {
+            look: TvLook {
+                knobs: crate::tv::TvKnobs {
+                    saturation: 0,
+                    ..crate::tv::TvKnobs::NEUTRAL
+                },
+                ..TvLook::NEUTRAL
+            },
+            ..DecoderOptions::default()
+        };
+        let mut decoder = RowDecoder::default();
+        decoder.set_options(grey);
+        let mut out = [0u8; 64 * 3];
+        decoder.decode_row(&[0x16; 64], &[], 0, &mut out);
+        let rgb = &out[32 * 3..33 * 3];
+        assert!(rgb.iter().max().unwrap() - rgb.iter().min().unwrap() <= 1, "{rgb:?}");
     }
 
     #[test]
