@@ -42,9 +42,9 @@ as Zaxnes does (PPU and APU still, the board clocked).
 - [x] 3. `NesHawkEngine`: built-in patch applied to the image before the machine is built, the
       pack installed, aids applied to the board's PRG, options; the extension saved in the
       block only when present (a flag bit, so blocks without it are byte-identical to today's).
-- [ ] 4. Tile capture with margins (the columns beyond 256 px, the decoders, sprite x high
+- [x] 4. Tile capture with margins (the columns beyond 256 px, the decoders, sprite x high
       bytes, tint), `FrameBatch` margin fields, `wide_picture_into`.
-- [ ] 5. Application: `Capabilities::NESHAWK` widescreen + hack packs, the host setters routed to
+- [x] 5. Application: `Capabilities::NESHAWK` widescreen + hack packs, the host setters routed to
       NesHawk, the idle-loop savestates and components.
 - [ ] 6. Proof: the `.bk2` corpus (Kirby whole movie, Faxanadu whole movie) frame-for-frame
       identical (work RAM + frame hash) to the build before the lot, widescreen off and on for a
@@ -64,5 +64,26 @@ oms`: nothing attached by default; a locked extension leaves
 - Proof runs: `tools/neshawk-hacks/bk2-trace.sh`, outputs in `G:\3DSen
 eshawk-hacks-runs`
   (baseline = rewrite-ui 70516d6b build, the core being identical up to 91ffefce).
-- Step 4 next: `zax_nes::ppu::tiles` (1 800 lines on `Ppu2C02`) is the reference; the plan is a
-  NesHawk-side copy adapted to this PPU, leaving `zax-nes` untouched.
+- Step 4 (443e3f9c): `tiles.rs` (wide rows, sprite x high bytes, second page), `wide_decode.rs`
+  (zax_nes's decoders run after the frame on the engine's copy of the records, each kept row with
+  its 4 KiB pattern table and nametable map), `wide_picture.rs` (the wide 2D picture), margin
+  sprites out of NesHawk's sprite evaluation, nametable write stamps. Two overclock bugs found by
+  comparing with Zaxnes: the boards' `ClockPPU` (MMC1's write filter dropped every bank switch of
+  the overclock after the first) and the PPU's delayed `$2001`/`$2006` installs (Metroid's CHR
+  uploads went to a nametable) now keep running while the PPU is held.
+  `dump_wide_pictures_of_both_engines` (1 500 frames of a scripted run, margin 64): 12 of the 13
+  patched demo ROMs give **the same wide picture to the pixel** on NesHawk and Zaxnes. Ninja
+  Gaiden III parts from Zaxnes near frame 700 **without any patch** (an emulation difference of
+  the two engines, not of the lot).
+- Step 5 (87d80ae3): `Capabilities::NESHAWK` widescreen + hack packs, `EngineHandle` routing,
+  options greyed by capability (FCEUX unchanged). `.bk2` on NesHawk: `plain_for_bk2` keeps the
+  machine plain (no patch, no aid, no margin, no extension) while the movie is set up and plays.
+- Not done (Zaxnes has them): vertical margins and `hides_overscan`, smooth scrolling and its
+  playfield end, steady sprites, sprites drawn over the centre by the wide picture (second page,
+  across the left edge), four screens (`$5007` bit 0; no demo pack uses it), idle-loop savestates
+  (NesHawk saves where it is), switching the widescreen mid-game (takes effect at the next load),
+  aids on the boards that fall back to Zaxnes's (`boards::zaxnes`).
+- Environment, 2026-11-18: C: full (20-40 MB free) so the page file cannot grow; nine harness
+  processes at once died of failed allocations. `prove.sh` runs three at a time. Build with
+  `TMP`/`TEMP` on G: and `--features zax-app/bundled` for the app tests, in release (the debug
+  test binaries of zax-app took 11 GB and filled G:).
