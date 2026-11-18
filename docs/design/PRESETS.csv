@@ -7,7 +7,7 @@ Video;Rendu accéléré (saut d'images);video.skip_frame;ne redessine pas une sc
 Video;Méthode de rendu;video.render_method;Render Tex : une texture intermédiaire en plus;Direct;tout de suite;oui;Direct;Direct;Direct;Direct;Direct;non;non;non;non;non
 Video;Frames en file GPU;video.max_queued_frames;file GPU : latence contre à-coups;2;tout de suite;oui;2;2;2;2;2;non;non;non;non;non
 Video;;video.msaa_2_0;anticrénelage matériel (GPU);2 (non utilisée);(stockée seulement);non;2 (non utilisée);2 (non utilisée);2 (non utilisée);2 (non utilisée);2 (non utilisée);non;non;non;non;non
-Video;Échelle de résolution;video.res_scale;gros gain GPU, image plus douce;Native;tout de suite;oui;1/2;2/3;Native;Native;Native;non;non;non;non;non
+Video;Échelle de résolution;video.res_scale;gros gain GPU, image plus douce;Native;tout de suite;oui;Native;Native;Native;Native;Native;oui (case du préréglage);non;non;non;non
 Video;Anticrénelage;video.anti_alias;lissage des maillages (CPU);MARCHING;tout de suite;oui;MARCHING;MARCHING;MARCHING;MARCHING;MARCHING;oui;oui;oui;oui;oui
 Render;Algorithme de maillage;render.mesh_algo;construction des formes (CPU);0;tout de suite;oui;0;0;0;0;0;non;non;non;non;non
 Render;Ombres;render.shadow;un passage d ombre en plus (GPU);oui;tout de suite;oui;non;oui;oui;oui;oui;oui;oui;oui;oui;oui
@@ -15,21 +15,22 @@ Render;Éclairage du backdrop;render.backdrop_lighting;léger (GPU);oui;tout de 
 Emulation;Vitesse de jeu;emu.game_speed;proportionnel à la vitesse;normale;tout de suite;oui;normale;normale;normale;normale;normale;non;non;non;non;non
 Emulation;Run-ahead;emu.run_ahead;chaque cran = une émulation complète de plus;1;tout de suite;oui;0;1;1;1;1;oui;oui;oui;oui;oui
 Emulation;Moteur d'émulation (ce jeu);emu.engine;FCEUX plus rapide que Zaxnes, autres options greyées;Zaxnes;au prochain chargement;oui;Zaxnes;Zaxnes;Zaxnes;Zaxnes;Zaxnes;non;non;non;non;non
+Emulation;Corruption par OAMADDR;emu.oamaddr_write_corruption;aucun (défaut matériel, certains jeux rares en ont besoin);non;au prochain chargement;oui;non;non;non;non;oui;non;non;non;non;oui (case du préréglage)
 Emulation;Rattrapage en cas de retard (frames);emu.catch_up;borne le travail quand la machine est en retard;2;tout de suite;oui;2;2;2;2;2;non;non;non;non;non
 Emulation;Nettoyage mémoire Lua lissé;emu.lua_smooth_gc;évite les à-coups du ramasse-miettes Lua;oui;tout de suite;oui;oui;oui;oui;oui;oui;non;non;non;non;non
 Emulation;Lua optimisé (unsafe);emu.lua_optimized;scripts Lua plus rapides, moins de vérifications;non;au prochain jeu;oui;oui;non;non;non;non;oui (case du préréglage);oui (case du préréglage);non;non;non
-Emulation;Optimisation Lua expérimentale (nécessite Lua optimisé);emu.lua_experimental;scripts Lua (expérimental);non;au prochain jeu;oui;non;non;non;non;non;non;non;non;non;non
+Emulation;Optimisation Lua expérimentale (nécessite Lua optimisé);emu.lua_experimental;scripts Lua (expérimental);non;au prochain jeu;oui;non;non;non;non;non;oui (case du préréglage);non;non;non;non
 Emulation;Scripts en parallèle du dessin;emu.pipeline;scripts et conversion 3D sur un autre fil, +1 image de latence;Off;tout de suite;oui;Auto;Off;Off;Off;Off;non;non;non;non;non
 Video;API graphique (au prochain démarrage);video.backend;OpenGL / Vulkan / DirectX 12;OpenGL;au prochain démarrage;oui;OpenGL;OpenGL;OpenGL;OpenGL;OpenGL;oui;oui;oui;oui;oui
 Video;Résolution automatique;video.dynamic_resolution;résolution qui baisse dans les scènes lourdes;non;tout de suite;oui;oui;oui;non;non;non;non;non;non;non;non
 Emulation;3D en pause en 2D;emu.pause_3d_in_2d;pas de conversion 3D quand la 2D est affichée;non;tout de suite;oui;oui;oui;non;non;non;non;non;non;non;non
-Emulation;Rattrapage : 3D de l'image affichée seulement;emu.catch_up_last_3d;images de rattrapage non converties en 3D;non;tout de suite;oui;oui;oui;non;non;non;non;non;non;non;non
+Emulation;Rattrapage : 3D de l'image affichée seulement;emu.catch_up_last_3d;images de rattrapage non converties en 3D;non;tout de suite;oui;oui;oui;oui;non;non;non;non;non;non;non
 Video;3D à 30 i/s (jeu à pleine vitesse);video.half_rate_3d;moitié du coût 3D, jeu à 60;non;tout de suite;non;non;non;non;non;non;oui (case du préréglage);non;non;non;non
 Internal;;video.res_scale_factor;facteur de résolution;1.0;(stockée seulement);non;1.0;1.0;1.0;1.0;1.0;non;non;non;non;non
 Internal;;video.target_framerate;cadence visée;90.0;(stockée seulement);non;90.0;90.0;90.0;90.0;90.0;non;non;non;non;non
 Emulation;Fidélité+;emu.fidelity_plus;plus lent (CPU);non;tout de suite;oui;non;non;non;non;oui;non;non;non;oui (case du préréglage);oui (case du préréglage)
 Emulation;Cœur rapide;emu.fast_core;gros gain CPU (2,5 à 3,5× moins de calcul en 2D), même machine;non;tout de suite;oui;oui;oui;non;non;non;oui (case du préréglage);oui (case du préréglage);non;non;non
-Emulation;Cadence de la console;emu.exact_rate;aucun calcul, cadence 60,0988 Hz;non;tout de suite;oui;non;non;non;oui;oui;oui;oui;oui;oui;oui
+Emulation;Cadence de la console;emu.exact_rate;aucun calcul, cadence 60,0988 Hz;non;tout de suite;oui;non;non;non;non;oui;oui;oui;oui;oui (case du préréglage);oui
 Emulation;Manette en temps réel;emu.realtime_input;coût faible (tranches de temps réel);oui;tout de suite;oui;oui;oui;oui;oui;oui;oui;oui;oui (case du préréglage);oui;oui
 Emulation;Présentation tardive;emu.late_present;aucun calcul, moins de latence;non;tout de suite;oui;non;non;non;non;non;non;non;non;oui (case du préréglage);oui (case du préréglage)
 Video;;video.widescreen_advanced;patchs avancés (suraccélération CPU);oui;au prochain chargement;non;oui;oui;oui;oui;oui;non;non;non;non;non

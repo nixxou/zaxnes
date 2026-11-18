@@ -25,73 +25,137 @@ const ACCENT: [f32; 4] = [1.0, 0.835, 0.18, 1.0];
 /// The amber of a "takes effect later" note.
 const LATER: [f32; 4] = [1.0, 0.82, 0.48, 1.0];
 
+/// A value a preset writes (`SettingValue` holds a `String` variant, so it cannot sit in a
+/// constant table itself).
+#[derive(Clone, Copy)]
+enum V {
+    B(bool),
+    I(i32),
+    E(i32),
+}
+
+impl V {
+    const fn value(self) -> SettingValue {
+        match self {
+            Self::B(on) => SettingValue::Bool(on),
+            Self::I(number) => SettingValue::Int(number),
+            Self::E(number) => SettingValue::Enum(number),
+        }
+    }
+}
+
 /// One preset of the slider: the values it sets, and the check boxes it shows under it (each
 /// with the value the preset gives it).
 struct Preset {
     /// Its key in the string tables: `options.preset.<key>.name`, `.summary`, `.acts`.
     key: &'static str,
     /// The values the preset writes, the check boxes' included.
-    values: &'static [(SettingId, bool)],
+    values: &'static [(SettingId, V)],
     /// The check boxes shown under the preset.
     boxes: &'static [SettingId],
 }
 
-/// The five presets, from the fastest to the most faithful. The middle one is the defaults.
+/// The five presets, from the fastest to the most faithful (owner's table,
+/// `docs/design/PRESETS.csv`, 2026-11-18).
 const PRESETS: [Preset; 5] = [
     Preset {
         key: "fastest",
         values: &[
-            (SettingId::EmuFastCore, true),
-            (SettingId::EmuFidelityPlus, false),
-            (SettingId::EmuLuaOptimized, true),
-            (SettingId::EmuCatchUpLast3d, true),
-            (SettingId::EmuExactRate, false),
+            (SettingId::EmuFastCore, V::B(true)),
+            (SettingId::EmuFidelityPlus, V::B(false)),
+            (SettingId::EmuLuaOptimized, V::B(true)),
+            (SettingId::EmuLuaExperimental, V::B(false)),
+            (SettingId::EmuCatchUpLast3d, V::B(true)),
+            (SettingId::EmuExactRate, V::B(false)),
+            (SettingId::EmuRunAhead, V::I(0)),
+            (SettingId::EmuPipeline, V::E(1)),
+            (SettingId::VideoDynamicResolution, V::B(true)),
+            (SettingId::EmuPause3dIn2d, V::B(true)),
+            (SettingId::RenderShadow, V::B(false)),
+            (SettingId::VideoHalfRate3d, V::B(false)),
+            (SettingId::VideoResScale, V::E(0)),
         ],
-        boxes: &[SettingId::EmuFastCore, SettingId::EmuLuaOptimized],
+        boxes: &[
+            SettingId::EmuFastCore,
+            SettingId::EmuLuaOptimized,
+            SettingId::EmuLuaExperimental,
+            SettingId::VideoResScale,
+            SettingId::VideoHalfRate3d,
+        ],
     },
     Preset {
         key: "fast",
         values: &[
-            (SettingId::EmuFastCore, true),
-            (SettingId::EmuFidelityPlus, false),
-            (SettingId::EmuLuaOptimized, false),
-            (SettingId::EmuCatchUpLast3d, false),
-            (SettingId::EmuExactRate, false),
+            (SettingId::EmuFastCore, V::B(true)),
+            (SettingId::EmuFidelityPlus, V::B(false)),
+            (SettingId::EmuLuaOptimized, V::B(false)),
+            (SettingId::EmuLuaExperimental, V::B(false)),
+            (SettingId::EmuCatchUpLast3d, V::B(true)),
+            (SettingId::EmuExactRate, V::B(false)),
+            (SettingId::EmuRunAhead, V::I(1)),
+            (SettingId::EmuPipeline, V::E(0)),
+            (SettingId::VideoDynamicResolution, V::B(true)),
+            (SettingId::EmuPause3dIn2d, V::B(true)),
+            (SettingId::RenderShadow, V::B(true)),
+            (SettingId::VideoHalfRate3d, V::B(false)),
         ],
         boxes: &[SettingId::EmuFastCore, SettingId::EmuLuaOptimized],
     },
     Preset {
         key: "balanced",
         values: &[
-            (SettingId::EmuFastCore, false),
-            (SettingId::EmuFidelityPlus, false),
-            (SettingId::EmuLuaOptimized, false),
-            (SettingId::EmuCatchUpLast3d, false),
-            (SettingId::EmuExactRate, false),
-            (SettingId::EmuRealtimeInput, true),
+            (SettingId::EmuFastCore, V::B(false)),
+            (SettingId::EmuFidelityPlus, V::B(false)),
+            (SettingId::EmuLuaOptimized, V::B(false)),
+            (SettingId::EmuLuaExperimental, V::B(false)),
+            (SettingId::EmuCatchUpLast3d, V::B(true)),
+            (SettingId::EmuExactRate, V::B(false)),
+            (SettingId::EmuRealtimeInput, V::B(true)),
+            (SettingId::EmuRunAhead, V::I(1)),
+            (SettingId::EmuPipeline, V::E(0)),
+            (SettingId::VideoDynamicResolution, V::B(false)),
+            (SettingId::EmuPause3dIn2d, V::B(false)),
+            (SettingId::RenderShadow, V::B(true)),
+            (SettingId::VideoHalfRate3d, V::B(false)),
         ],
         boxes: &[SettingId::EmuRealtimeInput],
     },
     Preset {
         key: "faithful",
         values: &[
-            (SettingId::EmuFastCore, false),
-            (SettingId::EmuFidelityPlus, false),
-            (SettingId::EmuExactRate, true),
-            (SettingId::EmuRealtimeInput, true),
-            (SettingId::EmuLatePresent, false),
+            (SettingId::EmuFastCore, V::B(false)),
+            (SettingId::EmuFidelityPlus, V::B(false)),
+            (SettingId::EmuLuaOptimized, V::B(false)),
+            (SettingId::EmuCatchUpLast3d, V::B(false)),
+            (SettingId::EmuExactRate, V::B(false)),
+            (SettingId::EmuRealtimeInput, V::B(true)),
+            (SettingId::EmuLatePresent, V::B(false)),
+            (SettingId::EmuRunAhead, V::I(1)),
+            (SettingId::EmuPipeline, V::E(0)),
+            (SettingId::VideoDynamicResolution, V::B(false)),
+            (SettingId::EmuPause3dIn2d, V::B(false)),
         ],
-        boxes: &[SettingId::EmuFidelityPlus, SettingId::EmuLatePresent],
+        boxes: &[
+            SettingId::EmuFidelityPlus,
+            SettingId::EmuExactRate,
+            SettingId::EmuLatePresent,
+        ],
     },
     Preset {
         key: "most_faithful",
         values: &[
-            (SettingId::EmuFastCore, false),
-            (SettingId::EmuFidelityPlus, true),
-            (SettingId::EmuExactRate, true),
-            (SettingId::EmuRealtimeInput, true),
-            (SettingId::EmuOamDecay, false),
-            (SettingId::EmuOamaddrWriteCorruption, false),
+            (SettingId::EmuFastCore, V::B(false)),
+            (SettingId::EmuFidelityPlus, V::B(true)),
+            (SettingId::EmuLuaOptimized, V::B(false)),
+            (SettingId::EmuCatchUpLast3d, V::B(false)),
+            (SettingId::EmuExactRate, V::B(true)),
+            (SettingId::EmuRealtimeInput, V::B(true)),
+            (SettingId::EmuOamDecay, V::B(false)),
+            (SettingId::EmuOamaddrWriteCorruption, V::B(true)),
+            (SettingId::EmuRunAhead, V::I(1)),
+            (SettingId::EmuPipeline, V::E(0)),
+            (SettingId::VideoDynamicResolution, V::B(false)),
+            (SettingId::EmuPause3dIn2d, V::B(false)),
         ],
         boxes: &[
             SettingId::EmuFidelityPlus,
@@ -204,7 +268,7 @@ fn matches(model: &SettingsModel, preset: &Preset) -> bool {
     preset
         .values
         .iter()
-        .all(|&(id, value)| model.get(id).as_bool() == value)
+        .all(|&(id, value)| model.get(id) == value.value())
 }
 
 /// The note of a setting that takes effect later; none for one that acts at once.
@@ -383,7 +447,7 @@ impl ZaxUi {
                 self.options_preset = index;
                 host.update_settings(|model| {
                     for &(id, value) in preset.values {
-                        model.set(id, SettingValue::Bool(value));
+                        model.set(id, value.value());
                     }
                 });
                 play(host, UiSound::Confirm);
