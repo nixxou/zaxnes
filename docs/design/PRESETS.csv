@@ -1,33 +1,53 @@
-﻿Groupe;Réglage;Clé;Défaut actuel;Effet sur la vitesse;Effet sur la fidélité / le ressenti;Rapidité max;Rapide;Équilibré;Fidèle;Fidélité max;Question ouverte
-Émulation;Cœur rapide;emu.fast_core;non;gros gain (2,5 à 3,5× moins de calcul en 2D);aucun (même machine, 320 ROMs identiques);oui;oui;non;non;non;
-Émulation;Fidélité+;emu.fidelity_plus;non;plus lent;plus fidèle (écritures vidéo au demi-cycle);non;non;non;case affichée, décochée;oui;Q4 : coché dès Fidèle ?
-Émulation;Anticipation (run-ahead);emu.run_ahead;1;chaque cran ajoute une émulation complète (1 = ×2);-1 image de latence par cran;0;1;1;1;1;Q1 : 0 en Rapidité max ?
-Émulation;Manette temps réel;emu.realtime_input;oui;coût faible;moins de latence;oui;oui;oui;oui;oui;
-Émulation;Cadence exacte (60,0988 Hz);emu.exact_rate;non;aucun;rythme exact, petite saccade possible sur écran 60 Hz;non;non;non;oui;oui;Q3 : seulement en Fidélité max ?
-Émulation;Présentation tardive;emu.late_present;non;aucun;moins de latence, risque d'images ratées;non;non;non;case affichée, décochée;case affichée, décochée;
-Émulation;Défauts matériels courants (corruption OAM, palette, glitchs $2000/$2006, conflits de bus);emu.oam_corruption, emu.palette_corruption, emu.ppu_*;oui;négligeable;fidélité;inchangé;inchangé;inchangé;inchangé;inchangé;
-Émulation;Dégradation de l'OAM;emu.oam_decay;non;négligeable;plus fidèle, peut casser certains jeux;non;non;non;non;case affichée, décochée;Q5
-Émulation;Corruption à l'écriture d'OAMADDR;emu.oamaddr_write_corruption;non;négligeable;plus fidèle, peut casser certains jeux;non;non;non;non;case affichée, décochée;Q5
-Émulation;Ligne reset du PPU;emu.ppu_reset_line;non;aucun;plus fidèle au démarrage;inchangé;inchangé;inchangé;inchangé;à décider;Q5 : l'ajouter en Fidélité max ?
-Émulation;RAM à l'allumage;emu.power_on_ram;(valeur 1);aucun;fidélité du démarrage;inchangé;inchangé;inchangé;inchangé;à décider;Q5 : aléatoire en Fidélité max ?
-Scripts;Lua optimisé;emu.lua_optimized;non;gain sur les profils 3D à scripts;moins de vérifications (au prochain jeu);oui;non;non;non;non;
-Scripts;Nettoyage mémoire Lua lissé;emu.lua_smooth_gc;oui;évite les à-coups;aucun;oui;oui;oui;oui;oui;
-Scripts;Scripts en parallèle du dessin;emu.pipeline;Off;gain sur multicœur;+1 image de latence;Auto;Off;Off;Off;Off;Q10 : avec l'anticipation à 0, +2 images au total
-Cadence;Rendu accéléré (saut d'images);video.skip_frame;oui;gain gratuit;aucun;oui;oui;oui;oui;oui;
-Cadence;Rattrapage en cas de retard;emu.catch_up;2;borne le travail en retard;aucun;2;2;2;2;2;
-Cadence;Rattrapage : dernière image seule en 3D;emu.catch_up_last_3d;non;gros gain en retard;images rattrapées non converties;oui;oui;non;non;non;Q2 : aussi en Rapide ?
-Cadence;3D à 30 i/s (jeu à pleine vitesse);video.half_rate_3d;non;moitié du coût 3D;mouvement 3D moins fluide;case affichée, décochée;non;non;non;non;Q9 : coché en Rapidité max ?
-Cadence;3D en pause en 2D;emu.pause_3d_in_2d;non;gain quand l'image 2D est affichée;aucun;oui;oui;inchangé;inchangé;inchangé;
-Cadence;Frames en file GPU;video.max_queued_frames;2;moins = moins de latence, risque d'à-coups;latence;inchangé;inchangé;inchangé;inchangé;inchangé;
-Résolution;Échelle de résolution;video.res_scale;native;gros gain GPU;image plus douce;1/2;2/3;native;native;native;Q7 et Q8 : le curseur touche-t-il au visuel ?
-Résolution;Résolution automatique;video.dynamic_resolution;non;gain GPU dans les scènes lourdes;image plus douce par moments;oui;oui;non;non;non;Q8
-Résolution;Résolution du shader;video.shader_resolution;100 %;gain GPU avec shader;image plus douce;inchangé;inchangé;inchangé;inchangé;inchangé;
-Résolution;Méthode de rendu;video.render_method;Direct;Render Tex coûte une texture intermédiaire;aucun;inchangé;inchangé;inchangé;inchangé;inchangé;
-Scène 3D;Style (Classique / Amélioré);render.visual_style;Classique;Amélioré = reflets, occlusion, ombres pixel (lourd GPU);goût;inchangé;inchangé;inchangé;inchangé;inchangé;Q7 : laissé hors du curseur ?
-Scène 3D;Ombres;render.shadow;oui;un passage d'ombre en plus;visuel;non;oui;oui;oui;oui;Q7
-Scène 3D;Éclairage du backdrop;render.backdrop_lighting;oui;léger;visuel;inchangé;inchangé;inchangé;inchangé;inchangé;
-Scène 3D;Anticrénelage (lissage des maillages);video.anti_alias;MARCHING;GREEDY moins de calcul CPU;bords moins lissés;inchangé;inchangé;inchangé;inchangé;inchangé;Q7
-Scène 3D;Algorithme de maillage;render.mesh_algo;0;coût CPU de construction;visuel;inchangé;inchangé;inchangé;inchangé;inchangé;
-Image 2D;Signal composite;video.composite_signal;non;coût de calcul de l'image;rendu TV;inchangé;inchangé;inchangé;inchangé;inchangé;Q11 : hors préréglages
-Affichage;Synchronisation verticale;video.vsync;chaque rafraîchissement;aucun direct;fluidité, latence;inchangé;inchangé;inchangé;inchangé;inchangé;
-Affichage;Shaders (CRT, etc.);shader.*;aucun;coût GPU selon le shader;rendu;inchangé;inchangé;inchangé;inchangé;inchangé;
+﻿Thème;Réglage;Clé;Effet sur les performances;Défaut;Prend effet;Visible en mode avancé;Rapidité max : valeur;Rapide : valeur;Équilibré : valeur;Fidèle : valeur;Fidélité max : valeur;Rapidité max : visible en mode simple;Rapide : visible en mode simple;Équilibré : visible en mode simple;Fidèle : visible en mode simple;Fidélité max : visible en mode simple
+Render;Style;render.visual_style;Amélioré = reflets, occlusion, ombres pixel (GPU lourd);Classique;tout de suite;oui;Classique;Classique;Classique;Classique;Classique;oui;oui;oui;oui;oui
+Video;;video.graphic_quality;qualité graphique globale;Low (non utilisée);tout de suite;non;Low (non utilisée);Low (non utilisée);Low (non utilisée);Low (non utilisée);Low (non utilisée);non;non;non;non;non
+Video;Synchronisation verticale;video.vsync;cadence du dessin;chaque rafraîchissement;tout de suite;oui;chaque rafraîchissement;chaque rafraîchissement;chaque rafraîchissement;chaque rafraîchissement;chaque rafraîchissement;oui;oui;oui;oui;oui
+Video;Fréquence de rendu;video.frame_rate;cadence du dessin sans vsync;Auto (fréquence de l écran);tout de suite;oui;Auto (fréquence de l écran);Auto (fréquence de l écran);Auto (fréquence de l écran);Auto (fréquence de l écran);Auto (fréquence de l écran);non;non;non;non;non
+Video;Rendu accéléré (saut d'images);video.skip_frame;ne redessine pas une scène inchangée;oui;tout de suite;oui;oui;oui;oui;oui;oui;oui;oui;oui;oui;oui
+Video;Méthode de rendu;video.render_method;Render Tex : une texture intermédiaire en plus;Direct;tout de suite;oui;Direct;Direct;Direct;Direct;Direct;non;non;non;non;non
+Video;Frames en file GPU;video.max_queued_frames;file GPU : latence contre à-coups;2;tout de suite;oui;2;2;2;2;2;non;non;non;non;non
+Video;;video.msaa_2_0;anticrénelage matériel (GPU);2 (non utilisée);(stockée seulement);non;2 (non utilisée);2 (non utilisée);2 (non utilisée);2 (non utilisée);2 (non utilisée);non;non;non;non;non
+Video;Échelle de résolution;video.res_scale;gros gain GPU, image plus douce;Native;tout de suite;oui;1/2;2/3;Native;Native;Native;non;non;non;non;non
+Video;Anticrénelage;video.anti_alias;lissage des maillages (CPU);MARCHING;tout de suite;oui;MARCHING;MARCHING;MARCHING;MARCHING;MARCHING;oui;oui;oui;oui;oui
+Render;Algorithme de maillage;render.mesh_algo;construction des formes (CPU);0;tout de suite;oui;0;0;0;0;0;non;non;non;non;non
+Render;Ombres;render.shadow;un passage d ombre en plus (GPU);oui;tout de suite;oui;non;oui;oui;oui;oui;oui;oui;oui;oui;oui
+Render;Éclairage du backdrop;render.backdrop_lighting;léger (GPU);oui;tout de suite;oui;oui;oui;oui;oui;oui;non;non;non;non;non
+Emulation;Vitesse de jeu;emu.game_speed;proportionnel à la vitesse;normale;tout de suite;oui;normale;normale;normale;normale;normale;non;non;non;non;non
+Emulation;Run-ahead;emu.run_ahead;chaque cran = une émulation complète de plus;1;tout de suite;oui;0;1;1;1;1;oui;oui;oui;oui;oui
+Emulation;Moteur d'émulation (ce jeu);emu.engine;FCEUX plus rapide que Zaxnes, autres options greyées;Zaxnes;au prochain chargement;oui;Zaxnes;Zaxnes;Zaxnes;Zaxnes;Zaxnes;non;non;non;non;non
+Emulation;Rattrapage en cas de retard (frames);emu.catch_up;borne le travail quand la machine est en retard;2;tout de suite;oui;2;2;2;2;2;non;non;non;non;non
+Emulation;Nettoyage mémoire Lua lissé;emu.lua_smooth_gc;évite les à-coups du ramasse-miettes Lua;oui;tout de suite;oui;oui;oui;oui;oui;oui;non;non;non;non;non
+Emulation;Lua optimisé (unsafe);emu.lua_optimized;scripts Lua plus rapides, moins de vérifications;non;au prochain jeu;oui;oui;non;non;non;non;oui (case du préréglage);oui (case du préréglage);non;non;non
+Emulation;Optimisation Lua expérimentale (nécessite Lua optimisé);emu.lua_experimental;scripts Lua (expérimental);non;au prochain jeu;oui;non;non;non;non;non;non;non;non;non;non
+Emulation;Scripts en parallèle du dessin;emu.pipeline;scripts et conversion 3D sur un autre fil, +1 image de latence;Off;tout de suite;oui;Auto;Off;Off;Off;Off;non;non;non;non;non
+Video;API graphique (au prochain démarrage);video.backend;OpenGL / Vulkan / DirectX 12;OpenGL;au prochain démarrage;oui;OpenGL;OpenGL;OpenGL;OpenGL;OpenGL;oui;oui;oui;oui;oui
+Video;Résolution automatique;video.dynamic_resolution;résolution qui baisse dans les scènes lourdes;non;tout de suite;oui;oui;oui;non;non;non;non;non;non;non;non
+Emulation;3D en pause en 2D;emu.pause_3d_in_2d;pas de conversion 3D quand la 2D est affichée;non;tout de suite;oui;oui;oui;non;non;non;non;non;non;non;non
+Emulation;Rattrapage : 3D de l'image affichée seulement;emu.catch_up_last_3d;images de rattrapage non converties en 3D;non;tout de suite;oui;oui;oui;non;non;non;non;non;non;non;non
+Video;3D à 30 i/s (jeu à pleine vitesse);video.half_rate_3d;moitié du coût 3D, jeu à 60;non;tout de suite;non;non;non;non;non;non;oui (case du préréglage);non;non;non;non
+Internal;;video.res_scale_factor;facteur de résolution;1.0;(stockée seulement);non;1.0;1.0;1.0;1.0;1.0;non;non;non;non;non
+Internal;;video.target_framerate;cadence visée;90.0;(stockée seulement);non;90.0;90.0;90.0;90.0;90.0;non;non;non;non;non
+Emulation;Fidélité+;emu.fidelity_plus;plus lent (CPU);non;tout de suite;oui;non;non;non;non;oui;non;non;non;oui (case du préréglage);oui (case du préréglage)
+Emulation;Cœur rapide;emu.fast_core;gros gain CPU (2,5 à 3,5× moins de calcul en 2D), même machine;non;tout de suite;oui;oui;oui;non;non;non;oui (case du préréglage);oui (case du préréglage);non;non;non
+Emulation;Cadence de la console;emu.exact_rate;aucun calcul, cadence 60,0988 Hz;non;tout de suite;oui;non;non;non;oui;oui;oui;oui;oui;oui;oui
+Emulation;Manette en temps réel;emu.realtime_input;coût faible (tranches de temps réel);oui;tout de suite;oui;oui;oui;oui;oui;oui;oui;oui;oui (case du préréglage);oui;oui
+Emulation;Présentation tardive;emu.late_present;aucun calcul, moins de latence;non;tout de suite;oui;non;non;non;non;non;non;non;non;oui (case du préréglage);oui (case du préréglage)
+Video;;video.widescreen_advanced;patchs avancés (suraccélération CPU);oui;au prochain chargement;non;oui;oui;oui;oui;oui;non;non;non;non;non
+Video;Écran large (ROM prévues pour);video.widescreen;plus de tuiles à émuler, convertir et dessiner;Off;tout de suite;non;Off;Off;Off;Off;Off;oui;oui;oui;oui;oui
+Video;Largeur supplémentaire de l'écran large;video.widescreen_extra;marges supplémentaires;+20 %;tout de suite;non;+20 %;+20 %;+20 %;+20 %;+20 %;non;non;non;non;non
+Emulation;Défilement lissé (interpolé par run-ahead);emu.smooth_scroll_ahead;émule des images en avance pour lisser le défilement;oui;tout de suite;oui;oui;oui;oui;oui;oui;oui;oui;oui;oui;oui
+Video;Supprimer la limite de 8 sprites par ligne;video.remove_sprite_limit;plus de sprites dessinés;Smart;tout de suite;oui;Smart;Smart;Smart;Smart;Smart;non;non;non;non;non
+Video;Signal composite;video.composite_signal;simulation du signal TV (calcul de l image);non;tout de suite;oui;non;non;non;non;non;oui;oui;oui;oui;oui
+Video;Résolution du shader;video.shader_resolution;résolution des shaders (GPU);100 %;tout de suite;oui;100 %;100 %;100 %;100 %;100 %;non;non;non;non;non
+Render;Occlusion ambiante;render.style.ao;occlusion ambiante (GPU lourd);Off;tout de suite;oui;Off;Off;Off;Off;Off;non;non;non;non;non
+Render;Rayon;render.style.ao_radius;rayon de l occlusion (GPU);3;tout de suite;oui;3;3;3;3;3;non;non;non;non;non
+Render;Qualité de l'occlusion;render.style.ao_quality;qualité de l occlusion (GPU);Medium;tout de suite;oui;Medium;Medium;Medium;Medium;Medium;non;non;non;non;non
+Render;Ombres pixel;render.style.pixel_shadow;ombres au pixel (GPU);non;tout de suite;oui;non;non;non;non;non;non;non;non;non;non
+Render;Grille de voxels;render.style.voxel_grid;style Amélioré (GPU);Off;tout de suite;oui;Off;Off;Off;Off;Off;non;non;non;non;non
+Render;Reflets;render.style.reflections;reflets (GPU lourd);non;tout de suite;oui;non;non;non;non;non;oui;oui;oui;oui;oui
+Render;Longueur;render.style.ssr_length;longueur des reflets (GPU);3;tout de suite;oui;3;3;3;3;3;non;non;non;non;non
+Render;Qualité des reflets;render.style.ssr_quality;qualité des reflets (GPU);High;tout de suite;oui;High;High;High;High;High;non;non;non;non;non
+Shaders;;shader.2d.preset;shader en 2D (GPU);aucun;tout de suite;fenêtre Shaders;aucun;aucun;aucun;aucun;aucun;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders
+Shaders;;shader.2d_ws.preset;shader en 2D écran large (GPU);aucun;tout de suite;fenêtre Shaders;aucun;aucun;aucun;aucun;aucun;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders
+Shaders;;shader.3d.preset;shader en 3D (GPU);aucun;tout de suite;fenêtre Shaders;aucun;aucun;aucun;aucun;aucun;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders
+Shaders;;shader.3d_ws.preset;shader en 3D écran large (GPU);aucun;tout de suite;fenêtre Shaders;aucun;aucun;aucun;aucun;aucun;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders
