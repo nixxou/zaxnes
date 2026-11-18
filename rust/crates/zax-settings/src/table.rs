@@ -2146,6 +2146,43 @@ fn derived_and_internal(out: &mut Vec<SettingDescriptor>) {
     );
 }
 
+/// Lot REWRITE-UI (owner request): the options in their simple or advanced mode, and the
+/// preset chosen on the performance / fidelity slider (fastest 0 to most faithful 4). The
+/// preset is a memory of the choice: the settings it wrote are the ones in force. Rust-only,
+/// not exposed to Lua.
+fn options_mode(out: &mut Vec<SettingDescriptor>) {
+    out.push(
+        SettingDescriptor::new(
+            SettingId::UiOptionsAdvanced,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Interface,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Advanced options"),
+    );
+    out.push(
+        SettingDescriptor::new(
+            SettingId::UiOptionsPreset,
+            SettingKind::Enum,
+            SettingValue::Enum(2),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Interface,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Fastest"),
+            opt(1, "Fast"),
+            opt(2, "Balanced"),
+            opt(3, "Faithful"),
+            opt(4, "Most faithful"),
+        ]))
+        .with_label("Preset"),
+    );
+}
+
 fn reimplementation_extras(out: &mut Vec<SettingDescriptor>) {
     // The mute switch of the Audio menu (AMD-010 REQ-UI-200). SPEC-11 has no separate mute setting,
     // so this one forces the effective gain to zero and leaves `audio.volume` alone.
@@ -2241,6 +2278,7 @@ fn reimplementation_extras(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("Editor mode"),
     );
+    options_mode(out);
     // AMD-035 §1 (amended): the interface language, "en" in the catalogue. While nothing is saved
     // the application suggests the operating-system language through the model's environment
     // default. The two texts are the whole domain; anything else reads as "en".

@@ -179,6 +179,9 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             // EDITOR-1 (owner request): the editor mode, Zaxnes's own as well.
             "ui.editor_mode",
             "ui.language",
+            // Lot REWRITE-UI: the options' mode and the slider's preset.
+            "ui.options_advanced",
+            "ui.options_preset",
             "ui.orientation",
             "ui.profiler",
             "ui.roms_folder",

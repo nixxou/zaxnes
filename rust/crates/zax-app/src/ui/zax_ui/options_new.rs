@@ -7,7 +7,6 @@
 use imgui::{Condition, StyleColor, TabBarFlags, TabItem, Ui, WindowFlags};
 use zax_settings::catalogue::SettingId;
 use zax_settings::meta::SettingEffect;
-use zax_settings::model::SettingsModel;
 use zax_settings::values::SettingValue;
 
 use super::{centre, play, ZaxUi};
@@ -16,6 +15,7 @@ use crate::audio::UiSound;
 use crate::emulation::host::hack_options;
 use crate::ui::handheld::hacks::HacksView;
 use crate::ui::options::{self, OptionsGroup, OptionsTab, TabEntry};
+use crate::ui::presets::{self, matches, reset_with, PRESETS};
 use crate::ui::{strings, text};
 
 /// The window's default size, as the classic one's.
@@ -26,181 +26,6 @@ const ACCENT: [f32; 4] = [1.0, 0.835, 0.18, 1.0];
 
 /// The amber of a "takes effect later" note.
 const LATER: [f32; 4] = [1.0, 0.82, 0.48, 1.0];
-
-/// A value a preset writes (`SettingValue` holds a `String` variant, so it cannot sit in a
-/// constant table itself).
-#[derive(Clone, Copy)]
-enum V {
-    B(bool),
-    I(i32),
-    E(i32),
-}
-
-impl V {
-    const fn value(self) -> SettingValue {
-        match self {
-            Self::B(on) => SettingValue::Bool(on),
-            Self::I(number) => SettingValue::Int(number),
-            Self::E(number) => SettingValue::Enum(number),
-        }
-    }
-}
-
-/// One preset of the slider. Every preset writes the whole set of settings the slider manages,
-/// so that a mode puts back what another one changed; each value is either proposed (shown
-/// under the slider, to be changed) or set and hidden (owner, 2026-11-18).
-struct Preset {
-    /// Its key in the string tables: `options.preset.<key>.name`, `.summary`, `.acts`.
-    key: &'static str,
-    /// The values the preset writes, in the order the proposed ones are shown, each with
-    /// whether it is proposed.
-    values: &'static [(SettingId, V, bool)],
-}
-
-/// The five presets, from the fastest to the most faithful (owner's table,
-/// `docs/design/PRESETS.csv`, 2026-11-18).
-const PRESETS: [Preset; 5] = [
-    Preset {
-        key: "fastest",
-        values: &[
-            (SettingId::EmuFastCore, V::B(true), true),
-            (SettingId::EmuFidelityPlus, V::B(false), false),
-            (SettingId::EmuRunAhead, V::I(0), true),
-            (SettingId::EmuRealtimeInput, V::B(true), true),
-            (SettingId::EmuExactRate, V::B(false), false),
-            (SettingId::EmuLatePresent, V::B(false), false),
-            (SettingId::EmuCatchUpLast3d, V::B(true), true),
-            (SettingId::EmuPause3dIn2d, V::B(true), true),
-            (SettingId::EmuPipeline, V::E(1), true),
-            (SettingId::EmuLuaOptimized, V::B(true), true),
-            (SettingId::EmuLuaExperimental, V::B(true), true),
-            (SettingId::VideoDynamicResolution, V::B(true), true),
-            (SettingId::VideoResScale, V::E(0), true),
-            (SettingId::VideoHalfRate3d, V::B(false), true),
-            (SettingId::RenderShadow, V::B(false), true),
-            (SettingId::EmuOamDecay, V::B(false), false),
-            (SettingId::EmuOamaddrWriteCorruption, V::B(false), false),
-            (SettingId::RenderVisualStyle, V::I(0), true),
-            (SettingId::RenderStyleReflections, V::I(0), false),
-            (SettingId::RenderStyleSsrQuality, V::I(0), false),
-            (SettingId::RenderStyleAo, V::I(0), false),
-            (SettingId::RenderStyleAoQuality, V::I(0), false),
-            (SettingId::RenderStylePixelShadow, V::I(0), false),
-        ],
-    },
-    Preset {
-        key: "fast",
-        values: &[
-            (SettingId::EmuFastCore, V::B(true), true),
-            (SettingId::EmuFidelityPlus, V::B(false), false),
-            (SettingId::EmuRunAhead, V::I(1), true),
-            (SettingId::EmuRealtimeInput, V::B(true), true),
-            (SettingId::EmuExactRate, V::B(false), false),
-            (SettingId::EmuLatePresent, V::B(false), false),
-            (SettingId::EmuCatchUpLast3d, V::B(true), true),
-            (SettingId::EmuPause3dIn2d, V::B(true), true),
-            (SettingId::EmuPipeline, V::E(0), true),
-            (SettingId::EmuLuaOptimized, V::B(false), true),
-            (SettingId::EmuLuaExperimental, V::B(false), false),
-            (SettingId::VideoDynamicResolution, V::B(true), true),
-            (SettingId::VideoResScale, V::E(0), false),
-            (SettingId::VideoHalfRate3d, V::B(false), false),
-            (SettingId::RenderShadow, V::B(true), true),
-            (SettingId::EmuOamDecay, V::B(false), false),
-            (SettingId::EmuOamaddrWriteCorruption, V::B(false), false),
-            (SettingId::RenderVisualStyle, V::I(0), true),
-            (SettingId::RenderStyleReflections, V::I(0), false),
-            (SettingId::RenderStyleSsrQuality, V::I(0), false),
-            (SettingId::RenderStyleAo, V::I(0), false),
-            (SettingId::RenderStyleAoQuality, V::I(0), false),
-            (SettingId::RenderStylePixelShadow, V::I(0), false),
-        ],
-    },
-    Preset {
-        key: "balanced",
-        values: &[
-            (SettingId::EmuFastCore, V::B(false), false),
-            (SettingId::EmuFidelityPlus, V::B(false), false),
-            (SettingId::EmuRunAhead, V::I(1), true),
-            (SettingId::EmuRealtimeInput, V::B(true), true),
-            (SettingId::EmuExactRate, V::B(false), false),
-            (SettingId::EmuLatePresent, V::B(false), false),
-            (SettingId::EmuCatchUpLast3d, V::B(true), true),
-            (SettingId::EmuPause3dIn2d, V::B(false), false),
-            (SettingId::EmuPipeline, V::E(0), false),
-            (SettingId::EmuLuaOptimized, V::B(false), false),
-            (SettingId::EmuLuaExperimental, V::B(false), false),
-            (SettingId::VideoDynamicResolution, V::B(false), false),
-            (SettingId::VideoResScale, V::E(0), false),
-            (SettingId::VideoHalfRate3d, V::B(false), false),
-            (SettingId::RenderShadow, V::B(true), false),
-            (SettingId::EmuOamDecay, V::B(false), false),
-            (SettingId::EmuOamaddrWriteCorruption, V::B(false), false),
-            (SettingId::RenderVisualStyle, V::I(4), true),
-            (SettingId::RenderStyleReflections, V::I(0), true),
-            (SettingId::RenderStyleSsrQuality, V::I(1), false),
-            (SettingId::RenderStyleAo, V::I(0), true),
-            (SettingId::RenderStyleAoQuality, V::I(1), false),
-            (SettingId::RenderStylePixelShadow, V::I(0), true),
-        ],
-    },
-    Preset {
-        key: "faithful",
-        values: &[
-            (SettingId::EmuFastCore, V::B(false), false),
-            (SettingId::EmuFidelityPlus, V::B(false), true),
-            (SettingId::EmuRunAhead, V::I(1), true),
-            (SettingId::EmuRealtimeInput, V::B(true), true),
-            (SettingId::EmuExactRate, V::B(false), true),
-            (SettingId::EmuLatePresent, V::B(false), true),
-            (SettingId::EmuCatchUpLast3d, V::B(false), true),
-            (SettingId::EmuPause3dIn2d, V::B(false), false),
-            (SettingId::EmuPipeline, V::E(0), false),
-            (SettingId::EmuLuaOptimized, V::B(false), false),
-            (SettingId::EmuLuaExperimental, V::B(false), false),
-            (SettingId::VideoDynamicResolution, V::B(false), false),
-            (SettingId::VideoResScale, V::E(0), false),
-            (SettingId::VideoHalfRate3d, V::B(false), false),
-            (SettingId::RenderShadow, V::B(true), false),
-            (SettingId::EmuOamDecay, V::B(false), false),
-            (SettingId::EmuOamaddrWriteCorruption, V::B(false), false),
-            (SettingId::RenderVisualStyle, V::I(4), true),
-            (SettingId::RenderStyleReflections, V::I(0), true),
-            (SettingId::RenderStyleSsrQuality, V::I(2), true),
-            (SettingId::RenderStyleAo, V::I(1), true),
-            (SettingId::RenderStyleAoQuality, V::I(1), true),
-            (SettingId::RenderStylePixelShadow, V::I(1), true),
-        ],
-    },
-    Preset {
-        key: "most_faithful",
-        values: &[
-            (SettingId::EmuFastCore, V::B(false), false),
-            (SettingId::EmuFidelityPlus, V::B(true), true),
-            (SettingId::EmuRunAhead, V::I(1), true),
-            (SettingId::EmuRealtimeInput, V::B(true), true),
-            (SettingId::EmuExactRate, V::B(true), true),
-            (SettingId::EmuLatePresent, V::B(false), true),
-            (SettingId::EmuCatchUpLast3d, V::B(false), false),
-            (SettingId::EmuPause3dIn2d, V::B(false), false),
-            (SettingId::EmuPipeline, V::E(0), false),
-            (SettingId::EmuLuaOptimized, V::B(false), false),
-            (SettingId::EmuLuaExperimental, V::B(false), false),
-            (SettingId::VideoDynamicResolution, V::B(false), false),
-            (SettingId::VideoResScale, V::E(0), false),
-            (SettingId::VideoHalfRate3d, V::B(false), false),
-            (SettingId::RenderShadow, V::B(true), false),
-            (SettingId::EmuOamDecay, V::B(false), true),
-            (SettingId::EmuOamaddrWriteCorruption, V::B(true), true),
-            (SettingId::RenderVisualStyle, V::I(4), true),
-            (SettingId::RenderStyleReflections, V::I(0), true),
-            (SettingId::RenderStyleSsrQuality, V::I(2), true),
-            (SettingId::RenderStyleAo, V::I(1), true),
-            (SettingId::RenderStyleAoQuality, V::I(2), true),
-            (SettingId::RenderStylePixelShadow, V::I(1), true),
-        ],
-    },
-];
 
 /// What the simple mode shows of a page.
 #[derive(Clone, Copy)]
@@ -217,8 +42,9 @@ enum Simple {
     Folder(SettingId),
     /// The buttons that open the widescreen and the hacks of the game in play.
     GameHacks,
-    /// The widescreen of every game by default: a check box, and the ratio beside it.
-    WidescreenDefault,
+    /// The widescreen of every game by default: a check box, and the ratio beside it when the
+    /// field holds.
+    WidescreenDefault(bool),
     /// The common default of a hack pack option (`hack_options::COMMON_OPTIONS`).
     HackDefault(&'static str),
 }
@@ -289,14 +115,10 @@ const PAGES: [Page; 8] = [
         title: Some("options.new.tab.widescreen"),
         // The defaults of every game whose ROM has a widescreen patch; a game's own choices, in
         // its hacks window, come first (owner, 2026-11-18).
-        simple: &[
-            Simple::WidescreenDefault,
-            Simple::Row(SettingId::VideoWidescreenAdvanced),
-            Simple::HackDefault("no_slowdown"),
-            Simple::GameHacks,
-        ],
+        // The simple mode: the widescreen on or off, nothing more (owner, 2026-11-18).
+        simple: &[Simple::WidescreenDefault(false), Simple::GameHacks],
         advanced: Advanced::Items(&[
-            Simple::WidescreenDefault,
+            Simple::WidescreenDefault(true),
             Simple::Row(SettingId::VideoWidescreenExtra),
             Simple::Row(SettingId::VideoWidescreenAdvanced),
             Simple::HackDefault("no_slowdown"),
@@ -362,29 +184,6 @@ const PAGES: [Page; 8] = [
     },
 ];
 
-/// Whether the settings still hold every value `preset` writes.
-fn matches(model: &SettingsModel, preset: &Preset) -> bool {
-    preset
-        .values
-        .iter()
-        .all(|&(id, value, _)| model.get(id) == value.value())
-}
-
-/// Takes `ids` back to their defaults: the value `preset` gives the ones it manages, the
-/// setting's own default to the others (owner, 2026-11-18: Default keeps the preset).
-fn reset_with(model: &mut SettingsModel, preset: &Preset, ids: &[SettingId]) {
-    for &id in ids {
-        match preset.values.iter().find(|&&(managed, ..)| managed == id) {
-            Some(&(_, value, _)) => {
-                model.set(id, value.value());
-            }
-            None => {
-                model.reset(id);
-            }
-        }
-    }
-}
-
 /// The note of a setting that takes effect later; none for one that acts at once.
 fn later_note(id: SettingId) -> Option<String> {
     match zax_settings::catalogue::descriptor(id).effect() {
@@ -410,11 +209,19 @@ impl ZaxUi {
             .flags(WindowFlags::NO_COLLAPSE)
             .opened(&mut open)
             .begin();
+        // The mode and the preset are settings, shared with the console screens.
+        self.options_advanced = presets::advanced(host.settings());
+        self.options_preset = presets::chosen(host.settings());
         if let Some(_window) = window {
-            ui.checkbox(
+            if ui.checkbox(
                 strings::get("options.new.advanced"),
                 &mut self.options_advanced,
-            );
+            ) {
+                let advanced = self.options_advanced;
+                host.update_settings(|model| {
+                    model.set(SettingId::UiOptionsAdvanced, SettingValue::Bool(advanced));
+                });
+            }
             ui.same_line();
             ui.text_disabled(if self.options_advanced {
                 strings::get("options.new.advanced_line")
@@ -494,7 +301,7 @@ impl ZaxUi {
         for item in items {
             match *item {
                 Simple::Row(id) | Simple::Folder(id) => ids.push(id),
-                Simple::WidescreenDefault => ids.push(SettingId::VideoWidescreen),
+                Simple::WidescreenDefault(_) => ids.push(SettingId::VideoWidescreen),
                 Simple::All => ids.extend(
                     self.options
                         .rows(page.tab)
@@ -555,7 +362,7 @@ impl ZaxUi {
     }
 
     /// The widescreen of every game by default: on or off, and its ratio when on.
-    fn draw_widescreen_default(ui: &Ui, host: &mut AppHost) {
+    fn draw_widescreen_default(ui: &Ui, host: &mut AppHost, with_ratio: bool) {
         ui.text_wrapped(strings::get("options.new.widescreen_line"));
         ui.spacing();
         let value = host.settings().get(SettingId::VideoWidescreen).as_int();
@@ -569,7 +376,7 @@ impl ZaxUi {
             });
             play(host, UiSound::Confirm);
         }
-        if on {
+        if on && with_ratio {
             let descriptor = zax_settings::catalogue::descriptor(SettingId::VideoWidescreen);
             // The ratios: every choice but Off.
             let ratios: Vec<(i32, String)> = (1..=4)
@@ -656,7 +463,9 @@ impl ZaxUi {
             match *item {
                 Simple::All => self.draw_tab_entries(ui, host, tab),
                 Simple::GameHacks => self.draw_game_hacks(ui, host),
-                Simple::WidescreenDefault => Self::draw_widescreen_default(ui, host),
+                Simple::WidescreenDefault(with_ratio) => {
+                    Self::draw_widescreen_default(ui, host, with_ratio);
+                }
                 Simple::HackDefault(key) => Self::draw_hack_default(ui, host, key),
                 Simple::Folder(id) => {
                     let row = options::row_of(id);
@@ -746,11 +555,7 @@ impl ZaxUi {
             let label = strings::get(&format!("options.preset.{}.name", preset.key));
             if ui.button_with_size(format!("{label}##preset{index}"), [step_width, 34.0]) {
                 self.options_preset = index;
-                host.update_settings(|model| {
-                    for &(id, value, _) in preset.values {
-                        model.set(id, value.value());
-                    }
-                });
+                host.update_settings(|model| presets::choose(model, index));
                 play(host, UiSound::Confirm);
             }
             drop(colors);

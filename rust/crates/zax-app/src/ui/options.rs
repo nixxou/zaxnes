@@ -437,9 +437,12 @@ pub enum TabEntry {
 /// The settings the window leaves out although they are user settings: the last browsed folder
 /// and the window rectangle are state, and the menu music no longer exists (AMD-024
 /// REQ-PUB-005).
-pub const EXCLUDED: [SettingId; 24] = [
+pub const EXCLUDED: [SettingId; 26] = [
     SettingId::UiLastBrowseDir,
     SettingId::UiWindowRect,
+    // Lot REWRITE-UI: the options' own mode and preset, set by the new window and the console.
+    SettingId::UiOptionsAdvanced,
+    SettingId::UiOptionsPreset,
     SettingId::AudioBgMusic,
     // Rust-only (owner request): the hacks belong to each game, in its hacks screen.
     SettingId::EmuHackOptions,

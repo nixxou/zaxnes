@@ -20,6 +20,7 @@ pub mod native_picker;
 pub mod notifications;
 pub mod options;
 pub mod platform;
+pub mod presets;
 pub mod profile_chooser;
 pub mod profile_import;
 pub mod shader_panel;

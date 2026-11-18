@@ -286,6 +286,10 @@ setting_ids! {
     UiShowFps => "ui.show_fps",
     UiProfiler => "ui.profiler",
     UiEditorMode => "ui.editor_mode",
+    // Lot REWRITE-UI: the simple or advanced mode of the options and the chosen preset of
+    // the performance / fidelity slider, shared by the window and the console screens.
+    UiOptionsAdvanced => "ui.options_advanced",
+    UiOptionsPreset => "ui.options_preset",
     UiLanguage => "ui.language",
     UiRomsFolder => "ui.roms_folder",
     // The twelve parameters of the Enhanced style (AMD-055 REQ-SCN-079, keys of its §4). They
