@@ -1297,7 +1297,7 @@ impl HandheldUi {
                     f64::from(self.overlay.speed()) / 10.0
                 )
             ),
-            OverlayItem::Widescreen | OverlayItem::Hacks if !playing_on_zaxnes(frame.host) => {
+            OverlayItem::Widescreen | OverlayItem::Hacks if !playing_with_hacks(frame.host) => {
                 strings::get(keys::HANDHELD_ZAXNES_ONLY)
             }
             OverlayItem::Widescreen => {
@@ -1848,11 +1848,13 @@ impl HandheldUi {
     }
 }
 
-/// Whether the game in play runs on Zaxnes's own engine (or no game is in play): the in-game
-/// menu's widescreen and hacks are Zaxnes's bus, which the other engines have not got.
-pub(super) fn playing_on_zaxnes(host: &crate::application::AppHost) -> bool {
-    host.session()
-        .is_none_or(|session| session.core().kind() == zax_core_api::EngineKind::Zaxnes)
+/// Whether the engine of the game in play carries the widescreen extension and the hack packs
+/// (or no game is in play): Zaxnes, and NesHawk since lot NESHAWK-HACKS; FCEUX has not got them.
+pub(super) fn playing_with_hacks(host: &crate::application::AppHost) -> bool {
+    host.session().is_none_or(|session| {
+        zax_core_api::Capabilities::of_kind(session.core().kind())
+            .has(zax_core_api::Capability::Widescreen)
+    })
 }
 
 /// The label and value of the widescreen and hacks rows of a game's main options screen: what
@@ -1863,7 +1865,12 @@ fn zaxnes_row_text(row: GameRow, model: &zax_settings::model::SettingsModel) -> 
     } else {
         keys::MENU_AIDS
     });
-    let value = if crate::ui::options::engine_is_not_zaxnes(model) {
+    let capability = if row == GameRow::Widescreen {
+        zax_core_api::Capability::Widescreen
+    } else {
+        zax_core_api::Capability::HackPacks
+    };
+    let value = if !crate::ui::options::engine_has(model, capability) {
         strings::get(keys::HANDHELD_ZAXNES_ONLY)
     } else if row == GameRow::Widescreen {
         strings::get(keys::HANDHELD_HOLD_FOR_SETTINGS)

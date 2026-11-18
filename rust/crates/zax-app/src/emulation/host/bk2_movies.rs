@@ -57,6 +57,7 @@ pub fn movie_commands(movie: &MovieFile) -> Vec<(u32, FrameCommand)> {
 impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// Plays the `.bk2` in `path` from power-on, on the engine that recorded it when this build
     /// has it.
+    #[allow(clippy::too_many_lines)] // One sequence: engine, plain machine, power-on, playback.
     pub(super) fn play_bk2(&mut self, path: &str) {
         let Some(movie) = self.read_bk2(path) else {
             return;
@@ -90,12 +91,20 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             ));
         }
 
-        // The engine the movie needs, for this session only; the session is rebuilt on it.
+        // The engine the movie needs, for this session only; the session is rebuilt on it — and
+        // also when it already is that engine but runs a built-in patch: the movie replays on
+        // the plain machine (lot NESHAWK-HACKS, `plain_for_bk2`).
+        self.bk2_loading = true;
         let current = self.session.as_ref().map(|session| session.core().kind());
-        if let Some(engine) = wanted.filter(|engine| current != Some(*engine)) {
+        let patched = self
+            .session
+            .as_ref()
+            .is_some_and(|session| session.core().builtin_patch().is_some());
+        if let Some(engine) = wanted.filter(|engine| current != Some(*engine) || patched) {
             self.movie_engine = Some(engine);
             if let Err(message) = self.rebuild_session_for_the_movie(&game, &rom) {
                 self.movie_engine = None;
+                self.bk2_loading = false;
                 self.log(&format!(
                     "bk2 movie: the engine could not be made: {message}"
                 ));
@@ -105,8 +114,16 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
 
         let Some(session) = self.session.as_mut() else {
+            self.bk2_loading = false;
             return;
         };
+        // No aid and no margin on the machine the movie plays on: without them the NesHawk
+        // engine attaches no widescreen extension at the power-on below.
+        if session.core().kind() == zax_core_api::EngineKind::NesHawk {
+            session.core_mut().set_hack_options(0);
+            session.core_mut().set_widescreen_margin(0);
+            session.core_mut().set_widescreen_vertical_margin(0);
+        }
         if let Some(expected) = movie.rom_sha1 {
             let data = rom.image.get(16..).unwrap_or_default();
             if zax_nes::movie::bk2::sha1(&rom.image) != expected
@@ -133,6 +150,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             }
         }
         let Ok(start_state) = session.core().save_state(true) else {
+            self.bk2_loading = false;
             return;
         };
         let header = serde_json::json!({
@@ -147,7 +165,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             inputs,
             annotations: Vec::new(),
         };
-        if let Err(error) = session.start_movie_playback(playback) {
+        let started = session.start_movie_playback(playback);
+        self.bk2_loading = false;
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        if let Err(error) = started {
             self.log(&format!("bk2 movie refused: {error}"));
             self.notifications.show_error(&format!(
                 "{}: {error}",

@@ -77,7 +77,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// the widescreen of the game is on (owner request: off, the game starts as it was made).
     #[must_use]
     pub fn builtin_patches_wanted(&self) -> bool {
-        !self.widescreen_held_off
+        !self.widescreen_held_off()
             && self.settings.get(SettingId::EmuBuiltinPatches).as_bool()
             && self.settings.get(SettingId::VideoWidescreen).as_int() != 0
     }
@@ -92,10 +92,29 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
     }
 
-    /// Whether the widescreen is held off ([`Self::set_widescreen_held_off`]).
+    /// Whether the widescreen is held off ([`Self::set_widescreen_held_off`]), or the machine
+    /// kept plain for a `.bk2` ([`Self::plain_for_bk2`]).
     #[must_use]
-    pub const fn widescreen_held_off(&self) -> bool {
-        self.widescreen_held_off
+    pub fn widescreen_held_off(&self) -> bool {
+        self.widescreen_held_off || self.plain_for_bk2()
+    }
+
+    /// Whether a BizHawk `.bk2` is being set up or played on the NesHawk engine: the machine is
+    /// then the one the movie was recorded on — no built-in patch, no aid, no widescreen margin,
+    /// so no widescreen extension at all (lot NESHAWK-HACKS). Before that lot NesHawk ignored them
+    /// all; a game with its widescreen on would otherwise load patched and the movie part at once.
+    /// Over as soon as the movie stops; the patch comes back with the next load.
+    #[must_use]
+    pub fn plain_for_bk2(&self) -> bool {
+        self.bk2_loading
+            || self.session.as_ref().is_some_and(|session| {
+                session.has_movie()
+                    && session.core().kind() == zax_core_api::EngineKind::NesHawk
+                    && self
+                        .movie_file
+                        .as_deref()
+                        .is_some_and(super::bk2_movies::is_bk2)
+            })
     }
 
     /// Whether the advanced mode of the game's widescreen is on (its patch, when the patch is an

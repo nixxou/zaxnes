@@ -398,8 +398,16 @@ fn build_menus() -> Vec<Menu> {
             MenuItem::rule(),
             // Hovered, the slots; clicked (or Ctrl+L / Ctrl+S), the slots with their pictures in
             // the screens of the console mode (lot REWRITE-UI: one entry each instead of two).
-            MenuItem::sub_clicked(text::load_state(), Submenu::LoadState, UiCommand::LoadStates),
-            MenuItem::sub_clicked(text::save_state(), Submenu::SaveState, UiCommand::SaveStates),
+            MenuItem::sub_clicked(
+                text::load_state(),
+                Submenu::LoadState,
+                UiCommand::LoadStates,
+            ),
+            MenuItem::sub_clicked(
+                text::save_state(),
+                Submenu::SaveState,
+                UiCommand::SaveStates,
+            ),
             // REQ-UI-052: the slot deletion of SPEC-09 REQ-PERS-054 needs a route of its own,
             // since a classic menu has no selected tile to hang a small button on.
             MenuItem::sub(text::delete_state(), Submenu::DeleteState),

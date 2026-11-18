@@ -186,26 +186,38 @@ impl Capabilities {
         machine_internals: false,
     };
 
-    /// What `zax-neshawk` offers: the trait, and rollback over the serialised block of its
-    /// `SyncState` port.
+    /// What `zax-neshawk` offers: the trait, rollback over the serialised block of its
+    /// `SyncState` port, and — since lot NESHAWK-HACKS — Zaxnes's widescreen extension, hack
+    /// packs and margin decoders, wired into the port's own bus and PPU and absent from the
+    /// machine unless the host turns them on (so a `.bk2` still replays on the C#'s machine).
     ///
-    /// The four `false`s are the same as FCEUX's and for the same reason — the widescreen
-    /// extension, the hack packs and the margin decoders are patches to *Zaxnes's* bus, and
-    /// `cartridge()`/`bus()`/`ppu()` are Zaxnes's own types. `sprite_limit` is `false` although
+    /// `machine_internals` stays `false`: `cartridge()`/`bus()`/`ppu()` are Zaxnes's own types.
+    /// `sprite_limit` is `false` although
     /// NesHawk does have the flag (`PPU.allow_more_than_eight_sprites`, which the port carries),
     /// because the control the application draws drives `NesCore::set_sprite_limit`, which is not
     /// on this trait: raising the flag here would enable a control that reaches nothing.
     /// `run_ahead` is `false` because it would mean a save and a load every frame, as on FCEUX.
     pub const NESHAWK: Self = Self {
         kind: EngineKind::NesHawk,
-        widescreen: false,
-        hack_packs: false,
+        widescreen: true,
+        hack_packs: true,
         sprite_limit: false,
         run_ahead: false,
         rollback: true,
         fast_core_snapshot: false,
         machine_internals: false,
     };
+
+    /// What the engine `kind` offers, without making one: the interface greys its controls from
+    /// the engine *chosen* for the next load, before any machine of it exists.
+    #[must_use]
+    pub const fn of_kind(kind: EngineKind) -> Self {
+        match kind {
+            EngineKind::Zaxnes => Self::ZAXNES,
+            EngineKind::Fceux => Self::FCEUX,
+            EngineKind::NesHawk => Self::NESHAWK,
+        }
+    }
 
     /// Why a control is disabled, for the interface to show beside it; `None` when `capability`
     /// is supported. `capability` names the field, as [`Capability`] does.

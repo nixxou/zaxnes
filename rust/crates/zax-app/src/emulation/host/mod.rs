@@ -267,6 +267,9 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     /// The widescreen held off whatever the settings say, the screen too narrow for it (portrait,
     /// owner request); nothing is written to the settings.
     widescreen_held_off: bool,
+    /// A `.bk2` is being set up for playback (lot NESHAWK-HACKS): with
+    /// [`Self::plain_for_bk2`], the game loads with no built-in patch, no aid and no margin.
+    bk2_loading: bool,
     confirmation: Option<ConfirmationRequest>,
     events: Vec<HostEvent>,
     state: EmulationState,
@@ -464,6 +467,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             job: None,
             loading: false,
             widescreen_held_off: false,
+            bk2_loading: false,
             confirmation: None,
             events: Vec::new(),
             state: EmulationState::Stopped,

@@ -145,13 +145,18 @@ fn with_fceux_chosen_the_four_controls_are_greyed_with_a_reason() {
         }
     }
 
-    // NesHawk has none of them either, in every build.
+    // NesHawk carries the widescreen extension and the hack packs since lot NESHAWK-HACKS, so
+    // those rows stay live; the sprite limit and the run-ahead are still greyed, in every build.
     let mut neshawk = SettingsModel::new();
     neshawk.set(SettingId::EmuEngine, SettingValue::Enum(3));
     for (id, reason) in expected {
+        let greyed = matches!(
+            id,
+            SettingId::VideoRemoveSpriteLimit | SettingId::EmuRunAhead
+        );
         assert_eq!(
             options::inert_reason(id, &neshawk),
-            Some(reason),
+            greyed.then_some(reason),
             "{}",
             id.key()
         );
