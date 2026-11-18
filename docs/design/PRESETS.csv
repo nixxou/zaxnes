@@ -17,13 +17,13 @@ Emulation;Run-ahead;emu.run_ahead;chaque cran = une émulation complète de plus
 Emulation;Moteur d'émulation (ce jeu);emu.engine;FCEUX plus rapide que Zaxnes, autres options greyées;Zaxnes;au prochain chargement;oui;Zaxnes;Zaxnes;Zaxnes;Zaxnes;Zaxnes;non;non;non;non;non
 Emulation;Corruption par OAMADDR;emu.oamaddr_write_corruption;aucun (défaut matériel, certains jeux rares en ont besoin);non;au prochain chargement;oui;non;non;non;non;oui;non;non;non;non;oui (proposé par le mode)
 Emulation;Rattrapage en cas de retard (frames);emu.catch_up;borne le travail quand la machine est en retard;2;tout de suite;oui;2;2;2;2;2;non;non;non;non;non
-Emulation;Nettoyage mémoire Lua lissé;emu.lua_smooth_gc;évite les à-coups du ramasse-miettes Lua;oui;tout de suite;oui;oui;oui;oui;oui;oui;oui (proposé par le mode);non;non;non;non
+Emulation;Nettoyage mémoire Lua lissé;emu.lua_smooth_gc;évite les à-coups du ramasse-miettes Lua;oui;tout de suite;oui;oui;oui;oui;oui;oui;non;non;non;non;non
 Emulation;Lua optimisé (unsafe);emu.lua_optimized;scripts Lua plus rapides, moins de vérifications;non;au prochain jeu;oui;oui;non;non;non;non;oui (proposé par le mode);oui (proposé par le mode);non;non;non
 Emulation;Optimisation Lua expérimentale (nécessite Lua optimisé);emu.lua_experimental;scripts Lua (expérimental);non;au prochain jeu;oui;oui;non;non;non;non;oui (proposé par le mode);non;non;non;non
 Emulation;Scripts en parallèle du dessin;emu.pipeline;scripts et conversion 3D sur un autre fil, +1 image de latence;Off;tout de suite;oui;Auto;Off;Off;Off;Off;oui (proposé par le mode);oui (proposé par le mode);non;non;non
 Video;API graphique (au prochain démarrage);video.backend;OpenGL / Vulkan / DirectX 12;OpenGL;au prochain démarrage;oui;OpenGL;OpenGL;OpenGL;OpenGL;OpenGL;oui;oui;oui;oui;oui
 Video;Résolution automatique;video.dynamic_resolution;résolution qui baisse dans les scènes lourdes;non;tout de suite;oui;oui;oui;non;non;non;oui (proposé par le mode);oui (proposé par le mode);non;non;non
-Emulation;3D en pause en 2D;emu.pause_3d_in_2d;pas de conversion 3D quand la 2D est affichée;non;tout de suite;oui;oui;oui;non;non;non;non;non;non;non;non
+Emulation;3D en pause en 2D;emu.pause_3d_in_2d;pas de conversion 3D quand la 2D est affichée;non;tout de suite;oui;oui;oui;non;non;non;oui (proposé par le mode);oui (proposé par le mode);non;non;non
 Emulation;Rattrapage : 3D de l'image affichée seulement;emu.catch_up_last_3d;images de rattrapage non converties en 3D;non;tout de suite;oui;oui;oui;oui;non;non;oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode);non
 Video;3D à 30 i/s (jeu à pleine vitesse);video.half_rate_3d;moitié du coût 3D, jeu à 60;non;tout de suite;non;non;non;non;non;non;oui (proposé par le mode);non;non;non;non
 Internal;;video.res_scale_factor;facteur de résolution;1.0;(stockée seulement);non;1.0;1.0;1.0;1.0;1.0;non;non;non;non;non
@@ -45,7 +45,7 @@ Render;Rayon;render.style.ao_radius;rayon de l occlusion (GPU);3;tout de suite;o
 Render;Qualité de l'occlusion;render.style.ao_quality;qualité de l occlusion (GPU);Medium;tout de suite;oui;Low;Low;Medium;Medium;High;non;non;non;oui (proposé par le mode);oui (proposé par le mode)
 Render;Ombres pixel;render.style.pixel_shadow;ombres au pixel (GPU);non;tout de suite;oui;non;non;non;oui;oui;non;non;oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode)
 Render;Grille de voxels;render.style.voxel_grid;style Amélioré (GPU);Off;tout de suite;oui;Off;Off;Off;Off;Off;non;non;non;non;non
-Render;Reflets;render.style.reflections;reflets (GPU lourd);non;tout de suite;oui;non;non;non;oui;oui;oui;oui;oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode)
+Render;Reflets;render.style.reflections;reflets (GPU lourd);non;tout de suite;oui;non;non;non;non;non;oui;oui;oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode)
 Render;Longueur;render.style.ssr_length;longueur des reflets (GPU);3;tout de suite;oui;3;3;3;3;3;non;non;non;non;non
 Render;Qualité des reflets;render.style.ssr_quality;qualité des reflets (GPU);High;tout de suite;oui;Low;Low;Medium;High;High;non;non;non;oui (proposé par le mode);oui (proposé par le mode)
 Shaders;;shader.2d.preset;shader en 2D (GPU);aucun;tout de suite;fenêtre Shaders;aucun;aucun;aucun;aucun;aucun;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders

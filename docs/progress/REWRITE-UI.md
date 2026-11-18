@@ -60,3 +60,8 @@ hardware defects, VS DIPs, ...). Of these the fast core and Fidelity+ are now im
 ## Step 15 (2026-11-18)
 
 The presets also manage render.visual_style and six Enhanced-style parameters (reflections, ssr_quality, ao, ao_quality, pixel_shadow, voxel_grid): Classic in the two fast modes, Enhanced from Balanced on with more effects towards the faithful end. Voxel grid stays Off and hidden (it is a look, not a quality). Tests not run (464 MB free on G:). Commit 637d151e.
+
+## Step 16 (2026-11-18)
+
+Owner: reflections off by default in every mode (still offered from Balanced on); voxel grid and emu.lua_smooth_gc (on by default) no longer managed by the presets; emu.pause_3d_in_2d stays in the presets, on and offered in the two fast modes, off and hidden elsewhere (default unchanged: some scripts lose frame hooks in 2D). Real line breaks in the preset strings turned back into 
+. Freed target/debug (13 GB). zax-app lib, desktop_options_golden, pause_3d and handheld_tree tests pass.
