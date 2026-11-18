@@ -1,5 +1,5 @@
 ﻿Thème;Réglage;Clé;Effet sur les performances;Défaut;Prend effet;Visible en mode avancé;Rapidité max : valeur;Rapide : valeur;Équilibré : valeur;Fidèle : valeur;Fidélité max : valeur;Rapidité max : visible en mode simple;Rapide : visible en mode simple;Équilibré : visible en mode simple;Fidèle : visible en mode simple;Fidélité max : visible en mode simple
-Render;Style;render.visual_style;Amélioré = reflets, occlusion, ombres pixel (GPU lourd);Classique;tout de suite;oui;Classique;Classique;Classique;Classique;Classique;oui;oui;oui;oui;oui
+Render;Style;render.visual_style;Amélioré = reflets, occlusion, ombres pixel (GPU lourd);Classique;tout de suite;oui;Classique;Classique;Amélioré;Amélioré;Amélioré;oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode)
 Video;;video.graphic_quality;qualité graphique globale;Low (non utilisée);tout de suite;non;Low (non utilisée);Low (non utilisée);Low (non utilisée);Low (non utilisée);Low (non utilisée);non;non;non;non;non
 Video;Synchronisation verticale;video.vsync;cadence du dessin;chaque rafraîchissement;tout de suite;oui;chaque rafraîchissement;chaque rafraîchissement;chaque rafraîchissement;chaque rafraîchissement;chaque rafraîchissement;oui;oui;oui;oui;oui
 Video;Fréquence de rendu;video.frame_rate;cadence du dessin sans vsync;Auto (fréquence de l écran);tout de suite;oui;Auto (fréquence de l écran);Auto (fréquence de l écran);Auto (fréquence de l écran);Auto (fréquence de l écran);Auto (fréquence de l écran);non;non;non;non;non
@@ -40,14 +40,14 @@ Emulation;Défilement lissé (interpolé par run-ahead);emu.smooth_scroll_ahead;
 Video;Supprimer la limite de 8 sprites par ligne;video.remove_sprite_limit;plus de sprites dessinés;Smart;tout de suite;oui;Smart;Smart;Smart;Smart;Smart;non;non;non;non;non
 Video;Signal composite;video.composite_signal;simulation du signal TV (calcul de l image);non;tout de suite;oui;non;non;non;non;non;oui;oui;oui;oui;oui
 Video;Résolution du shader;video.shader_resolution;résolution des shaders (GPU);100 %;tout de suite;oui;100 %;100 %;100 %;100 %;100 %;non;non;non;non;non
-Render;Occlusion ambiante;render.style.ao;occlusion ambiante (GPU lourd);Off;tout de suite;oui;Off;Off;Off;Off;Off;non;non;non;non;non
+Render;Occlusion ambiante;render.style.ao;occlusion ambiante (GPU lourd);Off;tout de suite;oui;Off;Off;Off;MSVO;MSVO;non;non;oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode)
 Render;Rayon;render.style.ao_radius;rayon de l occlusion (GPU);3;tout de suite;oui;3;3;3;3;3;non;non;non;non;non
-Render;Qualité de l'occlusion;render.style.ao_quality;qualité de l occlusion (GPU);Medium;tout de suite;oui;Medium;Medium;Medium;Medium;Medium;non;non;non;non;non
-Render;Ombres pixel;render.style.pixel_shadow;ombres au pixel (GPU);non;tout de suite;oui;non;non;non;non;non;non;non;non;non;non
+Render;Qualité de l'occlusion;render.style.ao_quality;qualité de l occlusion (GPU);Medium;tout de suite;oui;Low;Low;Medium;Medium;High;non;non;non;oui (proposé par le mode);oui (proposé par le mode)
+Render;Ombres pixel;render.style.pixel_shadow;ombres au pixel (GPU);non;tout de suite;oui;non;non;non;oui;oui;non;non;oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode)
 Render;Grille de voxels;render.style.voxel_grid;style Amélioré (GPU);Off;tout de suite;oui;Off;Off;Off;Off;Off;non;non;non;non;non
-Render;Reflets;render.style.reflections;reflets (GPU lourd);non;tout de suite;oui;non;non;non;non;non;oui;oui;oui;oui;oui
+Render;Reflets;render.style.reflections;reflets (GPU lourd);non;tout de suite;oui;non;non;non;oui;oui;oui;oui;oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode)
 Render;Longueur;render.style.ssr_length;longueur des reflets (GPU);3;tout de suite;oui;3;3;3;3;3;non;non;non;non;non
-Render;Qualité des reflets;render.style.ssr_quality;qualité des reflets (GPU);High;tout de suite;oui;High;High;High;High;High;non;non;non;non;non
+Render;Qualité des reflets;render.style.ssr_quality;qualité des reflets (GPU);High;tout de suite;oui;Low;Low;Medium;High;High;non;non;non;oui (proposé par le mode);oui (proposé par le mode)
 Shaders;;shader.2d.preset;shader en 2D (GPU);aucun;tout de suite;fenêtre Shaders;aucun;aucun;aucun;aucun;aucun;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders
 Shaders;;shader.2d_ws.preset;shader en 2D écran large (GPU);aucun;tout de suite;fenêtre Shaders;aucun;aucun;aucun;aucun;aucun;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders
 Shaders;;shader.3d.preset;shader en 3D (GPU);aucun;tout de suite;fenêtre Shaders;aucun;aucun;aucun;aucun;aucun;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders;fenêtre Shaders

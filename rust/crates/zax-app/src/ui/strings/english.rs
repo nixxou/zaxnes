@@ -557,19 +557,24 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("options.new.next_start", "at the next start"),
     ("options.preset.fastest.name", "Fastest"),
     ("options.preset.fastest.summary", "For handhelds and modest machines. The same console with far less work: the pictures and sounds do not change."),
-    ("options.preset.fastest.acts", "Fast core (2.5 to 3.5 times less work on the common boards)\nOptimised and experimental Lua, smoothed garbage collection\nNo run-ahead\nScripts beside the drawing (Auto)\nAutomatic resolution, no shadows\nCatch-up and 2D: no 3D conversion for nothing"),
+    ("options.preset.fastest.acts", "Fast core (2.5 to 3.5 times less work on the common boards)\nOptimised and experimental Lua, smoothed garbage collection\nNo run-ahead\nScripts beside the drawing (Auto)\nAutomatic resolution, no shadows\nCatch-up and 2D: no 3D conversion for nothing
+Classic style"),
     ("options.preset.fast.name", "Fast"),
     ("options.preset.fast.summary", "The fast core, the rest as usual."),
-    ("options.preset.fast.acts", "Fast core\nAutomatic resolution\nCatch-up and 2D: no 3D conversion for nothing"),
+    ("options.preset.fast.acts", "Fast core\nAutomatic resolution\nCatch-up and 2D: no 3D conversion for nothing
+Classic style"),
     ("options.preset.balanced.name", "Balanced"),
     ("options.preset.balanced.summary", "The default settings: the standard core, the controller read in real time."),
-    ("options.preset.balanced.acts", "Standard core\nController read in real time\nCatch-up: only the last late frame is turned into 3D"),
+    ("options.preset.balanced.acts", "Standard core\nController read in real time\nCatch-up: only the last late frame is turned into 3D
+Enhanced style, no reflections or occlusion"),
     ("options.preset.faithful.name", "Faithful"),
     ("options.preset.faithful.summary", "Every frame goes to 3D; the console's exact rate is offered."),
-    ("options.preset.faithful.acts", "Controller read in real time\nCommon hardware defects reproduced\nEvery frame turned into 3D, catch-up included"),
+    ("options.preset.faithful.acts", "Controller read in real time\nCommon hardware defects reproduced\nEvery frame turned into 3D, catch-up included
+Enhanced style: reflections, occlusion, pixel shadows"),
     ("options.preset.most_faithful.name", "Most faithful"),
     ("options.preset.most_faithful.summary", "The most faithful emulation, no compromise. For a desktop machine."),
-    ("options.preset.most_faithful.acts", "Fidelity+ (CPU and PPU on the clock edges)\nThe console's exact rate\nOAMADDR write corruption (a few rare games need it)\nEvery frame turned into 3D, catch-up included"),
+    ("options.preset.most_faithful.acts", "Fidelity+ (CPU and PPU on the clock edges)\nThe console's exact rate\nOAMADDR write corruption (a few rare games need it)\nEvery frame turned into 3D, catch-up included
+Enhanced style: reflections, high-quality occlusion, pixel shadows"),
     ("setting.emu.fast_core", "Fast core"),
     ("setting.emu.exact_rate", "Console frame rate"),
     ("setting.emu.realtime_input", "Real-time pad"),

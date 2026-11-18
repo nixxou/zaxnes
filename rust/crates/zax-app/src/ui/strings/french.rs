@@ -571,19 +571,24 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("options.new.next_start", "au prochain démarrage"),
     ("options.preset.fastest.name", "Rapidité max"),
     ("options.preset.fastest.summary", "Pour les consoles portables et les machines modestes. La même console, avec beaucoup moins de calcul : les images et les sons ne changent pas."),
-    ("options.preset.fastest.acts", "Cœur rapide (2,5 à 3,5 fois moins de calcul sur les cartes courantes)\nLua optimisé et expérimental, nettoyage mémoire lissé\nPas d'anticipation (run-ahead 0)\nScripts en parallèle du dessin (Auto)\nRésolution automatique, pas d'ombres\nRattrapage et 2D : la 3D n'est pas convertie pour rien"),
+    ("options.preset.fastest.acts", "Cœur rapide (2,5 à 3,5 fois moins de calcul sur les cartes courantes)\nLua optimisé et expérimental, nettoyage mémoire lissé\nPas d'anticipation (run-ahead 0)\nScripts en parallèle du dessin (Auto)\nRésolution automatique, pas d'ombres\nRattrapage et 2D : la 3D n'est pas convertie pour rien
+Style Classique"),
     ("options.preset.fast.name", "Rapide"),
     ("options.preset.fast.summary", "Le cœur rapide, le reste comme d'habitude."),
-    ("options.preset.fast.acts", "Cœur rapide\nRésolution automatique\nRattrapage et 2D : la 3D n'est pas convertie pour rien"),
+    ("options.preset.fast.acts", "Cœur rapide\nRésolution automatique\nRattrapage et 2D : la 3D n'est pas convertie pour rien
+Style Classique"),
     ("options.preset.balanced.name", "Équilibré"),
     ("options.preset.balanced.summary", "Les réglages par défaut : le cœur standard, la manette lue en temps réel."),
-    ("options.preset.balanced.acts", "Cœur standard\nManette lue en temps réel\nRattrapage : seule la dernière image en retard passe en 3D"),
+    ("options.preset.balanced.acts", "Cœur standard\nManette lue en temps réel\nRattrapage : seule la dernière image en retard passe en 3D
+Style Amélioré, sans reflets ni occlusion"),
     ("options.preset.faithful.name", "Fidèle"),
     ("options.preset.faithful.summary", "Chaque image passe en 3D ; la cadence exacte de la console est proposée."),
-    ("options.preset.faithful.acts", "Manette lue en temps réel\nDéfauts matériels courants reproduits\nChaque image convertie en 3D, même en rattrapage"),
+    ("options.preset.faithful.acts", "Manette lue en temps réel\nDéfauts matériels courants reproduits\nChaque image convertie en 3D, même en rattrapage
+Style Amélioré : reflets, occlusion, ombres pixel"),
     ("options.preset.most_faithful.name", "Fidélité max"),
     ("options.preset.most_faithful.summary", "L'émulation la plus fidèle, sans compromis. Pour une machine de bureau."),
-    ("options.preset.most_faithful.acts", "Fidélité+ (CPU et PPU sur les fronts d'horloge)\nCadence exacte de la console\nCorruption à l'écriture d'OAMADDR (certains jeux rares en ont besoin)\nChaque image convertie en 3D, même en rattrapage"),
+    ("options.preset.most_faithful.acts", "Fidélité+ (CPU et PPU sur les fronts d'horloge)\nCadence exacte de la console\nCorruption à l'écriture d'OAMADDR (certains jeux rares en ont besoin)\nChaque image convertie en 3D, même en rattrapage
+Style Amélioré : reflets, occlusion haute qualité, ombres pixel"),
     ("setting.emu.fast_core", "Cœur rapide"),
     ("setting.emu.exact_rate", "Cadence de la console"),
     ("setting.emu.realtime_input", "Manette en temps réel"),
