@@ -1,8 +1,8 @@
 # NESHAWK-HACKS — hack packs and widescreen on the NesHawk engine
 
-Branch `advanced-neshawk`, from `rewrite-ui` 91ffefce, worktree `G:DSen\wt-advanced-neshawk`
+Branch `advanced-neshawk`, from `rewrite-ui` 91ffefce, worktree `G:\3DSen\wt-advanced-neshawk`
 (its own target directory). Steps 1-2 were first written on a branch inside `wt-rewrite-ui`, which
-another session was using: set aside in `G:DSen
+another session was using: set aside in `G:\3DSen
 eshawk-hacks-parked`, re-applied here.
 
 ## The request (owner, 2026-11-18)
@@ -57,12 +57,12 @@ as Zaxnes does (PPU and APU still, the board clocked).
 - Steps 1-2 (04762d5e): `crate::wide` (bus hooks, `read_code`, overclock via
   `run_cpu_cycle::<false>`), harness `ZAXNES_NESHAWK_WIDE=1` attaches a locked extension.
 - Step 3 (cc5f465c): `crate::hacks`, engine API, `FLAG_WIDE` savestate block. `tests/hacks.rs`
-  with `ZAXNES_ROMS=G:DSen\demo
+  with `ZAXNES_ROMS=G:\3DSen\demo
 oms`: nothing attached by default; a locked extension leaves
   600 frames of work RAM identical on every demo ROM and its states restore; the 13 patched demo
   ROMs (Adventure Island, Blaster Master, Castlevania x2, Excitebike, FF1, MM2, Metroid, NG3,
   SMB1, SMB3, Zelda II x2) run their patch, unlock the extension, states restore.
-- Proof runs: `tools/neshawk-hacks/bk2-trace.sh`, outputs in `G:DSen
+- Proof runs: `tools/neshawk-hacks/bk2-trace.sh`, outputs in `G:\3DSen
 eshawk-hacks-runs`
   (baseline = rewrite-ui 70516d6b build, the core being identical up to 91ffefce).
 - Step 4 next: `zax_nes::ppu::tiles` (1 800 lines on `Ppu2C02`) is the reference; the plan is a
