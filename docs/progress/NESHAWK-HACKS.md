@@ -32,13 +32,13 @@ as Zaxnes does (PPU and APU still, the board clocked).
 
 ## Steps
 
-- [ ] 1. Bus layer in `zax-neshawk`, gated: `$5000` window (listen on writes, answer reads only
+- [x] 1. Bus layer in `zax-neshawk`, gated: `$5000` window (listen on writes, answer reads only
       once unlocked, `$500A` options), PRG window, execution zone on instruction-stream reads
       (`Mos6502xLink::read_code`, default = `read_memory`), zone data at `$3000`-`$3FFF`,
       sprite high bytes latched at OAM DMA, four screens.
-- [ ] 2. Overclock: CPU-only cycles at line 240 (board clocked, PPU/APU still), ended at the
+- [x] 2. Overclock: CPU-only cycles at line 240 (board clocked, PPU/APU still), ended at the
       patch's `idle_loop`.
-- [ ] 3. `NesHawkEngine`: built-in patch applied to the image before the machine is built, the
+- [x] 3. `NesHawkEngine`: built-in patch applied to the image before the machine is built, the
       pack installed, aids applied to the board's PRG, options; the extension saved in the
       block only when present (a flag bit, so blocks without it are byte-identical to today's).
 - [ ] 4. Tile capture with margins (the columns beyond 256 px, the decoders, sprite x high
@@ -51,3 +51,16 @@ as Zaxnes does (PPU and APU still, the board clocked).
       against Zaxnes.
 
 ## Progress
+
+- Steps 1-2 (04762d5e): `crate::wide` (bus hooks, `read_code`, overclock via
+  `run_cpu_cycle::<false>`), harness `ZAXNES_NESHAWK_WIDE=1` attaches a locked extension.
+- Step 3 (cc5f465c): `crate::hacks`, engine API, `FLAG_WIDE` savestate block. `tests/hacks.rs`
+  with `ZAXNES_ROMS=G:DSen\demooms`: nothing attached by default; a locked extension leaves
+  600 frames of work RAM identical on every demo ROM and its states restore; the 13 patched demo
+  ROMs (Adventure Island, Blaster Master, Castlevania x2, Excitebike, FF1, MM2, Metroid, NG3,
+  SMB1, SMB3, Zelda II x2) run their patch, unlock the extension, states restore.
+- Proof runs: `tools/neshawk-hacks/bk2-trace.sh`, outputs in `G:DSen
+eshawk-hacks-runs`
+  (baseline = rewrite-ui 70516d6b build, the core being identical up to 91ffefce).
+- Step 4 next: `zax_nes::ppu::tiles` (1 800 lines on `Ppu2C02`) is the reference; the plan is a
+  NesHawk-side copy adapted to this PPU, leaving `zax-nes` untouched.
