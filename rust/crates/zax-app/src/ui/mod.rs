@@ -23,6 +23,7 @@ pub mod platform;
 pub mod presets;
 pub mod profile_chooser;
 pub mod profile_import;
+pub mod shader_looks;
 pub mod shader_panel;
 pub mod shots;
 pub mod state;
