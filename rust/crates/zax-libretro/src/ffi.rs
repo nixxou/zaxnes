@@ -358,33 +358,37 @@ thread_local! {
 /// The device the frontend plugged into each port, kept for a game loaded after.
 static PORT_DEVICES: Mutex<[c_uint; 2]> = Mutex::new([DEVICE_JOYPAD; 2]);
 
+/// The device types a port offers. The frontend keeps a pointer to them: static.
+struct PortTypes([ControllerDescription; 2]);
+// SAFETY: read-only data, pointers to static C strings.
+unsafe impl Sync for PortTypes {}
+static PORT_TYPES: PortTypes = PortTypes([
+    ControllerDescription {
+        desc: c"NES pad".as_ptr(),
+        id: DEVICE_JOYPAD,
+    },
+    ControllerDescription {
+        desc: c"Zapper".as_ptr(),
+        id: DEVICE_LIGHTGUN,
+    },
+]);
+
 /// Declares the two ports' devices: a pad, or the Zapper.
 fn declare_controllers() {
-    let types = [
-        ControllerDescription {
-            desc: c"NES pad".as_ptr(),
-            id: DEVICE_JOYPAD,
-        },
-        ControllerDescription {
-            desc: c"Zapper".as_ptr(),
-            id: DEVICE_LIGHTGUN,
-        },
-    ];
+    let port = || ControllerInfo {
+        types: PORT_TYPES.0.as_ptr(),
+        num_types: 2,
+    };
     let mut ports = [
-        ControllerInfo {
-            types: types.as_ptr(),
-            num_types: 2,
-        },
-        ControllerInfo {
-            types: types.as_ptr(),
-            num_types: 2,
-        },
+        port(),
+        port(),
         ControllerInfo {
             types: std::ptr::null(),
             num_types: 0,
         },
     ];
-    // The data is the array itself, ended by an empty entry; the frontend copies it.
+    // The data is the array itself, ended by an empty entry; the frontend copies it (but not
+    // the types it points to).
     if let Some(first) = ports.first_mut() {
         environment(ENVIRONMENT_SET_CONTROLLER_INFO, first);
     }
@@ -1170,6 +1174,7 @@ pub unsafe extern "C" fn retro_load_game(info: *const GameInfo) -> bool {
             return false;
         }
     };
+    declare_controllers();
     plug_devices(&mut core);
     let hacks = hack_list(&core);
     declare_options(&hacks);
