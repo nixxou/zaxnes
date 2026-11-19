@@ -746,3 +746,34 @@ fn another_version_of_a_widened_game_is_studied_when_its_hacks_open() {
         .join("Zelda II - The Adventure of Link (Europe).nes");
     assert_eq!(0, harness.host.game_options(&rom.to_string_lossy()).len());
 }
+
+/// The press that a capture of the Controls screen binds is not a press of the screen too: B
+/// ending a capture stays on the list (it used to leave it), the next B leaves it.
+#[test]
+fn the_press_that_ends_a_capture_is_not_a_press_of_the_screen() {
+    let (mut harness, mut handheld) = start(&[], &["Game.nes"]);
+    let pad = common::FakeGamepad::new("Pad");
+    harness.pads.plug(&pad);
+    {
+        use zax_platform::input::GamepadHub as _;
+        let hub = &harness.pads;
+        harness.input.edit(|bindings, pads, _| {
+            pads.skip_startup_delay(hub, bindings);
+            pads.assign(bindings, 0, hub.devices().first().map(|device| &**device));
+        });
+    }
+    handheld.arrange_for_capture(Screen::Controls);
+    tap(&mut harness, &mut handheld, PadButton::A);
+    assert!(harness.input.rebinding().is_listening(), "A starts a capture");
+    // The sample that starts the listening, then the one the press of the pad's button ends it in.
+    harness.sample(1.0 / 60.0);
+    pad.press(zax_platform::input::standard_gamepad::EAST);
+    harness.sample(1.0 / 60.0);
+    assert!(!harness.input.rebinding().is_listening(), "the press is bound");
+    // The same press reaches the screen as B in that frame.
+    tap(&mut harness, &mut handheld, PadButton::B);
+    assert_eq!(Screen::Controls, handheld.screen());
+    pad.release_all();
+    tap(&mut harness, &mut handheld, PadButton::B);
+    assert_ne!(Screen::Controls, handheld.screen());
+}

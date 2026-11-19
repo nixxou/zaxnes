@@ -493,11 +493,19 @@ impl HandheldUi {
         self.confirming = frame.host.pending_confirmation().is_some();
         self.follow_the_game(frame.host);
         self.update_combo(pad, seconds, frame.host);
+        // A capture that ends this frame ended on the press that was bound: that press, sampled
+        // before this update, is not a press of the screen as well (B would leave the list, A
+        // start another capture). The screen's own guard cannot see it, the capture being over.
+        let capturing = self.screen == Screen::Controls && self.controls.capture_left.is_some();
         self.update_capture(seconds, frame);
+        let capture_ended = capturing && self.controls.capture_left.is_none();
         self.update_camera_memory(pad, seconds, frame.host);
         self.update_flat_view(pad, seconds, frame.host);
         self.update_widescreen_hold(pad, seconds, frame.host);
         self.update_resting_study(seconds, frame.host);
+        if capture_ended {
+            return;
+        }
         let presses: Vec<PadButton> = pad.presses().collect();
         for button in presses.iter().copied() {
             // A key that is A and Start at once (Enter) plays the game once, and Start with
