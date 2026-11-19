@@ -4,92 +4,89 @@
 
 # Zaxnes
 
-**Zaxnes** is a free NES emulator that plays your games **in 3D**. The flat tiles and sprites of
-each frame become little 3D blocks, set in a scene with a real camera, lights and shadows: you can
-turn around the level, zoom in, or go back to plain 2D at any time.
+**Zaxnes** is a free NES emulator that plays your games in 3D. It runs on Windows, Linux, Android,
+PortMaster handhelds and RetroArch.
 
-For a number of games, Zaxnes can also play in **widescreen**: the level is shown past the edges
-of the original screen (see [Widescreen](#widescreen-experimental)).
+- **Uses your 3dSen profiles.** Import them from your own 3dSen install in one click. 3dSen 2.0
+  and 2.1 profiles work too. Zaxnes also comes with a few profiles of its own (*Faxanadu*,
+  *Metal Force*), and more are on the way. ([details](#the-3d-profiles))
 
-It runs on **Windows**, **Linux**, **Android** (tablets and handhelds, with a gamepad or the
-touch pad) and **handheld consoles** through PortMaster (Anbernic H700 devices such as the RG40XXV
-and the RG35XX family, on muOS, Knulli or ROCKNIX).
+And even without the 3D, it's a solid NES emulator:
+
+- **Widescreen.** About 20 games show more of the level past the edges of the screen, like
+  *Super Mario Bros. 3*, *Zelda II*, *Metroid* and the six *Mega Man*. ([details](#widescreen))
+- **Accurate.** It's cycle accurate: compared cycle by cycle with a transistor-level simulation
+  of the NES chips, its timing matches every time. It passes all 147 AccuracyCoin tests and
+  supports over 400 mappers, the Famicom Disk System included. ([details](#accuracy))
+- **Or fast.** A fast core for small handhelds gives the same results with less CPU. You pick
+  fast or accurate with one slider. ([details](#fast-or-accurate))
+- **Extra cores.** FCEUX, and a NesHawk-compatible core that plays BizHawk TAS movies (`.bk2`)
+  in sync. ([details](#three-engines))
+- **The usual extras.** Rewind, save states, run-ahead, RetroAchievements and RetroArch shaders.
+  ([details](#and-the-rest))
+
+It's free and open source (GPL-3.0).
 
 > **Independent project, not affiliated with Geod Studio or Nintendo. NES is a trademark of
 > Nintendo.**
 
-## The 3D profiles: you need 3dSen
+## The 3D profiles
 
-How a game looks in 3D is described by a **3D profile**, one per game. Zaxnes does not ship any:
-the profiles are the work of the [3dSen](https://store.steampowered.com/app/1147940) team at Geod
-Studio, and they are what makes the magic happen.
+How a game looks in 3D is set by a **3D profile**, one per game. Each frame, the flat tiles and
+sprites become little 3D blocks in a scene with a camera, lights and shadows. You can turn around
+the level, zoom in, or go back to plain 2D at any time.
 
-**3dSen is a great app, worth every penny.** Over a hundred NES classics hand-tuned into gorgeous 3D
-dioramas, years of passionate work by a small studio, and the original idea Zaxnes owes everything
-to. If you enjoy NES games in 3D, it is the best few dollars you can spend, and buying it is how
-this whole scene keeps going.
+### Most profiles come from 3dSen
+
+The profiles are the work of the [3dSen](https://store.steampowered.com/app/1147940) team at Geod
+Studio. Over a hundred NES games, each tuned by hand. 3dSen is the original idea Zaxnes owes
+everything to, and it costs a few dollars. If you like NES games in 3D, buy it: that's how this
+whole scene keeps going.
 
 **[Get 3dSen on Steam](https://store.steampowered.com/app/1147940)**, then in Zaxnes use
-**File ▸ Import from 3dSen…**: Zaxnes reads the profiles of *your* installation and copies
-them into your own profile folder. Nothing is downloaded, nothing is redistributed, and your 3dSen
-installation is left untouched. On a handheld, run the import on a PC and copy the `profiles`
-folder to the card.
+**File ▸ Import from 3dSen…**. Zaxnes reads the profiles of *your* install and copies them into
+your own profile folder. Nothing is downloaded, nothing is shared, and your 3dSen install is left
+alone. On a handheld, run the import on a PC and copy the `profiles` folder to the card.
 
-The import works with every version of 3dSen, including **2.0 and 2.1**, and Zaxnes plays what
-those versions brought to the profiles: reflections, bend, the new camera and Lua features.
+The import works with every version of 3dSen, **2.0 and 2.1** included, and Zaxnes plays what
+those versions added: reflections, bend, the new camera and Lua features.
 
-**Some community profiles are free:** players share the profiles they made in the
-[Profile Repository](https://itch.io/board/872690/profile-repository) of the 3dSen Maker forum on
-itch.io. Import them with **File ▸ Import a profile…**.
+### Profiles made for Zaxnes
 
-**Profiles made for Zaxnes:** [zaxnes_3dn](https://github.com/nixxou/zaxnes_3dn) holds 3D profiles
-made for Zaxnes itself (*Faxanadu*, *Metal Force*). The released programs carry them and put them
-in your profiles at the first start. Their files have their own licence (CC BY-NC-ND 4.0) and are
-not part of the Zaxnes sources.
+[zaxnes_3dn](https://github.com/nixxou/zaxnes_3dn) holds 3D profiles made for Zaxnes itself:
+*Faxanadu* and *Metal Force* so far, with more to come. Every package carries them and puts them
+in your profiles at the first start. They have their own licence (CC BY-NC-ND 4.0) and aren't part
+of the Zaxnes sources.
+
+Players also share free profiles in the
+[Profile Repository](https://itch.io/board/872690/profile-repository) of the 3dSen Maker forum.
+Import them with **File ▸ Import a profile…**.
 
 Without a profile, every game still plays, in **2D**, or in a **default 3D** that gives every tile
 the same depth.
 
 ### Try it at once: FlappyZaxNes
 
-Zaxnes comes with one game, **FlappyZaxNes**: a simple NES game made for it (after
+Zaxnes comes with one game, **FlappyZaxNes**: a small NES game made for it (after
 [Flappy NES](https://github.com/filipemd/flappy-nes) by filipemd, GPL-3.0), with its own 3D profile
-and widescreen, so that you can see how the emulator works before unlocking any profile in 3dSen.
-At the first start its ROM is put in your ROM folder and its profile in your profiles, tied
-together: pick *FlappyZaxNes* in the ROM list and play. Delete them and they stay deleted, until a
+and widescreen. At the first start its ROM goes into your ROM folder and its profile into your
+profiles: pick *FlappyZaxNes* in the ROM list and play. Delete them and they stay deleted, until a
 new version of Zaxnes brings a new version of the game.
 
 ### Making your own profiles
 
-To make or change a profile, use [3dSen Maker](https://geod.itch.io/3dsen-maker), Geod Studio's
-free profile editor, then import the profile in Zaxnes (**File ▸ Import a profile…**).
+Use [3dSen Maker](https://geod.itch.io/3dsen-maker), Geod Studio's free profile editor, then
+import the profile in Zaxnes (**File ▸ Import a profile…**).
 
-Zaxnes also has an **editor mode** (work in progress): an AI-assisted way to write a profile in Lua.
-It gives an AI agent a harness through a local MCP server, and a prompt ready to copy and paste;
-see [`rust/docs/EDITOR.md`](rust/docs/EDITOR.md).
+Zaxnes also has an **editor mode** (work in progress) for writing a profile in Lua with the help
+of an AI agent. It gives the agent a local MCP server to look at the game and render it, and a
+prompt ready to paste; see [`rust/docs/EDITOR.md`](rust/docs/EDITOR.md).
 
-## Widescreen (experimental)
+## Widescreen
 
-Some games can be played in **16:9** (or 16:10, 3:2, or the shape of your window): the level and
-the enemies are shown **past the edges of the original screen**, where the NES never drew them.
-
-**This is experimental.** It works through most of these games, but corrections are still to be
-made: expect glitches here and there, mostly at the edges of the screen.
-
-**It is not a recompilation.** The game is not rewritten for a PC, as a "recomp" does: it still runs
-on the emulated NES. The widescreen is a combination of two things:
-
-- a **small ROM hack applied in memory** to your own ROM when the game starts (nothing is written
-  to your file, and Zaxnes ships no game data), which teaches the game to prepare the extra columns
-  of the screen;
-- **special registers added to the emulated console**, which the hack uses to draw those columns
-  past the original 256 pixels.
-
-Because the hack is small and only touches what the screen needs, it is **compatible with most
-ROM hacks** of these games: translations, difficulty or graphics hacks keep working in widescreen.
-
-Turn it on per game: on the ROM list, the games that support it carry a **[W]**; **L1** (or the
-game's options) opens its widescreen settings.
+Some games can be played in **16:9** (or 16:10, 3:2, or the shape of your window). The level and
+the enemies show **past the edges of the original screen**, where the NES never drew them. It
+works in 2D and in 3D.
 
 Games supported so far:
 
@@ -99,7 +96,6 @@ Games supported so far:
 - *Excitebike*
 - *Faxanadu*
 - *Final Fantasy*
-- *FlappyZaxNes* (the game included with Zaxnes)
 - *Kirby's Adventure*
 - *Mega Man*, *Mega Man 2*, *3*, *4*, *5* and *6*
 - *Metal Force*
@@ -107,22 +103,92 @@ Games supported so far:
 - *Ninja Gaiden III*
 - *Super Mario Bros.* and *Super Mario Bros. 3*
 - *Zelda II: The Adventure of Link*
+- *FlappyZaxNes* (the game that comes with Zaxnes)
 
-## Also in Zaxnes
+Here's how it works. It isn't a recompilation: the game still runs on the emulated NES. Two
+things make it work:
 
-- **RetroAchievements**, in softcore mode: sign in from the options, and save states, rewind and
-  fast forward stay allowed. The ROM list shows how far you got in each game.
-- **Save states** with thumbnails, **rewind** and **fast forward**. With a widescreen game, a
-  save state loads with the widescreen on or off.
-- **RetroArch shaders** (slang, through librashader) in Vulkan and DirectX 12, on the desktop and
-  on Android: CRT, scanlines, LCD, Mega Bezel TV frames, for 2D and 3D separately.
+- a **small ROM hack applied in memory** to your own ROM when the game starts (nothing is written
+  to your file, and Zaxnes ships no game data). It teaches the game to prepare the extra columns
+  of the screen;
+- **extra registers added to the emulated console**, which the hack uses to draw those columns
+  past the original 256 pixels.
+
+The hack is small and only touches what the screen needs, so it works with **most ROM hacks** of
+these games: translations, difficulty or graphics hacks keep working in widescreen.
+
+Some packs also offer **aids**, set per game or once for all of them in **Options ▸ Widescreen &
+Hacks**: no slowdown, invincibility, a level select, and what the enemies in the new margins do
+(move or wait until they're on the original screen, greyed while they wait).
+
+**It's still experimental.** It works through most of these games, but expect glitches here and
+there, mostly at the edges of the screen.
+
+On the ROM list, the games that support it carry a **[W]**. **L1** (or the game's options) opens
+its widescreen settings.
+
+## Accuracy
+
+Zaxnes aims to behave exactly like the console, down to the cycle.
+
+- **Cycle accurate.** Its CPU bus, DMA and PPU were compared cycle by cycle with the
+  transistor-level simulation of the NES chips (the 2A03 and 2C02 netlists): 421,901 CPU cycles,
+  32,131 of them stolen by DMA, with **no timing difference**. The details are in
+  [`docs/review/SUBCYCLE-PROOF.md`](docs/review/SUBCYCLE-PROOF.md).
+- **AccuracyCoin: 147 of 147**, in all four CPU/PPU alignments a console can power on with.
+- **Over 400 mappers**, the **Famicom Disk System**, the **VS. System** (with its cabinet buttons)
+  and newer boards like the Rainbow.
+- **PAL** measured on the netlist of the PAL chip (2C07), and Dendy.
+- **The real video signal, if you want it.** In **Options ▸ NES picture**, Zaxnes can rebuild the
+  console's video signal pixel by pixel and decode it like a TV: composite (the colour fringes and
+  the dot crawl), S-Video or RF. You can also pick a TV: modern screen, or a measured tube (US,
+  Japanese or PAL) with its own gamma and phosphors, and turn its tint, colour, contrast and
+  brightness knobs.
+
+The few known gaps are listed, with their sources, in
+[`docs/review/FIDELITY-LEADS.md`](docs/review/FIDELITY-LEADS.md).
+
+## Fast or accurate
+
+The **Essentials** tab of the options has one slider with five steps, from *Fastest* to *Most
+faithful*. Each step sets the settings that cost speed: the core, run-ahead, the 3D effects, the
+render scale, the video signal. You can still change any of them after.
+
+- The **fast core** skips work the console's visible result doesn't need. It gives the same
+  machine as the accurate core, checked frame by frame on 320 ROMs (save states, widescreen and
+  run-ahead included), and needs less CPU. It's what small handhelds use by default.
+- **Fidelity+** goes the other way: the console's finest details, at a small cost per frame.
+
+The options also have a **simple mode**, with only the settings most people need, and an
+**advanced mode** with everything, on the PC and on the console screen alike.
+
+## Three engines
+
+Each game can run on one of three engines, picked in its options:
+
+- **Zaxnes**, the default, with everything on this page.
+- **FCEUX**, the well-known emulator, built in.
+- **NesHawk**, a core that behaves like BizHawk's. It plays BizHawk TAS movies (`.bk2`) in sync,
+  and the widescreen and the hacks work on it too.
+
+## And the rest
+
+- **Rewind**, **save states** with thumbnails, **fast forward**. A widescreen game's save state
+  loads with the widescreen on or off.
 - **Run-ahead**, and an experimental **smooth scrolling at 120 Hz** that draws the playfield
   between two emulated frames.
-- A growing **accuracy**: 144 mappers, and 128 of the 147 tests of AccuracyCoin.
+- **RetroAchievements**, in softcore mode: save states, rewind and fast forward stay allowed. The
+  ROM list shows how far you got in each game.
+- **RetroArch shaders** (slang, through librashader) in Vulkan and DirectX 12, on the desktop and
+  on Android. They're grouped by style (CRT Guest, Mega Bezel, CRT Royale, LCD…), each with a few
+  simple options like curvature or scanlines. On the PC you can still edit every parameter.
 - **Movies**: record a game and replay it exactly.
-- A **console interface** made for the gamepad, on handhelds and on the desktop (F1).
-- Vulkan and DirectX 12 on the desktop, besides OpenGL; in Vulkan, ReShade can use the depth of
+- A **console interface** made for the gamepad, on handhelds and on the desktop (F1), with a
+  touch pad on Android.
+- Vulkan and DirectX 12 on the desktop, besides OpenGL. In Vulkan, ReShade can use the depth of
   the 3D scene.
+- A **libretro core** for RetroArch, with the 3D, the widescreen and the 120 Hz scrolling; see
+  [`rust/crates/zax-libretro/README.md`](rust/crates/zax-libretro/README.md).
 
 The user guide, in French, is [HOWTO-RUN.md](HOWTO-RUN.md): menus, shortcuts, options, where your
 files go, and the command line. The handheld controls are in the
@@ -169,5 +235,7 @@ Every [release](../../releases) has one package per platform:
 | `Zaxnes-<version>-android-arm64.apk` | Android 7.0 or later, 64-bit ARM (tablets and handhelds): install the APK |
 
 **The only game included is FlappyZaxNes**, with its 3D profile (see above); the 3D profiles made
-for Zaxnes come with every package. For any other game you
-need your own, legally owned ROMs.
+for Zaxnes come with every package. For any other game you need your own, legally owned ROMs.
+
+The libretro core isn't in the release packages yet: build it from source, as
+[`rust/crates/zax-libretro/README.md`](rust/crates/zax-libretro/README.md) explains.

@@ -5,7 +5,7 @@ frontends.
 
 ## What it does
 
-- The NES core of Zaxnes (`zax-nes`): 144 mappers, NTSC, PAL and Dendy.
+- The NES core of Zaxnes (`zax-nes`): over 400 mappers, NTSC, PAL and Dendy.
 - The **widescreen hacks** of the games that have one (Super Mario Bros. 3, Zelda II, Mega Man,
   Kirby's Adventure, Faxanadu...), with their options. Turning the widescreen on or off switches
   at once for the games whose hack pack carries its states both ways; for the others it applies
