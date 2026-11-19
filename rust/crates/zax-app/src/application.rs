@@ -92,7 +92,12 @@ const LATE_OBJECT_FRAMES_REPORTED: u32 = zax_engine3d::draw_list::LATE_OBJECT_FR
 /// except for smoke runs and screenshot runs.
 #[must_use]
 pub const fn should_open_fullscreen(options: &AppOptions, persisted: bool) -> bool {
-    (persisted || options.handheld) && !options.smoke_test && options.ui_shot_directory.is_none()
+    // Web build: the page is the window; SDL's full screen there would size the drawing for the
+    // whole screen while the page shows the canvas at its own size.
+    (persisted || options.handheld)
+        && !options.smoke_test
+        && options.ui_shot_directory.is_none()
+        && !cfg!(target_os = "emscripten")
 }
 
 /// What the window's pacing should be: the settings, except that a smoke run is not paced by
@@ -804,8 +809,14 @@ impl Running {
                 (TouchControl::Start, InputAction::START),
                 (TouchControl::Menu, InputAction::MENU),
             ] {
-                if self.input.touch.take_held(control) {
+                let held = self.input.touch.take_held(control);
+                if held {
                     snapshot.player_one |= action;
+                }
+                // The console interface reads its own pad: the menu button opens its in-game
+                // menu (on Android the virtual controller's guide button does that).
+                if control == TouchControl::Menu {
+                    self.ui.set_touch_menu(held);
                 }
             }
         }
@@ -1777,7 +1788,8 @@ fn load_settings(options: &AppOptions, paths: &UserDataPaths) -> (SettingsStore,
     let mut model = SettingsModel::new();
     // The economical defaults of a PortMaster handheld; the Android package keeps the desktop's
     // (owner request: some devices are powerful, each player tunes for his own).
-    if options.handheld && !cfg!(target_os = "android") {
+    // Not in the browser either: the web build runs as a handheld for its interface only.
+    if options.handheld && !cfg!(any(target_os = "android", target_os = "emscripten")) {
         handheld::defaults::apply(&mut model);
     }
     if cfg!(target_os = "android") {
@@ -1788,6 +1800,8 @@ fn load_settings(options: &AppOptions, paths: &UserDataPaths) -> (SettingsStore,
     if cfg!(target_os = "emscripten") {
         handheld::defaults::apply_fastest(&mut model);
         model.set_environment_default(SettingId::EmuRealtimeInput, SettingValue::Bool(false));
+        // The widescreen on by default (owner request): the ROMs made for it fill the page.
+        model.set_environment_default(SettingId::VideoWidescreen, SettingValue::Enum(1));
     }
     // Rust-only (owner request): the region comes from the ROM header unless the user turned the
     // automatic mode off, so a European dump runs at 50 Hz (`emu.auto_tv_mode` is off in C#).
@@ -2104,7 +2118,9 @@ fn configure_pacing(host: &mut AppHost, options: &AppOptions) {
     host.catch_up = options.catch_up;
     // No rewind on a PortMaster handheld (owner request): its snapshot every 60 frames costs a
     // spike. The Android package has it, as the desktop (owner request).
-    host.rollback_enabled = !options.handheld || cfg!(target_os = "android");
+    // The web build, a handheld for its interface only, keeps it too.
+    host.rollback_enabled =
+        !options.handheld || cfg!(any(target_os = "android", target_os = "emscripten"));
     host.separate_core = separate_core(options);
     // RO-2 part 4: a handheld build, `--handheld`, or a desktop opened in its console mode. It
     // is the launch-time choice of interface; F1 switching the presentation later does not make
@@ -2138,7 +2154,8 @@ fn separate_core(options: &AppOptions) -> bool {
     {
         Ok("1") => true,
         Ok("0") => false,
-        _ => options.handheld,
+        // The browser gives the program one thread.
+        _ => options.handheld && !cfg!(target_os = "emscripten"),
     }
 }
 

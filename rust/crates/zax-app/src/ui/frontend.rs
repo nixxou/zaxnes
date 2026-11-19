@@ -604,6 +604,16 @@ impl ImguiFrontend {
         self.touch_point = point;
     }
 
+    /// The touch pad's menu button, held or not, for the console interface's own pad (the web
+    /// build, whose touch pad has no virtual controller to press it).
+    pub fn set_touch_menu(&mut self, held: bool) {
+        if self.console_shown() {
+            self.platform
+                .pad_mut()
+                .set(super::handheld::pad::PadButton::Menu, held);
+        }
+    }
+
     /// Whether a game is on the screen, not a menu: the touch pad is shown only then.
     #[must_use]
     pub fn game_on_screen(&self) -> bool {

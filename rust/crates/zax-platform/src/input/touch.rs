@@ -796,7 +796,15 @@ impl TouchPad {
     /// screen, not on a desktop trying the pad with the mouse.
     #[must_use]
     pub const fn drives_pointer(&self) -> bool {
-        !self.mouse_finger
+        // The web build takes both: real fingers on a touch screen, the mouse on a computer.
+        !self.mouse_finger || DIRECT
+    }
+
+    /// Whether the mouse belongs to the pad alone: on the web, in game, it is a finger like the
+    /// others, so its drag turns the camera only when the lock lets fingers do it.
+    #[must_use]
+    pub fn holds_mouse(&self) -> bool {
+        DIRECT && self.mouse_finger && self.active()
     }
 
     /// The one free finger turning the camera, like a mouse drag; none while the camera is

@@ -477,6 +477,10 @@ impl HandheldUi {
                 }
             }
             Command::ShowOptions => self.open_options(host),
+            // Web build: the page's own dialogue (prepackaged ROMs, drop, the player's files).
+            Command::OpenRom if crate::web_bridge::active() => {
+                crate::web_bridge::request_open_dialog();
+            }
             other => self.effects.push(UiEffect::Log(format!(
                 "the handheld interface has nothing to do for '{}'.",
                 other.name()
