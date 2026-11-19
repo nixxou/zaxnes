@@ -704,11 +704,11 @@ fn start_three_d(core: &mut Core, name: &str, image: &[u8]) {
     if !core.options().three_d {
         return;
     }
-    let Some(document) = profiles::find(name, image, system_directory().as_deref()) else {
+    let Some((title, document)) = profiles::find_titled(name, image, system_directory().as_deref())
+    else {
         log(LOG_INFO, &format!("{name}: no 3D profile, 2D"));
         return;
     };
-    let title = document.profile.title.clone().unwrap_or_default();
     let tiles = document.hash_state().map(|state| state.tiles.clone());
     if let Err(error) = core.start_three_d(&document.profile, tiles, log_line) {
         log(

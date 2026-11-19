@@ -48,11 +48,21 @@ fn rank(title: &str, rom: &str) -> Option<u8> {
 /// title wins, the core's own on a tie.
 #[must_use]
 pub fn find(rom_name: &str, image: &[u8], system: Option<&Path>) -> Option<ProfileDocument> {
+    find_titled(rom_name, image, system).map(|(_, document)| document)
+}
+
+/// [`find`], with the title the profile goes by (its own, or its file name when it has none).
+#[must_use]
+pub fn find_titled(
+    rom_name: &str,
+    image: &[u8],
+    system: Option<&Path>,
+) -> Option<(String, ProfileDocument)> {
     let stem = Path::new(rom_name)
         .file_stem()
         .map_or_else(String::new, |stem| stem.to_string_lossy().into_owned());
     let rom_name = stem.as_str();
-    let mut best: Option<(u8, ProfileDocument)> = None;
+    let mut best: Option<(u8, String, ProfileDocument)> = None;
     let mut consider = |bytes: &[u8], source: &str| {
         let Ok(document) = format::load(bytes, None, Some(source)) else {
             return;
@@ -61,8 +71,8 @@ pub fn find(rom_name: &str, image: &[u8], system: Option<&Path>) -> Option<Profi
         let Some(rank) = rank(&title, rom_name) else {
             return;
         };
-        if best.as_ref().is_none_or(|(kept, _)| rank < *kept) {
-            best = Some((rank, document));
+        if best.as_ref().is_none_or(|(kept, _, _)| rank < *kept) {
+            best = Some((rank, title, document));
         }
     };
     for (name, bytes) in BUNDLED {
@@ -86,11 +96,11 @@ pub fn find(rom_name: &str, image: &[u8], system: Option<&Path>) -> Option<Profi
             }
         }
     }
-    let (_, mut document) = best?;
+    let (_, title, mut document) = best?;
     if document.is_hash_profile() {
         document.resolve_from_rom(image);
     }
-    Some(document)
+    Some((title, document))
 }
 
 #[cfg(test)]
