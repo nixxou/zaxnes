@@ -24,6 +24,11 @@ keys never renamed (players' `Zaxnes.opt` keeps its values). Tests with
 - Step 3, presets (table moved to zax_settings::presets): see the commit "the performance /
   fidelity presets". A player with no Zaxnes.opt now gets Balanced, so the Enhanced style by
   default, as in the application.
+- Step 4 (issue #2): 3D resolutions 240p to 2160p and a 3D aspect ratio option (16:9, 4:3,
+  widescreen ratio): 65aa88f9; the 3D drawn into the core's own framebuffer and copied upside
+  down, declared top-left like the 2D (the glcore flip of shader presets no longer needed):
+  a2d2c055, 1e1bfeb2. Checked in RetroArch (320x240 4:3, picture upright). Not checked: Mega
+  Bezel itself (its glcore_Zaxnes.params flip should now be removed).
 - Real checks use a scratch RetroArch config whose rgui_config_directory is in the scratchpad,
   so the owner's Zaxnes.opt is no longer written.
 
