@@ -250,6 +250,30 @@ impl BackdropState {
     }
 }
 
+/// The smooth scrolling of the 3D scene between two frames ([`SceneState::three_d_shift`]).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ThreeDShift {
+    /// How far to move the band's tiles left, in scene units.
+    pub amount: f32,
+    /// The screen lines of the band, `start..end`: a tile whose top line is outside stays (the
+    /// status bar).
+    pub start: i32,
+    /// See `start`.
+    pub end: i32,
+    /// The sprites that move with the camera (their slots, `FrameTile::ord`): they stay.
+    pub steady: Vec<i32>,
+}
+
+impl ThreeDShift {
+    /// The move of a tile at screen line `y`, of sprite slot `ord` (−1 for the background), not
+    /// in the HUD: `amount`, or nothing when it stays.
+    #[must_use]
+    pub fn of_tile(&self, y: i32, ord: i32) -> Option<f32> {
+        let steady = ord >= 0 && self.steady.contains(&ord);
+        ((self.start..self.end).contains(&y) && !steady).then_some(self.amount)
+    }
+}
+
 /// The state of the scene the host keeps from frame to frame: the settings, the camera, the
 /// clip margins, the light and the backdrop.
 ///
@@ -322,6 +346,10 @@ pub struct SceneState {
     /// a picture of the 2D picture's size, transparent (`interop::HIDDEN_PIXEL`) elsewhere, or
     /// empty.
     pub picture_overlay: Vec<u8>,
+    /// The experimental smooth scrolling in 3D (owner request, 2026-11-20): the tiles of the
+    /// playfield band slid along the camera's motion between two frames, as the 2D picture's
+    /// playfield is; `None` without it.
+    pub three_d_shift: Option<ThreeDShift>,
     /// The shape the subjective camera follows, or `None` (REQ-SCN-021). In FPV it decides
     /// which tiles count as occluders and are drawn at half opacity (REQ-SCN-022).
     pub followed_shape: Option<ShapeId>,
@@ -355,6 +383,7 @@ impl Default for SceneState {
             picture_framed: false,
             picture_shift: None,
             picture_overlay: Vec::new(),
+            three_d_shift: None,
             followed_shape: None,
             real_time: 0.0,
             emulated_time: 0.0,

@@ -2322,6 +2322,16 @@ impl NesCore {
         }
     }
 
+    /// The sprite slots of the picture just made that move with the camera (see
+    /// [`NesCore::split_steady_sprites`]): the 3D's smooth scrolling leaves their tiles in place.
+    #[must_use]
+    pub fn steady_sprites(&self) -> &[i32] {
+        if self.picture_shift.is_none() {
+            return &[];
+        }
+        &self.steady_sprites
+    }
+
     /// Moves the sprites that move with the camera out of `picture` (the wide picture of the
     /// frame just run) into `overlay`, transparent (`0xFF`) elsewhere, for the experimental
     /// smooth scrolling; `overlay` is left empty while the playfield is not shifted or no sprite

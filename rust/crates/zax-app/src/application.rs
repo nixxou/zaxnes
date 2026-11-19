@@ -3017,6 +3017,7 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     // And the television they are shown on (lot REWRITE-UI), the 3D scene's as the picture's.
     zax_engine3d::palette::set_tv_look(tv_look(host.settings()));
     let hack_options = host.hack_option_bits();
+    let scene_scale = host.scene_scale();
     // The smooth scrolling from the run-ahead: nothing to draw between two frames at 60 frames a
     // second or less, nor a real frame to slide from without run-ahead; then nothing is done.
     let smooth_ahead = host
@@ -3141,6 +3142,23 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         scene.picture_crop = zax_profiles::values::Vec4F::new(crop[0], crop[1], crop[2], crop[3]);
         scene.picture_shift = None;
         scene.picture_overlay.clear();
+        // Experimental (owner request, 2026-11-20): the 3D playfield between two frames too,
+        // from the shift and motion kept with the frame the scene shows.
+        let smooth = session.published_smooth();
+        scene.three_d_shift = match (smooth.shift, smooth.motion) {
+            (Some((shift, start, end)), Some(motion)) => {
+                #[allow(clippy::cast_possible_truncation)] // 0 to 1.
+                let along = motion * phase as f32;
+                state.picture_between = true;
+                Some(zax_render::scene::ThreeDShift {
+                    amount: (shift + along) * scene_scale,
+                    start,
+                    end,
+                    steady: smooth.steady.clone(),
+                })
+            }
+            _ => None,
+        };
     }
     // REQ-SCN-022: the renderer needs the followed shape to find the occluders.
     scene.followed_shape = session.followed_shape();

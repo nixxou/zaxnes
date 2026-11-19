@@ -253,6 +253,19 @@ pub struct SessionFrame {
 /// (the PPU's and a margin decoder's own), edge masks, widescreen margin and visible rows.
 type CapturedBatch = (Palettes, i32, i32, (i32, zax_core_api::VisibleRows, i32));
 
+/// The experimental smooth scrolling of a frame, kept with its 3D conversion: the shift and the
+/// motion of [`NesCore::picture_shift`] and [`NesCore::picture_motion`], and the sprites that
+/// move with the camera ([`NesCore::steady_sprites`]).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SmoothFrame {
+    /// See [`NesCore::picture_shift`].
+    pub shift: Option<(f32, i32, i32)>,
+    /// See [`NesCore::picture_motion`].
+    pub motion: Option<f32>,
+    /// See [`NesCore::steady_sprites`].
+    pub steady: Vec<i32>,
+}
+
 /// A frame's PPU palette and the margin decoder's own background palette, if any.
 type Palettes = ([u8; 32], Option<[u8; 16]>);
 
@@ -284,6 +297,9 @@ pub struct GameSession {
     /// The last frame captured while the 3D was paused, its records in `batch_records`: the
     /// one converted when the 3D comes back.
     skipped_batch: Option<CapturedBatch>,
+    /// The smooth scrolling of the frame last captured, and of the one last converted to 3D.
+    smooth_captured: SmoothFrame,
+    smooth_published: SmoothFrame,
     started: bool,
     aimed: Option<ZapperPosition>,
     batch_records: Vec<TileRecord>,
@@ -504,6 +520,8 @@ impl GameSession {
             paused_3d: false,
             catching_up: false,
             skipped_batch: None,
+            smooth_captured: SmoothFrame::default(),
+            smooth_published: SmoothFrame::default(),
             started: false,
             aimed: None,
             batch_records: Vec::new(),
@@ -1629,6 +1647,12 @@ impl GameSession {
     /// palette, edge masks and widescreen margin.
     fn capture_batch(&mut self, clock: &mut StageClock) -> CapturedBatch {
         let started = clock.start();
+        self.smooth_captured.shift = self.core.picture_shift();
+        self.smooth_captured.motion = self.core.picture_motion();
+        self.smooth_captured.steady.clear();
+        self.smooth_captured
+            .steady
+            .extend_from_slice(self.core.steady_sprites());
         let batch = self.core.frame_batch();
         self.batch_records.clear();
         self.batch_records.extend_from_slice(batch.records);
@@ -1695,6 +1719,7 @@ impl GameSession {
             return;
         }
         self.skipped_batch = None;
+        self.smooth_published.clone_from(&self.smooth_captured);
         let visible_rows = if self.strict_wide_edges || margin == 0 {
             visible_rows
         } else {
@@ -1879,6 +1904,12 @@ impl GameSession {
         } else {
             self.core.picture_motion()
         }
+    }
+
+    /// The smooth scrolling of the frame the 3D scene shows ([`SmoothFrame`]).
+    #[must_use]
+    pub const fn published_smooth(&self) -> &SmoothFrame {
+        &self.smooth_published
     }
 
     /// The camera the core's last picture shows ([`NesCore::picture_camera`]), for a debug log.

@@ -545,6 +545,13 @@ impl EngineHandle {
         self.zaxnes().and_then(NesCore::picture_motion)
     }
 
+    /// The sprite slots that move with the camera ([`NesCore::steady_sprites`]); none on an
+    /// engine without the smooth scrolling.
+    #[must_use]
+    pub fn steady_sprites(&self) -> &[i32] {
+        self.zaxnes().map_or(&[], NesCore::steady_sprites)
+    }
+
     /// The camera position the frame's own scroll implies; `None` on an engine that has none.
     #[must_use]
     pub fn picture_camera(&self) -> Option<f64> {

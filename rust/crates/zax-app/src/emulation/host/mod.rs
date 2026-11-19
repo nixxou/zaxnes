@@ -876,6 +876,13 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     }
 
     /// The scale of the scene (1 on the desktop), which the Zapper aim divides by.
+    /// The scene scale `s` (REQ-SCN-002), 1 on the desktop.
+    #[must_use]
+    pub const fn scene_scale(&self) -> f32 {
+        self.scene_scale
+    }
+
+    /// Sets the scene scale.
     pub const fn set_scene_scale(&mut self, scale: f32) {
         self.scene_scale = scale;
     }

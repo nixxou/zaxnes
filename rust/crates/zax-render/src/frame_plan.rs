@@ -24,7 +24,7 @@ use crate::geometry;
 use crate::interop;
 use crate::numerics::{Matrix4x4, Vector2, Vector3, Vector4};
 use crate::occlusion::{self, Occlusion};
-use crate::scene::{SceneFrame, SceneState};
+use crate::scene::{SceneFrame, SceneState, ThreeDShift};
 use crate::shadow_volume::ShadowVolume;
 
 /// How a backend lays one placement out in its instance data. A type of its own per layout, so
@@ -348,8 +348,12 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
             let hud_matrix = interop::hud_matrix(view);
             let occlusion = Occlusion::for_scene(scene, view);
             let clip_rect = scene.visible_rectangle();
+            let shift = scene
+                .three_d_shift
+                .as_ref()
+                .filter(|_| !scene.two_dimensional_mode);
             for tile in list.tiles() {
-                self.collect_tile(residency, tile, &hud_matrix, &occlusion, &clip_rect)?;
+                self.collect_tile(residency, tile, &hud_matrix, &occlusion, &clip_rect, shift)?;
             }
         }
 
@@ -471,6 +475,7 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
         hud_matrix: &Mat4,
         occlusion: &Occlusion,
         clip_rect: &geometry::VisibleRect,
+        shift: Option<&ThreeDShift>,
     ) -> Result<(), R::Error> {
         let Some(mesh) = tile.mesh.as_ref().filter(|mesh| !mesh.is_empty()) else {
             return Ok(());
@@ -502,6 +507,11 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
         if hud {
             // REQ-SCN-045: the HUD lives in a plane attached to the camera.
             model = *hud_matrix * model;
+        } else if let Some(amount) =
+            shift.and_then(|shift| shift.of_tile(tile.tile.y(), tile.tile.ord()))
+        {
+            // The experimental smooth scrolling: the playfield between two frames.
+            model = Mat4::translation(Vec3::new(-amount, 0.0, 0.0)) * model;
         }
 
         // REQ-SCN-022: in FPV, an opaque tile of another shape that crosses the eye-to-target
