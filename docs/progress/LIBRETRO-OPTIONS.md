@@ -21,6 +21,9 @@ keys never renamed (players' `Zaxnes.opt` keeps its values). Tests with
   (checked in RetroArch: Fidelity+ and Fast start).
 - Step 2d, television, composite signal (RF checked on SMB in RetroArch), emphasis in 3D
   (src/picture.rs): 41c2bfd6. Step 2 complete.
+- Step 3, presets (table moved to zax_settings::presets): see the commit "the performance /
+  fidelity presets". A player with no Zaxnes.opt now gets Balanced, so the Enhanced style by
+  default, as in the application.
 - Real checks use a scratch RetroArch config whose rgui_config_directory is in the scratchpad,
   so the owner's Zaxnes.opt is no longer written.
 
