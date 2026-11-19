@@ -65,6 +65,22 @@ type GlDrawItem = DrawItem<GpuMesh, Texture>;
 /// The uniform buffer binding point of the instance block.
 const INSTANCE_BINDING: u32 = 0;
 
+/// The size of the `ZaxInstances` block the scene shaders declare.
+#[cfg(target_os = "emscripten")]
+const INSTANCE_BLOCK_BYTES: usize = crate::frame_plan::INSTANCES_PER_DRAW * INSTANCE_BYTES;
+
+/// The uniform range bound for a run of `instances`: just the run natively, the whole block on
+/// the web, where WebGL requires the range to cover the block the shader declares.
+#[cfg(not(target_os = "emscripten"))]
+const fn bound_instance_bytes(instances: usize) -> usize {
+    instances * INSTANCE_BYTES
+}
+
+#[cfg(target_os = "emscripten")]
+const fn bound_instance_bytes(_instances: usize) -> usize {
+    INSTANCE_BLOCK_BYTES
+}
+
 /// The GL caches the plan asks for the resident meshes and textures.
 struct GlResidency<'a> {
     meshes: &'a mut MeshCache,
@@ -345,6 +361,10 @@ struct Passes {
     bound_vertex_array: Option<glow::VertexArray>,
     /// The placements of every scene draw of the frame, uploaded once before the scene pass.
     instance_buffer: glow::Buffer,
+    /// Web build: the placements followed by one whole block of padding (see
+    /// [`Renderer::upload_instances`]), kept from frame to frame.
+    #[cfg(target_os = "emscripten")]
+    padded_instances: Vec<u8>,
     /// `GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT`: each run starts at a multiple of it.
     instance_alignment: usize,
     /// The clip-space bias of AMD-057 the draws apply to the lateral walls of a tile box
@@ -525,6 +545,8 @@ impl SceneRenderer {
             bound_textures: [None; 2],
             bound_vertex_array: None,
             instance_buffer: gl.create_buffer()?,
+            #[cfg(target_os = "emscripten")]
+            padded_instances: Vec::new(),
             instance_alignment,
             wall_bias: geometry::wall_clip_bias(geometry::WALL_DEPTH_BIAS),
             statistics,
@@ -1895,6 +1917,20 @@ impl Passes {
         if !data.is_empty() {
             self.gl
                 .bind_buffer(glow::UNIFORM_BUFFER, Some(self.instance_buffer));
+            // WebGL refuses a draw whose bound uniform range is smaller than the block the
+            // shader declares (`uInstances[INSTANCES_PER_DRAW]`), where a native driver reads
+            // only what is used. Each run is then bound with the whole block, so the buffer
+            // carries one block of padding after the last run.
+            #[cfg(target_os = "emscripten")]
+            {
+                self.padded_instances.clear();
+                self.padded_instances.extend_from_slice(data);
+                self.padded_instances
+                    .resize(data.len() + INSTANCE_BLOCK_BYTES, 0);
+                self.gl
+                    .buffer_stream_data(glow::UNIFORM_BUFFER, &self.padded_instances);
+            }
+            #[cfg(not(target_os = "emscripten"))]
             self.gl.buffer_stream_data(glow::UNIFORM_BUFFER, data);
         }
     }
@@ -1964,7 +2000,7 @@ impl Passes {
             INSTANCE_BINDING,
             self.instance_buffer,
             gl_size(run.offset),
-            gl_size(instances * INSTANCE_BYTES),
+            gl_size(bound_instance_bytes(instances)),
         );
         self.bind_mesh(item.mesh);
         self.gl

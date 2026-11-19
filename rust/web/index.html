@@ -29,6 +29,13 @@
     printErr: (t) => console.warn(t),
     setStatus: (t) => { status.textContent = t; if (!t) status.remove(); },
     onRuntimeInitialized: () => { canvas.focus(); },
+    // Debugging aid: ?env=NAME=value (repeatable) sets environment variables of the program.
+    preRun: [() => {
+      for (const pair of new URLSearchParams(location.search).getAll('env')) {
+        const at = pair.indexOf('=');
+        if (at > 0) ENV[pair.slice(0, at)] = pair.slice(at + 1);
+      }
+    }],
   };
   window.addEventListener('error', (e) => { status.textContent = 'Erreur : ' + e.message; });
 </script>
