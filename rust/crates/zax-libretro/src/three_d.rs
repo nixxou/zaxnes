@@ -249,6 +249,19 @@ impl ThreeD {
         Ok(three)
     }
 
+    /// The 120 Hz scrolling's band for the frame just converted (`None`: nothing slides).
+    pub fn set_smooth_band(&mut self, band: Option<zax_render::scene::ThreeDShift>) {
+        self.scene.three_d_shift = band;
+    }
+
+    /// Slides the band's tiles by `amount` pixels from where the frame put them, for the picture
+    /// between two frames.
+    pub fn slide(&mut self, amount: f32) {
+        if let Some(band) = self.scene.three_d_shift.as_mut() {
+            band.amount = amount;
+        }
+    }
+
     /// Converts the frame `nes` just ran (its scripts' hooks run here) and makes the scene
     /// follow it.
     pub fn convert(&mut self, nes: &mut NesCore) {

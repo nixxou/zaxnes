@@ -512,11 +512,15 @@ impl Core {
     /// Runs one frame with the two pads' buttons (A, B, Select, Start, Up, Down, Left, Right in
     /// bits 0 to 7 of each byte, port 1 in the low byte), then makes its picture and sound.
     ///
-    /// With the 120 Hz scrolling on (2D only), it takes two calls a frame: the first runs it and
-    /// shows its picture, the second shows the playfield half way to the next.
+    /// With the 120 Hz scrolling on, it takes two calls a frame: the first runs it and shows its
+    /// picture, the second shows the playfield half way to the next (in 3D, its tiles).
     pub fn run(&mut self, input: u16) {
         if self.smooth() {
             self.run_smooth(input);
+            return;
+        }
+        if self.doubled() {
+            self.run_smooth_three_d(input);
             return;
         }
         self.nes.run_frame(input);
@@ -529,15 +533,65 @@ impl Core {
             };
             zax_engine3d::palette::set_scene_emphasis(emphasis);
             three_d.convert(&mut self.nes);
+            three_d.set_smooth_band(None);
         } else {
             self.make_picture();
         }
         self.make_sound();
     }
 
-    /// Whether the 120 Hz scrolling is in force: asked for, and the game in 2D.
+    /// Whether the 120 Hz scrolling is in force in 2D: asked for, and the game in 2D.
     fn smooth(&self) -> bool {
         self.options.smooth_120 && self.three_d.is_none()
+    }
+
+    /// Whether the 120 Hz scrolling is in force, in 2D or in 3D: two calls a frame.
+    const fn doubled(&self) -> bool {
+        self.options.smooth_120
+    }
+
+    /// [`Core::run_smooth`] in 3D: the first call runs the frame and converts it, its tiles where
+    /// the frame put them; the second slides the playfield's tiles half way to the next frame,
+    /// as the application does between two frames.
+    fn run_smooth_three_d(&mut self, input: u16) {
+        if let Some(amount) = self.half.take() {
+            if let Some(three_d) = self.three_d.as_mut() {
+                three_d.slide(amount);
+            }
+            self.audio = std::mem::take(&mut self.second_sound);
+            return;
+        }
+        self.nes
+            .run_frame_ahead(input, u8::from(self.options.smooth_ahead));
+        let shift = self.nes.picture_shift();
+        let motion = self.nes.picture_motion().unwrap_or(0.0);
+        let steady = self.nes.steady_sprites().to_vec();
+        if let Some(three_d) = self.three_d.as_mut() {
+            let emphasis = if self.options.picture.emphasis_in_three_d() {
+                self.nes.wide_emphasis_into(&mut self.emphasis);
+                crate::picture::common_emphasis(&self.emphasis)
+            } else {
+                0
+            };
+            zax_engine3d::palette::set_scene_emphasis(emphasis);
+            three_d.convert(&mut self.nes);
+            three_d.set_smooth_band(shift.map(|(first, start, end)| {
+                zax_render::scene::ThreeDShift {
+                    amount: first,
+                    start,
+                    end,
+                    steady,
+                }
+            }));
+        }
+        self.make_sound();
+        self.nes.restore_real_frame();
+        self.half = shift.map(|(first, _, _)| first + motion / 2.0);
+        // The frame's sound in two halves, whole stereo frames each.
+        let middle = (self.audio.len() / 4) * 2;
+        self.second_sound.clear();
+        self.second_sound.extend_from_slice(&self.audio[middle..]);
+        self.audio.truncate(middle);
     }
 
     fn run_smooth(&mut self, input: u16) {
@@ -792,7 +846,7 @@ impl Core {
             dots_per_frame -= 0.5;
         }
         let rate = dots_per_second / dots_per_frame;
-        if self.smooth() {
+        if self.doubled() {
             rate * 2.0
         } else {
             rate
@@ -983,7 +1037,7 @@ impl Core {
             .filter(|half| half[0] == 1)
             .and_then(|half| half[1..].try_into().ok())
             .map(f32::from_le_bytes)
-            .filter(|_| self.smooth());
+            .filter(|_| self.doubled());
         let region = self.nes.region();
         let loaded = self.nes.try_load_state(data, 0).is_ok();
         self.nes.set_region(region);

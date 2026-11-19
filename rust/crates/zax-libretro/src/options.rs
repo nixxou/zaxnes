@@ -684,8 +684,8 @@ pub fn declarations(hacks: &[HackOption]) -> Vec<Declaration> {
             "Smooth scrolling 120 Hz",
             "Smooth scrolling 120 Hz",
             "widescreen",
-            "In 2D, a picture between two frames along the camera's motion. Needs a display at \
-             120 Hz with RetroArch's refresh rate set to it (at 60 Hz the game runs at half \
+            "A picture between two frames along the camera's motion, in 2D and in 3D. Needs a \
+             display at 120 Hz with RetroArch's refresh rate set to it (at 60 Hz the game runs at half \
              speed). Leave RetroArch's run-ahead off.",
         )
         .switch(false),

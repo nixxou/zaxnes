@@ -1328,13 +1328,12 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (
         "detail.emu.smooth_scroll_ahead",
         "Expérimental. Sur un affichage plus rapide que la console, dessine la partie qui défile \
-         de l'image 2D entre deux images émulées : l'image est montrée ramenée au défilement que \
-         l'image réelle du run-ahead a dessiné, puis glisse vers le sien au fil de l'image, ce qui \
-         dépense une des images de latence du run-ahead en un mouvement plus fluide. Les barres \
-         d'état et les sprites qui suivent la caméra restent où ils sont. Sans run-ahead, à 60 \
-         images par seconde ou moins, ou dans la scène 3D, rien ne se passe : seule l'image 2D \
-         est interpolée. Un jeu dont le pack de hacks rapporte sa propre caméra utilise celle-ci \
-         à la place. Par défaut : désactivé.",
+         de l'image entre deux images émulées, en 2D comme en 3D : l'image est montrée ramenée au \
+         défilement que l'image réelle du run-ahead a dessiné, puis glisse vers le sien au fil de \
+         l'image, ce qui dépense une des images de latence du run-ahead en un mouvement plus \
+         fluide. Les barres d'état et les sprites qui suivent la caméra restent où ils sont. Sans \
+         run-ahead ou à 60 images par seconde ou moins, rien ne se passe. Un jeu dont le pack de \
+         hacks rapporte sa propre caméra utilise celle-ci à la place. Par défaut : désactivé.",
     ),
     (
         "detail.emu.smooth_scroll_view",
