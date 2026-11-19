@@ -13,6 +13,7 @@ pub mod core;
 #[allow(unsafe_code)]
 pub mod ffi;
 pub mod head_on_pull;
+pub mod machine;
 pub mod options;
 pub mod overscan;
 pub mod profiles;

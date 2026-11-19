@@ -6,6 +6,9 @@ use zax_nes::builtin_patches::{COMMON_OPTIONS, HackOption};
 use zax_nes::ppu::SpriteLimit;
 use zax_settings::catalogue::SettingId;
 use zax_settings::core_options::{self, LibretroCoreOption};
+use zax_settings::meta::{SettingEffect, SettingKind};
+
+use crate::machine::{self, Machine, Variant};
 
 use crate::core::{Options, RegionChoice};
 use crate::three_d::RenderOptions;
@@ -66,6 +69,105 @@ const RESOLUTIONS: [(u32, u32); 5] = [
 ];
 /// The prefix of the options of the game's hack: the option's own key follows.
 const HACK: &str = "zaxnes_hack_";
+/// Which loop runs the console.
+const CORE_VARIANT: &str = "zaxnes_core_variant";
+const VARIANTS: [&str; 3] = ["Standard", "Fidelity+", "Fast"];
+
+/// A line of explanation for each console setting (the application's tooltips, shortened).
+const MACHINE_INFO: [(SettingId, &str); 20] = [
+    (
+        SettingId::EmuCartridgeDb,
+        "Completes what an old iNES header cannot say (chip revision, save RAM, region) from a \
+         database of about 10 000 dumps. Never changes the mapper.",
+    ),
+    (
+        SettingId::EmuPowerOnRam,
+        "What the work RAM holds at power-on. The FCEUX pattern is what a few games need; \
+         Zeros is Mesen's; Random changes at every power-on.",
+    ),
+    (
+        SettingId::EmuPowerOnPpuRam,
+        "What the video chip's memories hold at power-on.",
+    ),
+    (
+        SettingId::EmuCpuPpuAlignment,
+        "How the processor's and the video chip's clocks line up at power-on (0 to 3, as \
+         AccuracyCoin numbers them); a few defects depend on it.",
+    ),
+    (
+        SettingId::EmuCpuApuParity,
+        "Where the processor's and the sound unit's two-cycle rhythm starts at power-on.",
+    ),
+    (
+        SettingId::EmuPpuRevision,
+        "The video chip's revision. Before the 2C02G, the palette cannot be read back.",
+    ),
+    (
+        SettingId::EmuCpuRevision,
+        "The processor's revision; the letterless RP2A03 of the first Famicoms has a simpler \
+         noise channel.",
+    ),
+    (
+        SettingId::EmuMmc3Revision,
+        "The MMC3 revision of a cartridge that has one; the cartridge's follows the header and \
+         the database.",
+    ),
+    (
+        SettingId::EmuOamCorruption,
+        "Switching the picture off in the middle of a line damages a row of sprite memory, as \
+         on the console.",
+    ),
+    (
+        SettingId::EmuPpuBusConflicts,
+        "A game reading video memory while the picture is drawn collides with the video \
+         chip's own reads, as on the console.",
+    ),
+    (
+        SettingId::EmuOamaddrBug,
+        "A sprite memory address left at 8 or more copies eight bytes over the first eight \
+         (2C02G and later, NTSC).",
+    ),
+    (
+        SettingId::EmuOamaddrWriteCorruption,
+        "A defect reported for the 2C02G; most consoles do not show it.",
+    ),
+    (
+        SettingId::EmuOamDecay,
+        "Sprite memory fades when the picture is off for long; sprites shown again unsent come \
+         back scrambled.",
+    ),
+    (
+        SettingId::EmuPowerOnTop,
+        "The video chip starts at the top of the picture, as the console does.",
+    ),
+    (
+        SettingId::EmuPpu2006Delay,
+        "A new video address takes effect three dots later, as on the console.",
+    ),
+    (
+        SettingId::EmuPpu2006Glitch,
+        "A new video address landing on the tile step mixes the scroll, as on the console.",
+    ),
+    (
+        SettingId::EmuPpu2000Glitch,
+        "Control and scroll writes on precise dots glitch a line, on some consoles.",
+    ),
+    (
+        SettingId::EmuPaletteCorruption,
+        "Switching the picture off mid-line can change palette colours (alignment 2).",
+    ),
+    (
+        SettingId::EmuPpuResetLine,
+        "The front-loading NES: the video chip ignores the game's writes for half a frame after \
+         power-on or Reset.",
+    ),
+    (
+        SettingId::AudioConsoleProfile,
+        "The sound through the filters of one real console (measured by BeesNES); None keeps \
+         the usual sound.",
+    ),
+];
+
 /// The prefix of the options common to every game's hack (`COMMON_OPTIONS`).
 const AID: &str = "zaxnes_aid_";
 /// A common option's value that leaves each pack its own default.
@@ -480,6 +582,23 @@ pub fn declarations(hacks: &[HackOption]) -> Vec<Declaration> {
             .values([PACK_DEFAULT, "enabled", "disabled"]),
         );
     }
+    list.push(
+        Declaration::new(
+            CORE_VARIANT,
+            "Core variant",
+            "Core variant",
+            "emulation",
+            "Standard; Fidelity+ (the accesses on the clock edges of the chips' transistor-level \
+             model: closest to the console, slower, NTSC only so far); Fast (several times \
+             faster on the common boards, the same pictures and sounds).",
+        )
+        .values(VARIANTS),
+    );
+    for id in machine::SETTINGS {
+        if let Some(declaration) = machine_declaration(id) {
+            list.push(declaration);
+        }
+    }
     for option in hacks {
         let common = COMMON_OPTIONS.iter().any(|(key, _)| *key == option.key);
         let declaration = Declaration::new(
@@ -501,6 +620,91 @@ pub fn declarations(hacks: &[HackOption]) -> Vec<Declaration> {
         });
     }
     list
+}
+
+/// The core option of the console setting `id`, from the catalogue: its label, its choices (or a
+/// switch), its default, and "(restart)" when it waits for the next load.
+fn machine_declaration(id: SettingId) -> Option<Declaration> {
+    let descriptor = zax_settings::catalogue::descriptor(id);
+    let label = descriptor.ui_label()?;
+    let later = matches!(
+        descriptor.effect(),
+        SettingEffect::NextRomLoad | SettingEffect::NextGameLoad | SettingEffect::Restart
+    );
+    let label = if later {
+        format!("{label} (restart)")
+    } else {
+        label.to_owned()
+    };
+    let info = if matches!(
+        id,
+        SettingId::EmuVsDip1
+            | SettingId::EmuVsDip2
+            | SettingId::EmuVsDip3
+            | SettingId::EmuVsDip4
+            | SettingId::EmuVsDip5
+            | SettingId::EmuVsDip6
+            | SettingId::EmuVsDip7
+            | SettingId::EmuVsDip8
+    ) {
+        "A DIP switch of a VS. System cabinet; each game gives them its own meaning (difficulty, \
+         lives, coins). VS. System games only."
+    } else {
+        MACHINE_INFO
+            .iter()
+            .find(|(setting, _)| *setting == id)
+            .map_or("", |(_, info)| info)
+    };
+    let category = "emulation";
+    let key = core_options::core_option_key(&descriptor.key());
+    let default = machine::default_value(id);
+    let declaration = Declaration::new(&key, &label, &label, category, info);
+    if descriptor.kind() == SettingKind::Bool {
+        return Some(declaration.switch(default != 0));
+    }
+    let choices = descriptor.domain().options()?;
+    let mut declaration = declaration.values(choices.iter().map(|choice| choice.label.as_str()));
+    if let Some(choice) = choices
+        .iter()
+        .find(|choice| choice_value(choice.value) == default)
+    {
+        declaration.default.clone_from(&choice.label);
+    }
+    Some(declaration)
+}
+
+/// A catalogue choice's value as the integer the setting holds.
+fn choice_value(value: f64) -> i32 {
+    // The choices are small whole numbers.
+    #[allow(clippy::cast_possible_truncation)]
+    let value = value.round() as i32;
+    value
+}
+
+/// The console settings the values give.
+fn read_machine(value: &dyn Fn(&str) -> Option<String>) -> Machine {
+    let variant = match value(CORE_VARIANT).as_deref() {
+        Some("Fidelity+") => Variant::FidelityPlus,
+        Some("Fast") => Variant::Fast,
+        _ => Variant::Standard,
+    };
+    let values = machine::SETTINGS
+        .iter()
+        .filter_map(|&id| {
+            let descriptor = zax_settings::catalogue::descriptor(id);
+            let text = value(&core_options::core_option_key(&descriptor.key()))?;
+            if descriptor.kind() == SettingKind::Bool {
+                return Some((id, i32::from(text == "enabled")));
+            }
+            descriptor
+                .domain()
+                .options()?
+                .iter()
+                .find(|choice| choice.label == text)
+                .map(|choice| (id, choice_value(choice.value)))
+        })
+        .collect();
+    Machine { variant, values }
 }
 
 /// The label of the common option `key`: the one a pack gives it.
@@ -580,6 +784,7 @@ pub fn read(value: &dyn Fn(&str) -> Option<String>, hacks: &[HackOption]) -> Opt
                 .filter(|pixels| OVERSCAN_PIXELS.contains(pixels))
                 .unwrap_or(0)
         }),
+        machine: read_machine(value),
         hacks: hacks
             .iter()
             .map(|option| {
@@ -735,6 +940,57 @@ mod tests {
             list.iter()
                 .any(|option| option.key == "zaxnes_aid_margin_freeze"
                     && option.default_value() == "pack default")
+        );
+    }
+
+    /// The console settings come from the catalogue: every default is one of the option's
+    /// values, and a value read back is the catalogue's.
+    #[test]
+    fn the_console_settings_come_from_the_catalogue() {
+        let list = declarations(&[]);
+        let emulation: Vec<&Declaration> = list
+            .iter()
+            .filter(|option| option.category == "emulation")
+            .collect();
+        assert!(emulation.len() > machine::SETTINGS.len());
+        for option in &emulation {
+            assert!(
+                option
+                    .values
+                    .iter()
+                    .any(|(value, _)| *value == option.default),
+                "{}: default {} not among its values",
+                option.key,
+                option.default
+            );
+        }
+        let ram = list
+            .iter()
+            .find(|option| option.key == "zaxnes_emu_power_on_ram")
+            .expect("the power-on RAM is declared");
+        assert_eq!(ram.default, "FCEUX pattern");
+        assert!(ram.label.ends_with("(restart)"));
+        let options = read(
+            &|key| match key {
+                "zaxnes_core_variant" => Some("Fast".to_owned()),
+                "zaxnes_emu_power_on_ram" => Some("Zeros".to_owned()),
+                "zaxnes_emu_oam_decay" => Some("disabled".to_owned()),
+                _ => None,
+            },
+            &[],
+        );
+        assert_eq!(options.machine.variant, Variant::Fast);
+        assert!(
+            options
+                .machine
+                .values
+                .contains(&(SettingId::EmuPowerOnRam, 0))
+        );
+        assert!(
+            options
+                .machine
+                .values
+                .contains(&(SettingId::EmuOamDecay, 0))
         );
     }
 }

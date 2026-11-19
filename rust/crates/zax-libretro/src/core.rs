@@ -57,6 +57,8 @@ pub struct Options {
     pub resolution: (u32, u32),
     /// The render settings of the 3D (at once).
     pub render: crate::three_d::RenderOptions,
+    /// The console's settings: core variant and hardware (most at the next load).
+    pub machine: crate::machine::Machine,
     /// The application's optimised Lua paths, `unsafe` code (at the next load).
     pub optimized_lua: bool,
     /// `video.widescreen_extra`: the share of the width, in percent, the margins grow by beyond
@@ -93,6 +95,7 @@ impl Default for Options {
             three_d: true,
             resolution: (1280, 720),
             render: crate::three_d::RenderOptions::default(),
+            machine: crate::machine::Machine::default(),
             optimized_lua: false,
             extra_percent: 0,
             strict_edges: false,
@@ -154,6 +157,7 @@ impl Core {
     /// The reason the ROM is refused.
     pub fn load(image: &[u8], name: &str, options: Options) -> Result<Self, String> {
         let mut nes = NesCore::new();
+        options.machine.apply_before_load(&mut nes);
         nes.set_builtin_patches(options.widescreen);
         nes.set_advanced_patches(options.advanced);
         if options.force_patch {
@@ -266,6 +270,9 @@ impl Core {
             != (self.options.widescreen, self.options.advanced)
         {
             changed.hack_options = self.switch_patch(options.widescreen, options.advanced);
+        }
+        if options.machine != self.options.machine {
+            options.machine.apply_live(&mut self.nes);
         }
         zax_engine3d::palette::select_nes_palette(options.palette);
         self.nes.set_sprite_limit(options.sprite_limit);
