@@ -5,7 +5,7 @@
 //! the same.
 
 use zax_nes::composite::{
-    DecoderOptions, Neighbours, PAL_VIDEO, PHASES, RowDecoder, Sharpness, Signal,
+    DecoderOptions, Neighbours, RowDecoder, Sharpness, Signal, PAL_VIDEO, PHASES,
 };
 use zax_nes::tv::{TvKnobs, TvLook, TvModel};
 use zax_settings::catalogue::SettingId;

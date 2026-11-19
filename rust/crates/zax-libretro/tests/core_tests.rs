@@ -170,7 +170,11 @@ fn smooth_scrolling_draws_a_picture_between_two_frames() {
     let mut halves: Vec<i32> = Vec::new();
     let mut checked = 0;
     for frame in 0..600_u32 {
-        let start = if (300..306).contains(&frame) { 1 << 3 } else { 0 };
+        let start = if (300..306).contains(&frame) {
+            1 << 3
+        } else {
+            0
+        };
         let flap = u16::from(frame % 30 < 2);
         core.run(start | flap);
         let first = core.picture().0.to_vec();
@@ -226,7 +230,11 @@ fn smooth_scrolling_keeps_its_pace_under_the_frontends_run_ahead() {
     let mut ahead = Core::load(&rom, "FlappyZaxNes.nes", smooth).expect("the demo loads");
     let mut state = vec![0; ahead.state_size()];
     for call in 0..800_u32 {
-        let input = if (600..612).contains(&call) { 1 << 3 } else { 0 };
+        let input = if (600..612).contains(&call) {
+            1 << 3
+        } else {
+            0
+        };
         plain.run(input);
         ahead.run(input);
         assert!(ahead.save_state(&mut state));
@@ -374,15 +382,50 @@ fn the_picture_takes_the_colour_emphasis_of_its_pixels() {
         let (pixels, width, height) = core.picture();
         assert!(width > 0 && height > 0);
         let middle = pixels[pixels.len() / 2];
-        assert!(pixels.iter().all(|&pixel| pixel == middle), "one colour, mask {mask:#04X}");
+        assert!(
+            pixels.iter().all(|&pixel| pixel == middle),
+            "one colour, mask {mask:#04X}"
+        );
         middle
     };
     let pack = |rgb: zax_engine3d::palette::Rgb24| {
         (u32::from(rgb.r) << 16) | (u32::from(rgb.g) << 8) | u32::from(rgb.b)
     };
-    assert_eq!(colour_of(0x00), pack(zax_engine3d::palette::nes_color(0x30)));
+    assert_eq!(
+        colour_of(0x00),
+        pack(zax_engine3d::palette::nes_color(0x30))
+    );
     // All three bits: the white the console darkens.
     let emphasized = colour_of(0xE0);
-    assert_eq!(emphasized, pack(zax_engine3d::palette::nes_color_emphasized(0x30, 7)));
+    assert_eq!(
+        emphasized,
+        pack(zax_engine3d::palette::nes_color_emphasized(0x30, 7))
+    );
     assert_ne!(emphasized, colour_of(0x00));
+}
+
+#[test]
+fn a_zapper_aimed_at_the_picture_shows_its_crosshair_there() {
+    let mut core = Core::load(&backdrop_rom(0), "zapper.nes", widescreen(false))
+        .expect("the test image loads");
+    core.set_zapper(1, true);
+    assert_eq!(core.zappers(), [false, true]);
+    core.aim_zapper(1, Some((0.5, 0.5)));
+    for _ in 0..6 {
+        core.run(0x1000);
+    }
+    let (pixels, width, height) = core.picture();
+    let (w, h) = (width as usize, height as usize);
+    let at = |x: usize, y: usize| pixels[y * w + x];
+    let (x, y) = (w / 2, h / 2);
+    // The aim itself stays clear; the arms' black edge shows on the white picture.
+    assert_ne!(at(x, y), 0);
+    assert_eq!(at(x + 3, y + 1), 0, "the edge under the right arm");
+    assert_eq!(at(x + 1, y - 3), 0, "the edge beside the top arm");
+    // Away from the screen: no crosshair.
+    core.aim_zapper(1, None);
+    core.run(0x1000);
+    let (pixels, ..) = core.picture();
+    let middle = pixels[pixels.len() / 2];
+    assert!(pixels.iter().all(|&pixel| pixel == middle));
 }

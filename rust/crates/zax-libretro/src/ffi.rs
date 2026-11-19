@@ -9,16 +9,16 @@
 //! the Lua runtime and the GL objects are not to be shared between threads anyway.
 
 use std::cell::RefCell;
-use std::ffi::{CStr, CString, c_char, c_uint, c_void};
+use std::ffi::{c_char, c_uint, c_void, CStr, CString};
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Mutex, PoisonError};
 
-use zax_render::SceneRenderer;
 use zax_render::target::RenderTarget;
+use zax_render::SceneRenderer;
 
-use crate::core::{Core, MAX_HEIGHT, MAX_WIDTH, Options, SAMPLE_RATE};
+use crate::core::{Core, Options, MAX_HEIGHT, MAX_WIDTH, SAMPLE_RATE};
 use crate::options;
 use crate::profiles;
 use crate::three_d::CameraNews;
@@ -44,6 +44,17 @@ const OPTION_VALUES_MAX: usize = 128;
 const PIXEL_FORMAT_XRGB8888: c_uint = 1;
 const HW_CONTEXT_OPENGL_CORE: c_uint = 3;
 const DEVICE_JOYPAD: c_uint = 1;
+/// `RETRO_DEVICE_LIGHTGUN`, the device type of the Zapper.
+const DEVICE_LIGHTGUN: c_uint = 4;
+const ENVIRONMENT_SET_CONTROLLER_INFO: c_uint = 35;
+const LIGHTGUN_TRIGGER: c_uint = 2;
+const LIGHTGUN_SCREEN_X: c_uint = 13;
+const LIGHTGUN_SCREEN_Y: c_uint = 14;
+const LIGHTGUN_IS_OFFSCREEN: c_uint = 15;
+const LIGHTGUN_RELOAD: c_uint = 16;
+/// What a Zapper port reads while its trigger is released, and held.
+const ZAPPER_RELEASED: u8 = 0x10;
+const ZAPPER_PRESSED: u8 = 0x00;
 const DEVICE_ANALOG: c_uint = 5;
 const ANALOG_RIGHT: c_uint = 1;
 /// The `RetroPad`'s west and north buttons, and its shoulders.
@@ -188,6 +199,20 @@ struct OptionsV2 {
     definitions: *mut OptionDefinition,
 }
 
+/// `struct retro_controller_description`.
+#[repr(C)]
+struct ControllerDescription {
+    desc: *const c_char,
+    id: c_uint,
+}
+
+/// `struct retro_controller_info`.
+#[repr(C)]
+struct ControllerInfo {
+    types: *const ControllerDescription,
+    num_types: c_uint,
+}
+
 #[repr(C)]
 struct InputDescriptor {
     port: c_uint,
@@ -328,6 +353,76 @@ thread_local! {
     static GAME: RefCell<Option<Box<Core>>> = const { RefCell::new(None) };
     /// The 3D renderer, from the frontend's `context_reset` to its `context_destroy`.
     static GL: RefCell<Option<Gl>> = const { RefCell::new(None) };
+}
+
+/// The device the frontend plugged into each port, kept for a game loaded after.
+static PORT_DEVICES: Mutex<[c_uint; 2]> = Mutex::new([DEVICE_JOYPAD; 2]);
+
+/// Declares the two ports' devices: a pad, or the Zapper.
+fn declare_controllers() {
+    let types = [
+        ControllerDescription {
+            desc: c"NES pad".as_ptr(),
+            id: DEVICE_JOYPAD,
+        },
+        ControllerDescription {
+            desc: c"Zapper".as_ptr(),
+            id: DEVICE_LIGHTGUN,
+        },
+    ];
+    let mut ports = [
+        ControllerInfo {
+            types: types.as_ptr(),
+            num_types: 2,
+        },
+        ControllerInfo {
+            types: types.as_ptr(),
+            num_types: 2,
+        },
+        ControllerInfo {
+            types: std::ptr::null(),
+            num_types: 0,
+        },
+    ];
+    // The data is the array itself, ended by an empty entry; the frontend copies it.
+    if let Some(first) = ports.first_mut() {
+        environment(ENVIRONMENT_SET_CONTROLLER_INFO, first);
+    }
+}
+
+/// Plugs into `core` the devices the frontend chose.
+fn plug_devices(core: &mut Core) {
+    let devices = *PORT_DEVICES.lock().unwrap_or_else(PoisonError::into_inner);
+    for (port, device) in devices.iter().enumerate() {
+        core.set_zapper(port, *device == DEVICE_LIGHTGUN);
+    }
+}
+
+/// Reads the light guns of the Zapper ports and aims them; their trigger goes in the input
+/// word, as the console reads it.
+fn aim_zappers(frontend: &Frontend, core: &mut Core, word: &mut u16) {
+    for (port, plugged) in core.zappers().into_iter().enumerate() {
+        if !plugged {
+            continue;
+        }
+        let index = c_uint::try_from(port).unwrap_or(0);
+        let gun = |id| pressed(frontend, index, DEVICE_LIGHTGUN, 0, id);
+        let reload = gun(LIGHTGUN_RELOAD) != 0;
+        let point = if reload || gun(LIGHTGUN_IS_OFFSCREEN) != 0 {
+            None
+        } else {
+            let along = |value: i16| (f32::from(value) + 32767.0) / 65534.0;
+            Some((along(gun(LIGHTGUN_SCREEN_X)), along(gun(LIGHTGUN_SCREEN_Y))))
+        };
+        core.aim_zapper(port, point);
+        let byte = if reload || gun(LIGHTGUN_TRIGGER) != 0 {
+            ZAPPER_PRESSED
+        } else {
+            ZAPPER_RELEASED
+        };
+        let shift = port * 8;
+        *word = (*word & !(0xFF << shift)) | (u16::from(byte) << shift);
+    }
 }
 
 fn frontend() -> Frontend {
@@ -630,6 +725,7 @@ pub extern "C" fn retro_set_environment(callback: Option<EnvironmentFn>) {
         .flatten();
     set_frontend(|frontend| frontend.log = log);
     declare_options(&[]);
+    declare_controllers();
 }
 
 #[no_mangle]
@@ -693,7 +789,19 @@ pub unsafe extern "C" fn retro_get_system_av_info(info: *mut SystemAvInfo) {
 }
 
 #[no_mangle]
-pub extern "C" fn retro_set_controller_port_device(_port: c_uint, _device: c_uint) {}
+pub extern "C" fn retro_set_controller_port_device(port: c_uint, device: c_uint) {
+    let Ok(port) = usize::try_from(port) else {
+        return;
+    };
+    if let Some(slot) = PORT_DEVICES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get_mut(port)
+    {
+        *slot = device;
+    }
+    with_game(plug_devices);
+}
 
 #[no_mangle]
 pub extern "C" fn retro_reset() {
@@ -848,7 +956,9 @@ pub extern "C" fn retro_run() {
             // SAFETY: the frontend's poll callback, called once a frame.
             unsafe { poll() };
         }
-        core.run(input_word(&frontend));
+        let mut word = input_word(&frontend);
+        aim_zappers(&frontend, core, &mut word);
+        core.run(word);
         #[allow(clippy::cast_possible_truncation)] // A frame's length.
         let seconds = (1.0 / core.frames_per_second()) as f32;
         if core.is_three_d() {
@@ -1060,6 +1170,7 @@ pub unsafe extern "C" fn retro_load_game(info: *const GameInfo) -> bool {
             return false;
         }
     };
+    plug_devices(&mut core);
     let hacks = hack_list(&core);
     declare_options(&hacks);
     core.set_options(read_options(&hacks));

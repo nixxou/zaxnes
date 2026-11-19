@@ -168,7 +168,10 @@ fn the_render_options_reach_the_scene_at_once() {
     let scene = core.three_d_mut().expect("in 3D").scene();
     assert_eq!(scene.settings.anti_alias(), 3);
     assert!(scene.settings.style.enhanced && scene.settings.style.reflections);
-    assert_eq!(scene.settings.skybox, zax_render::scene::SkyboxKind::Fantasy);
+    assert_eq!(
+        scene.settings.skybox,
+        zax_render::scene::SkyboxKind::Fantasy
+    );
     // Drawn so, without an error.
     let Some(mut gpu) = gpu() else {
         return;

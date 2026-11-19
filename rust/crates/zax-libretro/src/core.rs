@@ -4,6 +4,7 @@
 
 use crate::overscan::Overscan;
 use zax_nes::builtin_patches::HackOption;
+use zax_nes::input::{ControllerPortType, ZapperPosition};
 use zax_nes::ppu::SpriteLimit;
 use zax_nes::{NesCore, NesRegion, RegionTiming};
 
@@ -65,6 +66,8 @@ pub struct Options {
     pub machine: crate::machine::Machine,
     /// The picture's settings: television, composite signal, emphasis in 3D.
     pub picture: crate::picture::Picture,
+    /// A crosshair where a Zapper is aimed (2D).
+    pub zapper_crosshair: bool,
     /// The application's optimised Lua paths, `unsafe` code (at the next load).
     pub optimized_lua: bool,
     /// `video.widescreen_extra`: the share of the width, in percent, the margins grow by beyond
@@ -104,6 +107,7 @@ impl Default for Options {
             render: crate::three_d::RenderOptions::default(),
             machine: crate::machine::Machine::default(),
             picture: crate::picture::Picture::default(),
+            zapper_crosshair: true,
             optimized_lua: false,
             extra_percent: 0,
             strict_edges: false,
@@ -170,6 +174,13 @@ pub struct Core {
     /// The composite signal's decoder, and the picture it decodes (RGB).
     composite: zax_nes::composite::RowDecoder,
     rgb: Vec<u8>,
+    /// Which ports have a Zapper plugged in.
+    zappers: [bool; 2],
+    /// Where each Zapper is aimed, which the console asks once a frame.
+    aim: std::sync::Arc<std::sync::Mutex<[ZapperPosition; 2]>>,
+    /// The last 2D picture shown: its left and top in the full picture, its size, and the full
+    /// picture's width and height (the aim of a Zapper is read on it).
+    shown_area: (u32, u32, u32, u32, u32, u32),
 }
 
 impl Core {
@@ -222,7 +233,18 @@ impl Core {
             rows: 240,
             composite: zax_nes::composite::RowDecoder::default(),
             rgb: Vec::new(),
+            zappers: [false; 2],
+            aim: std::sync::Arc::new(std::sync::Mutex::new([ZapperPosition::OFF_SCREEN; 2])),
+            shown_area: (0, 0, 256, 240, 256, 240),
         };
+        let aim = std::sync::Arc::clone(&core.aim);
+        core.nes
+            .set_zapper_position_source(Some(Box::new(move |port| {
+                aim.lock()
+                    .ok()
+                    .and_then(|aims| aims.get(port).copied())
+                    .unwrap_or(ZapperPosition::OFF_SCREEN)
+            })));
         core.options.widescreen = options.widescreen;
         core.options.advanced = options.advanced;
         core.set_options(options);
@@ -401,7 +423,11 @@ impl Core {
         let to_off = NesCore::state_uses_widescreen(&state, 0) == Some(true);
         let carried = NesCore::state_builtin_patch(&state, 0).is_some_and(|patch| {
             let states = patch.states();
-            if to_off { states.to_off } else { states.to_on }
+            if to_off {
+                states.to_off
+            } else {
+                states.to_on
+            }
         });
         if !carried {
             self.nes.set_builtin_patches(before.0);
@@ -600,6 +626,7 @@ impl Core {
         self.height = height;
         self.width = width;
         self.framed = true;
+        self.shown_area = (x, y, width, height, full_width, rows);
         self.frame.clear();
         let (x, width, full_width) = (x as usize, width as usize, full_width as usize);
         if let Some((_, frozen)) = self.options.picture.composite() {
@@ -628,6 +655,7 @@ impl Core {
                     }));
                 }
             }
+            self.draw_crosshairs();
             return;
         }
         let colours = Colours::of(&self.emphasis, self.indices.len());
@@ -647,6 +675,7 @@ impl Core {
                     .map(|(&index, column)| colours.get(index, &self.emphasis, start + column)),
             );
         }
+        self.draw_crosshairs();
     }
 
     fn make_sound(&mut self) {
@@ -760,7 +789,113 @@ impl Core {
             dots_per_frame -= 0.5;
         }
         let rate = dots_per_second / dots_per_frame;
-        if self.smooth() { rate * 2.0 } else { rate }
+        if self.smooth() {
+            rate * 2.0
+        } else {
+            rate
+        }
+    }
+
+    /// Plugs a Zapper into `port` (0 or 1), or a pad when `on` is false.
+    pub fn set_zapper(&mut self, port: usize, on: bool) {
+        let kind = if on {
+            ControllerPortType::Zapper
+        } else {
+            ControllerPortType::Controller
+        };
+        if port < 2 && self.nes.set_port_type(port, kind).is_ok() {
+            self.zappers[port] = on;
+        }
+    }
+
+    /// Which ports have a Zapper plugged in.
+    #[must_use]
+    pub const fn zappers(&self) -> [bool; 2] {
+        self.zappers
+    }
+
+    /// Aims the Zapper of `port` at `point` of the picture shown, 0 to 1 across and down, or
+    /// away from the screen. The 3D view is not aimed into: there the gun points away.
+    pub fn aim_zapper(&mut self, port: usize, point: Option<(f32, f32)>) {
+        let (left, top, width, height, full_width, rows) = self.shown_area;
+        let position = match point {
+            Some((x, y)) if self.three_d.is_none() => {
+                let margin = full_width.saturating_sub(256) / 2;
+                let margin_y = rows.saturating_sub(240) / 2;
+                #[allow(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_precision_loss,
+                    clippy::cast_possible_wrap
+                )] // Screen pixels.
+                let to_pixel = |along: f32, size: u32, start: u32, origin: u32| {
+                    (along.clamp(0.0, 1.0) * size as f32).floor() as i32 + start as i32
+                        - origin as i32
+                };
+                ZapperPosition::new(
+                    to_pixel(x, width, left, margin),
+                    to_pixel(y, height, top, margin_y),
+                )
+            }
+            _ => ZapperPosition::OFF_SCREEN,
+        };
+        if let Ok(mut aims) = self.aim.lock() {
+            if let Some(aim) = aims.get_mut(port) {
+                *aim = position;
+            }
+        }
+    }
+
+    /// Draws a crosshair where each Zapper is aimed, on the 2D picture just made.
+    fn draw_crosshairs(&mut self) {
+        if !self.options.zapper_crosshair || self.zappers == [false; 2] {
+            return;
+        }
+        let (left, top, width, height, full_width, rows) = self.shown_area;
+        let margin = i32::try_from(full_width.saturating_sub(256) / 2).unwrap_or(0);
+        let margin_y = i32::try_from(rows.saturating_sub(240) / 2).unwrap_or(0);
+        let aims = self
+            .aim
+            .lock()
+            .map_or([ZapperPosition::OFF_SCREEN; 2], |aims| *aims);
+        let (w, h) = (
+            i32::try_from(width).unwrap_or(0),
+            i32::try_from(height).unwrap_or(0),
+        );
+        for (port, aim) in aims.iter().enumerate() {
+            if !self.zappers[port] || !aim.is_on_screen() {
+                continue;
+            }
+            let x = aim.x + margin - i32::try_from(left).unwrap_or(0);
+            let y = aim.y + margin_y - i32::try_from(top).unwrap_or(0);
+            // A white cross with a black edge, 4 pixels each way, the centre left clear.
+            for (dx, dy) in (-5_i32..=5).flat_map(|d| [(d, 0), (0, d)]) {
+                if dx.abs() + dy.abs() < 2 {
+                    continue;
+                }
+                for (ex, ey, colour) in [
+                    (1_i32, 0_i32, 0x0000_0000_u32),
+                    (-1, 0, 0x0000_0000),
+                    (0, 1, 0x0000_0000),
+                    (0, -1, 0x0000_0000),
+                    (0, 0, 0x00FF_FFFF),
+                ] {
+                    let edge = (ex, ey) != (0, 0);
+                    if edge && (dx.abs() == 5 || dy.abs() == 5) {
+                        continue;
+                    }
+                    let (px, py) = (x + dx + ex, y + dy + ey);
+                    if px < 0 || py < 0 || px >= w || py >= h {
+                        continue;
+                    }
+                    let index = usize::try_from(py * w + px).unwrap_or(usize::MAX);
+                    if let Some(pixel) = self.frame.get_mut(index) {
+                        if !edge || *pixel != 0x00FF_FFFF {
+                            *pixel = colour;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Whether the region in force is PAL's frame rate.

@@ -29,6 +29,13 @@ keys never renamed (players' `Zaxnes.opt` keeps its values). Tests with
   down, declared top-left like the 2D (the glcore flip of shader presets no longer needed):
   a2d2c055, 1e1bfeb2. Checked in RetroArch (320x240 4:3, picture upright). Not checked: Mega
   Bezel itself (its glcore_Zaxnes.params flip should now be removed).
+- Step 5, Zapper: both ports offer "NES pad" or "Zapper" (SET_CONTROLLER_INFO); the light gun's
+  screen x/y aim at the 2D picture shown (crop and widescreen margins taken into account), its
+  trigger (or reload, aimed off screen) gives the port byte 0x00, released 0x10; option "Zapper
+  crosshair" (Emulation, on). In 3D the gun points away (aiming into the scene would need a ray
+  against the picture plane: later). Test a_zapper_aimed_at_the_picture_shows_its_crosshair_there;
+  RetroArch: Duck Hunt loads with port 2 on Zapper, title screen not skipped (trigger released).
+  Not checked by hand: shooting with the mouse (needs the owner at the window).
 - Real checks use a scratch RetroArch config whose rgui_config_directory is in the scratchpad,
   so the owner's Zaxnes.opt is no longer written.
 

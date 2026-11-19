@@ -1,9 +1,9 @@
 //! The core options `RetroArch` shows (the libretro "variables"): their keys, their choices, and
 //! how their values make [`Options`]. The first choice of each is its default.
 
-use zax_nes::NesRegion;
-use zax_nes::builtin_patches::{COMMON_OPTIONS, HackOption};
+use zax_nes::builtin_patches::{HackOption, COMMON_OPTIONS};
 use zax_nes::ppu::SpriteLimit;
+use zax_nes::NesRegion;
 use zax_settings::catalogue::SettingId;
 use zax_settings::core_options::{self, LibretroCoreOption};
 use zax_settings::meta::{SettingEffect, SettingKind};
@@ -114,6 +114,9 @@ fn preset_value(preset: usize, id: SettingId) -> Option<i32> {
             V::I(number) | V::E(number) => number,
         })
 }
+
+/// A crosshair where a Zapper is aimed.
+const CROSSHAIR: &str = "zaxnes_zapper_crosshair";
 
 /// Which loop runs the console.
 const CORE_VARIANT: &str = "zaxnes_core_variant";
@@ -741,6 +744,18 @@ pub fn declarations(hacks: &[HackOption]) -> Vec<Declaration> {
         .values(VARIANTS)
         .following_preset(),
     );
+    list.push(
+        Declaration::new(
+            CROSSHAIR,
+            "Zapper crosshair",
+            "Zapper crosshair",
+            "emulation",
+            "A crosshair where the Zapper is aimed. Plug the Zapper into a port in RetroArch's \
+             Controls (device type Zapper) and aim with a light gun or the mouse; the Zapper \
+             aims at the 2D picture (renderer on 2D only for a game that has a 3D profile).",
+        )
+        .switch(true),
+    );
     for id in machine::SETTINGS {
         if let Some(declaration) = catalogue_declaration(id, "emulation") {
             list.push(declaration);
@@ -1064,6 +1079,7 @@ fn read_explicit(value: &dyn Fn(&str) -> Option<String>, hacks: &[HackOption]) -
                 .unwrap_or(0)
         }),
         machine: read_machine(value),
+        zapper_crosshair: enabled(CROSSHAIR, defaults.zapper_crosshair),
         picture: Picture {
             values: read_values(&picture::SETTINGS, value),
         },
@@ -1102,12 +1118,11 @@ mod tests {
     #[test]
     fn the_first_choice_is_the_default_and_values_come_back() {
         let list = declarations(&[OPTION]);
-        assert!(
-            list.iter()
-                .any(|option| option.key == "zaxnes_hack_invincible"
-                    && option.legacy() == "Hack: Invincible; common setting|enabled|disabled"
-                    && option.category == "hacks")
-        );
+        assert!(list
+            .iter()
+            .any(|option| option.key == "zaxnes_hack_invincible"
+                && option.legacy() == "Hack: Invincible; common setting|enabled|disabled"
+                && option.category == "hacks"));
         let none = read_explicit(&|_| None, &[OPTION]);
         assert_eq!(none.render.catalogue.len(), CATALOGUE.len());
         assert_eq!(
@@ -1218,11 +1233,10 @@ mod tests {
             ("zaxnes_hack_invincible", "enabled"),
         ]));
         let list = declarations(&[]);
-        assert!(
-            list.iter()
-                .any(|option| option.key == "zaxnes_aid_margin_freeze"
-                    && option.default_value() == "pack default")
-        );
+        assert!(list
+            .iter()
+            .any(|option| option.key == "zaxnes_aid_margin_freeze"
+                && option.default_value() == "pack default"));
     }
 
     /// The console settings come from the catalogue: every default is one of the option's
@@ -1262,18 +1276,14 @@ mod tests {
             &[],
         );
         assert_eq!(options.machine.variant, Variant::Fast);
-        assert!(
-            options
-                .machine
-                .values
-                .contains(&(SettingId::EmuPowerOnRam, 0))
-        );
-        assert!(
-            options
-                .machine
-                .values
-                .contains(&(SettingId::EmuOamDecay, 0))
-        );
+        assert!(options
+            .machine
+            .values
+            .contains(&(SettingId::EmuPowerOnRam, 0)));
+        assert!(options
+            .machine
+            .values
+            .contains(&(SettingId::EmuOamDecay, 0)));
     }
 
     /// The picture settings: a numeric range comes in steps whose default is one, and a value
@@ -1334,12 +1344,10 @@ mod tests {
         // Most faithful: Fidelity+, the OAMADDR write corruption on.
         let faithful = read_with(&[("zaxnes_preset", "Most faithful")]);
         assert_eq!(faithful.machine.variant, Variant::FidelityPlus);
-        assert!(
-            faithful
-                .machine
-                .values
-                .contains(&(SettingId::EmuOamaddrWriteCorruption, 1))
-        );
+        assert!(faithful
+            .machine
+            .values
+            .contains(&(SettingId::EmuOamaddrWriteCorruption, 1)));
         // An option given a value wins over the preset.
         let mixed = read_with(&[
             ("zaxnes_preset", "Fastest"),
@@ -1349,19 +1357,16 @@ mod tests {
         ]);
         assert_eq!(mixed.machine.variant, Variant::Standard);
         assert!(mixed.render.shadows);
-        assert!(
-            mixed
-                .machine
-                .values
-                .contains(&(SettingId::EmuOamaddrWriteCorruption, 1))
-        );
+        assert!(mixed
+            .machine
+            .values
+            .contains(&(SettingId::EmuOamaddrWriteCorruption, 1)));
         let list = declarations(&[]);
         assert_eq!(list[0].key, "zaxnes_preset");
         assert_eq!(list[0].category, "");
         assert_eq!(list[0].default, "Balanced");
-        assert!(
-            list.iter()
-                .any(|option| option.key == "zaxnes_3d_shadows" && option.default == "preset")
-        );
+        assert!(list
+            .iter()
+            .any(|option| option.key == "zaxnes_3d_shadows" && option.default == "preset"));
     }
 }
