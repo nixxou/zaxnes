@@ -1013,9 +1013,10 @@ fn the_reset_frames_the_picture_like_the_2d_view_when_asked() {
     let clipping = Vec4F::new(0.0, 8.0, 0.0, 8.0);
     camera.frame_picture = Some(clipping);
     let half = (camera.fov() * std::f32::consts::PI / 360.0).tan();
-    assert!((camera.reset_distance() - 112.0 / half).abs() < 1e-2);
+    let framed = 112.0 / half + zax_render::camera::FRAME_DEPTH_ROOM;
+    assert!((camera.reset_distance() - framed).abs() < 1e-2);
     camera.reset_view();
-    assert!((camera.current().distance() - 112.0 / half).abs() < 1e-2);
+    assert!((camera.current().distance() - framed).abs() < 1e-2);
     assert!(camera.reset_distance() < three_d_sen);
     // A script's reset keeps 3dSen's framing.
     camera.reset_view_as_three_d_sen();

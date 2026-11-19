@@ -181,6 +181,10 @@ impl CameraView {
 /// being smoothed while the game is paused — only the scene stops being drawn (REQ-SCN-047).
 /// FPV target tracking and the occlusion transparency of REQ-SCN-022 belong to the Lua layer
 /// and the host; this type only holds the state and the geometry.
+/// How far behind the 2D picture's distance the view reset puts the camera with
+/// `camera.frame_picture`: two tiles, the depth most profiles' blocks stand out by.
+pub const FRAME_DEPTH_ROOM: f32 = 16.0;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneCamera {
     setpoints: [CameraSetpoint; 2],
@@ -381,7 +385,9 @@ impl SceneCamera {
     #[must_use]
     pub fn reset_distance(&self) -> f32 {
         match self.frame_picture {
-            Some(clipping) => self.picture_framing(clipping).1,
+            // Drawn back by the depth the blocks stand out from the picture, whose front faces
+            // would otherwise overflow its edges (owner, 2026-11-20).
+            Some(clipping) => self.picture_framing(clipping).1 + FRAME_DEPTH_ROOM,
             None => geometry::reset_distance(self.fov),
         }
     }
