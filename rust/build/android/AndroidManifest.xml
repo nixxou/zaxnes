@@ -38,6 +38,17 @@
                 <category android:name="android.intent.category.LAUNCHER" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
+            <!-- A game sent by a frontend (ES-DE, Daijishou, a launcher) or opened with Zaxnes:
+                 the activity hands it to the native code (GitHub issue #1). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="application/x-nes-rom" />
+            </intent-filter>
         </activity>
     </application>
 </manifest>

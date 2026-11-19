@@ -764,16 +764,54 @@ fn the_press_that_ends_a_capture_is_not_a_press_of_the_screen() {
     }
     handheld.arrange_for_capture(Screen::Controls);
     tap(&mut harness, &mut handheld, PadButton::A);
-    assert!(harness.input.rebinding().is_listening(), "A starts a capture");
+    assert!(
+        harness.input.rebinding().is_listening(),
+        "A starts a capture"
+    );
     // The sample that starts the listening, then the one the press of the pad's button ends it in.
     harness.sample(1.0 / 60.0);
     pad.press(zax_platform::input::standard_gamepad::EAST);
     harness.sample(1.0 / 60.0);
-    assert!(!harness.input.rebinding().is_listening(), "the press is bound");
+    assert!(
+        !harness.input.rebinding().is_listening(),
+        "the press is bound"
+    );
     // The same press reaches the screen as B in that frame.
     tap(&mut harness, &mut handheld, PadButton::B);
     assert_eq!(Screen::Controls, handheld.screen());
     pad.release_all();
     tap(&mut harness, &mut handheld, PadButton::B);
     assert_ne!(Screen::Controls, handheld.screen());
+}
+
+/// A game an Android frontend asks for (the request file the activity writes) plays at once,
+/// and quitting it goes back to the frontend rather than to the list (GitHub issue #1).
+#[test]
+fn a_game_a_frontend_asks_for_plays_and_quitting_goes_back_to_it() {
+    let (mut harness, mut handheld) = start(&[], &["Game.nes"]);
+    let elsewhere = harness.root.path().join("frontend");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let rom = elsewhere.join("Asked.nes");
+    std::fs::write(&rom, SyntheticRom::counter()).unwrap();
+    let folder = harness.paths.root.join(zax_app::launch_request::FOLDER);
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(
+        folder.join(zax_app::launch_request::FILE),
+        format!("rom={}\nreturn=1\n", rom.display()),
+    )
+    .unwrap();
+    press(&mut harness, &mut handheld, &[]);
+    harness.settle();
+    press(&mut harness, &mut handheld, &[]);
+    assert!(harness.host.current_game_id().is_some(), "the game plays");
+    assert_eq!(Screen::InGame, handheld.screen());
+    assert!(!folder.join(zax_app::launch_request::FILE).exists());
+    // The menu, then Quit to ROM list (the ninth row): the application quits.
+    tap(&mut harness, &mut handheld, PadButton::Menu);
+    for _ in 0..8 {
+        tap(&mut harness, &mut handheld, PadButton::Down);
+    }
+    tap(&mut harness, &mut handheld, PadButton::A);
+    harness.settle();
+    assert!(harness.host.quit_requested());
 }

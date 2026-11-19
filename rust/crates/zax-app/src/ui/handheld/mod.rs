@@ -141,6 +141,11 @@ pub struct HandheldUi {
     overscan: OverscanModel,
     keys: KeyConfigModel,
     combo: ExitCombo,
+    /// Seconds until the next look for a game another application asked for
+    /// (`launch_request`).
+    launch_wait: f32,
+    /// The ROM another application asked for and wants to have back on quitting it.
+    return_on_quit: Option<std::path::PathBuf>,
     metrics: Metrics,
     heading_font: Option<imgui::FontId>,
     effects: Vec<UiEffect>,
@@ -216,6 +221,8 @@ enum HeadOn {
     Shown,
 }
 
+/// How often the console interface looks for a game another application asked for.
+const LAUNCH_CHECK_SECONDS: f32 = 0.5;
 /// How long L2 is held to keep the camera, and Y to see the game in 2D from the front.
 const CAMERA_KEEP_SECONDS: f32 = 0.6;
 /// How long the widescreen button is held before its settings open.
@@ -256,6 +263,8 @@ impl HandheldUi {
             controls: ControlsState::default(),
             keys: KeyConfigModel::new(),
             combo: ExitCombo::new(),
+            launch_wait: 0.0,
+            return_on_quit: None,
             metrics: Metrics::for_height(height),
             heading_font: None,
             effects: Vec::new(),
@@ -491,6 +500,7 @@ impl HandheldUi {
     /// One frame of input: the exit combination, the menu button and the presses of the screen.
     pub fn update(&mut self, pad: &PadState, seconds: f32, frame: &mut UiFrame<'_>) {
         self.confirming = frame.host.pending_confirmation().is_some();
+        self.take_launch_request(seconds, frame.host);
         self.follow_the_game(frame.host);
         self.update_combo(pad, seconds, frame.host);
         // A capture that ends this frame ended on the press that was bound: that press, sampled
@@ -832,6 +842,38 @@ impl HandheldUi {
             }
             Screen::Overlay => self.carry_out_overlay(OverlayCommand::Resume, host),
             _ => {}
+        }
+    }
+
+    /// A game another application asked for (an Android frontend): played at once, in place
+    /// of the one playing. Looked for twice a second.
+    fn take_launch_request(&mut self, seconds: f32, host: &mut AppHost) {
+        self.launch_wait -= seconds;
+        if self.launch_wait > 0.0 {
+            return;
+        }
+        self.launch_wait = LAUNCH_CHECK_SECONDS;
+        let Some(request) = crate::launch_request::take(&host.paths().root) else {
+            return;
+        };
+        crate::app_log::line(&format!("launch request: {}", request.rom.display()));
+        self.return_on_quit = request.return_on_quit.then(|| request.rom.clone());
+        // Played as from the list: the profile that matches it, else in 2D.
+        if self.library.is_empty() {
+            self.refresh_roms(host);
+        }
+        let entry = RomEntry::new(request.rom);
+        let profile = self
+            .profile_of(host, &entry)
+            .map(|profile| profile.id)
+            .or_else(|| host.games().two_dimensional_mode_id());
+        let rom = entry.path.to_string_lossy();
+        match profile {
+            Some(id) => host.launch_rom_with_profile(&rom, &id),
+            None => host.enqueue(Command::OpenRom, CommandArgs::of_text(&rom)),
+        }
+        if matches!(self.screen, Screen::Overlay | Screen::States) {
+            self.screen = Screen::InGame;
         }
     }
 
@@ -1476,6 +1518,10 @@ impl HandheldUi {
                         HacksView::Aids,
                     );
                 }
+            }
+            // A game a frontend asked for goes back to it.
+            OverlayCommand::QuitToList if self.return_on_quit.is_some() => {
+                host.enqueue(Command::Quit, CommandArgs::default());
             }
             OverlayCommand::QuitToList => {
                 host.enqueue(Command::Stop, CommandArgs::default());
