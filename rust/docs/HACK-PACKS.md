@@ -1,9 +1,9 @@
 # Hack packs
 
-Where the packs are: the catalogue is `builtin_patches.rs`; the packs of Zelda II, FlappyZaxNes
-and Nova the Squirrel are in `zax-nes/patches/`, the others in
-[zaxnes_3dn](https://github.com/nixxou/zaxnes_3dn) (`packs/`, under their own licence), loaded by
-`pack_files.rs`.
+Where the packs are: the catalogue is `builtin_patches.rs`, the packs are in `zax-nes/patches/`,
+built into the binary and loaded by `pack_files.rs`; a `.zxpk` of the same name in the `zxpk`
+folder next to the executable replaces the built-in one. The packs and their docs (`docs/hacks/`)
+are copies of a private repository that holds them with their sources (see `rust/README.md`).
 
 Status: the aids apart from the widescreen, see section 7. Branch `hack-rewrite`.
 

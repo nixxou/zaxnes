@@ -43,8 +43,6 @@ endif
 
 all: $(TARGET)
 
-# The hack packs are built into the core, from the zaxnes_3dn copy ZAXNES_3DN_DIR names or that
-# sits beside the workspace (see zax-nes/build.rs).
 $(TARGET): FORCE
 	cd $(WORKSPACE) && $(CARGO) build --profile libretro -p zax-libretro
 	cp $(OUT)/$(BUILT) $(TARGET)

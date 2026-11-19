@@ -28,14 +28,6 @@ are made by:
 The two Linux scripts use [cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild) to
 target glibc 2.31; each script's header lists what it needs.
 
-The hack packs (`.zxpk`) are not in this repository but in
-[zaxnes_3dn](https://github.com/nixxou/zaxnes_3dn), under their own licence. The package scripts
-take them from a clone that `ZAXNES_3DN_DIR` names: the desktop packages ship them in a `zxpk`
-folder next to the executable, the Android, web and libretro builds build them in
-(see `crates/zax-nes/build.rs`). A development build and the tests take them, like the 3D
-profiles, from `ZAXNES_3DN_DIR` or a `zaxnes_3dn` clone beside the workspace. Without packs, the
-games they are made for run without their widescreen.
-
 ### Tests
 
 ```
@@ -85,9 +77,11 @@ draw list. Lua scripts hook into the conversion, never into the core.
 ## Documentation
 
 - [`docs/WIDESCREEN-EXTENSION.md`](docs/WIDESCREEN-EXTENSION.md): the widescreen's emulator side
-  (the extra registers the hacks use), and [`docs/hacks/`](docs/hacks) the hacks whose packs are
-  in this repository (Zelda II, FlappyZaxNes); the other packs are in
-  [zaxnes_3dn](https://github.com/nixxou/zaxnes_3dn).
+  (the extra registers the hacks use), and [`docs/hacks/`](docs/hacks) one folder per game's
+  widescreen hack.
+  The packs themselves are in `crates/zax-nes/patches/`. The packs and these docs are copies: the
+  master copy, with the packs' sources, is a private repository (the owner's
+  `zaxnes_zxpksources`, whose `WORKFLOW.md` is the procedure for a pack); edit them there.
 - [`docs/MOVIES.md`](docs/MOVIES.md): the `.zmv` movies.
 - [`docs/OPTIONS-LAYOUT.md`](docs/OPTIONS-LAYOUT.md): the layout of the desktop options window,
   where it diverges from the specification, and the old-tab → new-tab mapping of every setting.

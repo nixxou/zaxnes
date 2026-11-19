@@ -70,6 +70,14 @@ n'ajoutent aucun fichier à la version publiée : au premier lancement d'une ver
 écrite dans le dossier des ROM et le profil dans les profils de l'utilisateur, et la
 bibliothèque les relie. Supprimés, ils ne reviennent qu'avec une version qui les change.
 
+## 1 quater. Les profils 3D faits pour Zaxnes
+
+`rust/profiles/` contient des profils 3D écrits pour ce projet (aucun fichier de 3dSen),
+*Faxanadu* et *Metal Force* pour l'instant, sous la licence du projet (GPL-3.0). Comme celui de
+FlappyZaxNes, ils sont **inclus dans l'exécutable** (`rust/crates/zax-app/src/bundled_profiles.rs`,
+et le core libretro) et écrits dans les profils de l'utilisateur au premier lancement d'une
+version.
+
 ## 2. Ce que Zaxnes lit sur votre machine, sans le redistribuer
 
 | Ressource | Comment | Licence |

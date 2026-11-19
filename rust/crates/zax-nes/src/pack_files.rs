@@ -1,9 +1,8 @@
 //! The hack pack files (`.zxpk`) the catalogue of [`crate::builtin_patches`] names by file name.
 //!
-//! They are not in this repository: the official builds take them from `zaxnes_3dn`, either built
-//! into the binary (`build.rs`) or as files in a `zxpk` folder next
-//! to the executable. Both are read once, on first use; a file in the folder wins over the same
-//! name built in. A pack that is in neither leaves its game without its widescreen and aids.
+//! They are in `patches/`, built into the binary (`build.rs`). A `zxpk` folder next to the
+//! executable may hold more, or newer ones: both are read once, on first use, and a file in the
+//! folder wins over the same name built in.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

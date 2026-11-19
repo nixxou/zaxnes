@@ -71,10 +71,9 @@ what those versions added: reflections, bend, the new camera and Lua features.
 
 ### Profiles made for Zaxnes
 
-[zaxnes_3dn](https://github.com/nixxou/zaxnes_3dn) holds 3D profiles made for Zaxnes itself:
-*Faxanadu* and *Metal Force* so far, with more to come. Every package carries them and puts them
-in your profiles at the first start. They have their own licence (CC BY-NC-ND 4.0) and aren't part
-of the Zaxnes sources.
+[`rust/profiles/`](rust/profiles) holds 3D profiles made for Zaxnes itself: *Faxanadu* and
+*Metal Force* so far, with more to come. Every package carries them and puts them in your profiles
+at the first start.
 
 Players also share free profiles in the
 [Profile Repository](https://itch.io/board/872690/profile-repository) of the 3dSen Maker forum.
@@ -246,9 +245,8 @@ cargo build --release -p zax-app --features bundled
 How to build the release packages, run the tests, and how the code is laid out are in
 [`rust/README.md`](rust/README.md) (the technical part of the former README, moved there). The
 widescreen's emulator side is described in
-[`rust/docs/WIDESCREEN-EXTENSION.md`](rust/docs/WIDESCREEN-EXTENSION.md). The hack packs and the 3D
-profiles live in [zaxnes_3dn](https://github.com/nixxou/zaxnes_3dn), under their own licence. The
-written specification is in [`docs/spec/`](docs/spec).
+[`rust/docs/WIDESCREEN-EXTENSION.md`](rust/docs/WIDESCREEN-EXTENSION.md), and each game's hack in
+[`rust/docs/hacks/`](rust/docs/hacks); the written specification is in [`docs/spec/`](docs/spec).
 
 ## Download
 

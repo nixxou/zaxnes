@@ -86,12 +86,6 @@ def build_libraries(sdk, ndk):
     if not fceux:
         sys.exit('set ZAX_FCEUX_DIR to the root of the fceux-zax fork (built with zax\\build-android.cmd)')
     env.setdefault('ZAX_FCEUX_LIB', os.path.join(fceux, 'build-android'))
-    # The hack packs are built into the library (no folder next to it on Android), from a clone
-    # of zaxnes_3dn that ZAXNES_3DN_DIR names.
-    packs_repo = os.environ.get('ZAXNES_3DN_DIR')
-    if not packs_repo or not os.path.isdir(os.path.join(packs_repo, 'packs')):
-        sys.exit('set ZAXNES_3DN_DIR to a clone of zaxnes_3dn (the hack packs)')
-    env['ZAXNES_EMBED_PACKS'] = os.path.join(packs_repo, 'packs')
     run(['cargo', 'ndk', '-t', ABI, '-P', str(MIN_SDK), 'build', '--release', '-p',
          'zax-android', '--features', 'zax-app/fceux-core'], cwd=RUST, env=env)
     out = os.path.join(TARGET, TRIPLE, 'release')

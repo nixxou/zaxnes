@@ -1017,10 +1017,9 @@ temporary.
 
 ## 7. Built-in patches
 
-`zax-nes/src/builtin_patches.rs`, the catalogue; the packs of Zelda II, FlappyZaxNes and Nova the
-Squirrel in `zax-nes/patches/`, the others in [zaxnes_3dn](https://github.com/nixxou/zaxnes_3dn)
-(`packs/`), loaded by `zax-nes/src/pack_files.rs` (built in, or the `zxpk` folder next to the
-executable).
+`zax-nes/src/builtin_patches.rs`, the catalogue; the packs in `zax-nes/patches/`, built in and
+loaded by `zax-nes/src/pack_files.rs` (a file of the same name in the `zxpk` folder next to the
+executable wins).
 
 ```rust
 pub struct BuiltinPatch {

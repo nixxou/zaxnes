@@ -72,6 +72,8 @@ local.settings.json
 *.unf
 *.fds
 *.3dn
+# The 3D profiles made for Zaxnes itself are part of the sources.
+!rust/profiles/*.3dn
 
 # A pattern without a slash is matched against every path component, directories
 # included -- and case-insensitively on Windows. "*.nes" therefore also matches the

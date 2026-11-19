@@ -8,7 +8,7 @@ use std::path::Path;
 
 use zax_profiles::format::{self, ProfileDocument};
 
-/// The profiles made for Zaxnes (`zaxnes_3dn`), as `build.rs` found them.
+/// The profiles made for Zaxnes (`rust/profiles`), as `build.rs` found them.
 const BUNDLED: &[(&str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/bundled-profiles.rs"));
 
 /// The folder of the system folder the profiles are read from.

@@ -1,6 +1,6 @@
 //! Records the `target-cpu` of the build flags, for the frame profiler's start-up line, and
 //! with the feature `shaders` zips the slang shader pack into the executable; puts the 3D profiles
-//! made for Zaxnes (the `zaxnes_3dn` repository, kept out of these sources) into it too.
+//! made for Zaxnes (`rust/profiles`) into it too.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -49,21 +49,10 @@ fn shader_source(manifest: &Path) -> Option<PathBuf> {
     .find(|folder| folder.is_dir())
 }
 
-/// The copy of the `zaxnes_3dn` repository (the 3D profiles made for Zaxnes, under a licence of
-/// their own): `ZAXNES_3DN_DIR`, else a `zaxnes_3dn` folder beside the workspace or one or two
-/// levels above it. None: the program carries no such profile.
+/// The 3D profiles made for Zaxnes: the workspace's `profiles` folder.
 fn profiles_source(manifest: &Path) -> Option<PathBuf> {
-    println!("cargo:rerun-if-env-changed=ZAXNES_3DN_DIR");
-    if let Some(chosen) = std::env::var_os("ZAXNES_3DN_DIR") {
-        return Some(PathBuf::from(chosen));
-    }
-    let workspace = manifest.parent()?.parent()?;
-    [
-        workspace.join("..").join("zaxnes_3dn"),
-        workspace.join("..").join("..").join("zaxnes_3dn"),
-    ]
-    .into_iter()
-    .find(|folder| folder.is_dir())
+    let folder = manifest.parent()?.parent()?.join("profiles");
+    folder.is_dir().then_some(folder)
 }
 
 /// Writes `bundled-profiles.rs`: the `.3dn` files of [`profiles_source`], each with its file name,

@@ -68,7 +68,7 @@ Requirements: cc65 (ca65, ld65 on the PATH), Python 3, Zaxnes' `rust/tools` (`ha
 ```
 make                                   # FlappyZaxNes.nes and build.lbl
 ZAXNES_TOOLS=<zaxnes>/rust/tools python -I widescreen/build.py FlappyZaxNes.nes build.lbl flappyzaxnes-widescreen.zxpk
-python -I tools/make_doc.py FlappyZaxNes.nes build.lbl <zaxnes>/rust/docs/hacks/flappyzaxnes/WIDESCREEN-HACK.md
+python -I tools/make_doc.py FlappyZaxNes.nes build.lbl <zaxnes_zxpksources>/docs/hacks/flappyzaxnes/WIDESCREEN-HACK.md
 ```
 
 `build.py` finds the hooks from the build's labels (`ld65 -Ln`), assembles `widescreen/wide.s`

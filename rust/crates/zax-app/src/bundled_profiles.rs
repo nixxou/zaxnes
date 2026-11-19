@@ -1,6 +1,5 @@
-//! The 3D profiles made for Zaxnes (the `zaxnes_3dn` repository: *Faxanadu*, *Metal Force*...),
-//! inside the executable of a release build (owner request). Their files are not in these
-//! sources: `build.rs` includes those of the copy it finds, and a build without one carries none.
+//! The 3D profiles made for Zaxnes (`rust/profiles`: *Faxanadu*, *Metal Force*...), inside the
+//! executable (owner request; `build.rs` includes them).
 //! At start-up they go into the user's profiles, once per version of the set, as `FlappyZaxNes`
 //! does: a player who deletes one does not get it back until a release changes the set.
 
