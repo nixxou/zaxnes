@@ -1,5 +1,6 @@
 //! The requests to the RetroAchievements server, made on threads of their own.
 
+#[cfg(not(target_os = "emscripten"))]
 use std::time::Duration;
 
 /// The status rcheevos reads as "no answer, try again later"
@@ -7,6 +8,7 @@ use std::time::Duration;
 pub const RETRYABLE_ERROR: i32 = -2;
 
 /// The largest answer read: a game's achievement set is a few hundred kilobytes at most.
+#[cfg(not(target_os = "emscripten"))]
 const MAX_BODY_BYTES: u64 = 16 * 1024 * 1024;
 
 /// A request of the client.
@@ -49,10 +51,17 @@ pub trait Transport: Send + Sync {
 }
 
 /// The HTTPS transport (rustls, with the certificates built in: no system library needed).
+#[cfg(not(target_os = "emscripten"))]
 pub struct UreqTransport {
     agent: ureq::Agent,
 }
 
+/// The web build has no TLS stack of its own: every request answers "server unreachable" until
+/// the browser's `fetch` is wired in, so the client stays offline.
+#[cfg(target_os = "emscripten")]
+pub struct UreqTransport;
+
+#[cfg(not(target_os = "emscripten"))]
 impl UreqTransport {
     /// A transport with a 30 s limit per request.
     #[must_use]
@@ -73,6 +82,23 @@ impl Default for UreqTransport {
     }
 }
 
+#[cfg(target_os = "emscripten")]
+impl UreqTransport {
+    /// The offline transport of the web build.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
+#[cfg(target_os = "emscripten")]
+impl Transport for UreqTransport {
+    fn send(&self, _request: &HttpRequest) -> HttpResponse {
+        HttpResponse::unreachable()
+    }
+}
+
+#[cfg(not(target_os = "emscripten"))]
 impl Transport for UreqTransport {
     fn send(&self, request: &HttpRequest) -> HttpResponse {
         let result = match &request.post_data {
