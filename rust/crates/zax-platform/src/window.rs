@@ -457,12 +457,6 @@ impl HostWindow {
         if self.gl_context.is_some() {
             self.window.gl_swap_window();
         }
-        // Web build: the page only draws, and takes input, while the program gives the browser
-        // its turn. With Asyncify, SDL_Delay is `emscripten_sleep`, which does that.
-        #[cfg(target_os = "emscripten")]
-        if let Ok(timer) = self.sdl.timer() {
-            timer.delay(0);
-        }
         #[cfg(feature = "wgpu")]
         if let Some(display) = &mut self.display {
             display.present();

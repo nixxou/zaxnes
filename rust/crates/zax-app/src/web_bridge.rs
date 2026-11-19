@@ -16,6 +16,9 @@ pub const OPEN_REQUEST: &str = "/zaxnes-web/open-request";
 /// Written by the page: the ROM to open, as a path of the file system.
 pub const OPEN_ANSWER: &str = "/zaxnes-web/open-answer";
 
+/// Written by the application: `playing` while a game is on the screen, `idle` otherwise.
+pub const STATE: &str = "/zaxnes-web/state";
+
 /// Whether this build talks to a page.
 #[must_use]
 pub const fn active() -> bool {
@@ -27,6 +30,21 @@ pub fn request_open_dialog() {
     if active() {
         let _ = std::fs::create_dir_all(FOLDER);
         let _ = std::fs::write(OPEN_REQUEST, b"rom");
+    }
+}
+
+/// Tells the page whether a game is on the screen; writes only when that changes.
+pub fn report_playing(playing: bool) {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    // 0 never reported, 1 idle, 2 playing.
+    static LAST: AtomicU8 = AtomicU8::new(0);
+    if !active() {
+        return;
+    }
+    let now = if playing { 2 } else { 1 };
+    if LAST.swap(now, Ordering::Relaxed) != now {
+        let _ = std::fs::create_dir_all(FOLDER);
+        let _ = std::fs::write(STATE, if playing { "playing" } else { "idle" });
     }
 }
 

@@ -208,8 +208,21 @@ impl ZaxApplication {
 
     fn run_inner(&self) -> Result<i32, String> {
         let mut running = Running::build(&self.options)?;
-        while running.frame()? {}
-        Ok(running.finish())
+        // Web build: the browser drives the frames (one per display refresh) and the loop
+        // never returns to here.
+        #[cfg(target_os = "emscripten")]
+        zax_platform::web::run_main_loop(move || match running.frame() {
+            Ok(go_on) => go_on,
+            Err(message) => {
+                app_log::error(&message);
+                false
+            }
+        });
+        #[cfg(not(target_os = "emscripten"))]
+        {
+            while running.frame()? {}
+            Ok(running.finish())
+        }
     }
 }
 
@@ -504,10 +517,12 @@ impl Running {
         self.reopen_the_audio_output();
         self.follow_the_editor_setting();
         self.load_the_asked_state();
-        // Web build: the ROM the page's dialogue chose (a no-op elsewhere).
+        // Web build: the ROM the page's dialogue chose, and whether a game is on the screen
+        // for the page (it hides its own button then). No-ops elsewhere.
         if let Some(path) = crate::web_bridge::take_open_answer() {
             self.host.enqueue(Command::OpenRom, CommandArgs::of_text(&path));
         }
+        crate::web_bridge::report_playing(self.ui.game_on_screen());
         let frame_begin = self.clock.start();
         let busy_begin = Instant::now();
         let mark = self.clock.start();
@@ -1519,15 +1534,22 @@ impl Running {
 
     /// The time a displayed frame has, as the pacing in force sets it: the swap interval at the
     /// display's refresh rate, or the frame cap's period; none when nothing paces the frames.
+    /// The display's refresh rate, 60 when the system does not say: a display mode may report 0
+    /// for "unknown" (browsers do), which must not become one frame a second.
+    fn refresh_rate(&self) -> i32 {
+        self.window
+            .window()
+            .display_mode()
+            .map(|mode| mode.refresh_rate)
+            .ok()
+            .filter(|&rate| rate > 0)
+            .unwrap_or(60)
+    }
+
     fn paced_budget(&self) -> Option<Duration> {
         let interval = self.window.vsync_interval();
         if interval > 0 {
-            let refresh = self
-                .window
-                .window()
-                .display_mode()
-                .map_or(60, |mode| mode.refresh_rate)
-                .max(1);
+            let refresh = self.refresh_rate();
             return Some(Duration::from_secs_f64(
                 f64::from(interval) / f64::from(refresh),
             ));
@@ -1540,12 +1562,7 @@ impl Running {
     fn display_rate(&self) -> f64 {
         let interval = self.window.vsync_interval();
         if interval > 0 {
-            let refresh = self
-                .window
-                .window()
-                .display_mode()
-                .map_or(60, |mode| mode.refresh_rate)
-                .max(1);
+            let refresh = self.refresh_rate();
             return f64::from(refresh) / f64::from(interval);
         }
         self.window
@@ -1555,12 +1572,7 @@ impl Running {
 
     /// The time one displayed frame may take: the swap interval at the display's refresh rate.
     fn frame_budget(&self) -> Duration {
-        let refresh = self
-            .window
-            .window()
-            .display_mode()
-            .map_or(60, |mode| mode.refresh_rate)
-            .max(1);
+        let refresh = self.refresh_rate();
         // The interval in force, which `video.half_rate_3d` may double.
         let interval = self.window.vsync_interval().max(1);
         Duration::from_secs_f64(f64::from(interval) / f64::from(refresh))
@@ -1747,6 +1759,7 @@ impl Running {
 
     /// REQ-LOOP-052: the current game is stopped (End hook), the settings and the slot metadata
     /// are written, and nothing is auto-saved.
+    #[cfg_attr(target_os = "emscripten", allow(dead_code))] // the browser never ends the loop
     fn finish(mut self) -> i32 {
         ImguiFrontend::close_capture(&mut self.source);
         let emulated_frames = self.host.emulated_frames();
@@ -1770,9 +1783,11 @@ fn load_settings(options: &AppOptions, paths: &UserDataPaths) -> (SettingsStore,
     if cfg!(target_os = "android") {
         handheld::defaults::apply_android(&mut model);
     }
-    // Web build (owner request): starts on the fastest preset.
+    // Web build (owner request): starts on the fastest preset, without the real-time pad, whose
+    // millisecond polling would hold the browser's only thread until each refresh.
     if cfg!(target_os = "emscripten") {
         handheld::defaults::apply_fastest(&mut model);
+        model.set_environment_default(SettingId::EmuRealtimeInput, SettingValue::Bool(false));
     }
     // Rust-only (owner request): the region comes from the ROM header unless the user turned the
     // automatic mode off, so a European dump runs at 50 Hz (`emu.auto_tv_mode` is off in C#).
@@ -2229,6 +2244,7 @@ struct RunState {
     /// automatic resolution, and its rounding with it).
     view_size: (i32, i32),
     renderer_name: String,
+    #[cfg_attr(target_os = "emscripten", allow(dead_code))] // the browser never ends the loop
     version: String,
     shadow_map_reported: bool,
     drag_origin: Option<[f32; 2]>,
@@ -2365,6 +2381,7 @@ fn smoke_run_is_over(options: &AppOptions, host: &AppHost, state: &RunState) -> 
     }
 }
 
+#[cfg_attr(target_os = "emscripten", allow(dead_code))] // the browser never ends the loop
 fn finish(options: &AppOptions, state: &RunState, emulated: i64) -> i32 {
     if !options.smoke_test {
         return 0;

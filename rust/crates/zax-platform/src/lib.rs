@@ -14,6 +14,8 @@ pub mod pacing;
 #[cfg(feature = "shaders")]
 pub mod slang_chain;
 pub mod ui_image;
+#[cfg(target_os = "emscripten")]
+pub mod web;
 pub mod wave;
 #[cfg(feature = "wgpu")]
 pub mod wgpu_display;
