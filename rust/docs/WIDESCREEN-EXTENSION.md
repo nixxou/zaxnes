@@ -1017,7 +1017,10 @@ temporary.
 
 ## 7. Built-in patches
 
-`zax-nes/src/builtin_patches.rs`, patches in `zax-nes/patches/`.
+`zax-nes/src/builtin_patches.rs`, the catalogue; the packs of Zelda II, FlappyZaxNes and Nova the
+Squirrel in `zax-nes/patches/`, the others in [zaxnes_3dn](https://github.com/nixxou/zaxnes_3dn)
+(`packs/`), loaded by `zax-nes/src/pack_files.rs` (built in, or the `zxpk` folder next to the
+executable).
 
 ```rust
 pub struct BuiltinPatch {
@@ -1098,7 +1101,7 @@ pub struct BuiltinPatch {
 
 ### 7.1 Hack packs
 
-`zax-nes/src/hack_pack.rs`, packs in `zax-nes/patches/*.zxpk`; the proposal and its decisions
+`zax-nes/src/hack_pack.rs`, packs as section 7 says; the proposal and its decisions
 are in `docs/HACK-PACKS.md`. A `BuiltinPatch` whose `bps` starts with `ZXPK` is a pack
 (`hack_pack::is_pack`); every built-in patch is one now, and every one has its code in the
 extension's memory: the pack holds the code, the boot window is `$80`/0 (the extension unlocked,

@@ -85,8 +85,9 @@ draw list. Lua scripts hook into the conversion, never into the core.
 ## Documentation
 
 - [`docs/WIDESCREEN-EXTENSION.md`](docs/WIDESCREEN-EXTENSION.md): the widescreen's emulator side
-  (the extra registers the hacks use), and [`docs/hacks/`](docs/hacks) one folder per game's
-  widescreen hack.
+  (the extra registers the hacks use), and [`docs/hacks/`](docs/hacks) the hacks whose packs are
+  in this repository (Zelda II, FlappyZaxNes); the other packs are in
+  [zaxnes_3dn](https://github.com/nixxou/zaxnes_3dn).
 - [`docs/MOVIES.md`](docs/MOVIES.md): the `.zmv` movies.
 - [`docs/OPTIONS-LAYOUT.md`](docs/OPTIONS-LAYOUT.md): the layout of the desktop options window,
   where it diverges from the specification, and the old-tab → new-tab mapping of every setting.
