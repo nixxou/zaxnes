@@ -71,6 +71,9 @@ pub struct RenderOptions {
     pub reflections: bool,
     /// `scene.skybox`: -1 the default, 0 colour, 1 gradient, 2 fantasy.
     pub skybox: i32,
+    /// The settings a preset writes that no option shows (the Enhanced style's quality), by
+    /// their catalogue value.
+    pub preset: Vec<(SettingId, i32)>,
     /// The settings exposed through the catalogue's libretro values
     /// (`zax_settings::core_options`): each core option key with the value label chosen.
     pub catalogue: Vec<(String, String)>,
@@ -84,6 +87,7 @@ impl Default for RenderOptions {
             enhanced: false,
             reflections: false,
             skybox: -1,
+            preset: Vec::new(),
             catalogue: Vec::new(),
         }
     }
@@ -105,6 +109,9 @@ impl RenderOptions {
             SettingValue::Int(i32::from(self.reflections)),
         );
         model.set(SettingId::SceneSkybox, SettingValue::Enum(self.skybox));
+        for &(id, number) in &self.preset {
+            model.set(id, SettingValue::Int(number));
+        }
         for (key, label) in &self.catalogue {
             zax_settings::core_options::try_apply(model, key, label);
         }

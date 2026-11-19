@@ -7,6 +7,7 @@ use zax_nes::ppu::SpriteLimit;
 use zax_settings::catalogue::SettingId;
 use zax_settings::core_options::{self, LibretroCoreOption};
 use zax_settings::meta::{SettingEffect, SettingKind};
+use zax_settings::presets::{PRESETS, V};
 
 use crate::machine::{self, Machine, Variant};
 use crate::picture::{self, Picture};
@@ -70,6 +71,40 @@ const RESOLUTIONS: [(u32, u32); 5] = [
 ];
 /// The prefix of the options of the game's hack: the option's own key follows.
 const HACK: &str = "zaxnes_hack_";
+/// The performance / fidelity preset (`zax_settings::presets`).
+const PRESET: &str = "zaxnes_preset";
+/// The presets' names, in the order of `PRESETS`.
+const PRESET_NAMES: [&str; 5] = ["Fastest", "Fast", "Balanced", "Faithful", "Most faithful"];
+/// The preset in force without a choice: Balanced, as in the application.
+const DEFAULT_PRESET: usize = 2;
+/// The value of an option a preset sets that leaves it to the preset.
+const FOLLOW: &str = "preset";
+/// The settings a preset writes that the core options carry through the catalogue.
+const PRESET_CATALOGUE: [SettingId; 3] = [
+    SettingId::VideoCompositeSignal,
+    SettingId::EmuOamDecay,
+    SettingId::EmuOamaddrWriteCorruption,
+];
+/// The settings a preset writes that no core option shows: the quality of the Enhanced style.
+const PRESET_HIDDEN: [SettingId; 4] = [
+    SettingId::RenderStyleSsrQuality,
+    SettingId::RenderStyleAo,
+    SettingId::RenderStyleAoQuality,
+    SettingId::RenderStylePixelShadow,
+];
+
+/// The value preset `preset` writes for `id`, as the catalogue's number.
+fn preset_value(preset: usize, id: SettingId) -> Option<i32> {
+    PRESETS[preset.min(PRESETS.len() - 1)]
+        .values
+        .iter()
+        .find(|(setting, ..)| *setting == id)
+        .map(|(_, value, _)| match *value {
+            V::B(on) => i32::from(on),
+            V::I(number) | V::E(number) => number,
+        })
+}
+
 /// Which loop runs the console.
 const CORE_VARIANT: &str = "zaxnes_core_variant";
 const VARIANTS: [&str; 3] = ["Standard", "Fidelity+", "Fast"];
@@ -333,6 +368,14 @@ impl Declaration {
         self
     }
 
+    /// With a first value, its default, that leaves the option to the preset.
+    fn following_preset(mut self) -> Self {
+        self.values
+            .insert(0, (FOLLOW.to_owned(), Some("Preset".to_owned())));
+        FOLLOW.clone_into(&mut self.default);
+        self
+    }
+
     /// A switch, on by default when `on`.
     fn switch(self, on: bool) -> Self {
         self.values(if on {
@@ -433,7 +476,20 @@ fn catalogue_option(setting: SettingId) -> Option<&'static LibretroCoreOption> {
 #[allow(clippy::too_many_lines)] // One entry per option.
 pub fn declarations(hacks: &[HackOption]) -> Vec<Declaration> {
     let resolutions = RESOLUTIONS.map(|(width, height)| format!("{width}x{height}"));
+    let mut preset = Declaration::new(
+        PRESET,
+        "Preset",
+        "Preset",
+        "",
+        "Performance or fidelity, as the application's presets: Fastest and Fast for handhelds \
+         (fast core, lighter 3D), Balanced, Faithful and Most faithful (Fidelity+, the console's \
+         defects). Each option set to Preset follows it; another value wins. What a core has no \
+         use for (run-ahead, catch-up, automatic resolution) is left to the frontend.",
+    )
+    .values(PRESET_NAMES);
+    PRESET_NAMES[DEFAULT_PRESET].clone_into(&mut preset.default);
     let mut list = vec![
+        preset,
         // Image.
         Declaration::new(
             PALETTE,
@@ -501,7 +557,8 @@ pub fn declarations(hacks: &[HackOption]) -> Vec<Declaration> {
             "three_d",
             "The shadows the blocks cast.",
         )
-        .switch(true),
+        .switch(true)
+        .following_preset(),
         Declaration::new(
             STYLE,
             "3D visual style",
@@ -509,7 +566,8 @@ pub fn declarations(hacks: &[HackOption]) -> Vec<Declaration> {
             "three_d",
             "Classic is 3dSen's look; Enhanced adds the application's lighting and occlusion.",
         )
-        .values(["Classic", "Enhanced"]),
+        .values(["Classic", "Enhanced"])
+        .following_preset(),
         Declaration::new(
             REFLECTIONS,
             "3D reflections (Enhanced style)",
@@ -517,7 +575,8 @@ pub fn declarations(hacks: &[HackOption]) -> Vec<Declaration> {
             "three_d",
             "Reflections on the floor, with the Enhanced style only.",
         )
-        .switch(false),
+        .switch(false)
+        .following_preset(),
         Declaration::new(
             SKY,
             "3D sky",
@@ -533,7 +592,8 @@ pub fn declarations(hacks: &[HackOption]) -> Vec<Declaration> {
             "three_d",
             "Faster paths for the profiles' Lua scripts, written with unsafe code.",
         )
-        .switch(false),
+        .switch(false)
+        .following_preset(),
         // Widescreen and scrolling.
         Declaration::new(
             WIDESCREEN,
@@ -649,7 +709,8 @@ pub fn declarations(hacks: &[HackOption]) -> Vec<Declaration> {
              model: closest to the console, slower, NTSC only so far); Fast (several times \
              faster on the common boards, the same pictures and sounds).",
         )
-        .values(VARIANTS),
+        .values(VARIANTS)
+        .following_preset(),
     );
     for id in machine::SETTINGS {
         if let Some(declaration) = catalogue_declaration(id, "emulation") {
@@ -754,7 +815,12 @@ fn catalogue_declaration(id: SettingId, category: &'static str) -> Option<Declar
     let default = machine::default_value(id);
     let declaration = Declaration::new(&key, &label, &label, category, catalogue_info(id));
     if descriptor.kind() == SettingKind::Bool {
-        return Some(declaration.switch(default != 0));
+        let declaration = declaration.switch(default != 0);
+        return Some(if PRESET_CATALOGUE.contains(&id) {
+            declaration.following_preset()
+        } else {
+            declaration
+        });
     }
     if let Some(steps) = range_values(id) {
         let mut declaration = declaration.values(steps.iter().map(ToString::to_string));
@@ -777,7 +843,11 @@ fn catalogue_declaration(id: SettingId, category: &'static str) -> Option<Declar
 fn catalogue_value(id: SettingId, text: &str) -> Option<i32> {
     let descriptor = zax_settings::catalogue::descriptor(id);
     if descriptor.kind() == SettingKind::Bool {
-        return Some(i32::from(text == "enabled"));
+        return match text {
+            "enabled" => Some(1),
+            "disabled" => Some(0),
+            _ => None,
+        };
     }
     if let Some(steps) = range_values(id) {
         return text.parse().ok().filter(|value| steps.contains(value));
@@ -820,6 +890,57 @@ fn read_machine(value: &dyn Fn(&str) -> Option<String>) -> Machine {
     Machine { variant, values }
 }
 
+/// Gives `options` what preset `preset` writes wherever its option is on Preset (or has no
+/// value): the core variant, the 3D's style, shadows, reflections and optimised Lua, the
+/// composite signal, two console defects, and the Enhanced style's quality.
+fn follow_preset(options: &mut Options, preset: usize, value: &dyn Fn(&str) -> Option<String>) {
+    let follows = |key: &str| value(key).is_none_or(|text| text == FOLLOW);
+    let on = |id: SettingId| preset_value(preset, id).map(|number| number != 0);
+    if follows(CORE_VARIANT) {
+        options.machine.variant = if on(SettingId::EmuFidelityPlus) == Some(true) {
+            Variant::FidelityPlus
+        } else if on(SettingId::EmuFastCore) == Some(true) {
+            Variant::Fast
+        } else {
+            Variant::Standard
+        };
+    }
+    let render = &mut options.render;
+    if follows(SHADOWS) {
+        render.shadows = on(SettingId::RenderShadow).unwrap_or(render.shadows);
+    }
+    if follows(STYLE) {
+        render.enhanced = preset_value(preset, SettingId::RenderVisualStyle)
+            .map_or(render.enhanced, |style| style != 0);
+    }
+    if follows(REFLECTIONS) {
+        render.reflections = on(SettingId::RenderStyleReflections).unwrap_or(render.reflections);
+    }
+    if follows(FAST_LUA) {
+        options.optimized_lua = on(SettingId::EmuLuaOptimized).unwrap_or(options.optimized_lua);
+    }
+    render.preset = PRESET_HIDDEN
+        .iter()
+        .filter_map(|&id| preset_value(preset, id).map(|number| (id, number)))
+        .collect();
+    for id in PRESET_CATALOGUE {
+        let key = core_options::core_option_key(&zax_settings::catalogue::descriptor(id).key());
+        if !follows(&key) {
+            continue;
+        }
+        let Some(number) = preset_value(preset, id) else {
+            continue;
+        };
+        let values = if id == SettingId::VideoCompositeSignal {
+            &mut options.picture.values
+        } else {
+            &mut options.machine.values
+        };
+        values.retain(|(setting, _)| *setting != id);
+        values.push((id, number));
+    }
+}
+
 /// The label of the common option `key`: the one a pack gives it.
 fn common_label(key: &str) -> String {
     zax_nes::builtin_patches::patches()
@@ -833,6 +954,16 @@ fn common_label(key: &str) -> String {
 /// has none; `hacks` are the game's hack options.
 #[must_use]
 pub fn read(value: &dyn Fn(&str) -> Option<String>, hacks: &[HackOption]) -> Options {
+    let preset = value(PRESET)
+        .and_then(|text| PRESET_NAMES.iter().position(|name| *name == text))
+        .unwrap_or(DEFAULT_PRESET);
+    let mut options = read_explicit(value, hacks);
+    follow_preset(&mut options, preset, value);
+    options
+}
+
+/// The options as the values give them, a preset aside.
+fn read_explicit(value: &dyn Fn(&str) -> Option<String>, hacks: &[HackOption]) -> Options {
     let defaults = Options::default();
     let enabled = |key: &str, default: bool| value(key).map_or(default, |text| text == "enabled");
     Options {
@@ -871,6 +1002,7 @@ pub fn read(value: &dyn Fn(&str) -> Option<String>, hacks: &[HackOption]) -> Opt
             enhanced: value(STYLE).map_or(defaults.render.enhanced, |text| text == "Enhanced"),
             reflections: enabled(REFLECTIONS, defaults.render.reflections),
             skybox: choice(&SKIES, value(SKY), defaults.render.skybox),
+            preset: Vec::new(),
             catalogue: CATALOGUE
                 .iter()
                 .filter_map(|(setting, ..)| catalogue_option(*setting))
@@ -942,7 +1074,7 @@ mod tests {
                     && option.legacy() == "Hack: Invincible; common setting|enabled|disabled"
                     && option.category == "hacks")
         );
-        let none = read(&|_| None, &[OPTION]);
+        let none = read_explicit(&|_| None, &[OPTION]);
         assert_eq!(none.render.catalogue.len(), CATALOGUE.len());
         assert_eq!(
             none,
@@ -955,7 +1087,7 @@ mod tests {
                 ..Options::default()
             }
         );
-        let set = read(
+        let set = read_explicit(
             &|key| match key {
                 "zaxnes_widescreen" => Some("disabled".to_owned()),
                 "zaxnes_widescreen_ratio" => Some("21:9".to_owned()),
@@ -1140,5 +1272,62 @@ mod tests {
         assert_eq!(look.knobs.saturation, 150);
         assert_eq!(look.knobs.hue, 0);
         assert!(options.picture.composite().is_some());
+    }
+
+    /// The preset fills the options left on Preset; an option given a value keeps it.
+    #[test]
+    fn a_preset_fills_what_is_left_to_it() {
+        let read_with = |values: &[(&str, &str)]| {
+            read(
+                &|key| {
+                    values
+                        .iter()
+                        .find(|(name, _)| *name == key)
+                        .map(|(_, value)| (*value).to_owned())
+                },
+                &[],
+            )
+        };
+        // Balanced, without a choice: the standard core, the Enhanced style with shadows.
+        let balanced = read_with(&[]);
+        assert_eq!(balanced.machine.variant, Variant::Standard);
+        assert!(balanced.render.enhanced && balanced.render.shadows);
+        // Fastest: the fast core, optimised Lua, Classic style without shadows.
+        let fastest = read_with(&[("zaxnes_preset", "Fastest")]);
+        assert_eq!(fastest.machine.variant, Variant::Fast);
+        assert!(fastest.optimized_lua);
+        assert!(!fastest.render.enhanced && !fastest.render.shadows);
+        // Most faithful: Fidelity+, the OAMADDR write corruption on.
+        let faithful = read_with(&[("zaxnes_preset", "Most faithful")]);
+        assert_eq!(faithful.machine.variant, Variant::FidelityPlus);
+        assert!(
+            faithful
+                .machine
+                .values
+                .contains(&(SettingId::EmuOamaddrWriteCorruption, 1))
+        );
+        // An option given a value wins over the preset.
+        let mixed = read_with(&[
+            ("zaxnes_preset", "Fastest"),
+            ("zaxnes_core_variant", "Standard"),
+            ("zaxnes_3d_shadows", "enabled"),
+            ("zaxnes_emu_oamaddr_write_corruption", "enabled"),
+        ]);
+        assert_eq!(mixed.machine.variant, Variant::Standard);
+        assert!(mixed.render.shadows);
+        assert!(
+            mixed
+                .machine
+                .values
+                .contains(&(SettingId::EmuOamaddrWriteCorruption, 1))
+        );
+        let list = declarations(&[]);
+        assert_eq!(list[0].key, "zaxnes_preset");
+        assert_eq!(list[0].category, "");
+        assert_eq!(list[0].default, "Balanced");
+        assert!(
+            list.iter()
+                .any(|option| option.key == "zaxnes_3d_shadows" && option.default == "preset")
+        );
     }
 }

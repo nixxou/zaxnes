@@ -12,6 +12,7 @@ pub mod games;
 pub mod meta;
 pub mod model;
 pub mod persistence;
+pub mod presets;
 pub mod shader_slots;
 pub mod store;
 pub mod styles;

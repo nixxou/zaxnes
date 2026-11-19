@@ -444,7 +444,11 @@ fn declare_options_v2(list: &[options::Declaration]) -> bool {
                     desc_categorized: in_category.as_ptr(),
                     info: info.as_ptr(),
                     info_categorized: null,
-                    category_key: category.as_ptr(),
+                    category_key: if category.is_empty() {
+                        null
+                    } else {
+                        category.as_ptr()
+                    },
                     values: slots,
                     default_value: default.as_ptr(),
                 }
