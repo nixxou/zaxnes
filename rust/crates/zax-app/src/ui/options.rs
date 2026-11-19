@@ -399,7 +399,10 @@ pub const LAYOUT: [(OptionsTab, &[LayoutEntry]); 9] = [
     (OptionsTab::Light, LIGHT),
     (
         OptionsTab::Camera,
-        &[LayoutEntry::Row(SettingId::CameraFov)],
+        &[
+            LayoutEntry::Row(SettingId::CameraFov),
+            LayoutEntry::Row(SettingId::CameraFramePicture),
+        ],
     ),
     (OptionsTab::Audio, AUDIO),
     (OptionsTab::Emulation, EMULATION),

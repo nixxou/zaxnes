@@ -573,9 +573,10 @@ pub const NES_PICTURE_ROWS: [OptionRow; 14] = [
 ];
 
 /// *Advanced options › Camera*: the preset row that left the main page, and the field of view.
-pub const CAMERA_ROWS: [OptionRow; 3] = [
+pub const CAMERA_ROWS: [OptionRow; 4] = [
     OptionRow::Camera,
     OptionRow::Setting(SettingId::CameraFov),
+    OptionRow::Setting(SettingId::CameraFramePicture),
     OptionRow::Reset,
 ];
 

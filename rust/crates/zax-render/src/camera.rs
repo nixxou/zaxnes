@@ -198,6 +198,11 @@ pub struct SceneCamera {
     /// The local camera profile setting (REQ-SCN-009): the rotation becomes `R_Z(ry) · R_X(rx)`
     /// and the camera no longer aims at `P*`.
     pub local_camera: bool,
+    /// `camera.frame_picture` (owner request, 2026-11-19): with the clipping the game shows, the
+    /// view reset frames the picture's visible rows as the head-on 2D view does
+    /// ([`Self::picture_view`]), so going from 2D to 3D does not draw back. `None`: the
+    /// framing of 3dSen (AMD-045 REQ-SCN-069), the NES picture over about 90 % of the height.
+    pub frame_picture: Option<Vec4F>,
     distance_filter: CriticalSmoothing,
     rx_filter: CriticalSmoothing,
     ry_filter: CriticalSmoothing,
@@ -228,6 +233,7 @@ impl SceneCamera {
             transition_remaining: 0.0,
             smooth_time: CriticalSmoothing::DEFAULT_SMOOTH_TIME,
             local_camera: false,
+            frame_picture: None,
             distance_filter: CriticalSmoothing::default(),
             rx_filter: CriticalSmoothing::default(),
             ry_filter: CriticalSmoothing::default(),
@@ -358,9 +364,14 @@ impl SceneCamera {
     /// **before** the bound of REQ-SCN-011 (AMD-045 REQ-SCN-069). It follows every change of
     /// field of view, even without a reset, which is what `Camera.ResetDistance` exposes to Lua
     /// (AMD-040 REQ-LUA-113).
+    ///
+    /// With [`Self::frame_picture`], the distance of the head-on 2D view instead.
     #[must_use]
     pub fn reset_distance(&self) -> f32 {
-        geometry::reset_distance(self.fov)
+        match self.frame_picture {
+            Some(clipping) => self.picture_framing(clipping).1,
+            None => geometry::reset_distance(self.fov),
+        }
     }
 
     /// The head-on view of the 2D picture (Rust-only, owner request: the "2D from the front" of

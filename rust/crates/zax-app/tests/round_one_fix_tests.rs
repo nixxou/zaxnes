@@ -45,9 +45,10 @@ fn req_scn_013_stopping_a_game_resets_the_view_and_returns_to_tpv() {
     assert_eq!(CameraMode::Tpv, camera.mode());
     assert!((camera.current().angles.x - render_geometry::DEFAULT_ANGLES.x).abs() < 1e-3);
     assert!((camera.current().angles.y - render_geometry::DEFAULT_ANGLES.y).abs() < 1e-3);
-    assert!(
-        (camera.current().distance() - render_geometry::reset_distance(camera.fov())).abs() < 1e-3
-    );
+    // The framed distance the camera resets to: the 2D picture's by default
+    // (`camera.frame_picture`, 2026-11-19), 3dSen's when that setting is off.
+    assert!((camera.current().distance() - camera.reset_distance()).abs() < 1e-3);
+    assert!(camera.reset_distance() < render_geometry::reset_distance(camera.fov()));
     assert!((camera.smooth_time - CriticalSmoothing::DEFAULT_SMOOTH_TIME).abs() < 1e-4);
     assert_eq!(0, harness.host.settings().game_speed());
 }

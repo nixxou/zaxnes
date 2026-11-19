@@ -21,6 +21,7 @@ audio.console_profile
 audio.latency_ms
 audio.volume
 camera.fov
+camera.frame_picture
 emu.auto_tv_mode
 emu.cartridge_db
 emu.catch_up

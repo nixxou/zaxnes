@@ -130,6 +130,7 @@ options
     page.camera
       row.camera
       camera.fov
+      camera.frame_picture
       row.reset
     page.emulation
       emu.engine

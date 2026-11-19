@@ -97,6 +97,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "audio.console_profile",
             "audio.latency_ms",
             "audio.mute",
+            "camera.frame_picture",
             "emu.builtin_patches",
             "emu.cartridge_db",
             "emu.catch_up",

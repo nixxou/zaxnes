@@ -284,11 +284,21 @@ pub fn push_settings(model: &SettingsModel, scene: &mut SceneState) {
     scene.settings.custom_background_color = color_of(model, SettingId::SceneCustomBgColor);
     scene.use_nes_background_color = model.get(SettingId::SceneUseNesBgColor).as_bool();
     scene.clipping = clipping_of(model);
+    push_framing(model, scene);
     scene.bend = bend_of(model);
     scene.bend_two_dimensional_mode = model.get(SettingId::SceneBend2dMode).as_bool();
     scene.settings.backdrop_lighting = model.get(SettingId::RenderBackdropLighting).as_bool();
     scene.settings.style = style_of(model);
     push_light(model, scene);
+}
+
+/// `camera.frame_picture`: the view reset frames the rows the clipping leaves visible, as the
+/// head-on 2D view does, or (off) as 3dSen does. It takes effect at the next view reset.
+fn push_framing(model: &SettingsModel, scene: &mut SceneState) {
+    scene.camera.frame_picture = model
+        .get(SettingId::CameraFramePicture)
+        .as_bool()
+        .then_some(scene.clipping);
 }
 
 /// Applies the change of one setting to the scene.
@@ -316,7 +326,9 @@ pub fn apply_setting(id: SettingId, model: &SettingsModel, scene: &mut SceneStat
             // The clip margins frame the camera and cut the tiles (REQ-E3D-410), so a Lua write
             // has to reach the scene at the next frame (REQ-PERS-007).
             scene.clipping = clipping_of(model);
+            push_framing(model, scene);
         }
+        SettingId::CameraFramePicture => push_framing(model, scene),
         // AMD-043 REQ-SCN-066: the four curvature settings apply hot, from the next rendered
         // frame. The three sines and cosines of `SpaceBend::new` are paid here, on a change,
         // and never again.

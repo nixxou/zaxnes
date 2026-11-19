@@ -332,6 +332,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
          certains profils affichent un fond.",
     ),
     ("setting.camera.fov", "Champ de vision (degrés)"),
+    ("setting.camera.frame_picture", "Cadrage 3D comme l'image 2D"),
     ("setting.light.intensity", "Intensité lumineuse"),
     ("setting.scene.skybox", "Fond (skybox)"),
     ("setting.scene.custom_bg_color", "Couleur de fond"),
@@ -1264,6 +1265,12 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
          large exagère sa profondeur. Le curseur va de 45 à 95 par pas de 5 ; un script peut \
          demander n'importe quoi entre 10 et 150. Le changer ne joue pas le son de validation, la \
          valeur bougeant continûment sous la souris. Par défaut : 70.",
+    ),
+    (
+        "detail.camera.frame_picture",
+        "La vue 3D, au début d'une partie et quand on la recentre, cadre l'image comme la vue 2D : \
+         passer de la 2D à la 3D ne fait plus reculer la caméra. Désactivé : le cadrage de 3dSen, \
+         l'image sur environ les neuf dixièmes de la hauteur. Par défaut : activé.",
     ),
 
     // ----------------------------------------------------------- onglet Audio

@@ -104,6 +104,7 @@ setting_ids! {
     CameraFov => "camera.fov",
     CameraLocalCam => "camera.local_cam",
     CameraSmoothTime => "camera.smooth_time",
+    CameraFramePicture => "camera.frame_picture",
     LightDirection => "light.direction",
     LightColor => "light.color",
     LightIntensity => "light.intensity",

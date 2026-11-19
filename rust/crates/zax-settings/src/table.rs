@@ -612,6 +612,21 @@ fn camera(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::greater_than(0.0))
         .with_lua("SmoothTime"),
     );
+    // Owner request, 2026-11-19: the view reset frames the picture's visible rows as the
+    // head-on 2D view does, so going from 2D to 3D no longer draws the camera back. Off: the
+    // framing of 3dSen (AMD-045 REQ-SCN-069). Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::CameraFramePicture,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Camera,
+        )
+        .with_domain(Domain::switch())
+        .with_label("3D framed like the 2D picture"),
+    );
 }
 
 fn light(out: &mut Vec<SettingDescriptor>) {

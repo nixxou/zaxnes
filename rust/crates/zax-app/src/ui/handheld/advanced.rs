@@ -32,7 +32,7 @@ use crate::ui::text;
 ///
 /// Adding a setting to the desktop window therefore does not add a console row: a console row is
 /// an owner decision, written down here and placed by a page table.
-pub const ROW_SETTINGS: [SettingId; 106] = [
+pub const ROW_SETTINGS: [SettingId; 107] = [
     SettingId::VideoVSync,
     SettingId::VideoFrameRate,
     SettingId::VideoSkipFrame,
@@ -88,6 +88,7 @@ pub const ROW_SETTINGS: [SettingId; 106] = [
     SettingId::VideoTvContrast,
     SettingId::VideoTvBrightness,
     SettingId::CameraFov,
+    SettingId::CameraFramePicture,
     SettingId::RenderShadow,
     SettingId::RenderBackdropLighting,
     SettingId::LightIntensity,

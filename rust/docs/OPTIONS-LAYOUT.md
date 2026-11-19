@@ -22,6 +22,7 @@ after it has no earlier tab — so they are listed here instead:
 | `audio.latency_ms` | Audio | Advanced | AUDIO-1 |
 | `audio.classic_output` | Audio | Advanced | AUDIO-2 |
 | `ui.editor_mode` | Interface | — | EDITOR-1 |
+| `camera.frame_picture` | Camera | — | owner request 2026-11-19 (also console: *Advanced options › Camera*) |
 
 The editor mode is deliberately absent from the console tree: its MCP server and its pens are
 desktop-only, so `handheld/advanced.rs::ROW_SETTINGS` does not list it.
@@ -358,7 +359,7 @@ options
  │   ├─ Light and shadows >    Light intensity, Backdrop lighting, Pixel shadows
  │   │                         [Ambient occlusion] AO, strength, radius, thickness, quality
  │   ├─ NES picture >          Remove sprite limit, Widescreen strict edges
- │   ├─ Camera >               Camera view, Field of view
+ │   ├─ Camera >               Camera view, Field of view, 3D framed like the 2D picture
  │   └─ Emulation >            Run-ahead, Game speed, Auto region, Region, Emulated menu button
  ├─ Controls >, RetroAchievements >
  └─ Profiler

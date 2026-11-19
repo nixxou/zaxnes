@@ -381,6 +381,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
          show a backdrop at all.",
     ),
     ("setting.camera.fov", "Field of view (degrees)"),
+    ("setting.camera.frame_picture", "3D framed like the 2D picture"),
     ("setting.light.intensity", "Light intensity"),
     ("setting.scene.skybox", "Background (skybox)"),
     ("setting.scene.custom_bg_color", "Background colour"),
@@ -1297,6 +1298,12 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
          large one exaggerates its depth. The slider covers 45 to 95 in steps of 5; a script may \
          ask for anything from 10 to 150. Changing it plays no validation sound, the value moving \
          continuously under the mouse. Default: 70.",
+    ),
+    (
+        "detail.camera.frame_picture",
+        "The 3D view, at the start of a game and when it is reset, frames the picture as the 2D \
+         view does: going from 2D to 3D no longer draws the camera back. Off: the framing of \
+         3dSen, the picture over about nine tenths of the height. Default: on.",
     ),
 
     // --------------------------------------------------------------- Audio tab
