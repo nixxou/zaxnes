@@ -623,20 +623,9 @@ suit la ROM d'origine.
 
 Le détail technique est dans [`rust/docs/WIDESCREEN-EXTENSION.md`](rust/docs/WIDESCREEN-EXTENSION.md)
 (côté émulateur), [`rust/docs/hacks/zelda2/WIDESCREEN-HACK.md`](rust/docs/hacks/zelda2/WIDESCREEN-HACK.md)
-, [`rust/docs/hacks/megaman2/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman2/WIDESCREEN-HACK.md)
-, [`rust/docs/hacks/smb3/WIDESCREEN-HACK.md`](rust/docs/hacks/smb3/WIDESCREEN-HACK.md)
-, [`rust/docs/hacks/adventure_island/WIDESCREEN-HACK.md`](rust/docs/hacks/adventure_island/WIDESCREEN-HACK.md)
-, [`rust/docs/hacks/excitebike/WIDESCREEN-HACK.md`](rust/docs/hacks/excitebike/WIDESCREEN-HACK.md)
-, [`rust/docs/hacks/ff1/WIDESCREEN-HACK.md`](rust/docs/hacks/ff1/WIDESCREEN-HACK.md)
-, [`rust/docs/hacks/metalforce/WIDESCREEN-HACK.md`](rust/docs/hacks/metalforce/WIDESCREEN-HACK.md)
-, [`rust/docs/hacks/blastermaster/WIDESCREEN-HACK.md`](rust/docs/hacks/blastermaster/WIDESCREEN-HACK.md)
-, [`rust/docs/hacks/megaman1/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman1/WIDESCREEN-HACK.md)
-, [`rust/docs/hacks/megaman3/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman3/WIDESCREEN-HACK.md)
-, [`rust/docs/hacks/megaman4/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman4/WIDESCREEN-HACK.md)
-, [`rust/docs/hacks/megaman5/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman5/WIDESCREEN-HACK.md)
-, [`rust/docs/hacks/megaman6/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman6/WIDESCREEN-HACK.md)
-et [`rust/docs/hacks/metroid/WIDESCREEN-HACK.md`](rust/docs/hacks/metroid/WIDESCREEN-HACK.md) (les hacks
-eux-mêmes et comment les reconstruire).
+et [`rust/docs/hacks/flappyzaxnes/WIDESCREEN-HACK.md`](rust/docs/hacks/flappyzaxnes/WIDESCREEN-HACK.md) (les
+hacks eux-mêmes et comment les reconstruire). Les packs des autres jeux sont livrés à part, dans le
+dossier `zxpk` à côté de l'exécutable.
 
 ### Limite de 8 sprites par ligne
 

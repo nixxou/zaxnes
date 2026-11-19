@@ -57,7 +57,7 @@ fn fingerprint() -> &'static str {
     static FINGERPRINT: OnceLock<String> = OnceLock::new();
     FINGERPRINT.get_or_init(|| {
         let mut bytes = Vec::new();
-        for patch in &zax_nes::builtin_patches::PATCHES {
+        for patch in zax_nes::builtin_patches::patches() {
             bytes.extend_from_slice(patch.name.as_bytes());
             bytes.extend_from_slice(&patch.source_crc.to_le_bytes());
             bytes.extend_from_slice(patch.bps);

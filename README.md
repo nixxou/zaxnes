@@ -246,8 +246,9 @@ cargo build --release -p zax-app --features bundled
 How to build the release packages, run the tests, and how the code is laid out are in
 [`rust/README.md`](rust/README.md) (the technical part of the former README, moved there). The
 widescreen's emulator side is described in
-[`rust/docs/WIDESCREEN-EXTENSION.md`](rust/docs/WIDESCREEN-EXTENSION.md), and each game's hack in
-[`rust/docs/hacks/`](rust/docs/hacks); the written specification is in [`docs/spec/`](docs/spec).
+[`rust/docs/WIDESCREEN-EXTENSION.md`](rust/docs/WIDESCREEN-EXTENSION.md). The hack packs and the 3D
+profiles live in [zaxnes_3dn](https://github.com/nixxou/zaxnes_3dn), under their own licence. The
+written specification is in [`docs/spec/`](docs/spec).
 
 ## Download
 

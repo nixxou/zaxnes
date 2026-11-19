@@ -31,6 +31,11 @@ export SDL2_TOOLCHAIN="${SDL2_TOOLCHAIN:-$script_dir/x86_64-sdl2-zig.cmake}"
 # sources ship in the package (GPL), as fceux-zax-source.zip.
 : "${ZAX_FCEUX_DIR:?set ZAX_FCEUX_DIR to the root of the fceux-zax fork}"
 export ZAX_FCEUX_LIB="${ZAX_FCEUX_LIB:-$ZAX_FCEUX_DIR/build-linux-zig}"
+# The hack packs ship as files in a zxpk folder next to the binary, taken from a clone of
+# zaxnes_3dn that ZAXNES_3DN_DIR names; none is built into the binary.
+: "${ZAXNES_3DN_DIR:?set ZAXNES_3DN_DIR to a clone of zaxnes_3dn (the hack packs)}"
+[[ -d "$ZAXNES_3DN_DIR/packs" ]] || { echo "error: no packs folder in $ZAXNES_3DN_DIR" >&2; exit 1; }
+export ZAXNES_EMBED_PACKS=none
 (cd "$rust_dir" && cargo zigbuild --locked --release -p zax-app \
     --features firmware-sdl,shaders,fceux-core --target "$target.$glibc")
 # The harness of the editor mode (the editor folder's AGENT.md): renders from any angle without
@@ -66,6 +71,11 @@ install -m 755 "$binary" "$dir/zaxnes"
 install -m 755 "$harness" "$dir/zax-harness"
 install -m 644 "$root_dir/LICENSE" "$root_dir/THIRD-PARTY-NOTICES.md" "$root_dir/ASSETS-LICENSES.md" \
     "$root_dir/HOWTO-RUN.md" "$dir/"
+# The hack packs, with their licence (they are not under the GPL).
+mkdir -p "$dir/zxpk"
+install -m 644 "$ZAXNES_3DN_DIR"/packs/*.zxpk "$ZAXNES_3DN_DIR/LICENSE.md" \
+    "$ZAXNES_3DN_DIR/ADDITIONAL-PERMISSIONS.md" "$dir/zxpk/"
+echo "package: $(ls "$dir/zxpk" | grep -c '\.zxpk$') hack packs from zaxnes_3dn $(git -C "$ZAXNES_3DN_DIR" rev-parse --short HEAD)"
 # GPL: the corresponding source of the FCEUX fork linked into zaxnes, at the commit built.
 git -C "$ZAX_FCEUX_DIR" archive --format=zip --prefix=fceux-zax/ -o "$dir/fceux-zax-source.zip" HEAD
 printf '%s\n' "Déposez ici vos profils .3dn ; ils sont chargés au démarrage. Aucun profil n'est fourni." \
@@ -83,9 +93,9 @@ intégrés au programme et installés au premier lancement.
     ./zaxnes --list-profiles
 EOF
 
-# The package holds the binary, the documents and profiles/README.txt, and nothing else.
-shipped="$(cd "$dir" && find . -type f | sort | tr '\n' ' ')"
-expected="./ASSETS-LICENSES.md ./HOWTO-RUN.md ./LICENSE ./README.txt ./THIRD-PARTY-NOTICES.md ./fceux-zax-source.zip ./profiles/README.txt ./zax-harness ./zaxnes "
+# The package holds the binary, the documents, profiles/README.txt and the packs, and nothing else.
+shipped="$(cd "$dir" && find . -type f ! -path './zxpk/*.zxpk' | sort | tr '\n' ' ')"
+expected="./ASSETS-LICENSES.md ./HOWTO-RUN.md ./LICENSE ./README.txt ./THIRD-PARTY-NOTICES.md ./fceux-zax-source.zip ./profiles/README.txt ./zax-harness ./zaxnes ./zxpk/ADDITIONAL-PERMISSIONS.md ./zxpk/LICENSE.md "
 if [[ "$shipped" != "$expected" ]]; then
     echo "error: unexpected package contents: $shipped" >&2
     exit 1

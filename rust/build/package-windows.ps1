@@ -26,6 +26,14 @@ $root = Split-Path -Parent $rust
 $fceux = $env:ZAX_FCEUX_DIR
 if (-not $fceux) { throw 'package: set ZAX_FCEUX_DIR to the root of the fceux-zax fork (built with zax\build-msvc.cmd)' }
 
+# The hack packs ship as files in a zxpk folder next to zaxnes.exe, taken from a clone of
+# zaxnes_3dn that ZAXNES_3DN_DIR names; none is built into the executable.
+$packsRepo = $env:ZAXNES_3DN_DIR
+if (-not $packsRepo) { throw 'package: set ZAXNES_3DN_DIR to a clone of zaxnes_3dn (the hack packs)' }
+$packsDir = Join-Path $packsRepo 'packs'
+if (-not (Test-Path $packsDir)) { throw "package: no packs folder in $packsRepo" }
+$env:ZAXNES_EMBED_PACKS = 'none'
+
 Push-Location $rust
 try {
     cargo build --release -p zax-app --features bundled,shaders,fceux-core
@@ -52,6 +60,17 @@ Copy-Item (Join-Path $rust 'target\release\zax-harness.exe') (Join-Path $Output 
 foreach ($document in 'LICENSE', 'HOWTO-RUN.md', 'ASSETS-LICENSES.md', 'THIRD-PARTY-NOTICES.md') {
     Copy-Item (Join-Path $root $document) (Join-Path $Output $document) -Force
 }
+# The hack packs, with their licence (they are not under the GPL).
+$zxpk = Join-Path $Output 'zxpk'
+New-Item -ItemType Directory -Force -Path $zxpk | Out-Null
+Copy-Item (Join-Path $packsDir '*.zxpk') $zxpk
+foreach ($document in 'LICENSE.md', 'ADDITIONAL-PERMISSIONS.md') {
+    Copy-Item (Join-Path $packsRepo $document) (Join-Path $zxpk $document)
+}
+$packFiles = @(Get-ChildItem -File (Join-Path $zxpk '*.zxpk') | ForEach-Object { "zxpk\$($_.Name)" })
+if ($packFiles.Count -eq 0) { throw "package: no .zxpk in $packsDir" }
+Write-Host "package: $($packFiles.Count) hack packs from zaxnes_3dn $(git -C $packsRepo rev-parse --short HEAD)"
+
 # GPL: the corresponding source of the FCEUX fork linked into zaxnes.exe, at the commit built.
 git -C $fceux archive --format=zip --prefix=fceux-zax/ -o (Join-Path $Output 'fceux-zax-source.zip') HEAD
 if ($LASTEXITCODE -ne 0) { throw "package: git archive of the FCEUX fork failed ($LASTEXITCODE)" }
@@ -112,10 +131,11 @@ Vérification non interactive :
 "@
 Set-Content -Path (Join-Path $Output 'README.txt') -Value $readme -Encoding utf8
 
-# The folder ships the executable, the documents and profiles\README.txt, and nothing else
+# The folder ships the executable, the documents, profiles\README.txt and the packs, and nothing else
 # (portable.txt is added after these checks).
 $expected = @('zaxnes.exe', 'zax-harness.exe', 'LICENSE', 'HOWTO-RUN.md', 'ASSETS-LICENSES.md',
-    'THIRD-PARTY-NOTICES.md', 'README.txt', 'profiles\README.txt', 'fceux-zax-source.zip')
+    'THIRD-PARTY-NOTICES.md', 'README.txt', 'profiles\README.txt', 'fceux-zax-source.zip',
+    'zxpk\LICENSE.md', 'zxpk\ADDITIONAL-PERMISSIONS.md') + $packFiles
 $shipped = @(Get-ChildItem -Recurse -File $Output | ForEach-Object {
         $_.FullName.Substring($Output.Length + 1)
     })

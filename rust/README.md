@@ -28,6 +28,14 @@ are made by:
 The two Linux scripts use [cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild) to
 target glibc 2.31; each script's header lists what it needs.
 
+The hack packs (`.zxpk`) are not in this repository but in
+[zaxnes_3dn](https://github.com/nixxou/zaxnes_3dn), under their own licence. The package scripts
+take them from a clone that `ZAXNES_3DN_DIR` names: the desktop packages ship them in a `zxpk`
+folder next to the executable, the Android, web and libretro builds build them in
+(see `crates/zax-nes/build.rs`). A development build and the tests take them, like the 3D
+profiles, from `ZAXNES_3DN_DIR` or a `zaxnes_3dn` clone beside the workspace. Without packs, the
+games they are made for run without their widescreen.
+
 ### Tests
 
 ```

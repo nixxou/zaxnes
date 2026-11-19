@@ -18,6 +18,7 @@ mod nametable_mirroring;
 mod nes_bus;
 pub mod nes_colors;
 mod nes_core;
+pub mod pack_files;
 mod power_on_ram;
 pub mod ppu;
 mod region_timing;

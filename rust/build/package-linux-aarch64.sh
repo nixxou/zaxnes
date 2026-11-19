@@ -28,6 +28,12 @@ glibc=2.31
 target_dir="${CARGO_TARGET_DIR:-$rust_dir/target}"
 out_dir="$target_dir/package"
 
+# The hack packs ship as files in a zxpk folder next to the binary, taken from a clone of
+# zaxnes_3dn that ZAXNES_3DN_DIR names; none is built into the binary.
+: "${ZAXNES_3DN_DIR:?set ZAXNES_3DN_DIR to a clone of zaxnes_3dn (the hack packs)}"
+[[ -d "$ZAXNES_3DN_DIR/packs" ]] || { echo "error: no packs folder in $ZAXNES_3DN_DIR" >&2; exit 1; }
+export ZAXNES_EMBED_PACKS=none
+
 if [[ "${1:-}" == "--native" ]]; then
     (cd "$rust_dir" && cargo build --release -p zax-app --features firmware-sdl)
     binary="$target_dir/release/zaxnes"
@@ -64,11 +70,14 @@ echo "binary: max $newest, dependencies ok"
 stage="$out_dir/stage"
 port="$stage/zaxnes"
 rm -rf "$stage"
-mkdir -p "$port/licenses" "$port/profiles" "$port/roms"
+mkdir -p "$port/licenses" "$port/profiles" "$port/roms" "$port/zxpk"
 
 install -m 755 "$binary" "$port/zaxnes.aarch64"
 cp "$root_dir/LICENSE" "$root_dir/THIRD-PARTY-NOTICES.md" "$root_dir/ASSETS-LICENSES.md" \
     "$port/licenses/"
+# The hack packs, with their licence (they are not under the GPL).
+cp "$ZAXNES_3DN_DIR"/packs/*.zxpk "$ZAXNES_3DN_DIR/LICENSE.md"     "$ZAXNES_3DN_DIR/ADDITIONAL-PERMISSIONS.md" "$port/zxpk/"
+echo "package: $(ls "$port/zxpk" | grep -c '\.zxpk$') hack packs from zaxnes_3dn $(git -C "$ZAXNES_3DN_DIR" rev-parse --short HEAD)"
 # GPL: the corresponding source of the FCEUX fork linked into the binary, at the commit built.
 if [[ -n "${ZAX_FCEUX_DIR:-}" ]]; then
     git -C "$ZAX_FCEUX_DIR" archive --format=zip --prefix=fceux-zax/ \
