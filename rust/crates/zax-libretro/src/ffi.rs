@@ -243,9 +243,83 @@ static FRONTEND: Mutex<Frontend> = Mutex::new(Frontend {
     proc_address: None,
 });
 
-/// The renderer of the 3D, on the frontend's OpenGL context, and the size it draws at.
+/// The renderer of the 3D, on the frontend's OpenGL context, and the framebuffer it draws into.
 struct Gl {
     renderer: SceneRenderer,
+    gl: Rc<glow::Context>,
+    target: Option<OwnTarget>,
+}
+
+/// The core's own framebuffer: the 3D is drawn there with OpenGL's bottom-left origin, then
+/// copied upside down into the frontend's, which is declared with a top-left origin as the 2D
+/// frames are. So the 2D and the 3D reach the frontend the same way up: a shader preset needs
+/// no flip of its own for this core under `glcore` (GitHub issue #2).
+struct OwnTarget {
+    framebuffer: glow::Framebuffer,
+    colour: glow::Renderbuffer,
+    depth: glow::Renderbuffer,
+    size: (u32, u32),
+}
+
+impl OwnTarget {
+    /// A framebuffer of `width` x `height`, colour, depth and stencil; none when OpenGL refuses.
+    fn new(gl: &glow::Context, (width, height): (u32, u32)) -> Option<Self> {
+        use glow::HasContext as _;
+        let (w, h) = (
+            i32::try_from(width).unwrap_or(1),
+            i32::try_from(height).unwrap_or(1),
+        );
+        // SAFETY: OpenGL calls on the frontend's context, current during `retro_run`; every
+        // object made here is deleted by `delete` before the context goes.
+        unsafe {
+            let framebuffer = gl.create_framebuffer().ok()?;
+            let colour = gl.create_renderbuffer().ok()?;
+            let depth = gl.create_renderbuffer().ok()?;
+            gl.bind_renderbuffer(glow::RENDERBUFFER, Some(colour));
+            gl.renderbuffer_storage(glow::RENDERBUFFER, glow::RGBA8, w, h);
+            gl.bind_renderbuffer(glow::RENDERBUFFER, Some(depth));
+            gl.renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH24_STENCIL8, w, h);
+            gl.bind_renderbuffer(glow::RENDERBUFFER, None);
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+            gl.framebuffer_renderbuffer(
+                glow::FRAMEBUFFER,
+                glow::COLOR_ATTACHMENT0,
+                glow::RENDERBUFFER,
+                Some(colour),
+            );
+            gl.framebuffer_renderbuffer(
+                glow::FRAMEBUFFER,
+                glow::DEPTH_STENCIL_ATTACHMENT,
+                glow::RENDERBUFFER,
+                Some(depth),
+            );
+            let complete =
+                gl.check_framebuffer_status(glow::FRAMEBUFFER) == glow::FRAMEBUFFER_COMPLETE;
+            gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+            let target = Self {
+                framebuffer,
+                colour,
+                depth,
+                size: (width, height),
+            };
+            if complete {
+                Some(target)
+            } else {
+                target.delete(gl);
+                None
+            }
+        }
+    }
+
+    fn delete(self, gl: &glow::Context) {
+        use glow::HasContext as _;
+        // SAFETY: objects this core made on the context still current.
+        unsafe {
+            gl.delete_framebuffer(self.framebuffer);
+            gl.delete_renderbuffer(self.colour);
+            gl.delete_renderbuffer(self.depth);
+        }
+    }
 }
 
 thread_local! {
@@ -698,19 +772,58 @@ fn draw_three_d(frontend: &Frontend, core: &mut Core) -> bool {
     };
     // SAFETY: the frontend's callback, called while its context is current.
     let id = unsafe { framebuffer() };
-    let target = RenderTarget {
-        framebuffer: NonZeroU32::new(u32::try_from(id).unwrap_or(0)),
-        width: i32::try_from(width).unwrap_or(1),
-        height: i32::try_from(height).unwrap_or(1),
-    };
+    let frontend_framebuffer =
+        NonZeroU32::new(u32::try_from(id).unwrap_or(0)).map(glow::NativeFramebuffer);
     let Some(three_d) = core.three_d_mut() else {
         return false;
     };
     let drawn = GL.with(|gl| {
         let mut gl = gl.borrow_mut();
         let gl = gl.as_mut()?;
+        if gl
+            .target
+            .as_ref()
+            .is_none_or(|target| target.size != (width, height))
+        {
+            if let Some(old) = gl.target.take() {
+                old.delete(&gl.gl);
+            }
+            gl.target = OwnTarget::new(&gl.gl, (width, height));
+        }
+        let own = gl.target.as_ref()?.framebuffer;
+        let target = RenderTarget {
+            framebuffer: Some(own.0),
+            width: i32::try_from(width).unwrap_or(1),
+            height: i32::try_from(height).unwrap_or(1),
+        };
         let (scene, frame) = three_d.scene_and_frame();
-        Some(gl.renderer.render(&target, scene, &frame))
+        let result = gl.renderer.render(&target, scene, &frame);
+        let (w, h) = (target.width, target.height);
+        {
+            use glow::HasContext as _;
+            // SAFETY: OpenGL calls on the frontend's current context: the core's framebuffer
+            // copied upside down into the frontend's, which stays bound for it.
+            unsafe {
+                gl.gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(own));
+                gl.gl
+                    .bind_framebuffer(glow::DRAW_FRAMEBUFFER, frontend_framebuffer);
+                gl.gl.blit_framebuffer(
+                    0,
+                    0,
+                    w,
+                    h,
+                    0,
+                    h,
+                    w,
+                    0,
+                    glow::COLOR_BUFFER_BIT,
+                    glow::NEAREST,
+                );
+                gl.gl
+                    .bind_framebuffer(glow::FRAMEBUFFER, frontend_framebuffer);
+            }
+        }
+        Some(result)
     });
     match drawn {
         Some(Ok(())) => {}
@@ -822,11 +935,18 @@ extern "C" fn context_reset() {
     };
     // SAFETY: the frontend's loader, called with NUL-terminated names while its context is
     // current, as glow asks.
-    let gl =
-        unsafe { glow::Context::from_loader_function_cstr(|name| proc_address(name.as_ptr())) };
-    match SceneRenderer::new(Rc::new(gl), None) {
+    let gl = Rc::new(unsafe {
+        glow::Context::from_loader_function_cstr(|name| proc_address(name.as_ptr()))
+    });
+    match SceneRenderer::new(Rc::clone(&gl), None) {
         Ok(renderer) => {
-            GL.with(|gl| *gl.borrow_mut() = Some(Gl { renderer }));
+            GL.with(|slot| {
+                *slot.borrow_mut() = Some(Gl {
+                    renderer,
+                    gl,
+                    target: None,
+                });
+            });
             log(LOG_INFO, "3D renderer ready");
         }
         Err(error) => log(LOG_ERROR, &format!("3D renderer refused: {error}")),
@@ -835,7 +955,13 @@ extern "C" fn context_reset() {
 
 /// The frontend is about to destroy its context: the renderer goes first.
 extern "C" fn context_destroy() {
-    GL.with(|gl| *gl.borrow_mut() = None);
+    GL.with(|slot| {
+        if let Some(mut gl) = slot.borrow_mut().take() {
+            if let Some(target) = gl.target.take() {
+                target.delete(&gl.gl);
+            }
+        }
+    });
 }
 
 /// Asks the frontend for an OpenGL 3.3 core context, depth and stencil included.
@@ -847,7 +973,8 @@ fn request_opengl() -> bool {
         get_proc_address: None,
         depth: true,
         stencil: true,
-        bottom_left_origin: true,
+        // The core flips its 3D itself (`OwnTarget`): top-left, as its 2D frames.
+        bottom_left_origin: false,
         version_major: 3,
         version_minor: 3,
         cache_context: false,
