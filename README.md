@@ -13,8 +13,6 @@ around the level, zoom in, or go back to plain 2D at any time.
     <img src="branding/zaxnes-web-demo.webp" alt="FlappyZaxNes in 2D, 2D widescreen, then 3D widescreen - click to play Zaxnes in your browser" width="800">
   </a>
   <br>
-  <sub><b><a href="https://nixxou.github.io/zaxnes/?play=flappy">Play in your browser</a></b>: the whole emulator, compiled to WebAssembly. Bring your own ROMs; they stay in your browser.</sub>
-  <br>
   <img src="branding/web-experimental.svg" alt="Experimental, this is not fully functional yet, all settings are set to minimum, expect better performance on the executable." width="720" height="18">
 </p>
 
