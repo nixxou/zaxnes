@@ -22,7 +22,7 @@ out past the edges of the screen, show in the margins.
 | Source data (iNES header excluded) | CRC-32 `CEBD2A31` |
 | Target data | CRC-32 `86DBFACC` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | 2 KiB of code at PRG offset `$1B000`-`$1B7FF` (bank 6 from its page `$30`, zeros in the game), four hooks in the fixed bank; size and layout unchanged |
-| Patch | `rust/crates/zax-nes/patches/final-fantasy-usa-widescreen.bps`, made against the data without header |
+| Patch | `final-fantasy-usa-widescreen.bps` (built by `tools/build.py`, kept in the private sources repository, not published), made against the data without header |
 
 The ROM keeps its size and layout: a state made without the hack restores with it as it is, and
 the battery file is the same.
@@ -149,7 +149,7 @@ keeps a heavier scene smooth. Core time, power-on to the world map then 600 fram
 
 ```
 python -I tools/build.py "Final Fantasy (USA).nes" final-fantasy-usa-widescreen.bps
-python -I tools/make_doc.py <zaxnes>/rust/docs/hacks/ff1/WIDESCREEN-HACK.md
+python -I tools/make_doc.py <zaxnes_zxpksources>/docs/hacks/ff1/WIDESCREEN-HACK.md
 ```
 
 `build.py` assembles `src/wide.s` with ca65/ld65 (through WSL when they are not on the PATH) into

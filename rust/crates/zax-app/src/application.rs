@@ -2112,6 +2112,16 @@ fn open_log_file(paths: &UserDataPaths) {
             "NOT writable: settings and saves will not be kept"
         }
     ));
+    let packs = zax_nes::pack_files::report();
+    log(&format!(
+        "hack packs: {} built in, {} in '{}'",
+        packs.embedded,
+        packs.from_folder,
+        packs.folder.as_deref().map_or_else(
+            || "(no folder)".to_owned(),
+            |folder| folder.display().to_string()
+        )
+    ));
 }
 
 /// The Rust-only choices of the host's loop: forced catch-up, rewind, emulation thread and

@@ -71,10 +71,9 @@ what those versions added: reflections, bend, the new camera and Lua features.
 
 ### Profiles made for Zaxnes
 
-[zaxnes_3dn](https://github.com/nixxou/zaxnes_3dn) holds 3D profiles made for Zaxnes itself:
-*Faxanadu* and *Metal Force* so far, with more to come. Every package carries them and puts them
-in your profiles at the first start. They have their own licence (CC BY-NC-ND 4.0) and aren't part
-of the Zaxnes sources.
+[`rust/profiles/`](rust/profiles) holds 3D profiles made for Zaxnes itself: *Faxanadu* and
+*Metal Force* so far, with more to come. Every package carries them and puts them in your profiles
+at the first start.
 
 Players also share free profiles in the
 [Profile Repository](https://itch.io/board/872690/profile-repository) of the 3dSen Maker forum.

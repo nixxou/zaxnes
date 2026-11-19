@@ -4,6 +4,7 @@
 
 use crate::overscan::Overscan;
 use zax_nes::builtin_patches::HackOption;
+use zax_nes::input::{ControllerPortType, ZapperPosition};
 use zax_nes::ppu::SpriteLimit;
 use zax_nes::{NesCore, NesRegion, RegionTiming};
 
@@ -19,6 +20,8 @@ pub const SMOOTH_SCALE: u32 = 4;
 /// The widest picture: the NES's 256 pixels and the widest margins on each side, at the scale
 /// of the 120 Hz scrolling.
 pub const MAX_WIDTH: u32 = (256 + 2 * zax_nes::wide::MAX_MARGIN.unsigned_abs()) * SMOOTH_SCALE;
+/// The widest the 3D is drawn at (the frontend's `MAX_3D`): a wider shape loses height.
+pub const MAX_3D_WIDTH: u32 = 3840;
 /// The tallest picture: 240 lines and the tallest margins above and below.
 pub const MAX_HEIGHT: u32 = 240 + 2 * zax_nes::wide::MAX_VERTICAL_MARGIN.unsigned_abs();
 
@@ -55,8 +58,16 @@ pub struct Options {
     pub three_d: bool,
     /// The size the 3D is drawn at (at the next load).
     pub resolution: (u32, u32),
+    /// The shape of the 3D picture (its width follows from the resolution's height).
+    pub three_d_aspect: ThreeDAspect,
     /// The render settings of the 3D (at once).
     pub render: crate::three_d::RenderOptions,
+    /// The console's settings: core variant and hardware (most at the next load).
+    pub machine: crate::machine::Machine,
+    /// The picture's settings: television, composite signal, emphasis in 3D.
+    pub picture: crate::picture::Picture,
+    /// A crosshair where a Zapper is aimed (2D).
+    pub zapper_crosshair: bool,
     /// The application's optimised Lua paths, `unsafe` code (at the next load).
     pub optimized_lua: bool,
     /// `video.widescreen_extra`: the share of the width, in percent, the margins grow by beyond
@@ -92,7 +103,11 @@ impl Default for Options {
             hacks: Vec::new(),
             three_d: true,
             resolution: (1280, 720),
+            three_d_aspect: ThreeDAspect::Wide,
             render: crate::three_d::RenderOptions::default(),
+            machine: crate::machine::Machine::default(),
+            picture: crate::picture::Picture::default(),
+            zapper_crosshair: true,
             optimized_lua: false,
             extra_percent: 0,
             strict_edges: false,
@@ -113,6 +128,18 @@ pub struct Changed {
     pub timing: bool,
     /// The game's hack options changed (the widescreen switched): declare them again.
     pub hack_options: bool,
+}
+
+/// The shape of the 3D picture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ThreeDAspect {
+    /// 16:9, as the core has always drawn it.
+    #[default]
+    Wide,
+    /// 4:3, for bezels made for it and CRTs.
+    FourThree,
+    /// The widescreen ratio for a game it widens, 4:3 for the others.
+    Widescreen,
 }
 
 /// The game in play.
@@ -144,6 +171,18 @@ pub struct Core {
     second_sound: Vec<i16>,
     /// The rows of the picture of the frame just run (120 Hz).
     rows: u32,
+    /// The composite signal's decoder, and the picture it decodes (RGB).
+    composite: zax_nes::composite::RowDecoder,
+    rgb: Vec<u8>,
+    /// Which ports have a Zapper plugged in.
+    zappers: [bool; 2],
+    /// Where each Zapper's pointer is on the 3D picture, 0 to 1 across and down.
+    pointers: [Option<(f32, f32)>; 2],
+    /// Where each Zapper is aimed, which the console asks once a frame.
+    aim: std::sync::Arc<std::sync::Mutex<[ZapperPosition; 2]>>,
+    /// The last 2D picture shown: its left and top in the full picture, its size, and the full
+    /// picture's width and height (the aim of a Zapper is read on it).
+    shown_area: (u32, u32, u32, u32, u32, u32),
 }
 
 impl Core {
@@ -154,6 +193,7 @@ impl Core {
     /// The reason the ROM is refused.
     pub fn load(image: &[u8], name: &str, options: Options) -> Result<Self, String> {
         let mut nes = NesCore::new();
+        options.machine.apply_before_load(&mut nes);
         nes.set_builtin_patches(options.widescreen);
         nes.set_advanced_patches(options.advanced);
         if options.force_patch {
@@ -193,7 +233,21 @@ impl Core {
             half: None,
             second_sound: Vec::new(),
             rows: 240,
+            composite: zax_nes::composite::RowDecoder::default(),
+            rgb: Vec::new(),
+            zappers: [false; 2],
+            pointers: [None; 2],
+            aim: std::sync::Arc::new(std::sync::Mutex::new([ZapperPosition::OFF_SCREEN; 2])),
+            shown_area: (0, 0, 256, 240, 256, 240),
         };
+        let aim = std::sync::Arc::clone(&core.aim);
+        core.nes
+            .set_zapper_position_source(Some(Box::new(move |port| {
+                aim.lock()
+                    .ok()
+                    .and_then(|aims| aims.get(port).copied())
+                    .unwrap_or(ZapperPosition::OFF_SCREEN)
+            })));
         core.options.widescreen = options.widescreen;
         core.options.advanced = options.advanced;
         core.set_options(options);
@@ -217,7 +271,7 @@ impl Core {
             &mut self.nes,
             profile,
             tiles,
-            self.options.render,
+            &self.options.render,
             self.options.optimized_lua,
             log,
         )?);
@@ -267,11 +321,20 @@ impl Core {
         {
             changed.hack_options = self.switch_patch(options.widescreen, options.advanced);
         }
+        if options.machine != self.options.machine {
+            options.machine.apply_live(&mut self.nes);
+        }
         zax_engine3d::palette::select_nes_palette(options.palette);
+        zax_engine3d::palette::set_tv_look(options.picture.tv_look());
+        if let Some((decoder, _)) = options.picture.composite() {
+            if self.composite.options() != &decoder {
+                self.composite.set_options(decoder);
+            }
+        }
         self.nes.set_sprite_limit(options.sprite_limit);
         if options.render != self.options.render {
             if let Some(three_d) = self.three_d.as_mut() {
-                three_d.set_render(&mut self.nes, options.render);
+                three_d.set_render(&mut self.nes, &options.render);
             }
         }
         let before = (self.margin(), self.options.overscan);
@@ -321,8 +384,16 @@ impl Core {
         let cut = self.overscan().in_force(i32::try_from(margin).unwrap_or(0));
         let side = |pixels: i32| u32::try_from(pixels.clamp(0, 64)).unwrap_or(0);
         // As `Overscan::leave_out`: a side cut takes the vertical margin past it along.
-        let top = if cut.top > 0 { margin_y + side(cut.top) } else { 0 };
-        let bottom = if cut.bottom > 0 { margin_y + side(cut.bottom) } else { 0 };
+        let top = if cut.top > 0 {
+            margin_y + side(cut.top)
+        } else {
+            0
+        };
+        let bottom = if cut.bottom > 0 {
+            margin_y + side(cut.bottom)
+        } else {
+            0
+        };
         let (left, right) = (side(cut.left), side(cut.right));
         (
             left,
@@ -450,6 +521,13 @@ impl Core {
         }
         self.nes.run_frame(input);
         if let Some(three_d) = self.three_d.as_mut() {
+            let emphasis = if self.options.picture.emphasis_in_three_d() {
+                self.nes.wide_emphasis_into(&mut self.emphasis);
+                crate::picture::common_emphasis(&self.emphasis)
+            } else {
+                0
+            };
+            zax_engine3d::palette::set_scene_emphasis(emphasis);
             three_d.convert(&mut self.nes);
         } else {
             self.make_picture();
@@ -498,14 +576,11 @@ impl Core {
         let full_width = (pixels / full_height).max(1);
         let (x0, y0, width, height) = self.shown(full_width, full_height);
         let margin_y = full_height.saturating_sub(240) / 2;
-        let band = self
-            .nes
-            .picture_shift()
-            .map_or(0..0, |(_, start, end)| {
-                let start = u32::try_from(start).unwrap_or(0) + margin_y;
-                let end = u32::try_from(end).unwrap_or(0) + margin_y;
-                start..end
-            });
+        let band = self.nes.picture_shift().map_or(0..0, |(_, start, end)| {
+            let start = u32::try_from(start).unwrap_or(0) + margin_y;
+            let end = u32::try_from(end).unwrap_or(0) + margin_y;
+            start..end
+        });
         #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // A few pixels.
         let quarters = (shift * SMOOTH_SCALE as f32).round() as i64;
         let colours = Colours::of(&self.emphasis, self.indices.len());
@@ -532,7 +607,12 @@ impl Core {
                     .and_then(|overlay| overlay.get(x0 + out / scale))
                     .copied()
                     .filter(|index| *index != 0xFF);
-                let pixel = start + if still.is_some() { x0 + out / scale } else { column };
+                let pixel = start
+                    + if still.is_some() {
+                        x0 + out / scale
+                    } else {
+                        column
+                    };
                 let index = still.unwrap_or(row[column]);
                 self.frame.push(colours.get(index, &self.emphasis, pixel));
             }
@@ -549,9 +629,39 @@ impl Core {
         self.height = height;
         self.width = width;
         self.framed = true;
-        let colours = Colours::of(&self.emphasis, self.indices.len());
+        self.shown_area = (x, y, width, height, full_width, rows);
         self.frame.clear();
         let (x, width, full_width) = (x as usize, width as usize, full_width as usize);
+        if let Some((_, frozen)) = self.options.picture.composite() {
+            let phase = self.nes.video_phase();
+            // Frozen: every frame at the same phase (the 2C07's does not crawl anyway).
+            let phase = if frozen {
+                phase & zax_nes::composite::PAL_VIDEO
+            } else {
+                phase
+            };
+            crate::picture::decode_composite(
+                &mut self.composite,
+                &self.indices,
+                &self.emphasis,
+                (full_width, rows as usize),
+                phase,
+                &mut self.rgb,
+            );
+            for row in (y as usize..).take(height as usize) {
+                let end = (x + width).min(full_width);
+                let start = (row * full_width + x) * 3;
+                let stop = (row * full_width + end) * 3;
+                if let Some(pixels) = self.rgb.get(start..stop) {
+                    self.frame.extend(pixels.chunks_exact(3).map(|rgb| {
+                        (u32::from(rgb[0]) << 16) | (u32::from(rgb[1]) << 8) | u32::from(rgb[2])
+                    }));
+                }
+            }
+            self.draw_crosshairs();
+            return;
+        }
+        let colours = Colours::of(&self.emphasis, self.indices.len());
         for (number, row) in self
             .indices
             .chunks(full_width)
@@ -568,6 +678,7 @@ impl Core {
                     .map(|(&index, column)| colours.get(index, &self.emphasis, start + column)),
             );
         }
+        self.draw_crosshairs();
     }
 
     fn make_sound(&mut self) {
@@ -614,6 +725,38 @@ impl Core {
         new
     }
 
+    /// The size the 3D is drawn at: the resolution's height, the width its shape gives.
+    #[must_use]
+    pub fn three_d_size(&self) -> (u32, u32) {
+        let height = self.options.resolution.1.max(1);
+        let ratio = match self.options.three_d_aspect {
+            ThreeDAspect::Wide => 16.0 / 9.0,
+            ThreeDAspect::Widescreen if self.margin().0 > 0 => {
+                self.options.ratio.clamp(4.0 / 3.0, 32.0 / 9.0)
+            }
+            // 4:3, and the widescreen ratio of a game it does not widen.
+            ThreeDAspect::FourThree | ThreeDAspect::Widescreen => 4.0 / 3.0,
+        };
+        // An even width, as video sizes are.
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss
+        )] // Screen sizes.
+        let width = ((height as f32 * ratio / 2.0).round() as u32 * 2).max(2);
+        // Within the widest the frontend was told (3840): a wider shape loses height.
+        if width > MAX_3D_WIDTH {
+            #[allow(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                clippy::cast_precision_loss
+            )] // Screen sizes.
+            let height = ((MAX_3D_WIDTH as f32 / ratio / 2.0).round() as u32 * 2).max(2);
+            return (MAX_3D_WIDTH, height);
+        }
+        (width, height)
+    }
+
     /// The width over the height of the picture as shown: square pixels, as the application
     /// draws its 2D picture (`Scene::picture_aspect`), which is what the widescreen ratios are
     /// computed for (16:9 is 427 x 240, 432 in whole tiles).
@@ -653,6 +796,131 @@ impl Core {
             rate * 2.0
         } else {
             rate
+        }
+    }
+
+    /// Plugs a Zapper into `port` (0 or 1), or a pad when `on` is false.
+    pub fn set_zapper(&mut self, port: usize, on: bool) {
+        let kind = if on {
+            ControllerPortType::Zapper
+        } else {
+            ControllerPortType::Controller
+        };
+        if port < 2 && self.nes.set_port_type(port, kind).is_ok() {
+            self.zappers[port] = on;
+        }
+    }
+
+    /// Which ports have a Zapper plugged in.
+    #[must_use]
+    pub const fn zappers(&self) -> [bool; 2] {
+        self.zappers
+    }
+
+    /// Aims the Zapper of `port` at `point` of the picture shown, 0 to 1 across and down, or
+    /// away from the screen. In 3D the aim goes through the camera to the picture's plane, as
+    /// in the application.
+    pub fn aim_zapper(&mut self, port: usize, point: Option<(f32, f32)>) {
+        let (left, top, width, height, full_width, rows) = self.shown_area;
+        let size = self.three_d_size();
+        if let Some(pointer) = self.pointers.get_mut(port) {
+            *pointer = point;
+        }
+        let position = match point {
+            Some(point) if self.three_d.is_some() => self
+                .three_d
+                .as_ref()
+                .and_then(|three_d| three_d.aim(point, size))
+                .unwrap_or(ZapperPosition::OFF_SCREEN),
+            Some((x, y)) => {
+                let margin = full_width.saturating_sub(256) / 2;
+                let margin_y = rows.saturating_sub(240) / 2;
+                #[allow(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_precision_loss,
+                    clippy::cast_possible_wrap
+                )] // Screen pixels.
+                let to_pixel = |along: f32, size: u32, start: u32, origin: u32| {
+                    (along.clamp(0.0, 1.0) * size as f32).floor() as i32 + start as i32
+                        - origin as i32
+                };
+                ZapperPosition::new(
+                    to_pixel(x, width, left, margin),
+                    to_pixel(y, height, top, margin_y),
+                )
+            }
+            _ => ZapperPosition::OFF_SCREEN,
+        };
+        if let Ok(mut aims) = self.aim.lock() {
+            if let Some(aim) = aims.get_mut(port) {
+                *aim = position;
+            }
+        }
+    }
+
+    /// Where to draw a crosshair on the 3D picture: each Zapper's pointer, 0 to 1 across and
+    /// down; none without the option or outside 3D.
+    #[must_use]
+    pub fn three_d_crosshairs(&self) -> Vec<(f32, f32)> {
+        if !self.options.zapper_crosshair || self.three_d.is_none() {
+            return Vec::new();
+        }
+        (0..2)
+            .filter(|&port| self.zappers[port])
+            .filter_map(|port| self.pointers[port])
+            .collect()
+    }
+
+    /// Draws a crosshair where each Zapper is aimed, on the 2D picture just made.
+    fn draw_crosshairs(&mut self) {
+        if !self.options.zapper_crosshair || self.zappers == [false; 2] {
+            return;
+        }
+        let (left, top, width, height, full_width, rows) = self.shown_area;
+        let margin = i32::try_from(full_width.saturating_sub(256) / 2).unwrap_or(0);
+        let margin_y = i32::try_from(rows.saturating_sub(240) / 2).unwrap_or(0);
+        let aims = self
+            .aim
+            .lock()
+            .map_or([ZapperPosition::OFF_SCREEN; 2], |aims| *aims);
+        let (w, h) = (
+            i32::try_from(width).unwrap_or(0),
+            i32::try_from(height).unwrap_or(0),
+        );
+        for (port, aim) in aims.iter().enumerate() {
+            if !self.zappers[port] || !aim.is_on_screen() {
+                continue;
+            }
+            let x = aim.x + margin - i32::try_from(left).unwrap_or(0);
+            let y = aim.y + margin_y - i32::try_from(top).unwrap_or(0);
+            // A white cross with a black edge, 4 pixels each way, the centre left clear.
+            for (dx, dy) in (-5_i32..=5).flat_map(|d| [(d, 0), (0, d)]) {
+                if dx.abs() + dy.abs() < 2 {
+                    continue;
+                }
+                for (ex, ey, colour) in [
+                    (1_i32, 0_i32, 0x0000_0000_u32),
+                    (-1, 0, 0x0000_0000),
+                    (0, 1, 0x0000_0000),
+                    (0, -1, 0x0000_0000),
+                    (0, 0, 0x00FF_FFFF),
+                ] {
+                    let edge = (ex, ey) != (0, 0);
+                    if edge && (dx.abs() == 5 || dy.abs() == 5) {
+                        continue;
+                    }
+                    let (px, py) = (x + dx + ex, y + dy + ey);
+                    if px < 0 || py < 0 || px >= w || py >= h {
+                        continue;
+                    }
+                    let index = usize::try_from(py * w + px).unwrap_or(usize::MAX);
+                    if let Some(pixel) = self.frame.get_mut(index) {
+                        if !edge || *pixel != 0x00FF_FFFF {
+                            *pixel = colour;
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -766,7 +1034,10 @@ impl Colours {
                 .map(|entry| {
                     #[allow(clippy::cast_possible_truncation)] // 0-7
                     let bits = (entry >> 6) as u8;
-                    pack(zax_engine3d::palette::nes_color_emphasized(entry & 0x3F, bits))
+                    pack(zax_engine3d::palette::nes_color_emphasized(
+                        entry & 0x3F,
+                        bits,
+                    ))
                 })
                 .collect(),
         )

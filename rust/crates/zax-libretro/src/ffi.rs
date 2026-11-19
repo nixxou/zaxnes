@@ -36,10 +36,25 @@ const ENVIRONMENT_GET_VARIABLE_UPDATE: c_uint = 17;
 const ENVIRONMENT_GET_LOG_INTERFACE: c_uint = 27;
 const ENVIRONMENT_SET_SYSTEM_AV_INFO: c_uint = 32;
 const ENVIRONMENT_SET_GEOMETRY: c_uint = 37;
+const ENVIRONMENT_GET_CORE_OPTIONS_VERSION: c_uint = 52;
+const ENVIRONMENT_SET_CORE_OPTIONS_V2: c_uint = 67;
+/// `RETRO_NUM_CORE_OPTION_VALUES_MAX`: the values of an option, its closing null pair included.
+const OPTION_VALUES_MAX: usize = 128;
 
 const PIXEL_FORMAT_XRGB8888: c_uint = 1;
 const HW_CONTEXT_OPENGL_CORE: c_uint = 3;
 const DEVICE_JOYPAD: c_uint = 1;
+/// `RETRO_DEVICE_LIGHTGUN`, the device type of the Zapper.
+const DEVICE_LIGHTGUN: c_uint = 4;
+const ENVIRONMENT_SET_CONTROLLER_INFO: c_uint = 35;
+const LIGHTGUN_TRIGGER: c_uint = 2;
+const LIGHTGUN_SCREEN_X: c_uint = 13;
+const LIGHTGUN_SCREEN_Y: c_uint = 14;
+const LIGHTGUN_IS_OFFSCREEN: c_uint = 15;
+const LIGHTGUN_RELOAD: c_uint = 16;
+/// What a Zapper port reads while its trigger is released, and held.
+const ZAPPER_RELEASED: u8 = 0x10;
+const ZAPPER_PRESSED: u8 = 0x00;
 const DEVICE_ANALOG: c_uint = 5;
 const ANALOG_RIGHT: c_uint = 1;
 /// The `RetroPad`'s west and north buttons, and its shoulders.
@@ -79,7 +94,12 @@ const CAMERA: [(c_uint, c_uint, c_uint, &CStr); 7] = [
     (DEVICE_JOYPAD, 0, JOYPAD_L, c"Camera: farther"),
     (DEVICE_JOYPAD, 0, JOYPAD_R, c"Camera: nearer"),
     (DEVICE_JOYPAD, 0, JOYPAD_Y, c"2D / 3D (hold: 2D head on)"),
-    (DEVICE_JOYPAD, 0, JOYPAD_L2, c"Camera: put back (hold: keep)"),
+    (
+        DEVICE_JOYPAD,
+        0,
+        JOYPAD_L2,
+        c"Camera: put back (hold: keep)",
+    ),
     (DEVICE_JOYPAD, 0, JOYPAD_X, c"Default view"),
 ];
 
@@ -143,6 +163,56 @@ struct Variable {
     value: *const c_char,
 }
 
+/// `struct retro_core_option_value`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct OptionValue {
+    value: *const c_char,
+    label: *const c_char,
+}
+
+/// `struct retro_core_option_v2_category`.
+#[repr(C)]
+struct OptionCategory {
+    key: *const c_char,
+    desc: *const c_char,
+    info: *const c_char,
+}
+
+/// `struct retro_core_option_v2_definition`.
+#[repr(C)]
+struct OptionDefinition {
+    key: *const c_char,
+    desc: *const c_char,
+    desc_categorized: *const c_char,
+    info: *const c_char,
+    info_categorized: *const c_char,
+    category_key: *const c_char,
+    values: [OptionValue; OPTION_VALUES_MAX],
+    default_value: *const c_char,
+}
+
+/// `struct retro_core_options_v2`.
+#[repr(C)]
+struct OptionsV2 {
+    categories: *mut OptionCategory,
+    definitions: *mut OptionDefinition,
+}
+
+/// `struct retro_controller_description`.
+#[repr(C)]
+struct ControllerDescription {
+    desc: *const c_char,
+    id: c_uint,
+}
+
+/// `struct retro_controller_info`.
+#[repr(C)]
+struct ControllerInfo {
+    types: *const ControllerDescription,
+    num_types: c_uint,
+}
+
 #[repr(C)]
 struct InputDescriptor {
     port: c_uint,
@@ -198,9 +268,83 @@ static FRONTEND: Mutex<Frontend> = Mutex::new(Frontend {
     proc_address: None,
 });
 
-/// The renderer of the 3D, on the frontend's OpenGL context, and the size it draws at.
+/// The renderer of the 3D, on the frontend's OpenGL context, and the framebuffer it draws into.
 struct Gl {
     renderer: SceneRenderer,
+    context: Rc<glow::Context>,
+    target: Option<OwnTarget>,
+}
+
+/// The core's own framebuffer: the 3D is drawn there with OpenGL's bottom-left origin, then
+/// copied upside down into the frontend's, which is declared with a top-left origin as the 2D
+/// frames are. So the 2D and the 3D reach the frontend the same way up: a shader preset needs
+/// no flip of its own for this core under `glcore` (GitHub issue #2).
+struct OwnTarget {
+    framebuffer: glow::Framebuffer,
+    colour: glow::Renderbuffer,
+    depth: glow::Renderbuffer,
+    size: (u32, u32),
+}
+
+impl OwnTarget {
+    /// A framebuffer of `width` x `height`, colour, depth and stencil; none when OpenGL refuses.
+    fn new(gl: &glow::Context, (width, height): (u32, u32)) -> Option<Self> {
+        use glow::HasContext as _;
+        let (w, h) = (
+            i32::try_from(width).unwrap_or(1),
+            i32::try_from(height).unwrap_or(1),
+        );
+        // SAFETY: OpenGL calls on the frontend's context, current during `retro_run`; every
+        // object made here is deleted by `delete` before the context goes.
+        unsafe {
+            let framebuffer = gl.create_framebuffer().ok()?;
+            let colour = gl.create_renderbuffer().ok()?;
+            let depth = gl.create_renderbuffer().ok()?;
+            gl.bind_renderbuffer(glow::RENDERBUFFER, Some(colour));
+            gl.renderbuffer_storage(glow::RENDERBUFFER, glow::RGBA8, w, h);
+            gl.bind_renderbuffer(glow::RENDERBUFFER, Some(depth));
+            gl.renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH24_STENCIL8, w, h);
+            gl.bind_renderbuffer(glow::RENDERBUFFER, None);
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+            gl.framebuffer_renderbuffer(
+                glow::FRAMEBUFFER,
+                glow::COLOR_ATTACHMENT0,
+                glow::RENDERBUFFER,
+                Some(colour),
+            );
+            gl.framebuffer_renderbuffer(
+                glow::FRAMEBUFFER,
+                glow::DEPTH_STENCIL_ATTACHMENT,
+                glow::RENDERBUFFER,
+                Some(depth),
+            );
+            let complete =
+                gl.check_framebuffer_status(glow::FRAMEBUFFER) == glow::FRAMEBUFFER_COMPLETE;
+            gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+            let target = Self {
+                framebuffer,
+                colour,
+                depth,
+                size: (width, height),
+            };
+            if complete {
+                Some(target)
+            } else {
+                target.delete(gl);
+                None
+            }
+        }
+    }
+
+    fn delete(self, gl: &glow::Context) {
+        use glow::HasContext as _;
+        // SAFETY: objects this core made on the context still current.
+        unsafe {
+            gl.delete_framebuffer(self.framebuffer);
+            gl.delete_renderbuffer(self.colour);
+            gl.delete_renderbuffer(self.depth);
+        }
+    }
 }
 
 thread_local! {
@@ -209,6 +353,80 @@ thread_local! {
     static GAME: RefCell<Option<Box<Core>>> = const { RefCell::new(None) };
     /// The 3D renderer, from the frontend's `context_reset` to its `context_destroy`.
     static GL: RefCell<Option<Gl>> = const { RefCell::new(None) };
+}
+
+/// The device the frontend plugged into each port, kept for a game loaded after.
+static PORT_DEVICES: Mutex<[c_uint; 2]> = Mutex::new([DEVICE_JOYPAD; 2]);
+
+/// The device types a port offers. The frontend keeps a pointer to them: static.
+struct PortTypes([ControllerDescription; 2]);
+// SAFETY: read-only data, pointers to static C strings.
+unsafe impl Sync for PortTypes {}
+static PORT_TYPES: PortTypes = PortTypes([
+    ControllerDescription {
+        desc: c"NES pad".as_ptr(),
+        id: DEVICE_JOYPAD,
+    },
+    ControllerDescription {
+        desc: c"Zapper".as_ptr(),
+        id: DEVICE_LIGHTGUN,
+    },
+]);
+
+/// Declares the two ports' devices: a pad, or the Zapper.
+fn declare_controllers() {
+    let port = || ControllerInfo {
+        types: PORT_TYPES.0.as_ptr(),
+        num_types: 2,
+    };
+    let mut ports = [
+        port(),
+        port(),
+        ControllerInfo {
+            types: std::ptr::null(),
+            num_types: 0,
+        },
+    ];
+    // The data is the array itself, ended by an empty entry; the frontend copies it (but not
+    // the types it points to).
+    if let Some(first) = ports.first_mut() {
+        environment(ENVIRONMENT_SET_CONTROLLER_INFO, first);
+    }
+}
+
+/// Plugs into `core` the devices the frontend chose.
+fn plug_devices(core: &mut Core) {
+    let devices = *PORT_DEVICES.lock().unwrap_or_else(PoisonError::into_inner);
+    for (port, device) in devices.iter().enumerate() {
+        core.set_zapper(port, *device == DEVICE_LIGHTGUN);
+    }
+}
+
+/// Reads the light guns of the Zapper ports and aims them; their trigger goes in the input
+/// word, as the console reads it.
+fn aim_zappers(frontend: &Frontend, core: &mut Core, word: &mut u16) {
+    for (port, plugged) in core.zappers().into_iter().enumerate() {
+        if !plugged {
+            continue;
+        }
+        let index = c_uint::try_from(port).unwrap_or(0);
+        let gun = |id| pressed(frontend, index, DEVICE_LIGHTGUN, 0, id);
+        let reload = gun(LIGHTGUN_RELOAD) != 0;
+        let point = if reload || gun(LIGHTGUN_IS_OFFSCREEN) != 0 {
+            None
+        } else {
+            let along = |value: i16| (f32::from(value) + 32767.0) / 65534.0;
+            Some((along(gun(LIGHTGUN_SCREEN_X)), along(gun(LIGHTGUN_SCREEN_Y))))
+        };
+        core.aim_zapper(port, point);
+        let byte = if reload || gun(LIGHTGUN_TRIGGER) != 0 {
+            ZAPPER_PRESSED
+        } else {
+            ZAPPER_RELEASED
+        };
+        let shift = port * 8;
+        *word = (*word & !(0xFF << shift)) | (u16::from(byte) << shift);
+    }
 }
 
 fn frontend() -> Frontend {
@@ -306,11 +524,132 @@ fn system_directory() -> Option<PathBuf> {
     Some(PathBuf::from(folder.to_string_lossy().into_owned()))
 }
 
-/// Declares the core options, the game's hack options with them.
+/// Declares the core options, the game's hack options with them: in their submenus when the
+/// frontend knows the options of version 2, else as the flat list of the first API.
 fn declare_options(hacks: &[zax_nes::builtin_patches::HackOption]) {
-    let declared: Vec<(CString, CString)> = options::declarations(hacks)
-        .into_iter()
-        .filter_map(|(key, text)| Some((CString::new(key).ok()?, CString::new(text).ok()?)))
+    let list = options::declarations(hacks);
+    let mut version: c_uint = 0;
+    if environment(ENVIRONMENT_GET_CORE_OPTIONS_VERSION, &mut version)
+        && version >= 2
+        && declare_options_v2(&list)
+    {
+        return;
+    }
+    declare_variables(&list);
+}
+
+/// A C string of `text`, empty when it holds a NUL.
+fn c_text(text: &str) -> CString {
+    CString::new(text).unwrap_or_default()
+}
+
+/// The strings of one option: key, name, name in its submenu, explanation, submenu, default;
+/// then each value with its label.
+type OptionTexts = ([CString; 6], Vec<(CString, Option<CString>)>);
+
+/// `SET_CORE_OPTIONS_V2`: the submenus and the options with their explanations. The frontend
+/// copies everything during the call, so the strings only live as long as it.
+fn declare_options_v2(list: &[options::Declaration]) -> bool {
+    let null = std::ptr::null::<c_char>();
+    let category_texts: Vec<[CString; 3]> = options::CATEGORIES
+        .iter()
+        .map(|category| {
+            [
+                c_text(category.key),
+                c_text(category.label),
+                c_text(category.info),
+            ]
+        })
+        .collect();
+    let mut categories: Vec<OptionCategory> = category_texts
+        .iter()
+        .map(|[key, desc, info]| OptionCategory {
+            key: key.as_ptr(),
+            desc: desc.as_ptr(),
+            info: info.as_ptr(),
+        })
+        .collect();
+    categories.push(OptionCategory {
+        key: null,
+        desc: null,
+        info: null,
+    });
+    // Every string of the options, kept until the call is over.
+    let texts: Vec<OptionTexts> = list
+        .iter()
+        .map(|option| {
+            (
+                [
+                    c_text(&option.key),
+                    c_text(&option.label),
+                    c_text(&option.label_in_category),
+                    c_text(&option.info),
+                    c_text(option.category),
+                    c_text(option.default_value()),
+                ],
+                option
+                    .values
+                    .iter()
+                    .take(OPTION_VALUES_MAX - 1)
+                    .map(|(value, label)| (c_text(value), label.as_deref().map(c_text)))
+                    .collect(),
+            )
+        })
+        .collect();
+    let empty = OptionValue {
+        value: null,
+        label: null,
+    };
+    let mut definitions: Vec<OptionDefinition> = texts
+        .iter()
+        .map(
+            |([key, desc, in_category, info, category, default], values)| {
+                let mut slots = [empty; OPTION_VALUES_MAX];
+                for (slot, (value, label)) in slots.iter_mut().zip(values) {
+                    *slot = OptionValue {
+                        value: value.as_ptr(),
+                        label: label.as_ref().map_or(null, |label| label.as_ptr()),
+                    };
+                }
+                OptionDefinition {
+                    key: key.as_ptr(),
+                    desc: desc.as_ptr(),
+                    desc_categorized: in_category.as_ptr(),
+                    info: info.as_ptr(),
+                    info_categorized: null,
+                    category_key: if category.is_empty() {
+                        null
+                    } else {
+                        category.as_ptr()
+                    },
+                    values: slots,
+                    default_value: default.as_ptr(),
+                }
+            },
+        )
+        .collect();
+    definitions.push(OptionDefinition {
+        key: null,
+        desc: null,
+        desc_categorized: null,
+        info: null,
+        info_categorized: null,
+        category_key: null,
+        values: [empty; OPTION_VALUES_MAX],
+        default_value: null,
+    });
+    let mut options = OptionsV2 {
+        categories: categories.as_mut_ptr(),
+        definitions: definitions.as_mut_ptr(),
+    };
+    environment(ENVIRONMENT_SET_CORE_OPTIONS_V2, &mut options)
+}
+
+/// `SET_VARIABLES`: the flat list of the first API, `"Name; default|other|..."`.
+fn declare_variables(list: &[options::Declaration]) {
+    let declared: Vec<(CString, CString)> = list
+        .iter()
+        .map(|option| (c_text(&option.key), c_text(&option.legacy())))
         .collect();
     let mut variables: Vec<Variable> = declared
         .iter()
@@ -345,7 +684,7 @@ fn av_info(core: Option<&Core>) -> SystemAvInfo {
         (256, 240, (MAX_WIDTH, MAX_HEIGHT), 4.0 / 3.0, 60.098_8),
         |core| {
             if core.is_three_d() {
-                let (width, height) = core.options().resolution;
+                let (width, height) = core.three_d_size();
                 #[allow(clippy::cast_precision_loss)] // Screen sizes.
                 let aspect = width as f32 / height as f32;
                 (width, height, MAX_3D, aspect, core.frames_per_second())
@@ -390,6 +729,7 @@ pub extern "C" fn retro_set_environment(callback: Option<EnvironmentFn>) {
         .flatten();
     set_frontend(|frontend| frontend.log = log);
     declare_options(&[]);
+    declare_controllers();
 }
 
 #[no_mangle]
@@ -453,7 +793,19 @@ pub unsafe extern "C" fn retro_get_system_av_info(info: *mut SystemAvInfo) {
 }
 
 #[no_mangle]
-pub extern "C" fn retro_set_controller_port_device(_port: c_uint, _device: c_uint) {}
+pub extern "C" fn retro_set_controller_port_device(port: c_uint, device: c_uint) {
+    let Ok(port) = usize::try_from(port) else {
+        return;
+    };
+    if let Some(slot) = PORT_DEVICES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get_mut(port)
+    {
+        *slot = device;
+    }
+    with_game(plug_devices);
+}
 
 #[no_mangle]
 pub extern "C" fn retro_reset() {
@@ -526,25 +878,67 @@ fn steer(frontend: &Frontend, core: &mut Core, seconds: f32) {
 /// Draws the 3D into the frontend's framebuffer and hands it over; false when there is no
 /// renderer yet (the frontend has not reset the context).
 fn draw_three_d(frontend: &Frontend, core: &mut Core) -> bool {
-    let (width, height) = core.options().resolution;
+    let (width, height) = core.three_d_size();
     let Some(framebuffer) = frontend.framebuffer else {
         return false;
     };
     // SAFETY: the frontend's callback, called while its context is current.
     let id = unsafe { framebuffer() };
-    let target = RenderTarget {
-        framebuffer: NonZeroU32::new(u32::try_from(id).unwrap_or(0)),
-        width: i32::try_from(width).unwrap_or(1),
-        height: i32::try_from(height).unwrap_or(1),
-    };
+    let frontend_framebuffer =
+        NonZeroU32::new(u32::try_from(id).unwrap_or(0)).map(glow::NativeFramebuffer);
+    let crosshairs = core.three_d_crosshairs();
     let Some(three_d) = core.three_d_mut() else {
         return false;
     };
     let drawn = GL.with(|gl| {
         let mut gl = gl.borrow_mut();
         let gl = gl.as_mut()?;
+        if gl
+            .target
+            .as_ref()
+            .is_none_or(|target| target.size != (width, height))
+        {
+            if let Some(old) = gl.target.take() {
+                old.delete(&gl.context);
+            }
+            gl.target = OwnTarget::new(&gl.context, (width, height));
+        }
+        let own = gl.target.as_ref()?.framebuffer;
+        let target = RenderTarget {
+            framebuffer: Some(own.0),
+            width: i32::try_from(width).unwrap_or(1),
+            height: i32::try_from(height).unwrap_or(1),
+        };
         let (scene, frame) = three_d.scene_and_frame();
-        Some(gl.renderer.render(&target, scene, &frame))
+        let result = gl.renderer.render(&target, scene, &frame);
+        let (w, h) = (target.width, target.height);
+        {
+            use glow::HasContext as _;
+            // SAFETY: OpenGL calls on the frontend's current context: the core's framebuffer
+            // copied upside down into the frontend's, which stays bound for it.
+            unsafe {
+                gl.context
+                    .bind_framebuffer(glow::READ_FRAMEBUFFER, Some(own));
+                gl.context
+                    .bind_framebuffer(glow::DRAW_FRAMEBUFFER, frontend_framebuffer);
+                gl.context.blit_framebuffer(
+                    0,
+                    0,
+                    w,
+                    h,
+                    0,
+                    h,
+                    w,
+                    0,
+                    glow::COLOR_BUFFER_BIT,
+                    glow::NEAREST,
+                );
+                gl.context
+                    .bind_framebuffer(glow::FRAMEBUFFER, frontend_framebuffer);
+            }
+            draw_crosshairs(&gl.context, &crosshairs, (w, h));
+        }
+        Some(result)
     });
     match drawn {
         Some(Ok(())) => {}
@@ -568,7 +962,9 @@ pub extern "C" fn retro_run() {
             // SAFETY: the frontend's poll callback, called once a frame.
             unsafe { poll() };
         }
-        core.run(input_word(&frontend));
+        let mut word = input_word(&frontend);
+        aim_zappers(&frontend, core, &mut word);
+        core.run(word);
         #[allow(clippy::cast_possible_truncation)] // A frame's length.
         let seconds = (1.0 / core.frames_per_second()) as f32;
         if core.is_three_d() {
@@ -648,6 +1044,43 @@ pub extern "C" fn retro_cheat_reset() {}
 #[no_mangle]
 pub extern "C" fn retro_cheat_set(_index: c_uint, _enabled: bool, _code: *const c_char) {}
 
+/// Draws a crosshair at each point (0 to 1 across and down) of the frontend's framebuffer, bound
+/// and declared top-left: a white cross with a black edge, its size following the height.
+fn draw_crosshairs(gl: &glow::Context, points: &[(f32, f32)], (width, height): (i32, i32)) {
+    use glow::HasContext as _;
+    if points.is_empty() {
+        return;
+    }
+    let unit = (height / 240).max(1);
+    // SAFETY: OpenGL calls on the frontend's current context, its framebuffer bound; the
+    // scissor test is put back as it was.
+    unsafe {
+        let scissor = gl.is_enabled(glow::SCISSOR_TEST);
+        gl.enable(glow::SCISSOR_TEST);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+        for &(x, y) in points {
+            let (cx, cy) = ((x * width as f32) as i32, (y * height as f32) as i32);
+            // Arms from 2 to 6 units off the centre, 1 unit thick; the edge one unit around.
+            let arms = [
+                (cx + 2 * unit, cy, 4 * unit, unit),
+                (cx - 6 * unit, cy, 4 * unit, unit),
+                (cx, cy + 2 * unit, unit, 4 * unit),
+                (cx, cy - 6 * unit, unit, 4 * unit),
+            ];
+            for (colour, grow) in [(0.0, unit), (1.0, 0)] {
+                gl.clear_color(colour, colour, colour, 1.0);
+                for (ax, ay, aw, ah) in arms {
+                    gl.scissor(ax - grow, ay - grow, aw + 2 * grow, ah + 2 * grow);
+                    gl.clear(glow::COLOR_BUFFER_BIT);
+                }
+            }
+        }
+        if !scissor {
+            gl.disable(glow::SCISSOR_TEST);
+        }
+    }
+}
+
 /// The frontend made its OpenGL context (again): the renderer is made on it.
 extern "C" fn context_reset() {
     let Some(proc_address) = frontend().proc_address else {
@@ -656,11 +1089,18 @@ extern "C" fn context_reset() {
     };
     // SAFETY: the frontend's loader, called with NUL-terminated names while its context is
     // current, as glow asks.
-    let gl =
-        unsafe { glow::Context::from_loader_function_cstr(|name| proc_address(name.as_ptr())) };
-    match SceneRenderer::new(Rc::new(gl), None) {
+    let gl = Rc::new(unsafe {
+        glow::Context::from_loader_function_cstr(|name| proc_address(name.as_ptr()))
+    });
+    match SceneRenderer::new(Rc::clone(&gl), None) {
         Ok(renderer) => {
-            GL.with(|gl| *gl.borrow_mut() = Some(Gl { renderer }));
+            GL.with(|slot| {
+                *slot.borrow_mut() = Some(Gl {
+                    renderer,
+                    context: gl,
+                    target: None,
+                });
+            });
             log(LOG_INFO, "3D renderer ready");
         }
         Err(error) => log(LOG_ERROR, &format!("3D renderer refused: {error}")),
@@ -669,7 +1109,13 @@ extern "C" fn context_reset() {
 
 /// The frontend is about to destroy its context: the renderer goes first.
 extern "C" fn context_destroy() {
-    GL.with(|gl| *gl.borrow_mut() = None);
+    GL.with(|slot| {
+        if let Some(mut gl) = slot.borrow_mut().take() {
+            if let Some(target) = gl.target.take() {
+                target.delete(&gl.context);
+            }
+        }
+    });
 }
 
 /// Asks the frontend for an OpenGL 3.3 core context, depth and stencil included.
@@ -681,7 +1127,8 @@ fn request_opengl() -> bool {
         get_proc_address: None,
         depth: true,
         stencil: true,
-        bottom_left_origin: true,
+        // The core flips its 3D itself (`OwnTarget`): top-left, as its 2D frames.
+        bottom_left_origin: false,
         version_major: 3,
         version_minor: 3,
         cache_context: false,
@@ -704,11 +1151,11 @@ fn start_three_d(core: &mut Core, name: &str, image: &[u8]) {
     if !core.options().three_d {
         return;
     }
-    let Some(document) = profiles::find(name, image, system_directory().as_deref()) else {
+    let Some((title, document)) = profiles::find_titled(name, image, system_directory().as_deref())
+    else {
         log(LOG_INFO, &format!("{name}: no 3D profile, 2D"));
         return;
     };
-    let title = document.profile.title.clone().unwrap_or_default();
     let tiles = document.hash_state().map(|state| state.tiles.clone());
     if let Err(error) = core.start_three_d(&document.profile, tiles, log_line) {
         log(
@@ -766,6 +1213,8 @@ pub unsafe extern "C" fn retro_load_game(info: *const GameInfo) -> bool {
             return false;
         }
     };
+    declare_controllers();
+    plug_devices(&mut core);
     let hacks = hack_list(&core);
     declare_options(&hacks);
     core.set_options(read_options(&hacks));

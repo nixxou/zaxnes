@@ -1,7 +1,5 @@
-//! Puts the 3D profiles made for Zaxnes (the `zaxnes_3dn` repository, kept out of these sources
-//! under a licence of their own) into the core, as `zax-app/build.rs` does for the application:
-//! `ZAXNES_3DN_DIR`, else a `zaxnes_3dn` folder beside the workspace or one level above it. A
-//! build without one carries none.
+//! Puts the 3D profiles made for Zaxnes (`rust/profiles`) into the core, as `zax-app/build.rs`
+//! does for the application.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -18,18 +16,10 @@ fn environment(name: &str) -> std::io::Result<PathBuf> {
         .ok_or_else(|| std::io::Error::other(format!("{name} is not set")))
 }
 
+/// The 3D profiles made for Zaxnes: the workspace's `profiles` folder.
 fn profiles_source(manifest: &Path) -> Option<PathBuf> {
-    println!("cargo:rerun-if-env-changed=ZAXNES_3DN_DIR");
-    if let Some(chosen) = std::env::var_os("ZAXNES_3DN_DIR") {
-        return Some(PathBuf::from(chosen));
-    }
-    let workspace = manifest.parent()?.parent()?;
-    [
-        workspace.join("..").join("zaxnes_3dn"),
-        workspace.join("..").join("..").join("zaxnes_3dn"),
-    ]
-    .into_iter()
-    .find(|folder| folder.is_dir())
+    let folder = manifest.parent()?.parent()?.join("profiles");
+    folder.is_dir().then_some(folder)
 }
 
 fn bundled_profiles() -> std::io::Result<()> {

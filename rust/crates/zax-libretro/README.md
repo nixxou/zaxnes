@@ -22,7 +22,7 @@ in RetroArch the `glcore` or `gl` video driver): the conversion engine, the prof
 and the renderer of the application. The profiles are looked for in this order:
 
 - the ones the core carries: the profiles made for Zaxnes
-  ([zaxnes_3dn](https://github.com/nixxou/zaxnes_3dn): Faxanadu, Metal Force). The core ships no
+  (`rust/profiles/`: Faxanadu, Metal Force). The core ships no
   game: FlappyZaxNes, its profile included, stays with the application;
 - the `.3dn` files of `<RetroArch system folder>/Zaxnes/profiles` (your profiles, imported from
   3dSen by the Zaxnes application for instance).

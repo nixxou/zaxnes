@@ -22,7 +22,7 @@ options.
 | Source data (iNES header excluded) | CRC-32 `F8A713BE` (the dump the [disassembly](https://github.com/cyneprepou4uk/NES-Games-Disassembly/tree/main/Adventure%20Island) rebuilds, SHA-1 of the iNES file `22EE75B8...`) |
 | Target data | CRC-32 `7DE620F4` (the hack's version in savestate headers; `tools/build.py` prints it), 80 KiB: the game's 32 KiB of PRG, a 16 KiB PRG bank added, the 32 KiB of CHR |
 | Changes | hooks in the game's PRG (same size as what they replace); the new code in the added bank |
-| Patch | `rust/crates/zax-nes/patches/adventure-island-usa-widescreen.bps`, made against the data without header; the CHR-ROM, moved after the new bank, is copied from the player's ROM (BPS SourceCopy), so the patch carries only the hack's bytes |
+| Patch | `adventure-island-usa-widescreen.bps` (built by `tools/build.py`, kept in the private sources repository, not published), made against the data without header; the CHR-ROM, moved after the new bank, is copied from the player's ROM (BPS SourceCopy), so the patch carries only the hack's bytes |
 | Zaxnes declaration | `builtin_patches.rs`: `advanced: true` (applied only in the advanced mode), `boot_window: Some((0x82, 0x00))`, `idle_loop: Some((0xB759, 0xB75C))` |
 
 The game has no free byte left in its PRG. Zaxnes therefore opens the extension at power-on and
@@ -195,7 +195,7 @@ Requirements: cc65 (ca65, ld65; run through WSL when not on the PATH), Python 3,
 
 ```
 python -I tools/build.py "Adventure Island (USA).nes" build/aiwide.bps
-python -I tools/make_doc.py <zaxnes>/rust/docs/hacks/adventure_island/WIDESCREEN-HACK.md
+python -I tools/make_doc.py <zaxnes_zxpksources>/docs/hacks/adventure_island/WIDESCREEN-HACK.md
 ```
 
 `build.py` assembles `src/wide.s` for `$5800` (a 16 KiB bank, `$FF` fill), writes the hooks into the

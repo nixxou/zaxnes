@@ -21,7 +21,7 @@ this patch: the riders in the margins, and the option.
 | Source data (iNES header excluded) | CRC-32 `49AEB3A6` |
 | Target data | CRC-32 `B67CBC02` (the hack's version in savestate headers; `tools/build.py` prints it), 56 KiB: the game's 16 KiB of PRG, a copy of them, a 16 KiB PRG bank added, the 8 KiB of CHR |
 | Changes | hooks in both copies of the game's PRG (same size as what they replace); the new code in the added bank |
-| Patch | `rust/crates/zax-nes/patches/excitebike-widescreen.bps`, made against the data without header; the copy of the PRG and the CHR-ROM are copied from the player's ROM (BPS SourceCopy), so the patch carries only the hack's bytes |
+| Patch | `excitebike-widescreen.bps` (built by `tools/build.py`, kept in the private sources repository, not published), made against the data without header; the copy of the PRG and the CHR-ROM are copied from the player's ROM (BPS SourceCopy), so the patch carries only the hack's bytes |
 | Zaxnes declaration | `builtin_patches.rs`: `advanced: true` (applied only in the advanced mode), `boot_window: Some((0x82, 0x00))`, `idle_loop: Some((0xC1D8, 0xC1E0))` |
 
 The game has no free byte in its 16 KiB. The PRG is therefore laid out anew: the game, a copy of
@@ -119,7 +119,7 @@ Requirements: cc65 (ca65, ld65; run through WSL when not on the PATH), Python 3,
 
 ```
 python -I tools/build.py "Excitebike (Japan, USA) (En).nes" build/excitebikewide.bps
-python -I tools/make_doc.py <zaxnes>/rust/docs/hacks/excitebike/WIDESCREEN-HACK.md
+python -I tools/make_doc.py <zaxnes_zxpksources>/docs/hacks/excitebike/WIDESCREEN-HACK.md
 ```
 
 `build.py` assembles `src/wide.s` for `$5800` (a 16 KiB bank, `$FF` fill), writes the hooks into

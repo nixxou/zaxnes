@@ -18,7 +18,7 @@ section 4). The hack does the objects: enemies that spawn, live and show in the 
 | Source data (iNES header excluded) | CRC-32 `0FCFC04D` |
 | Target data | CRC-32 `CE1870B9` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | new code at `$F300` of bank 15 (in the `$FF` fill `$F2E3`-`$F8FF`), hooks in bank 15, bank 14 and bank 11 |
-| Patch | `rust/crates/zax-nes/patches/megaman2-usa-widescreen.bps`, made against the data without header |
+| Patch | `megaman2-usa-widescreen.bps` (built by `tools/build.py`, kept in the private sources repository, not published), made against the data without header |
 
 ---
 
@@ -166,7 +166,7 @@ The options the player can turn on or off (Video menu, "Hack options"); Zaxnes w
 | 1 | `invincible` | Invincible | off | a testing aid: no damage, spikes harmless (`wide_touch`, `wide_hurt`, `wide_spike`); falling off the screen still kills |
 | 2 | `no_slowdown` | No slowdown / Sans ralentissements | on | 255 lines of overclock instead of 64: the game never runs late (no lag frame) |
 
-The options live in Zaxnes (`rust/crates/zax-nes/src/builtin_patches.rs`, `PATCHES`); the ROM does
+The options live in Zaxnes (`rust/crates/zax-nes/src/builtin_patches.rs`, `CATALOGUE`); the ROM does
 not depend on them being set (all 0 is the hack without enemies in the margins, 64 lines).
 
 ## 6. Building

@@ -21,7 +21,7 @@ which live and show in the margins, and the options.
 | Source data (iNES header excluded) | base build CRC-32 `0AC1AA8F`, Rev 1 CRC-32 `B668C7FC` |
 | Target data | base build CRC-32 `BCA66AEF`, Rev 1 CRC-32 `17A19A8D` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | 2 KiB of code at PRG offset `$15F00`-`$166FF` (bank 5 from its page `$1F`, `$FF` fill in both builds), hooks in banks 0, 6 and 7; size and layout unchanged |
-| Patches | `rust/crates/zax-nes/patches/castlevania-usa-widescreen.bps` and `castlevania-usa-rev1-widescreen.bps`, made against the data without header |
+| Patches | `castlevania-usa-widescreen.bps` (built by `tools/build.py`, kept in the private sources repository, not published) and `castlevania-usa-rev1-widescreen.bps`, made against the data without header |
 
 The two builds share their data banks 0-4 byte for byte; their code (banks 5-7) was rebuilt, so
 the routines the hack calls and the hooks of the fixed bank lie elsewhere in each (Rev 1's are

@@ -22,7 +22,7 @@ on the original screen).
 | Source data (iNES header excluded) | CRC-32 `EC6D910E` |
 | Target data | CRC-32 `9132B62B` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | new code at `$F940` of bank 15 (in the `$FF` fill `$F936`-`$FF7F`), hooks in bank 15 and bank 13 |
-| Patch | `rust/crates/zax-nes/patches/metalforce-korea-widescreen.bps`, made against the data without header |
+| Patch | `metalforce-korea-widescreen.bps` (built by `tools/build.py`, kept in the private sources repository, not published), made against the data without header |
 
 ---
 
@@ -136,7 +136,7 @@ Zaxnes writes their bits at `$500A` every frame, the hack reads them there (`WID
 | 1 | `invincible` | Invincible | off | a testing aid: no damage (`wide_hurt`); falling into a pit still kills |
 | 2 | `no_slowdown` | No slowdown / Sans ralentissements | on | 255 lines of overclock instead of 64 |
 
-The options live in Zaxnes (`rust/crates/zax-nes/src/builtin_patches.rs`, `PATCHES`); the ROM does
+The options live in Zaxnes (`rust/crates/zax-nes/src/builtin_patches.rs`, `CATALOGUE`); the ROM does
 not depend on them being set.
 
 ## 6. Building

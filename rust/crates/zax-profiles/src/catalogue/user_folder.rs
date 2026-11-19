@@ -612,7 +612,15 @@ pub fn derived_id(bytes: &[u8]) -> String {
 }
 
 fn title_of(header: &ProfileHeader, path: &Path) -> String {
-    match header.title.as_deref() {
+    profile_title(header.title.as_deref(), path)
+}
+
+/// The title a profile in the file `path` goes by, its own title being `title`: that title (see
+/// [`shown_title`]), or the file name without its extension when it has none, as the profiles
+/// a 3dSen 2.0 bundle carries.
+#[must_use]
+pub fn profile_title(title: Option<&str>, path: &Path) -> String {
+    match title {
         Some(title) if !title.is_empty() => shown_title(title, path),
         _ => path
             .file_stem()

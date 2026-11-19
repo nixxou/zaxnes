@@ -32,6 +32,7 @@ pub mod sync;
 pub mod target;
 #[cfg(feature = "wgpu")]
 pub mod wgpu_backend;
+pub mod zapper;
 
 pub use gl::api::GlError;
 pub use renderer::{RenderError, SceneRenderer};

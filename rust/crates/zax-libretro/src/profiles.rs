@@ -2,13 +2,15 @@
 //! `build.rs` finds; the core ships no game, `FlappyZaxNes` included, owner decision), then the
 //! `.3dn` files of the frontend's system folder
 //! (`<system>/Zaxnes/profiles`). A profile suits a ROM whose file name is its title, or starts
-//! with it, as the application's ROM list matches them (`rom_list::matching_profiles`).
+//! with it, as the application's ROM list matches them (`rom_list::matching_profiles`); a profile
+//! with no title (those of a 3dSen 2.0 bundle) goes by its file name, as in the application.
 
 use std::path::Path;
 
+use zax_profiles::catalogue::profile_title;
 use zax_profiles::format::{self, ProfileDocument};
 
-/// The profiles made for Zaxnes (`zaxnes_3dn`), as `build.rs` found them.
+/// The profiles made for Zaxnes (`rust/profiles`), as `build.rs` found them.
 const BUNDLED: &[(&str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/bundled-profiles.rs"));
 
 /// The folder of the system folder the profiles are read from.
@@ -46,25 +48,31 @@ fn rank(title: &str, rom: &str) -> Option<u8> {
 /// title wins, the core's own on a tie.
 #[must_use]
 pub fn find(rom_name: &str, image: &[u8], system: Option<&Path>) -> Option<ProfileDocument> {
+    find_titled(rom_name, image, system).map(|(_, document)| document)
+}
+
+/// [`find`], with the title the profile goes by (its own, or its file name when it has none).
+#[must_use]
+pub fn find_titled(
+    rom_name: &str,
+    image: &[u8],
+    system: Option<&Path>,
+) -> Option<(String, ProfileDocument)> {
     let stem = Path::new(rom_name)
         .file_stem()
         .map_or_else(String::new, |stem| stem.to_string_lossy().into_owned());
     let rom_name = stem.as_str();
-    let mut best: Option<(u8, ProfileDocument)> = None;
+    let mut best: Option<(u8, String, ProfileDocument)> = None;
     let mut consider = |bytes: &[u8], source: &str| {
         let Ok(document) = format::load(bytes, None, Some(source)) else {
             return;
         };
-        let Some(rank) = document
-            .profile
-            .title
-            .as_deref()
-            .and_then(|title| rank(title, rom_name))
-        else {
+        let title = profile_title(document.profile.title.as_deref(), Path::new(source));
+        let Some(rank) = rank(&title, rom_name) else {
             return;
         };
-        if best.as_ref().is_none_or(|(kept, _)| rank < *kept) {
-            best = Some((rank, document));
+        if best.as_ref().is_none_or(|(kept, _, _)| rank < *kept) {
+            best = Some((rank, title, document));
         }
     };
     for (name, bytes) in BUNDLED {
@@ -88,11 +96,11 @@ pub fn find(rom_name: &str, image: &[u8], system: Option<&Path>) -> Option<Profi
             }
         }
     }
-    let (_, mut document) = best?;
+    let (_, title, mut document) = best?;
     if document.is_hash_profile() {
         document.resolve_from_rom(image);
     }
-    Some(document)
+    Some((title, document))
 }
 
 #[cfg(test)]
@@ -107,6 +115,17 @@ mod tests {
         );
         assert_eq!(rank("Kirby", "Kirby's Adventure (USA)"), Some(1));
         assert_eq!(rank("Zelda II", "Metroid (USA)"), None);
+    }
+
+    /// Issue #2: the profiles of a 3dSen 2.0 bundle have no title; the file name stands for it.
+    #[test]
+    fn an_untitled_profile_goes_by_its_file_name() {
+        let title = profile_title(None, Path::new("profiles/Adventures of Lolo (U).3dn"));
+        assert_eq!(rank(&title, "Adventures of Lolo (USA)"), Some(0));
+        let title = profile_title(Some(""), Path::new("Arkanoid (U).3dn"));
+        assert_eq!(rank(&title, "Arkanoid (USA)"), Some(0));
+        let title = profile_title(Some("Faxanadu"), Path::new("whatever.3dn"));
+        assert_eq!(rank(&title, "Faxanadu (USA) (Rev 1)"), Some(0));
     }
 
     /// Owner decision: the core ships no game, so not `FlappyZaxNes`'s profile either.

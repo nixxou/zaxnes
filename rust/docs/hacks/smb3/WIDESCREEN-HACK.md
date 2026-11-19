@@ -25,7 +25,7 @@ variables below are only its labels, to find them.
 | Source data (iNES header excluded) | CRC-32 `2E6301ED` |
 | Target data | CRC-32 `170CF4A6` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | 128 bytes at `$E240` of bank 31 (the `$FF` padding before a DMC sample), 2 KiB at `$1600`-`$1DFF` of bank 25 (its empty end), hooks in banks 0, 3, 4, 5, 24, 30 and 31; size and layout unchanged |
-| Patch | `rust/crates/zax-nes/patches/smb3-usa-rev1-widescreen.bps`, made against the data without header |
+| Patch | `smb3-usa-rev1-widescreen.bps` (built by `tools/build.py`, kept in the private sources repository, not published), made against the data without header |
 
 The ROM keeps its size: MMC3 fixes the last banks, and Zaxnes' savestates keep the cartridge's bank
 windows as offsets, so a larger PRG-ROM would move the fixed banks under a state of the unpatched
@@ -173,7 +173,7 @@ Zaxnes writes their bits at `$500A` every frame, the hack reads them there.
 | 1 | `invincible` | Invincible | off | a testing aid: the game's unused debug invincibility (`$7CFF`, which its damage routine tests) set every frame; falling and the timer still kill |
 | 2 | `no_slowdown` | No slowdown / Sans ralentissements | on | 255 lines of overclock: the game never runs late |
 
-The options live in Zaxnes (`rust/crates/zax-nes/src/builtin_patches.rs`, `PATCHES`); all 0 is
+The options live in Zaxnes (`rust/crates/zax-nes/src/builtin_patches.rs`, `CATALOGUE`); all 0 is
 the hack with the game's slowdowns.
 
 ## 6. Building

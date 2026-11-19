@@ -45,8 +45,12 @@ pub struct BuiltinPatch {
     pub rom_name: &'static str,
     /// CRC-32 of the ROM data the patch applies to, iNES header excluded.
     pub source_crc: u32,
-    /// The BPS patch.
+    /// The patch or hack pack bytes: the pack of the file [`Self::pack_file`] once
+    /// [`patches`] has loaded it, or the bytes built into the core.
     pub bps: &'static [u8],
+    /// The hack pack's file name in the packs folder (`zxpk/`, see [`crate::pack_files`]), or
+    /// empty when the bytes are built into the core.
+    pub pack_file: &'static str,
     /// The options the player can turn on or off (a menu of the host), told to the ROM through
     /// the widescreen extension's `$500A`.
     pub options: &'static [HackOption],
@@ -237,8 +241,9 @@ pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 /// Name of the Rockman 6 (Japan) widescreen patch (advanced mode).
 pub const ROCKMAN6_JAPAN: &str = "Rockman 6 (Japan) widescreen";
 
-/// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 68] = [
+/// The catalogue: every patch the core knows, the packs outside the repository by their file
+/// name only. [`patches`] gives the ones whose bytes are there.
+const CATALOGUE: [BuiltinPatch; 68] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -247,6 +252,7 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // A hack pack (see `crate::hack_pack`, built by `z2pack`): the code in the extension's
         // memory, the hooks checked and applied by the core; the ROM keeps its size.
         bps: include_bytes!("../patches/zelda2-usa-widescreen.zxpk"),
+        pack_file: "",
         options: &[
             // A testing aid, a component of its own (with or without the widescreen): no hit
             // hurts Link (pits and lava still kill).
@@ -290,6 +296,7 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // The USA hack built for the European code (`z2pack`, `tools/build.py`: the same source,
         // the game's moved addresses for this build; a PAL pack).
         bps: include_bytes!("../patches/zelda2-europe-widescreen.zxpk"),
+        pack_file: "",
         options: ZELDA2_OPTIONS,
         // The world map's redraw is its pack's (states section: $0736 05 -> 02).
         after_other_way_state: None,
@@ -313,6 +320,7 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // The USA hack built for the European code (`z2pack`, `tools/build.py`: the same source,
         // the game's moved addresses for this build; a PAL pack); the pack of the Europe build: this revision has the same code where the hack hooks it.
         bps: include_bytes!("../patches/zelda2-europe-widescreen.zxpk"),
+        pack_file: "",
         options: ZELDA2_OPTIONS,
         // The world map's redraw is its pack's (states section: $0736 05 -> 02).
         after_other_way_state: None,
@@ -336,6 +344,7 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // The USA hack built for the European code (`z2pack`, `tools/build.py`: the same source,
         // the game's moved addresses for this build; a PAL pack).
         bps: include_bytes!("../patches/zelda2-europe-rev2-widescreen.zxpk"),
+        pack_file: "",
         options: ZELDA2_OPTIONS,
         // The world map's redraw is its pack's (states section: $0736 05 -> 02).
         after_other_way_state: None,
@@ -360,6 +369,7 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // at bank 7): the USA's code and addresses, its places counted from the start (`z2pack`,
         // `tools/build.py`); its translations take it by their signatures.
         bps: include_bytes!("../patches/zelda2-usa-mmc5-widescreen.zxpk"),
+        pack_file: "",
         options: ZELDA2_OPTIONS,
         // The world map's redraw is its pack's (states section: $0736 05 -> 02).
         after_other_way_state: None,
@@ -380,7 +390,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // A hack pack (see `crate::hack_pack`): the code in the extension's execution zone at
         // $2000, the hooks checked and applied by the core; the ROM keeps its size. "Invincible"
         // a component of its own.
-        bps: include_bytes!("../patches/megaman2-usa-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "megaman2-usa-widescreen.zxpk",
         options: MEGAMAN2_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the objects.
@@ -402,7 +413,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0xA663_8CBA,
         // The USA pack built from the European ROM, PAL (`mm2wide`, `tools/build.py --pack`): its
         // code is the same where the hack hooks and calls, its stage layouts too.
-        bps: include_bytes!("../patches/megaman2-europe-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "megaman2-europe-widescreen.zxpk",
         options: MEGAMAN2_OPTIONS,
         after_other_way_state: None,
         advanced: true,
@@ -423,7 +435,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // The USA hack built for the Japanese code (`mm2wide`, `tools/build.py --pack`, -D JAPAN:
         // its fixed bank's places moved; banks 11 and 14, the RAM and the stage layouts as the
         // USA's).
-        bps: include_bytes!("../patches/rockman2-japan-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "rockman2-japan-widescreen.zxpk",
         options: MEGAMAN2_OPTIONS,
         after_other_way_state: None,
         advanced: true,
@@ -445,7 +458,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // and applied by the core in three groups (the sprites, the enemies in the margins, the
         // level select); "Invincible" a component of its own (`smb1wide`, `tools/build.py
         // --pack`). The PlayChoice-10 ROM's data is the same.
-        bps: include_bytes!("../patches/smb1-world-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "smb1-world-widescreen.zxpk",
         options: SMB1_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
@@ -466,7 +480,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0x9A2D_B086,
         // The World hack built for the European code (`smb1wide`, -D EUROPE: most of its code from
         // $C905 on 6 to 8 bytes later, some 56 earlier; the same RAM), PAL.
-        bps: include_bytes!("../patches/smb1-europe-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "smb1-europe-widescreen.zxpk",
         options: SMB1_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
@@ -488,7 +503,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // The European build's CRC, its PAL entry above taking it first: this one is for the
         // ROMs of the European code whose header says NTSC, taken by their signatures
         // (`smb1wide`, `tools/build.py --pack <out> --ntsc`).
-        bps: include_bytes!("../patches/smb1-europe-ntsc-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "smb1-europe-ntsc-widescreen.zxpk",
         options: SMB1_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
@@ -510,7 +526,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // A hack pack (see `crate::hack_pack`): the code in the zone fantôme, the hooks checked
         // and applied by the core in two groups (the objects in the margins, the enemy list's);
         // the ROM keeps its size (`ng3wide`, `tools/build.py --pack`).
-        bps: include_bytes!("../patches/ng3-usa-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "ng3-usa-widescreen.zxpk",
         options: NG3_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the objects.
@@ -531,7 +548,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0x2F2E_30F7,
         // The USA hack built for the Japanese code (`ng3wide`, -D JAPAN: the same code and RAM,
         // moved by a few bytes).
-        bps: include_bytes!("../patches/ng3-japan-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "ng3-japan-widescreen.zxpk",
         options: NG3_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the objects.
@@ -555,7 +573,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // margins, Mario in the margins); the level select and "Invincible" components of their
         // own, without code (`smb3wide`, `tools/build.py --pack`). The first revision takes it
         // by its bytes.
-        bps: include_bytes!("../patches/smb3-usa-rev1-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "smb3-usa-rev1-widescreen.zxpk",
         options: SMB3_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
@@ -576,7 +595,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0x52E2_B5E0,
         // The USA hack built for the Japanese code (`smb3wide`, -D JAPAN: the end of the frame's
         // work 15 bytes earlier, Mario's screen limit 23; the same RAM and level data).
-        bps: include_bytes!("../patches/smb3-japan-rev1-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "smb3-japan-rev1-widescreen.zxpk",
         options: SMB3_OPTIONS,
         after_other_way_state: None,
         advanced: true,
@@ -595,7 +615,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0xE7DD_FEE3,
         // The Japanese pack with the first revision's title screen (its 1P/2P menu 39 bytes
         // earlier: the level select's place).
-        bps: include_bytes!("../patches/smb3-japan-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "smb3-japan-widescreen.zxpk",
         options: SMB3_OPTIONS,
         after_other_way_state: None,
         advanced: true,
@@ -614,7 +635,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0x1ED5_C801,
         // The USA hack built for the European code (`smb3wide`, -D EUROPE: the end of the frame's
         // work and Mario's screen limit 7 bytes earlier), PAL.
-        bps: include_bytes!("../patches/smb3-europe-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "smb3-europe-widescreen.zxpk",
         options: SMB3_OPTIONS,
         after_other_way_state: None,
         advanced: true,
@@ -634,7 +656,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // The European build's CRC, its PAL entry above taking it first: this one is for the
         // ROMs of the European code whose header says NTSC, taken by their signatures
         // (`smb3wide`, `tools/build.py --pack <out> --ntsc`).
-        bps: include_bytes!("../patches/smb3-europe-ntsc-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "smb3-europe-ntsc-widescreen.zxpk",
         options: SMB3_OPTIONS,
         after_other_way_state: None,
         advanced: true,
@@ -655,7 +678,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // checked and applied by the core; the ROM keeps its size.
         // "Invincible" a component of its own (the level selector needs the hack's code: it stays
         // with the widescreen).
-        bps: include_bytes!("../patches/castlevania-usa-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "castlevania-usa-widescreen.zxpk",
         options: CASTLEVANIA_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the objects.
@@ -680,7 +704,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // checked and applied by the core; the ROM keeps its size.
         // "Invincible" a component of its own (the level selector needs the hack's code: it stays
         // with the widescreen).
-        bps: include_bytes!("../patches/castlevania-usa-rev1-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "castlevania-usa-rev1-widescreen.zxpk",
         options: CASTLEVANIA_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the objects.
@@ -704,7 +729,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // The USA hack built for the European code (`cvwide`, `tools/build.py --pack`: the same
         // source, the game's moved addresses for this build; the USA builds' data banks and RAM;
         // a PAL pack).
-        bps: include_bytes!("../patches/castlevania-europe-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "castlevania-europe-widescreen.zxpk",
         options: CASTLEVANIA_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the objects.
@@ -727,7 +753,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // ROM hacks), taken by their signatures.
         source_crc: 0xA935_27E2,
         // The European pack as an NTSC one (`cvwide`, `tools/build.py --pack <out> --ntsc`).
-        bps: include_bytes!("../patches/castlevania-europe-ntsc-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "castlevania-europe-ntsc-widescreen.zxpk",
         options: CASTLEVANIA_OPTIONS,
         after_other_way_state: None,
         advanced: true,
@@ -746,7 +773,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // The USA hack built for the PlayChoice-10 code (`cvwide`, `tools/build.py --pack`,
         // -D PC10: the base build's code rebuilt, its routines moved; the same data banks, RAM
         // and states).
-        bps: include_bytes!("../patches/castlevania-pc10-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "castlevania-pc10-widescreen.zxpk",
         options: CASTLEVANIA_OPTIONS,
         after_other_way_state: None,
         advanced: true,
@@ -767,7 +795,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // The USA hack built for the Japanese code (`cvwide`, `tools/build.py --pack`, -D JAPAN:
         // its moved addresses, its shorter state dispatch, a hit's damage from its table; the
         // same RAM and states).
-        bps: include_bytes!("../patches/akumajou-dracula-japan-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "akumajou-dracula-japan-widescreen.zxpk",
         options: CASTLEVANIA_OPTIONS,
         after_other_way_state: None,
         advanced: true,
@@ -788,7 +817,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // A hack pack (see `crate::hack_pack`): the code in the zone fantôme, the hooks checked
         // and applied by the core in groups (the sprites, the ghosts, the previews, and the two
         // aids, which need the hack's code; `aiwide`, `tools/build.py --pack`).
-        bps: include_bytes!("../patches/adventure-island-usa-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "adventure-island-usa-widescreen.zxpk",
         options: ADVENTURE_ISLAND_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the sprites and objects.
@@ -808,7 +838,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         rom_name: "Adventure Island Classic (Europe)",
         source_crc: 0x8686_7830,
         // The same pack for PAL: the European code is the same at the same places.
-        bps: include_bytes!("../patches/adventure-island-europe-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "adventure-island-europe-widescreen.zxpk",
         options: ADVENTURE_ISLAND_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the sprites and objects.
@@ -829,7 +860,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0x6A45_7A43,
         // The USA hack built for the Japanese code (`aiwide`, -D JAPAN: the same code and RAM,
         // moved).
-        bps: include_bytes!("../patches/adventure-island-japan-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "adventure-island-japan-widescreen.zxpk",
         options: ADVENTURE_ISLAND_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the sprites and objects.
@@ -850,7 +882,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0x6230_20FB,
         // The Japanese pack but for the NMI's place (4 bytes earlier) and the level selector, its
         // title screen being its own (`aiwide`, `tools/build.py --pack`).
-        bps: include_bytes!("../patches/adventure-island-kiddy-sun-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "adventure-island-kiddy-sun-widescreen.zxpk",
         options: ADVENTURE_ISLAND_KIDDY_SUN_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the sprites and objects.
@@ -873,7 +906,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // and applied by the core in two groups (the settings, the riders in the margins); the
         // game's 16 KiB as they are (NROM mirrors them; `excitebikewide`, `tools/build.py
         // --pack`).
-        bps: include_bytes!("../patches/excitebike-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "excitebike-widescreen.zxpk",
         options: EXCITEBIKE_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the riders.
@@ -895,7 +929,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0x8A0C_7337,
         // The same pack for PAL: the European code is the same at the same places (a table of
         // speeds differs).
-        bps: include_bytes!("../patches/excitebike-europe-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "excitebike-europe-widescreen.zxpk",
         options: EXCITEBIKE_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the riders.
@@ -918,7 +953,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // A hack pack (see `crate::hack_pack`): the code in the zone fantôme, the hooks checked
         // and applied by the core in two groups (the sprites, the people and vehicles in the
         // margins); the ROM keeps its size (`ff1wide`, `tools/build.py --pack`).
-        bps: include_bytes!("../patches/final-fantasy-usa-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "final-fantasy-usa-widescreen.zxpk",
         options: FINAL_FANTASY_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the people and vehicles.
@@ -939,7 +975,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0x466E_FDC2,
         // The USA hack built for the Japanese code, which its Rev 1 takes too: the same code and
         // RAM, the fixed bank's at other places (`ff1wide`, `tools/build.py --pack`).
-        bps: include_bytes!("../patches/final-fantasy-japan-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "final-fantasy-japan-widescreen.zxpk",
         options: FINAL_FANTASY_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the people and vehicles.
@@ -962,7 +999,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // and applied by the core in two groups (the sprites, the enemies in the margins); the ROM
         // keeps its size. "Invincible" a component of its own (the level selector needs the
         // hack's code: it stays with the widescreen; `metalforcewide`, `tools/build.py --pack`).
-        bps: include_bytes!("../patches/metalforce-korea-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "metalforce-korea-widescreen.zxpk",
         options: &[
             // Testing aids: left / right on the mission screen pick the mission; no damage (pits
             // still kill).
@@ -1009,7 +1047,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // A hack pack (see `crate::hack_pack`): the code in the zone fantôme, the hooks checked
         // and applied by the core in groups (the sprites, the enemies in the margins, and the two
         // aids, which need the hack's code; `blastermasterwide`, `tools/build.py --pack`).
-        bps: include_bytes!("../patches/blastermaster-usa-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "blastermaster-usa-widescreen.zxpk",
         options: BLASTERMASTER_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
@@ -1031,7 +1070,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // The USA hack built for the Japanese code (`blastermasterwide`, -D JAPAN: the same RAM
         // and routines, the code laid out otherwise; it starts a game otherwise: no level
         // selector).
-        bps: include_bytes!("../patches/blastermaster-japan-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "blastermaster-japan-widescreen.zxpk",
         options: BLASTERMASTER_OTHER_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
@@ -1052,7 +1092,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0x8106_E694,
         // The USA hack built for the European code (`blastermasterwide`, -D EUROPE, as the
         // Japanese one), PAL.
-        bps: include_bytes!("../patches/blastermaster-europe-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "blastermaster-europe-widescreen.zxpk",
         options: BLASTERMASTER_OTHER_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
@@ -1074,7 +1115,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // The European build's CRC, its PAL entry above taking it first: this one is for the
         // ROMs of the European code whose header says NTSC, taken by their signatures
         // (`blastermasterwide`, `tools/build.py --pack <out> --ntsc`).
-        bps: include_bytes!("../patches/blastermaster-europe-ntsc-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "blastermaster-europe-ntsc-widescreen.zxpk",
         options: BLASTERMASTER_OTHER_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
@@ -1097,7 +1139,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // and applied by the core in groups (the sprites, the enemies, the doors and items, the
         // previews, and the two aids, which need the hack's code; `metroidwide`, `tools/build.py
         // --pack`).
-        bps: include_bytes!("../patches/metroid-usa-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "metroid-usa-widescreen.zxpk",
         options: METROID_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
@@ -1117,7 +1160,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         rom_name: "Metroid (Europe)",
         source_crc: 0x7751_588D,
         // The same pack for PAL: the European code is the same at the same places.
-        bps: include_bytes!("../patches/metroid-europe-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "metroid-europe-widescreen.zxpk",
         options: METROID_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
@@ -1141,7 +1185,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // "Invincible" a component of its own (`mm1wide`, `tools/build.py --pack`). It takes
         // Rockman (Japan), whose code is the USA's where the hack hooks and calls, by its
         // signatures; UxROM, MMC3, MMC5 and GxROM conversions too.
-        bps: include_bytes!("../patches/megaman1-usa-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "megaman1-usa-widescreen.zxpk",
         options: MEGAMAN1_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
@@ -1162,7 +1207,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0x9447_6A70,
         // The USA hack built for the European code (`mm1wide`, `tools/build.py --pack`,
         // -D EUROPE: its fixed bank's hooks 6 bytes further; the same routines and RAM), PAL.
-        bps: include_bytes!("../patches/megaman1-europe-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "megaman1-europe-widescreen.zxpk",
         options: MEGAMAN1_OPTIONS,
         after_other_way_state: None,
         advanced: true,
@@ -1182,7 +1228,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // ROMs of the European code whose header says NTSC, taken by their signatures.
         source_crc: 0x9447_6A70,
         // The European pack as an NTSC one (`mm1wide`, `tools/build.py --pack <out> --ntsc`).
-        bps: include_bytes!("../patches/megaman1-europe-ntsc-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "megaman1-europe-ntsc-widescreen.zxpk",
         options: MEGAMAN1_OPTIONS,
         after_other_way_state: None,
         advanced: true,
@@ -1201,7 +1248,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // A hack pack (see `crate::hack_pack`): the code in the zone fantôme, the hooks checked
         // and applied by the core in two groups (the sprites, the enemies in the margins);
         // "Invincible" a component of its own (`mm3wide`, `tools/build.py --pack`).
-        bps: include_bytes!("../patches/megaman3-usa-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "megaman3-usa-widescreen.zxpk",
         options: MEGAMAN3_OPTIONS,
         after_other_way_state: None,
         advanced: true,
@@ -1221,7 +1269,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0xD9F1_E47C,
         // The USA hack built for the Japanese code (`mm3wide`, -D JAPAN: its sprite code
         // moved in the fixed bank; the same RAM and routines).
-        bps: include_bytes!("../patches/rockman3-japan-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "rockman3-japan-widescreen.zxpk",
         options: MEGAMAN3_OPTIONS,
         after_other_way_state: None,
         advanced: true,
@@ -1241,7 +1290,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0x837A_3D8A,
         // The USA hack built for the European code (`mm3wide`, -D EUROPE: its sprite code
         // moved in the fixed bank), PAL.
-        bps: include_bytes!("../patches/megaman3-europe-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "megaman3-europe-widescreen.zxpk",
         options: MEGAMAN3_OPTIONS,
         after_other_way_state: None,
         advanced: true,
@@ -1261,7 +1311,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0x837A_3D8A,
         // The European pack as an NTSC one, for the ROMs of that code whose header says NTSC,
         // taken by their signatures (its PAL entry above takes the CRC first).
-        bps: include_bytes!("../patches/megaman3-europe-ntsc-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "megaman3-europe-ntsc-widescreen.zxpk",
         options: MEGAMAN3_OPTIONS,
         after_other_way_state: None,
         advanced: true,
@@ -1281,7 +1332,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0x0013_88B3,
         // The USA hack built for the code of the European Rev 1 (`mm3wide`, -D EUROPE_REV1:
         // its sprite code and the hiding of the rest of OAM moved), PAL.
-        bps: include_bytes!("../patches/megaman3-europe-rev1-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "megaman3-europe-rev1-widescreen.zxpk",
         options: MEGAMAN3_OPTIONS,
         after_other_way_state: None,
         advanced: true,
@@ -1300,7 +1352,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         rom_name: "Mega Man 3 (Europe) (Rev 1)",
         source_crc: 0x0013_88B3,
         // The Rev 1's pack as an NTSC one, for the ROMs of that code whose header says NTSC.
-        bps: include_bytes!("../patches/megaman3-europe-rev1-ntsc-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "megaman3-europe-rev1-ntsc-widescreen.zxpk",
         options: MEGAMAN3_OPTIONS,
         after_other_way_state: None,
         advanced: true,
@@ -1323,7 +1376,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // "Invincible" a component of its own (`mm4wide`, `tools/build.py --pack`). Rockman 4
         // (Japan), whose code is the USA's where the hack hooks and calls, takes it by its
         // signatures.
-        bps: include_bytes!("../patches/megaman4-usa-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "megaman4-usa-widescreen.zxpk",
         options: MEGAMAN4_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
@@ -1345,7 +1399,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
         // checked and applied by the core; "Invincible" a component of its own.
         // The pack of Mega Man 4 (USA): its hooks find their bytes in this revision too.
-        bps: include_bytes!("../patches/megaman4-usa-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "megaman4-usa-widescreen.zxpk",
         options: MEGAMAN4_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
@@ -1366,7 +1421,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0x1B93_2BEA,
         // The USA pack built from the European ROM, PAL (`mm4wide`, `tools/build.py --pack`): its
         // code is the same where the hack hooks and calls.
-        bps: include_bytes!("../patches/megaman4-europe-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "megaman4-europe-widescreen.zxpk",
         options: MEGAMAN4_OPTIONS,
         after_other_way_state: None,
         advanced: true,
@@ -1389,7 +1445,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // "Invincible" a component of its own (`mm5wide`, `tools/build.py --pack`). Rockman 5
         // (Japan), whose code is the USA's where the hack hooks and calls, takes it by its
         // signatures.
-        bps: include_bytes!("../patches/megaman5-usa-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "megaman5-usa-widescreen.zxpk",
         options: MEGAMAN4_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
@@ -1410,7 +1467,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0xA4DC_F72E,
         // The USA hack built for the European code (`mm5wide`, -D EUROPE: its fixed banks' code
         // 2 bytes earlier from $C100; the same RAM and stage data), PAL.
-        bps: include_bytes!("../patches/megaman5-europe-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "megaman5-europe-widescreen.zxpk",
         options: MEGAMAN4_OPTIONS,
         after_other_way_state: None,
         advanced: true,
@@ -1431,7 +1489,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // A hack pack (see `crate::hack_pack`): the code in the zone fantôme, the hooks checked
         // and applied by the core in two groups (the sprites, the enemies in the margins);
         // "Invincible" a component of its own (`mm6wide`, `tools/build.py --pack`).
-        bps: include_bytes!("../patches/megaman6-usa-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "megaman6-usa-widescreen.zxpk",
         options: MEGAMAN4_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
@@ -1452,7 +1511,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0x2D66_4D99,
         // The USA hack built for the Japanese code (`mm6wide`, -D JAPAN: its fixed banks' code 4
         // bytes later from $D0D9 to $FA8A; the same RAM and stage data).
-        bps: include_bytes!("../patches/rockman6-japan-widescreen.zxpk"),
+        bps: &[],
+        pack_file: "rockman6-japan-widescreen.zxpk",
         options: MEGAMAN4_OPTIONS,
         after_other_way_state: None,
         advanced: true,
@@ -1476,7 +1536,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // 255 lines of overclock and goes on at once when the NMI already came while the frame
         // ran (the game's wait clears that count first, losing a frame). The margins are the
         // margin decoder's.
-        bps: include_bytes!("../patches/kirby-usa-rev1.zxpk"),
+        bps: &[],
+        pack_file: "kirby-usa-rev1.zxpk",
         options: KIRBY_OPTIONS,
         after_other_way_state: None,
         advanced: false,
@@ -1495,7 +1556,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0xD779_4AFC,
         // The first USA build (PRG0): its fixed bank as the Rev 1's, banks of the aids moved. The same hack built from this build's ROM
         // (`kirbywide`, `tools/build_pack.py`: every place found by its signature).
-        bps: include_bytes!("../patches/kirby-usa.zxpk"),
+        bps: &[],
+        pack_file: "kirby-usa.zxpk",
         options: KIRBY_OPTIONS,
         after_other_way_state: None,
         advanced: false,
@@ -1514,7 +1576,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0x3708_8EFF,
         // The Canadian build: its fixed bank's code moved a few bytes. The same hack built from this build's ROM
         // (`kirbywide`, `tools/build_pack.py`: every place found by its signature).
-        bps: include_bytes!("../patches/kirby-canada.zxpk"),
+        bps: &[],
+        pack_file: "kirby-canada.zxpk",
         options: KIRBY_OPTIONS,
         after_other_way_state: None,
         advanced: false,
@@ -1533,7 +1596,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0xE4A7_D436,
         // The Japanese build: its fixed bank's code moved a few bytes. The same hack built from this build's ROM
         // (`kirbywide`, `tools/build_pack.py`: every place found by its signature).
-        bps: include_bytes!("../patches/kirby-japan.zxpk"),
+        bps: &[],
+        pack_file: "kirby-japan.zxpk",
         options: KIRBY_OPTIONS,
         after_other_way_state: None,
         advanced: false,
@@ -1552,7 +1616,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0x2C08_8DC5,
         // The European build (PAL), which the French one takes by its signatures (the same code). The same hack built from this build's ROM
         // (`kirbywide`, `tools/build_pack.py`: every place found by its signature).
-        bps: include_bytes!("../patches/kirby-europe.zxpk"),
+        bps: &[],
+        pack_file: "kirby-europe.zxpk",
         options: KIRBY_OPTIONS,
         after_other_way_state: None,
         advanced: false,
@@ -1572,7 +1637,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // The European build's CRC, its PAL entry above taking it first: this one is for the ROMs of the
         // European code whose header says NTSC, taken by their signatures (`build_pack.py --ntsc`). The same hack built from this build's ROM
         // (`kirbywide`, `tools/build_pack.py`: every place found by its signature).
-        bps: include_bytes!("../patches/kirby-europe-ntsc.zxpk"),
+        bps: &[],
+        pack_file: "kirby-europe-ntsc.zxpk",
         options: KIRBY_OPTIONS,
         after_other_way_state: None,
         advanced: false,
@@ -1591,7 +1657,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         source_crc: 0x127D_76F4,
         // The German build (PAL): one of Kirby's checklists apart from the European build's. The same hack built from this build's ROM
         // (`kirbywide`, `tools/build_pack.py`: every place found by its signature).
-        bps: include_bytes!("../patches/kirby-germany.zxpk"),
+        bps: &[],
+        pack_file: "kirby-germany.zxpk",
         options: KIRBY_OPTIONS,
         after_other_way_state: None,
         advanced: false,
@@ -1615,7 +1682,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // find gold enough, the purse full); their code in the execution zone. The widescreen
         // is the margin decoder's. Its signatures also take (USA) Rev 1 (the routines at the
         // same places, a far call's operands elsewhere) and the translations and hacks of both.
-        bps: include_bytes!("../patches/faxanadu-usa.zxpk"),
+        bps: &[],
+        pack_file: "faxanadu-usa.zxpk",
         options: FAXANADU_OPTIONS,
         after_other_way_state: None,
         advanced: false,
@@ -1633,7 +1701,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         rom_name: "Faxanadu (Europe)",
         source_crc: 0x76C1_61E3,
         // The (USA) pack built for the European ROM: (USA) Rev 1's code, PAL.
-        bps: include_bytes!("../patches/faxanadu-europe.zxpk"),
+        bps: &[],
+        pack_file: "faxanadu-europe.zxpk",
         options: FAXANADU_OPTIONS,
         after_other_way_state: None,
         advanced: false,
@@ -1651,7 +1720,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // The European build's CRC, its PAL entry above taking it first: this one is for the
         // ROMs of the European code whose header says NTSC, taken by their signatures
         // (`tools/build_pack.py <rom> <out> --ntsc`).
-        bps: include_bytes!("../patches/faxanadu-europe-ntsc.zxpk"),
+        bps: &[],
+        pack_file: "faxanadu-europe-ntsc.zxpk",
         options: FAXANADU_OPTIONS,
         after_other_way_state: None,
         advanced: false,
@@ -1669,7 +1739,8 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // The (USA) pack built for the Japanese code: the same RAM and the same routines but
         // its fixed bank's far call and gold routines $C8 bytes on, a prologue before the
         // introduction, the password's stats routine elsewhere in bank 12.
-        bps: include_bytes!("../patches/faxanadu-japan.zxpk"),
+        bps: &[],
+        pack_file: "faxanadu-japan.zxpk",
         options: FAXANADU_OPTIONS,
         after_other_way_state: None,
         advanced: false,
@@ -1689,6 +1760,7 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // returns at once; the pits still kill) and the level select (its two tests of
         // LevelAvailable made NOPs: every level of every world, the save untouched).
         bps: include_bytes!("../patches/nova-the-squirrel.zxpk"),
+        pack_file: "",
         options: NOVA_OPTIONS,
         after_other_way_state: None,
         advanced: false,
@@ -1710,6 +1782,7 @@ pub const PATCHES: [BuiltinPatch; 68] = [
         // 512-pixel world in the nametables, which the margins show: no decoder
         // (`flappy-src/widescreen`, `build.py`).
         bps: include_bytes!("../patches/flappyzaxnes-widescreen.zxpk"),
+        pack_file: "",
         options: &[],
         after_other_way_state: None,
         advanced: false,
@@ -2258,6 +2331,19 @@ impl BuiltinPatch {
     }
 }
 
+/// The options several packs share, whose default the application's options window and the
+/// libretro core's options set for all of them (lot REWRITE-UI, owner, 2026-11-18): each key
+/// with the value the packs give it.
+pub const COMMON_OPTIONS: [(&str, bool); 6] = [
+    ("no_slowdown", true),
+    ("invincible", false),
+    ("level_select", false),
+    // Kirby's margin behaviour, meant for other games too (owner, 2026-11-18).
+    ("margin_enemies", true),
+    ("margin_freeze", false),
+    ("margin_freeze_tint", false),
+];
+
 /// An option of a built-in patch: bit `bit` of the extension's `$500A`, which the ROM reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HackOption {
@@ -2287,6 +2373,31 @@ pub struct PatchedRom {
 /// Size of an iNES header.
 const HEADER_SIZE: usize = 16;
 
+/// The patches whose bytes are there: the catalogue's built-in ones, and those whose pack file
+/// was found (see [`crate::pack_files`]), in the catalogue's order. Built once, on first use.
+#[must_use]
+pub fn patches() -> &'static [BuiltinPatch] {
+    static PATCHES: std::sync::OnceLock<Vec<BuiltinPatch>> = std::sync::OnceLock::new();
+    PATCHES.get_or_init(|| {
+        CATALOGUE
+            .iter()
+            .filter_map(|patch| {
+                if patch.pack_file.is_empty() {
+                    return Some(*patch);
+                }
+                let bps = crate::pack_files::get(patch.pack_file)?;
+                Some(BuiltinPatch { bps, ..*patch })
+            })
+            .collect()
+    })
+}
+
+/// Every patch the catalogue knows, its pack there or not (the file names a release must ship).
+#[must_use]
+pub fn catalogue() -> &'static [BuiltinPatch] {
+    &CATALOGUE
+}
+
 /// The image with the built-in patch made for it, or `None` when no patch matches (or the one
 /// that matches does not apply cleanly, which its checksums would tell).
 #[must_use]
@@ -2302,7 +2413,7 @@ pub fn apply_with(image: &[u8], forced: Option<&'static BuiltinPatch>) -> Option
     let (start, end) = data_bounds(image);
     let data = &image[start..end];
     let crc = crc32(data);
-    let (patch, checked) = match PATCHES.iter().find(|patch| patch.source_crc == crc) {
+    let (patch, checked) = match patches().iter().find(|patch| patch.source_crc == crc) {
         Some(patch) => (patch, true),
         None => match pack_matching(image, data) {
             Some((patch, _)) => (patch, true),
@@ -2343,7 +2454,7 @@ pub fn apply_with(image: &[u8], forced: Option<&'static BuiltinPatch>) -> Option
 /// whatever its CRC: another build of the game, or a ROM hack, whose hooked code (and the code
 /// the hack relies on) is the same, of the region and on a mapper the pack is made for (see
 /// [`crate::hack_pack`]). Best: its widescreen applies, then the most groups, then the first in
-/// [`PATCHES`] (two builds of a game may share an aid's bytes but not the widescreen's).
+/// [`patches`] (two builds of a game may share an aid's bytes but not the widescreen's).
 fn pack_matching(
     image: &[u8],
     data: &[u8],
@@ -2359,7 +2470,7 @@ fn pack_matching(
         (widescreen, groups)
     };
     let mut best: Option<(&'static BuiltinPatch, crate::hack_pack::AppliedPack)> = None;
-    for patch in &PATCHES {
+    for patch in patches() {
         let Some(pack) = crate::hack_pack::HackPack::read(patch.bps) else {
             continue;
         };
@@ -2423,7 +2534,7 @@ pub fn patch_for(image: &[u8]) -> Option<&'static BuiltinPatch> {
 /// The built-in patch called `name`, if any.
 #[must_use]
 pub fn by_name(name: &str) -> Option<&'static BuiltinPatch> {
-    PATCHES.iter().find(|patch| patch.name == name)
+    patches().iter().find(|patch| patch.name == name)
 }
 
 /// CRC-32 of the data of `image`: its PRG-ROM and CHR-ROM, without the iNES header, a trainer
@@ -2478,7 +2589,7 @@ pub fn source_size(patch: &BuiltinPatch) -> Option<usize> {
 /// The built-in patch made for ROM data (iNES header excluded) of CRC-32 `crc`, if any.
 #[must_use]
 pub fn for_data_crc(crc: u32) -> Option<&'static BuiltinPatch> {
-    PATCHES.iter().find(|patch| patch.source_crc == crc)
+    patches().iter().find(|patch| patch.source_crc == crc)
 }
 
 /// The built-in patch made for the game named `name` (a ROM file or a profile title), whichever
@@ -2490,7 +2601,7 @@ pub fn for_game_name(name: &str) -> Option<&'static BuiltinPatch> {
     // The longest game that names it, and not one whose number goes on ("Super Mario Bros. 3"
     // is not "Super Mario Bros.", "Castlevania II" not "Castlevania"); of a game's several
     // builds, the first listed (`max_by_key` keeps the last of equals: the list reversed).
-    PATCHES
+    patches()
         .iter()
         .rev()
         .filter(|patch| {
@@ -2979,8 +3090,26 @@ mod tests {
     }
 
     #[test]
+    fn every_pack_file_is_there_when_packs_are() {
+        // With packs at hand (built in or in the folder), the whole set: a missing file is a
+        // release without one of its games' widescreen.
+        let report = crate::pack_files::report();
+        if report.embedded + report.from_folder == 0 {
+            return;
+        }
+        for patch in catalogue() {
+            assert!(
+                patch.pack_file.is_empty() || crate::pack_files::get(patch.pack_file).is_some(),
+                "{}: {} missing",
+                patch.name,
+                patch.pack_file
+            );
+        }
+    }
+
+    #[test]
     fn the_built_in_patches_are_well_formed() {
-        for patch in PATCHES {
+        for patch in patches() {
             // A hack pack: it reads, and its widescreen is one of its components, unless it is
             // a pack of aids alone (Nova the Squirrel; Faxanadu, whose level select's code runs
             // in the execution zone).

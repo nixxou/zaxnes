@@ -79,6 +79,9 @@ draw list. Lua scripts hook into the conversion, never into the core.
 - [`docs/WIDESCREEN-EXTENSION.md`](docs/WIDESCREEN-EXTENSION.md): the widescreen's emulator side
   (the extra registers the hacks use), and [`docs/hacks/`](docs/hacks) one folder per game's
   widescreen hack.
+  The packs themselves are in `crates/zax-nes/patches/`. The packs and these docs are copies: the
+  master copy, with the packs' sources, is a private repository (the owner's
+  `zaxnes_zxpksources`, whose `WORKFLOW.md` is the procedure for a pack); edit them there.
 - [`docs/MOVIES.md`](docs/MOVIES.md): the `.zmv` movies.
 - [`docs/OPTIONS-LAYOUT.md`](docs/OPTIONS-LAYOUT.md): the layout of the desktop options window,
   where it diverges from the specification, and the old-tab → new-tab mapping of every setting.

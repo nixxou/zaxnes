@@ -21,7 +21,7 @@ show in the margins.
 | Source data (iNES header excluded) | CRC-32 `902E3168` (the whole file with its header: CRC-32 `BABD39FA`) |
 | Target data | CRC-32 `FF5824BD` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | new code at `$E700` of bank 15 (in the `$FF` fill `$E6F2`-`$F001`), hooks in banks 14, 15, 4 and 5 |
-| Patch | `rust/crates/zax-nes/patches/ng3-usa-widescreen.bps`, made against the data without header |
+| Patch | `ng3-usa-widescreen.bps` (built by `tools/build.py`, kept in the private sources repository, not published), made against the data without header |
 
 ---
 

@@ -77,17 +77,7 @@ fn entry_key(patch: &str, key: &str) -> String {
 /// not set for that pack.
 const COMMON: &str = "*";
 
-/// The options several packs share, whose default the options window sets for all of them:
-/// each key with the value the packs give it.
-pub const COMMON_OPTIONS: [(&str, bool); 6] = [
-    ("no_slowdown", true),
-    ("invincible", false),
-    ("level_select", false),
-    // Kirby's margin behaviour, meant for other games too (owner, 2026-11-18).
-    ("margin_enemies", true),
-    ("margin_freeze", false),
-    ("margin_freeze_tint", false),
-];
+pub use zax_nes::builtin_patches::COMMON_OPTIONS;
 
 /// The stored value of `key` of `patch`, when the player set it.
 fn stored_value(stored: &str, patch: &str, key: &str) -> Option<bool> {

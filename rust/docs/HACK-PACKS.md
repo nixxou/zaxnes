@@ -1,5 +1,10 @@
 # Hack packs
 
+Where the packs are: the catalogue is `builtin_patches.rs`, the packs are in `zax-nes/patches/`,
+built into the binary and loaded by `pack_files.rs`; a `.zxpk` of the same name in the `zxpk`
+folder next to the executable replaces the built-in one. The packs and their docs (`docs/hacks/`)
+are copies of a private repository that holds them with their sources (see `rust/README.md`).
+
 Status: the aids apart from the widescreen, see section 7. Branch `hack-rewrite`.
 
 ## 1. Why
@@ -255,52 +260,45 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
   PlayChoice-10 one (its INST-ROM left out of the data CRC); the VS.
   System is left aside (no mapper 99, VS PPUs or coins in the core);
   Mega Man 2 next: its pack in the execution zone, three groups (core, enemies, stage fixes) with
-  checks, MMC1, UxROM and MMC3, the European ROM's pack (PAL) and Rockman 2's
-  (`docs/hacks/megaman2/WIDESCREEN-HACK.md`). Its code reaches the extension at `$3000`-`$3FFF`
+  checks, MMC1, UxROM and MMC3, the European ROM's pack (PAL) and Rockman 2's. Its code reaches the extension at `$3000`-`$3FFF`
   (zone data, `WIDESCREEN-EXTENSION.md` 2), so the MMC5 conversions take it too: 636 of 703 ROMs
   take a whole pack, the same RAM as without zone data over its movies. Zelda II and Castlevania
   then moved to widescreen MMC5 too (the zone fantôme holding the extension's data), the same RAM
-  over their movies; Mega Man next (`docs/hacks/megaman1/WIDESCREEN-HACK.md`): its pack in the zone
+  over their movies; Mega Man next: its pack in the zone
   fantôme with zone data, two groups (core, enemies) with checks, the game's NMI left alone (the
   settings made in the frame's logic), UxROM, MMC3, MMC5 and GxROM, the European ROM's pack (PAL,
   and as NTSC for the ROMs of that code whose header says NTSC); 452 of its 455 ROMs take a whole
-  pack, Rockman (Japan) by the USA pack's signatures. Mega Man 3 the same way
-  (`docs/hacks/megaman3/WIDESCREEN-HACK.md`), with a pack per build (USA, Rockman 3, Europe and its
+  pack, Rockman (Japan) by the USA pack's signatures. Mega Man 3 the same way, with a pack per build (USA, Rockman 3, Europe and its
   Rev 1, the European ones PAL with NTSC twins): 268 of its 494 ROMs take a whole pack, its
-  512 KiB ROM hacks (their code reworked where the hack hooks) none. Mega Man 4 too
-  (`docs/hacks/megaman4/WIDESCREEN-HACK.md`): one pack for both USA builds and Rockman 4, the same
-  built from the European ROM (PAL); 272 of its 279 ROMs take a whole pack. Mega Man 5 too
-  (`docs/hacks/megaman5/WIDESCREEN-HACK.md`): the USA pack, which Rockman 5 takes, and the European
+  512 KiB ROM hacks (their code reworked where the hack hooks) none. Mega Man 4 too: one pack for both USA builds and Rockman 4, the same
+  built from the European ROM (PAL); 272 of its 279 ROMs take a whole pack. Mega Man 5 too: the USA pack, which Rockman 5 takes, and the European
   build's own (its fixed banks' code 2 bytes earlier), PAL; 419 of its 442 ROMs take a whole
-  pack. Mega Man 6 too (`docs/hacks/megaman6/WIDESCREEN-HACK.md`): its code (3.7 KiB) left the
+  pack. Mega Man 6 too: its code (3.7 KiB) left the
   10 KiB window for the zone fantôme; the USA pack and Rockman 6 (Japan)'s own (its fixed banks'
-  code 4 bytes later); 210 of its 215 ROMs take a whole pack. Super Mario Bros. 3 too
-  (`docs/hacks/smb3/WIDESCREEN-HACK.md`): three groups (core, enemies, Mario in the margins) with
+  code 4 bytes later); 210 of its 215 ROMs take a whole pack. Super Mario Bros. 3 too: three groups (core, enemies, Mario in the margins) with
   checks, its NMI left alone, its two aids components without code; the USA pack (Rev 1, which
   the first revision takes), one per Japanese revision and the European one (PAL, with its NTSC
-  twin); 910 of its 1077 ROMs take a whole pack. Super Mario Bros. too
-  (`docs/hacks/smb1/WIDESCREEN-HACK.md`): its three tables made tests (the zone shows data reads
+  twin); 910 of its 1077 ROMs take a whole pack. Super Mario Bros. too: its three tables made tests (the zone shows data reads
   to the PPU), the settings from the NMI's call of `UpdateTopScore`, three groups (core, enemies,
   level select) with checks, NROM, CNROM and MMC3; the World pack and the European one (PAL, with
   its NTSC twin); 69 of a pool of 100 ROMs take a whole pack, 10 more the core. Ninja Gaiden
-  III too (`docs/hacks/ng3/WIDESCREEN-HACK.md`): its code from the 2 KiB window to the zone
+  III too: its code from the 2 KiB window to the zone
   fantôme, two groups (core, enemies) with checks; the USA pack and Ninja Ryuuken Den III
   (Japan)'s own (the same code, moved by a few bytes); 42 of its 45 ROMs take a whole pack.
-  Excitebike too (`docs/hacks/excitebike/WIDESCREEN-HACK.md`): its code from the window to the
+  Excitebike too: its code from the window to the
   zone fantôme, two groups (core, riders) with checks, NROM, MMC1 and MMC3; the pack and the
   European one, the same code for PAL; 63 of its 68 ROMs take a whole pack. Adventure Island
-  too (`docs/hacks/adventure_island/WIDESCREEN-HACK.md`): its code from the window to the zone
+  too: its code from the window to the zone
   fantôme, its second sprite page with it, groups (core, enemies, previews, its two aids) with
   checks; the USA pack, the European one for PAL, the Japanese one (the same code, moved; the
   margin decoder's tables per build) and the Asian one (Kiddy Sun in Fantasia, the Japanese one
   without the level selector); 75 of its 97 ROMs take a whole pack, 14 all but the selector.
-  Final Fantasy too (`docs/hacks/ff1/WIDESCREEN-HACK.md`): its code from the window to the zone
+  Final Fantasy too: its code from the window to the zone
   fantôme, two groups (core, people) with checks; the USA pack and the Japanese one, which its
   Rev 1 takes (the same code at other places); 125 of a pool of 137 ROMs take a whole pack.
-  Metal Force too (`docs/hacks/metalforce/WIDESCREEN-HACK.md`): its code from the window to the
+  Metal Force too: its code from the window to the
   zone fantôme, two groups (core, enemies) with checks, "Invincible" a component of its own; the
-  dump and its ROM hack Mega Force take the whole pack. Blaster Master too
-  (`docs/hacks/blastermaster/WIDESCREEN-HACK.md`): its code from the window to the zone fantôme,
+  dump and its ROM hack Mega Force take the whole pack. Blaster Master too: its code from the window to the zone fantôme,
   groups (core, enemies, its two aids) with checks, MMC1 and MMC3; the USA pack (the Japanese,
   European and beta builds lay their code out otherwise); 21 of a pool of 33 ROMs take a whole
   pack, 3 all but the level selector. Then its Japanese (Chou-Wakusei Senki MetaFight) and
@@ -312,7 +310,7 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
   state dispatch's start), Adventure Island's, Blaster Master's and Metroid's level select and
   invincibility, Metal Force's level select (on the sound routine's start, which only the NMI
   calls), each a component named after its option. The core opens the execution zone on the
-  pack's code while the widescreen runs or an aid is on (`NesCore::boot_pack_zone`). Metroid too (`docs/hacks/metroid/WIDESCREEN-HACK.md`): its
+  pack's code while the widescreen runs or an aid is on (`NesCore::boot_pack_zone`). Metroid too: its
   code from the window to the zone fantôme, its one table made a test, groups (core, enemies,
   doors, previews, its two aids) with checks; the USA pack and the European one, the same code
   for PAL; 111 of a pool of 116 ROMs take a whole pack, 2 all but the doors. Kirby's Adventure
@@ -333,6 +331,5 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
   a table of the dumps whose header gives the wrong TV region (`rom::region_exception`, by data
   CRC-32: so far Castlevania (Europe) (Virtual Console), PAL) stands for the header at load (the
   automatic TV mode starts them right, a region the player chose stays) and in the packs' region
-  gate; `docs/hacks/castlevania/WIDESCREEN-HACK.md`
-  gives its groups, checks and the ROM set it was tried against. `pack_for` now falls back to the
+  gate. `pack_for` now falls back to the
   signatures when the pack of the ROM's CRC is refused by its gate (another region).

@@ -21,7 +21,7 @@ this patch: the enemies, platforms and firebars of the margins.
 | Source data (iNES header excluded) | CRC-32 `D445F698` |
 | Target data | CRC-32 `666302BB` (the hack's version in savestate headers; `tools/build.py` prints it), 56 KiB: the game's 32 KiB of PRG, a 16 KiB PRG bank added, the 8 KiB of CHR |
 | Changes | hooks in the game's PRG (same size as what they replace); the new code in the added bank |
-| Patch | `rust/crates/zax-nes/patches/smb1-world-widescreen.bps`, made against the data without header; the CHR-ROM, moved after the new bank, is copied from the player's ROM (BPS SourceCopy), so the patch carries only the hack's bytes |
+| Patch | `smb1-world-widescreen.bps` (built by `tools/build.py`, kept in the private sources repository, not published), made against the data without header; the CHR-ROM, moved after the new bank, is copied from the player's ROM (BPS SourceCopy), so the patch carries only the hack's bytes |
 | Zaxnes declaration | `builtin_patches.rs`: `advanced: true` (applied only in the advanced mode), `boot_window: Some((0x82, 0x00))`, `idle_loop: Some((0x8057, 0x8059))` |
 
 The game has no room left for the code that would unlock the extension. Zaxnes therefore opens
@@ -180,7 +180,7 @@ Requirements: cc65 (ca65, ld65; run through WSL when not on the PATH), Python 3,
 
 ```
 python -I tools/build.py "Super Mario Bros. (World).nes" build/smb1wide.bps
-python -I tools/make_doc.py <zaxnes>/rust/docs/hacks/smb1/WIDESCREEN-HACK.md
+python -I tools/make_doc.py <zaxnes_zxpksources>/docs/hacks/smb1/WIDESCREEN-HACK.md
 ```
 
 `build.py` assembles `src/wide.s` for `$5800` (a 16 KiB bank, `$FF` fill), writes the hooks into the

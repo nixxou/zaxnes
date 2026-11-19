@@ -637,6 +637,8 @@ Le détail technique est dans [`rust/docs/WIDESCREEN-EXTENSION.md`](rust/docs/WI
 , [`rust/docs/hacks/megaman6/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman6/WIDESCREEN-HACK.md)
 et [`rust/docs/hacks/metroid/WIDESCREEN-HACK.md`](rust/docs/hacks/metroid/WIDESCREEN-HACK.md) (les hacks
 eux-mêmes et comment les reconstruire).
+Les packs sont intégrés au programme ; un fichier `.zxpk` posé dans un dossier `zxpk` à côté de
+l'exécutable remplace le pack intégré du même nom.
 
 ### Limite de 8 sprites par ligne
 

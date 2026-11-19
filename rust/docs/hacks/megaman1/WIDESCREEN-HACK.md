@@ -27,7 +27,7 @@ picture then ends where it does without a vertical margin.
 | Source data (iNES header excluded) | CRC-32 `6EE4BB0A` |
 | Target data | CRC-32 `6292CD89` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | PRG grown to 256 KiB (16 banks): the game's banks 0-7 where they were, the hack's code as bank 8, banks 9-14 of `$FF`, the fixed bank copied to bank 15 (the one UxROM fixes at `$C000`); hooks in bank 5 and bank 7 (both copies of the fixed bank) |
-| Patch | `rust/crates/zax-nes/patches/megaman1-usa-widescreen.bps`, made against the data without header; the fixed bank's copy is SourceCopy, no game data in the patch |
+| Patch | `megaman1-usa-widescreen.bps` (built by `tools/build.py`, kept in the private sources repository, not published), made against the data without header; the fixed bank's copy is SourceCopy, no game data in the patch |
 
 The code runs from the widescreen extension's PRG window at `$5800-$7FFF` (`$5007` bit 4), which
 Zaxnes opens on bank 8, page 0 at power-on for this patch (`boot_window`): the game has no free
@@ -155,7 +155,7 @@ Zaxnes writes their bits at `$500A` every frame, the hack reads them there (`WID
 | 1 | `invincible` | Invincible | off | a testing aid: Mega Man takes no damage and no knockback (pits and spikes still kill) |
 | 2 | `no_slowdown` | No slowdown / Sans ralentissements | on | 255 lines of overclock instead of 64 |
 
-The options live in Zaxnes (`rust/crates/zax-nes/src/builtin_patches.rs`, `PATCHES`); the ROM does
+The options live in Zaxnes (`rust/crates/zax-nes/src/builtin_patches.rs`, `CATALOGUE`); the ROM does
 not depend on them being set.
 
 ## 6. Building

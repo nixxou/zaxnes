@@ -213,7 +213,7 @@ mod tests {
     ];
 
     fn patch() -> BuiltinPatch {
-        let mut patch = builtin_patches::PATCHES[0];
+        let mut patch = builtin_patches::patches()[0];
         patch.bps = PACK;
         patch.rom_name = "Test (USA)";
         patch.source_crc = 0x1234_5678;

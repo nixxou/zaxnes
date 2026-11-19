@@ -106,7 +106,7 @@ pub struct NesCore {
     smooth_ahead: bool,
     /// Whether the game's own `smooth_scroll` aid is on, worked out when the options, the patch
     /// or the pack change ([`NesCore::refresh_patch_cache`]) and **never inside a frame**: the
-    /// question costs a scan of `builtin_patches::PATCHES`, and `end_frame` asked it twice a
+    /// question costs a scan of `builtin_patches::patches()`, and `end_frame` asked it twice a
     /// frame until lot KIRBY-MERGE step 4.
     smooth_scroll_on: bool,
     /// Whether the last frame did any smooth scrolling, so that the frame after the option goes
@@ -115,7 +115,7 @@ pub struct NesCore {
     /// Where the game waits for the next frame, from the patch that runs
     /// ([`crate::builtin_patches::BuiltinPatch::idle_loop`]): the overclock ends there. Cached
     /// with [`NesCore::smooth_scroll_on`] and for the same reason — finding it means scanning
-    /// `builtin_patches::PATCHES`, and `end_frame` did that once a frame.
+    /// `builtin_patches::patches()`, and `end_frame` did that once a frame.
     idle_loop: Option<(u16, u16)>,
     /// Lot CORE-2: every frame through the path of every board, even for a specialised board
     /// (the equivalence test's reference). Not a setting, not in the state.
@@ -2107,7 +2107,7 @@ impl NesCore {
     /// Works out everything the frame path reads of the patch that runs: its margin decoder,
     /// whether the game's `smooth_scroll` aid is on, and where the game waits for the next
     /// frame. None of the three can change inside a frame, and each costs a walk of a long
-    /// match or a scan of `builtin_patches::PATCHES` to find; `end_frame` worked all three out
+    /// match or a scan of `builtin_patches::patches()` to find; `end_frame` worked all three out
     /// once a frame until lot KIRBY-MERGE step 4, which is where the lot's whole regression on
     /// the five commercial games came from. This runs at every point an answer can move: a ROM
     /// loaded or closed, a pack installed, the options set, `emu.builtin_patches` turned.

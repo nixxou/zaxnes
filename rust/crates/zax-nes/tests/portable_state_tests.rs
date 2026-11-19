@@ -175,7 +175,7 @@ fn a_state_without_the_hack_goes_on_with_it() {
 /// version as it was: the states made with the pack before it keep loading.
 #[test]
 fn the_pack_says_its_states_carry_and_keeps_its_version() {
-    let patch = zax_nes::builtin_patches::PATCHES
+    let patch = zax_nes::builtin_patches::patches()
         .iter()
         .find(|patch| patch.name == zax_nes::builtin_patches::FLAPPYZAXNES)
         .expect("the FlappyZaxNes patch");
@@ -195,7 +195,7 @@ fn the_pack_says_its_states_carry_and_keeps_its_version() {
 #[test]
 fn every_pack_says_how_its_states_carry() {
     use zax_nes::hack_pack::{is_pack, RedrawStep};
-    for patch in zax_nes::builtin_patches::PATCHES
+    for patch in zax_nes::builtin_patches::patches()
         .iter()
         .filter(|patch| is_pack(patch.bps))
     {

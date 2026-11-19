@@ -29,7 +29,7 @@ picture then ends where it does without a vertical margin.
 | Source data (iNES header excluded) | CRC-32 `2BC67AA8`; Rev 1 `18A2E74F` |
 | Target data | CRC-32 `46C5D773`; Rev 1 `33E7BBEE` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | PRG grown to 544 KiB (68 banks of 8 KiB): the game's banks 0-63 where they were, the hack's code as banks 64-65 (16 KiB bank 32), the fixed banks copied to banks 66 and 67 (Zaxnes' MMC3 fixes the last two banks, whatever their count); hooks in banks `$38`, `$3A`, 62 and 63 (both copies of the fixed banks) |
-| Patches | `rust/crates/zax-nes/patches/megaman4-usa-widescreen.bps` and `megaman4-usa-rev1-widescreen.bps`, made against the data without header; the fixed banks' copies are SourceCopy, the added banks never read from the source, no game data in the patches |
+| Patches | `megaman4-usa-widescreen.bps` (built by `tools/build.py`, kept in the private sources repository, not published) and `megaman4-usa-rev1-widescreen.bps`, made against the data without header; the fixed banks' copies are SourceCopy, the added banks never read from the source, no game data in the patches |
 
 The code runs from the widescreen extension's PRG window at `$5800-$5FFF`, which Zaxnes opens on
 bank 32, page 0 at power-on for this patch (`boot_window`): the game has no free room for code that

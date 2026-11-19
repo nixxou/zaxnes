@@ -2,8 +2,8 @@
 
 Branch: `feat/widescreen-adventure-island` (from `dev`), temporary, same method as the Zelda II /
 Mega Man 2 / Super Mario Bros. widescreen work. Read first: `rust/docs/WIDESCREEN-EXTENSION.md`,
-`rust/docs/hacks/smb1/WIDESCREEN-HACK.md` (closest model: boot window + added PRG bank, advanced mode),
-then `rust/docs/hacks/adventure_island/WIDESCREEN-HACK.md` (this hack, complete).
+`docs/hacks/smb1/WIDESCREEN-HACK.md` (closest model: boot window + added PRG bank, advanced mode),
+then `docs/hacks/adventure_island/WIDESCREEN-HACK.md` (this hack, complete).
 
 ## ROM
 *Adventure Island (USA)*, CNROM (mapper 3), 32 KiB PRG + 32 KiB CHR, data CRC-32 `F8A713BE`.
@@ -21,7 +21,7 @@ No ROM is committed: get it from the owner.
    all 32 rounds (see WIDESCREEN-EXTENSION.md section 4).
 2. `4698551` Core fix `ppu/tiles.rs`: second-page sprites were dropped in bands without console sprites
    (affected SMB1 too).
-3. `37d9080` Advanced patch `rust/crates/zax-nes/patches/adventure-island-usa-widescreen.bps` +
+3. `37d9080` Advanced patch `adventure-island-usa-widescreen.bps` (built by `tools/build.py`, kept in the private sources repository, not published) +
    `builtin_patches.rs` entry (advanced, boot_window (0x82,0), idle_loop B759-B75C), options
    level_select (Select on title), invincible, no_slowdown. Sprites with 16-bit x in the margins,
    left-edge "ghost" objects (behaviour runs, no collision/sound/spawn). `for_game_name` ignores
