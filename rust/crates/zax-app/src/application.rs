@@ -92,7 +92,12 @@ const LATE_OBJECT_FRAMES_REPORTED: u32 = zax_engine3d::draw_list::LATE_OBJECT_FR
 /// except for smoke runs and screenshot runs.
 #[must_use]
 pub const fn should_open_fullscreen(options: &AppOptions, persisted: bool) -> bool {
-    (persisted || options.handheld) && !options.smoke_test && options.ui_shot_directory.is_none()
+    // Web build: the page is the window; SDL's full screen there would size the drawing for the
+    // whole screen while the page shows the canvas at its own size.
+    (persisted || options.handheld)
+        && !options.smoke_test
+        && options.ui_shot_directory.is_none()
+        && !cfg!(target_os = "emscripten")
 }
 
 /// What the window's pacing should be: the settings, except that a smoke run is not paced by
@@ -208,8 +213,21 @@ impl ZaxApplication {
 
     fn run_inner(&self) -> Result<i32, String> {
         let mut running = Running::build(&self.options)?;
-        while running.frame()? {}
-        Ok(running.finish())
+        // Web build: the browser drives the frames (one per display refresh) and the loop
+        // never returns to here.
+        #[cfg(target_os = "emscripten")]
+        zax_platform::web::run_main_loop(move || match running.frame() {
+            Ok(go_on) => go_on,
+            Err(message) => {
+                app_log::error(&message);
+                false
+            }
+        });
+        #[cfg(not(target_os = "emscripten"))]
+        {
+            while running.frame()? {}
+            Ok(running.finish())
+        }
     }
 }
 
@@ -504,6 +522,12 @@ impl Running {
         self.reopen_the_audio_output();
         self.follow_the_editor_setting();
         self.load_the_asked_state();
+        // Web build: the ROM the page's dialogue chose, and whether a game is on the screen
+        // for the page (it hides its own button then). No-ops elsewhere.
+        if let Some(path) = crate::web_bridge::take_open_answer() {
+            self.host.enqueue(Command::OpenRom, CommandArgs::of_text(&path));
+        }
+        crate::web_bridge::report_playing(self.ui.game_on_screen());
         let frame_begin = self.clock.start();
         let busy_begin = Instant::now();
         let mark = self.clock.start();
@@ -768,6 +792,38 @@ impl Running {
         }
         if forward {
             snapshot.player_one |= crate::input::input_action::InputAction::FAST_FORWARD;
+        }
+        // Web build: no virtual controller carries the pad's buttons, they are the first
+        // player's here (the whole pad, or its extras alone beside a real gamepad).
+        {
+            use crate::input::input_action::InputAction;
+            use zax_platform::input::touch::TouchControl;
+            for (control, action) in [
+                (TouchControl::Up, InputAction::UP),
+                (TouchControl::Down, InputAction::DOWN),
+                (TouchControl::Left, InputAction::LEFT),
+                (TouchControl::Right, InputAction::RIGHT),
+                (TouchControl::A, InputAction::A),
+                (TouchControl::B, InputAction::B),
+                (TouchControl::Select, InputAction::SELECT),
+                (TouchControl::Start, InputAction::START),
+                (TouchControl::Menu, InputAction::MENU),
+            ] {
+                let held = self.input.touch.take_held(control);
+                if held {
+                    snapshot.player_one |= action;
+                }
+                // The console interface reads its own pad: the menu button opens its in-game
+                // menu (on Android the virtual controller's guide button does that).
+                if control == TouchControl::Menu {
+                    self.ui.set_touch_menu(held);
+                }
+            }
+        }
+        for command in self.input.touch.take_commands() {
+            if let Some(command) = Command::from_name(command) {
+                self.host.enqueue(command, CommandArgs::default());
+            }
         }
         let capturing = self.source.rebinding().suppresses_actions();
         self.ui.handle_shortcuts(
@@ -1489,15 +1545,22 @@ impl Running {
 
     /// The time a displayed frame has, as the pacing in force sets it: the swap interval at the
     /// display's refresh rate, or the frame cap's period; none when nothing paces the frames.
+    /// The display's refresh rate, 60 when the system does not say: a display mode may report 0
+    /// for "unknown" (browsers do), which must not become one frame a second.
+    fn refresh_rate(&self) -> i32 {
+        self.window
+            .window()
+            .display_mode()
+            .map(|mode| mode.refresh_rate)
+            .ok()
+            .filter(|&rate| rate > 0)
+            .unwrap_or(60)
+    }
+
     fn paced_budget(&self) -> Option<Duration> {
         let interval = self.window.vsync_interval();
         if interval > 0 {
-            let refresh = self
-                .window
-                .window()
-                .display_mode()
-                .map_or(60, |mode| mode.refresh_rate)
-                .max(1);
+            let refresh = self.refresh_rate();
             return Some(Duration::from_secs_f64(
                 f64::from(interval) / f64::from(refresh),
             ));
@@ -1510,12 +1573,7 @@ impl Running {
     fn display_rate(&self) -> f64 {
         let interval = self.window.vsync_interval();
         if interval > 0 {
-            let refresh = self
-                .window
-                .window()
-                .display_mode()
-                .map_or(60, |mode| mode.refresh_rate)
-                .max(1);
+            let refresh = self.refresh_rate();
             return f64::from(refresh) / f64::from(interval);
         }
         self.window
@@ -1525,12 +1583,7 @@ impl Running {
 
     /// The time one displayed frame may take: the swap interval at the display's refresh rate.
     fn frame_budget(&self) -> Duration {
-        let refresh = self
-            .window
-            .window()
-            .display_mode()
-            .map_or(60, |mode| mode.refresh_rate)
-            .max(1);
+        let refresh = self.refresh_rate();
         // The interval in force, which `video.half_rate_3d` may double.
         let interval = self.window.vsync_interval().max(1);
         Duration::from_secs_f64(f64::from(interval) / f64::from(refresh))
@@ -1717,6 +1770,7 @@ impl Running {
 
     /// REQ-LOOP-052: the current game is stopped (End hook), the settings and the slot metadata
     /// are written, and nothing is auto-saved.
+    #[cfg_attr(target_os = "emscripten", allow(dead_code))] // the browser never ends the loop
     fn finish(mut self) -> i32 {
         ImguiFrontend::close_capture(&mut self.source);
         let emulated_frames = self.host.emulated_frames();
@@ -1734,11 +1788,20 @@ fn load_settings(options: &AppOptions, paths: &UserDataPaths) -> (SettingsStore,
     let mut model = SettingsModel::new();
     // The economical defaults of a PortMaster handheld; the Android package keeps the desktop's
     // (owner request: some devices are powerful, each player tunes for his own).
-    if options.handheld && !cfg!(target_os = "android") {
+    // Not in the browser either: the web build runs as a handheld for its interface only.
+    if options.handheld && !cfg!(any(target_os = "android", target_os = "emscripten")) {
         handheld::defaults::apply(&mut model);
     }
     if cfg!(target_os = "android") {
         handheld::defaults::apply_android(&mut model);
+    }
+    // Web build (owner request): starts on the fastest preset, without the real-time pad, whose
+    // millisecond polling would hold the browser's only thread until each refresh.
+    if cfg!(target_os = "emscripten") {
+        handheld::defaults::apply_fastest(&mut model);
+        model.set_environment_default(SettingId::EmuRealtimeInput, SettingValue::Bool(false));
+        // The widescreen on by default (owner request): the ROMs made for it fill the page.
+        model.set_environment_default(SettingId::VideoWidescreen, SettingValue::Enum(1));
     }
     // Rust-only (owner request): the region comes from the ROM header unless the user turned the
     // automatic mode off, so a European dump runs at 50 Hz (`emu.auto_tv_mode` is off in C#).
@@ -2055,7 +2118,9 @@ fn configure_pacing(host: &mut AppHost, options: &AppOptions) {
     host.catch_up = options.catch_up;
     // No rewind on a PortMaster handheld (owner request): its snapshot every 60 frames costs a
     // spike. The Android package has it, as the desktop (owner request).
-    host.rollback_enabled = !options.handheld || cfg!(target_os = "android");
+    // The web build, a handheld for its interface only, keeps it too.
+    host.rollback_enabled =
+        !options.handheld || cfg!(any(target_os = "android", target_os = "emscripten"));
     host.separate_core = separate_core(options);
     // RO-2 part 4: a handheld build, `--handheld`, or a desktop opened in its console mode. It
     // is the launch-time choice of interface; F1 switching the presentation later does not make
@@ -2089,7 +2154,8 @@ fn separate_core(options: &AppOptions) -> bool {
     {
         Ok("1") => true,
         Ok("0") => false,
-        _ => options.handheld,
+        // The browser gives the program one thread.
+        _ => options.handheld && !cfg!(target_os = "emscripten"),
     }
 }
 
@@ -2195,6 +2261,7 @@ struct RunState {
     /// automatic resolution, and its rounding with it).
     view_size: (i32, i32),
     renderer_name: String,
+    #[cfg_attr(target_os = "emscripten", allow(dead_code))] // the browser never ends the loop
     version: String,
     shadow_map_reported: bool,
     drag_origin: Option<[f32; 2]>,
@@ -2331,6 +2398,7 @@ fn smoke_run_is_over(options: &AppOptions, host: &AppHost, state: &RunState) -> 
     }
 }
 
+#[cfg_attr(target_os = "emscripten", allow(dead_code))] // the browser never ends the loop
 fn finish(options: &AppOptions, state: &RunState, emulated: i64) -> i32 {
     if !options.smoke_test {
         return 0;
@@ -2705,7 +2773,7 @@ fn update_cursor(
         host.state() == EmulationState::Running,
         snapshot.pointer_moved,
         real,
-    );
+    ) || cfg!(target_os = "emscripten"); // Web: the page keeps the mouse (it clicks the pad).
     if input.pointer.cursor_visible() != visible {
         input.pointer.set_cursor_visible(visible);
     }

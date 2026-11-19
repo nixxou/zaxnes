@@ -14,9 +14,11 @@ const LABEL: [f32; 4] = [1.0, 1.0, 1.0, 0.55];
 pub fn draw(ui: &Ui, view: &TouchPadView) {
     let list = ui.get_foreground_draw_list();
     let layout = &view.layout;
-    draw_dpad(&list, layout.dpad, view);
-    circle_button(ui, &list, layout.a, "A", view.is_pressed(TouchControl::A));
-    circle_button(ui, &list, layout.b, "B", view.is_pressed(TouchControl::B));
+    if !view.extras_only {
+        draw_dpad(&list, layout.dpad, view);
+        circle_button(ui, &list, layout.a, "A", view.is_pressed(TouchControl::A));
+        circle_button(ui, &list, layout.b, "B", view.is_pressed(TouchControl::B));
+    }
     circle_button(
         ui,
         &list,
@@ -69,6 +71,9 @@ pub fn draw(ui: &Ui, view: &TouchPadView) {
             view.is_pressed(TouchControl::FastForward),
         );
         draw_arrows(&list, forward, 1.0);
+    }
+    if view.extras_only {
+        return;
     }
     pill(
         ui,

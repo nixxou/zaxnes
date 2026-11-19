@@ -22,9 +22,19 @@ pub const TOUCH_PAD_NAME: &str = "Zaxnes touch pad";
 pub fn offered() -> bool {
     static OFFERED: OnceLock<bool> = OnceLock::new();
     *OFFERED.get_or_init(|| {
-        cfg!(target_os = "android") || std::env::var("ZAXNES_TOUCH_PAD").is_ok_and(|v| v == "1")
+        cfg!(any(target_os = "android", target_os = "emscripten"))
+            || std::env::var("ZAXNES_TOUCH_PAD").is_ok_and(|v| v == "1")
     })
 }
+
+/// Web build (owner request): with a real gamepad connected, the automatic mode keeps the
+/// buttons a gamepad does not have (the menu, 2D/3D, the camera's lock and recentring, the
+/// rewind and the fast forward) instead of hiding the whole pad.
+const EXTRAS_WITH_GAMEPAD: bool = cfg!(target_os = "emscripten");
+
+/// Web build: Emscripten's SDL has no virtual joysticks, so the pad never makes one; the
+/// application reads its controls instead ([`TouchPad::held`], [`TouchPad::take_commands`]).
+const DIRECT: bool = cfg!(target_os = "emscripten");
 
 /// What the screen shows of the pad: where its controls are, and which are pressed.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -33,6 +43,8 @@ pub struct TouchPadView {
     pressed: [bool; CONTROLS],
     /// The camera does not follow the fingers.
     pub camera_locked: bool,
+    /// Only the buttons a gamepad does not have are shown (a real one is connected).
+    pub extras_only: bool,
 }
 
 impl TouchPadView {
@@ -385,6 +397,29 @@ impl TouchLayout {
         }
     }
 
+    /// This layout without what a gamepad already has (the cross, B and A, Select and Start):
+    /// those controls are moved off the view, where no finger reaches them.
+    #[must_use]
+    pub const fn without_gamepad_controls(self) -> Self {
+        const AWAY: f32 = -1.0e6;
+        let gone = Circle {
+            center: [AWAY, AWAY],
+            radius: 0.0,
+        };
+        let none = Rect {
+            min: [AWAY, AWAY],
+            max: [AWAY, AWAY],
+        };
+        Self {
+            dpad: gone,
+            a: gone,
+            b: gone,
+            select: none,
+            start: none,
+            ..self
+        }
+    }
+
     /// [`Self::for_portrait`] at `scale` times the size, each control keeping to its corner or
     /// edge of the band, as [`Self::scaled`] does on the whole screen.
     #[must_use]
@@ -614,6 +649,12 @@ pub struct TouchPad {
     mouse_finger: bool,
     /// Where free fingers tapped since the last [`TouchPad::take_taps`], in drawable pixels.
     taps: Vec<[f32; 2]>,
+    /// The commands the buttons pressed while only the extras are shown (no virtual
+    /// controller carries them), since the last [`TouchPad::take_commands`].
+    commands: Vec<&'static str>,
+    /// The controls pressed since the application last read them ([`TouchPad::take_held`]): a
+    /// quick tap (a mouse click) may go down and up between two frames and must still count.
+    latched: [bool; CONTROLS],
     options: TouchOptions,
     /// In portrait, where the pad's band starts.
     pad_top: Option<f32>,
@@ -646,6 +687,8 @@ impl TouchPad {
             name: CString::new(TOUCH_PAD_NAME).unwrap_or_default(),
             mouse_finger,
             taps: Vec::new(),
+            commands: Vec::new(),
+            latched: [false; CONTROLS],
             options: TouchOptions::default(),
             pad_top: None,
             vibrator: Vibrator::default(),
@@ -663,21 +706,84 @@ impl TouchPad {
             }
     }
 
+    /// Whether only the buttons a gamepad lacks are shown: the web build's automatic mode with a
+    /// real gamepad connected, in game.
+    #[must_use]
+    pub fn extras_only(&self) -> bool {
+        EXTRAS_WITH_GAMEPAD
+            && self.playing
+            && self.mode == TouchPadMode::Auto
+            && self.physical
+            && self.view[1] > 0.0
+    }
+
+    /// Whether the whole pad is shown with no virtual controller behind it: the web build, whose
+    /// SDL has no virtual joysticks. Its controls are then read by [`TouchPad::held`].
+    fn direct(&self) -> bool {
+        DIRECT && self.shown() && self.view[1] > 0.0
+    }
+
+    /// Whether some of the pad is on the screen and takes fingers.
+    fn active(&self) -> bool {
+        !self.joystick.is_null() || self.direct() || self.extras_only()
+    }
+
+    /// Whether the pad's buttons are read by the application rather than pressed on a virtual
+    /// controller.
+    fn read_directly(&self) -> bool {
+        self.joystick.is_null() && self.active()
+    }
+
+    /// Whether only the extras are on the screen now.
+    fn showing_extras_only(&self) -> bool {
+        self.active() && !self.shown()
+    }
+
+    /// The controls fingers can press now.
+    fn active_layout(&self) -> TouchLayout {
+        if self.showing_extras_only() {
+            self.layout.without_gamepad_controls()
+        } else {
+            self.layout
+        }
+    }
+
     /// What to draw of the pad; none while it is hidden.
     #[must_use]
     pub fn view(&self) -> Option<TouchPadView> {
-        (!self.joystick.is_null()).then_some(TouchPadView {
-            layout: self.layout,
+        self.active().then(|| TouchPadView {
+            layout: self.active_layout(),
             pressed: self.pressed,
             camera_locked: self.camera_locked,
+            extras_only: self.showing_extras_only(),
         })
+    }
+
+    /// Whether `control` is held, for the application to act on it itself: only while no
+    /// virtual controller carries the pad's buttons (the web build).
+    #[must_use]
+    pub fn held(&self, control: TouchControl) -> bool {
+        self.read_directly() && self.pressed[control.index()]
+    }
+
+    /// [`TouchPad::held`], or pressed at all since the last call: what the application reads
+    /// once a frame, so that a tap shorter than a frame is not lost.
+    pub fn take_held(&mut self, control: TouchControl) -> bool {
+        let latched = std::mem::take(&mut self.latched[control.index()]);
+        self.read_directly() && (latched || self.pressed[control.index()])
+    }
+
+    /// The commands the extras pressed since the last call (`video.toggle_2d`,
+    /// `video.reset_view`).
+    pub fn take_commands(&mut self) -> Vec<&'static str> {
+        std::mem::take(&mut self.commands)
     }
 
     /// Whether the pad's rewind and fast-forward buttons are held: the hotkeys they stand for
     /// (owner request).
     #[must_use]
-    pub const fn hotkeys_held(&self) -> (bool, bool) {
-        if self.joystick.is_null() {
+    pub fn hotkeys_held(&self) -> (bool, bool) {
+        if !self.active() {
             return (false, false);
         }
         (
@@ -690,7 +796,15 @@ impl TouchPad {
     /// screen, not on a desktop trying the pad with the mouse.
     #[must_use]
     pub const fn drives_pointer(&self) -> bool {
-        !self.mouse_finger
+        // The web build takes both: real fingers on a touch screen, the mouse on a computer.
+        !self.mouse_finger || DIRECT
+    }
+
+    /// Whether the mouse belongs to the pad alone: on the web, in game, it is a finger like the
+    /// others, so its drag turns the camera only when the lock lets fingers do it.
+    #[must_use]
+    pub fn holds_mouse(&self) -> bool {
+        DIRECT && self.mouse_finger && self.active()
     }
 
     /// The one free finger turning the camera, like a mouse drag; none while the camera is
@@ -708,7 +822,7 @@ impl TouchPad {
 
     /// The camera follows free fingers in game, unless the shown pad locks it.
     fn camera_free(&self) -> bool {
-        self.playing && (self.joystick.is_null() || !self.camera_locked)
+        self.playing && (!self.active() || !self.camera_locked)
     }
 
     /// One free finger turns the camera; two pinch its zoom.
@@ -792,7 +906,8 @@ impl TouchPad {
     /// Takes one SDL event: the fingers, and the gamepads plugged or unplugged.
     pub fn handle_event(&mut self, event: &Event) {
         let (view, scale) = (self.view, self.scale);
-        let pad = (!self.joystick.is_null()).then_some(&self.layout);
+        let layout = self.active_layout();
+        let pad = self.active().then_some(&layout);
         // How far a tap may slide: a little of the view's height.
         let slop = view[1] * 0.03;
         let at = |x: f32, y: f32| [x * view[0], y * view[1]];
@@ -827,19 +942,23 @@ impl TouchPad {
             }
             _ => return,
         }
-        self.press(self.fingers.pressed(&self.layout));
+        self.press(self.fingers.pressed(&layout));
         self.follow_camera_fingers();
     }
 
     /// Attaches the virtual controller when the pad appears, detaches it when it goes.
     fn follow_visibility(&mut self) {
-        let shown = self.shown() && self.view[1] > 0.0;
+        let shown = self.shown() && self.view[1] > 0.0 && !DIRECT;
         if shown && self.joystick.is_null() {
             self.attach();
         } else if !shown && !self.joystick.is_null() {
             self.fingers = Fingers::default();
             self.press([false; CONTROLS]);
             self.detach();
+        } else if !self.active() && self.pressed.iter().any(|on| *on) {
+            // The extras went away (no game, or the gamepad unplugged into the full pad).
+            self.fingers = Fingers::default();
+            self.pressed = [false; CONTROLS];
         }
         if !self.camera_free() {
             self.camera_finger = None;
@@ -848,7 +967,7 @@ impl TouchPad {
     }
 
     fn press(&mut self, pressed: [bool; CONTROLS]) {
-        if self.joystick.is_null() {
+        if !self.active() {
             self.pressed = [false; CONTROLS];
             return;
         }
@@ -866,14 +985,26 @@ impl TouchPad {
             }
             match control.button() {
                 // SAFETY: the joystick is the open virtual controller of this pad.
-                Some(button) => unsafe {
+                Some(button) if !self.joystick.is_null() => unsafe {
                     sys::SDL_JoystickSetVirtualButton(self.joystick, button as i32, u8::from(on));
                 },
+                // The extras alone, with no virtual controller: the commands its buttons stand
+                // for in game (the menu is a held hotkey, see `menu_held`).
+                Some(_) if on && control == TouchControl::Flat => {
+                    self.commands.push("video.toggle_2d");
+                }
+                Some(_) if on && control == TouchControl::Recenter => {
+                    self.commands.push("video.reset_view");
+                }
+                Some(_) => {}
                 None if on && control == TouchControl::Lock => {
                     self.camera_locked = !self.camera_locked;
                 }
                 None => {}
             }
+        }
+        for (latched, on) in self.latched.iter_mut().zip(pressed) {
+            *latched |= on;
         }
         self.pressed = pressed;
     }

@@ -410,6 +410,10 @@ impl ZaxUi {
     /// A command asked the interface for a window or a dialogue.
     pub fn handle_ui_request(&mut self, host: &mut AppHost, command: Command, args: &CommandArgs) {
         match command {
+            // Web build: the page's own dialogue (prepackaged ROMs, drop, the player's files).
+            Command::OpenRom if crate::web_bridge::active() => {
+                crate::web_bridge::request_open_dialog();
+            }
             Command::OpenRom => self.open_browser(host, BrowserPurpose::Rom),
             Command::OpenRecentRom => Self::open_recent(host, args.number),
             Command::ChooseProfile => {

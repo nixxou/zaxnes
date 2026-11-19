@@ -788,6 +788,13 @@ impl Gl {
     /// says whether it is signalled. A driver that fails the wait reports `true`, so that a
     /// caller cannot loop on it for ever.
     pub fn wait_for_fence(&self, fence: Fence, timeout_nanoseconds: i32) -> bool {
+        // WebGL forbids a blocking wait (its MAX_CLIENT_WAIT_TIMEOUT_WEBGL is 0): the web build
+        // only polls.
+        #[cfg(target_os = "emscripten")]
+        let timeout_nanoseconds = {
+            let _ = timeout_nanoseconds;
+            0
+        };
         // SAFETY: renderer contract; the fence was made by this context and is not deleted.
         let result = unsafe {
             self.context

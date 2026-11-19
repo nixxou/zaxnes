@@ -9,7 +9,8 @@ publish.workspace = true
 [lints]
 workspace = true
 
-[dependencies]
+[target.'cfg(not(target_os = "emscripten"))'.dependencies]
+# No TLS stack on the web build: requests there will go through the browser (`fetch`).
 ureq = "3"
 
 [build-dependencies]

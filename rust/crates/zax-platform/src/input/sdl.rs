@@ -455,6 +455,10 @@ impl SdlInput {
                     self.keyboard.set(key, false);
                 }
             }
+            // Web build, in game: the mouse is one of the pad's fingers (see
+            // `TouchPad::holds_mouse`); its buttons and moves reach the pointer through it.
+            Event::MouseMotion { .. } | Event::MouseButtonDown { .. }
+                if self.touch.holds_mouse() => {}
             #[allow(clippy::cast_precision_loss)] // pixel coordinates are far below 2^24
             Event::MouseMotion { x, y, .. } => self.pointer.position = [*x as f32, *y as f32],
             Event::MouseButtonDown { mouse_btn, .. } => self.set_button(*mouse_btn, true),

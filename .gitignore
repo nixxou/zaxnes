@@ -112,3 +112,6 @@ rust/target-au2/
 rust/target-fx/
 rust/target-nhr/
 rust/target-fceux/
+
+# Web build output (tools/web/build.sh)
+rust/target-web/

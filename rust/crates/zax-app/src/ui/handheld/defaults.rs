@@ -91,17 +91,23 @@ fn defaults() -> [(SettingId, SettingValue); 14] {
 /// REWRITE-UI: a handheld starts on "Fastest", which its options show as the chosen preset),
 /// then the handheld's own, which agree with it where both set a value.
 pub fn apply(model: &mut SettingsModel) {
-    let fastest = &crate::ui::presets::PRESETS[0];
-    for &(id, value, _) in fastest.values {
-        model.set_environment_default(id, value.value());
-    }
-    model.set_environment_default(SettingId::UiOptionsPreset, SettingValue::Enum(0));
+    apply_fastest(model);
     for (id, value) in defaults() {
         model.set_environment_default(id, value);
     }
     // The owner's earlier decision stands over the preset: the automatic resolution stays a
     // choice of the options, off by default (see the module's head).
     model.set_environment_default(SettingId::VideoDynamicResolution, SettingValue::Bool(false));
+}
+
+/// Makes the fastest preset's values the defaults of `model`, and the preset the one shown as
+/// chosen (the handheld, and the web build: owner request).
+pub fn apply_fastest(model: &mut SettingsModel) {
+    let fastest = &crate::ui::presets::PRESETS[0];
+    for &(id, value, _) in fastest.values {
+        model.set_environment_default(id, value.value());
+    }
+    model.set_environment_default(SettingId::UiOptionsPreset, SettingValue::Enum(0));
 }
 
 /// The defaults of the Android package (owner decision): the desktop's, but for the Lua paths,
