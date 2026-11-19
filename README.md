@@ -4,8 +4,13 @@
 
 # Zaxnes
 
-**Zaxnes** is a free NES emulator that plays your games in 3D. It runs on Windows, Linux, Android,
-PortMaster handhelds and RetroArch.
+**Zaxnes** is a free NES emulator that plays your games in 3D. The flat tiles and sprites of each
+frame become little 3D blocks, in a scene with a real camera, lights and shadows: you can turn
+around the level, zoom in, or go back to plain 2D at any time.
+
+It runs on **Windows**, **Linux**, **Android** (tablets and handhelds, with a gamepad or the touch
+pad), **handheld consoles** through PortMaster (Anbernic H700 devices such as the RG40XXV and the
+RG35XX family, on muOS, Knulli or ROCKNIX) and **RetroArch**.
 
 - **Uses your 3dSen profiles.** Import them from your own 3dSen install in one click. 3dSen 2.0
   and 2.1 profiles work too. Zaxnes also comes with a few profiles of its own (*Faxanadu*,
@@ -26,6 +31,10 @@ And even without the 3D, it's a solid NES emulator:
   ([details](#and-the-rest))
 
 It's free and open source (GPL-3.0).
+
+A word on how it's made: I built Zaxnes with heavy use of AI coding tools, on top of many
+open-source projects (they're all listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)).
+I think it brings enough of its own to be worth a try next to them.
 
 > **Independent project, not affiliated with Geod Studio or Nintendo. NES is a trademark of
 > Nintendo.**
