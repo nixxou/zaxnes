@@ -59,6 +59,8 @@ pub struct Options {
     pub render: crate::three_d::RenderOptions,
     /// The console's settings: core variant and hardware (most at the next load).
     pub machine: crate::machine::Machine,
+    /// The picture's settings: television, composite signal, emphasis in 3D.
+    pub picture: crate::picture::Picture,
     /// The application's optimised Lua paths, `unsafe` code (at the next load).
     pub optimized_lua: bool,
     /// `video.widescreen_extra`: the share of the width, in percent, the margins grow by beyond
@@ -96,6 +98,7 @@ impl Default for Options {
             resolution: (1280, 720),
             render: crate::three_d::RenderOptions::default(),
             machine: crate::machine::Machine::default(),
+            picture: crate::picture::Picture::default(),
             optimized_lua: false,
             extra_percent: 0,
             strict_edges: false,
@@ -147,6 +150,9 @@ pub struct Core {
     second_sound: Vec<i16>,
     /// The rows of the picture of the frame just run (120 Hz).
     rows: u32,
+    /// The composite signal's decoder, and the picture it decodes (RGB).
+    composite: zax_nes::composite::RowDecoder,
+    rgb: Vec<u8>,
 }
 
 impl Core {
@@ -197,6 +203,8 @@ impl Core {
             half: None,
             second_sound: Vec::new(),
             rows: 240,
+            composite: zax_nes::composite::RowDecoder::default(),
+            rgb: Vec::new(),
         };
         core.options.widescreen = options.widescreen;
         core.options.advanced = options.advanced;
@@ -275,6 +283,12 @@ impl Core {
             options.machine.apply_live(&mut self.nes);
         }
         zax_engine3d::palette::select_nes_palette(options.palette);
+        zax_engine3d::palette::set_tv_look(options.picture.tv_look());
+        if let Some((decoder, _)) = options.picture.composite() {
+            if self.composite.options() != &decoder {
+                self.composite.set_options(decoder);
+            }
+        }
         self.nes.set_sprite_limit(options.sprite_limit);
         if options.render != self.options.render {
             if let Some(three_d) = self.three_d.as_mut() {
@@ -461,6 +475,13 @@ impl Core {
         }
         self.nes.run_frame(input);
         if let Some(three_d) = self.three_d.as_mut() {
+            let emphasis = if self.options.picture.emphasis_in_three_d() {
+                self.nes.wide_emphasis_into(&mut self.emphasis);
+                crate::picture::common_emphasis(&self.emphasis)
+            } else {
+                0
+            };
+            zax_engine3d::palette::set_scene_emphasis(emphasis);
             three_d.convert(&mut self.nes);
         } else {
             self.make_picture();
@@ -562,9 +583,37 @@ impl Core {
         self.height = height;
         self.width = width;
         self.framed = true;
-        let colours = Colours::of(&self.emphasis, self.indices.len());
         self.frame.clear();
         let (x, width, full_width) = (x as usize, width as usize, full_width as usize);
+        if let Some((_, frozen)) = self.options.picture.composite() {
+            let phase = self.nes.video_phase();
+            // Frozen: every frame at the same phase (the 2C07's does not crawl anyway).
+            let phase = if frozen {
+                phase & zax_nes::composite::PAL_VIDEO
+            } else {
+                phase
+            };
+            crate::picture::decode_composite(
+                &mut self.composite,
+                &self.indices,
+                &self.emphasis,
+                (full_width, rows as usize),
+                phase,
+                &mut self.rgb,
+            );
+            for row in (y as usize..).take(height as usize) {
+                let end = (x + width).min(full_width);
+                let start = (row * full_width + x) * 3;
+                let stop = (row * full_width + end) * 3;
+                if let Some(pixels) = self.rgb.get(start..stop) {
+                    self.frame.extend(pixels.chunks_exact(3).map(|rgb| {
+                        (u32::from(rgb[0]) << 16) | (u32::from(rgb[1]) << 8) | u32::from(rgb[2])
+                    }));
+                }
+            }
+            return;
+        }
+        let colours = Colours::of(&self.emphasis, self.indices.len());
         for (number, row) in self
             .indices
             .chunks(full_width)

@@ -9,6 +9,7 @@ use zax_settings::core_options::{self, LibretroCoreOption};
 use zax_settings::meta::{SettingEffect, SettingKind};
 
 use crate::machine::{self, Machine, Variant};
+use crate::picture::{self, Picture};
 
 use crate::core::{Options, RegionChoice};
 use crate::three_d::RenderOptions;
@@ -165,6 +166,62 @@ const MACHINE_INFO: [(SettingId, &str); 20] = [
         SettingId::AudioConsoleProfile,
         "The sound through the filters of one real console (measured by BeesNES); None keeps \
          the usual sound.",
+    ),
+];
+
+/// A line of explanation for each picture setting.
+const PICTURE_INFO: [(SettingId, &str); 13] = [
+    (
+        SettingId::VideoTvModel,
+        "The television the colours go through: a modern screen, or the tube of a NTSC, \
+         Japanese or PAL set.",
+    ),
+    (SettingId::VideoTvHue, "The television's tint knob."),
+    (
+        SettingId::VideoTvSaturation,
+        "The television's colour knob.",
+    ),
+    (
+        SettingId::VideoTvContrast,
+        "The television's contrast knob.",
+    ),
+    (
+        SettingId::VideoTvBrightness,
+        "The television's brightness knob.",
+    ),
+    (
+        SettingId::VideoCompositeSignal,
+        "Decodes the picture from the console's composite signal, as a television did: colour \
+         bleeding, dot crawl. 2D only.",
+    ),
+    (
+        SettingId::VideoSignalKind,
+        "The cable: composite, S-Video (sharper) or RF (the aerial plug, with snow and ghost).",
+    ),
+    (
+        SettingId::VideoDecoderSharpness,
+        "How sharp the television's decoder is.",
+    ),
+    (
+        SettingId::VideoCombFilter,
+        "A comb filter, as better televisions had: less colour bleeding on edges.",
+    ),
+    (
+        SettingId::VideoFrozenDotCrawl,
+        "Every frame at the same signal phase: no dot crawl.",
+    ),
+    (
+        SettingId::VideoRfNoise,
+        "The snow of the RF signal, in percent.",
+    ),
+    (
+        SettingId::VideoRfGhost,
+        "The ghost of the RF signal, in percent.",
+    ),
+    (
+        SettingId::VideoEmphasis3d,
+        "The 3D scene takes the picture's most common colour emphasis (some games tint the \
+         screen with it).",
     ),
 ];
 
@@ -595,7 +652,17 @@ pub fn declarations(hacks: &[HackOption]) -> Vec<Declaration> {
         .values(VARIANTS),
     );
     for id in machine::SETTINGS {
-        if let Some(declaration) = machine_declaration(id) {
+        if let Some(declaration) = catalogue_declaration(id, "emulation") {
+            list.push(declaration);
+        }
+    }
+    for id in picture::SETTINGS {
+        let category = if id == SettingId::VideoEmphasis3d {
+            "three_d"
+        } else {
+            "image"
+        };
+        if let Some(declaration) = catalogue_declaration(id, category) {
             list.push(declaration);
         }
     }
@@ -622,9 +689,56 @@ pub fn declarations(hacks: &[HackOption]) -> Vec<Declaration> {
     list
 }
 
-/// The core option of the console setting `id`, from the catalogue: its label, its choices (or a
-/// switch), its default, and "(restart)" when it waits for the next load.
-fn machine_declaration(id: SettingId) -> Option<Declaration> {
+/// The steps the core offers for the catalogue settings that are a numeric range: the setting,
+/// its lowest and highest values and the step (the defaults fall on a step).
+const RANGES: [(SettingId, i32, i32, i32); 6] = [
+    (SettingId::VideoTvHue, -30, 30, 5),
+    (SettingId::VideoTvSaturation, 0, 200, 10),
+    (SettingId::VideoTvContrast, 50, 150, 5),
+    (SettingId::VideoTvBrightness, -50, 50, 5),
+    (SettingId::VideoRfNoise, 0, 100, 10),
+    (SettingId::VideoRfGhost, 0, 100, 5),
+];
+
+/// The values of the range setting `id`, from [`RANGES`].
+fn range_values(id: SettingId) -> Option<Vec<i32>> {
+    RANGES
+        .iter()
+        .find(|(setting, ..)| *setting == id)
+        .map(|&(_, low, high, step)| {
+            (0..=(high - low) / step)
+                .map(|index| low + index * step)
+                .collect()
+        })
+}
+
+/// The explanation of the console or picture setting `id`.
+fn catalogue_info(id: SettingId) -> &'static str {
+    if matches!(
+        id,
+        SettingId::EmuVsDip1
+            | SettingId::EmuVsDip2
+            | SettingId::EmuVsDip3
+            | SettingId::EmuVsDip4
+            | SettingId::EmuVsDip5
+            | SettingId::EmuVsDip6
+            | SettingId::EmuVsDip7
+            | SettingId::EmuVsDip8
+    ) {
+        return "A DIP switch of a VS. System cabinet; each game gives them its own meaning \
+                (difficulty, lives, coins). VS. System games only.";
+    }
+    MACHINE_INFO
+        .iter()
+        .chain(PICTURE_INFO.iter())
+        .find(|(setting, _)| *setting == id)
+        .map_or("", |(_, info)| info)
+}
+
+/// The core option of the setting `id`, from the catalogue: its label, its choices (a switch,
+/// the catalogue's choices or the steps of [`RANGES`]), its default, and "(restart)" when it
+/// waits for the next load.
+fn catalogue_declaration(id: SettingId, category: &'static str) -> Option<Declaration> {
     let descriptor = zax_settings::catalogue::descriptor(id);
     let label = descriptor.ui_label()?;
     let later = matches!(
@@ -636,31 +750,16 @@ fn machine_declaration(id: SettingId) -> Option<Declaration> {
     } else {
         label.to_owned()
     };
-    let info = if matches!(
-        id,
-        SettingId::EmuVsDip1
-            | SettingId::EmuVsDip2
-            | SettingId::EmuVsDip3
-            | SettingId::EmuVsDip4
-            | SettingId::EmuVsDip5
-            | SettingId::EmuVsDip6
-            | SettingId::EmuVsDip7
-            | SettingId::EmuVsDip8
-    ) {
-        "A DIP switch of a VS. System cabinet; each game gives them its own meaning (difficulty, \
-         lives, coins). VS. System games only."
-    } else {
-        MACHINE_INFO
-            .iter()
-            .find(|(setting, _)| *setting == id)
-            .map_or("", |(_, info)| info)
-    };
-    let category = "emulation";
     let key = core_options::core_option_key(&descriptor.key());
     let default = machine::default_value(id);
-    let declaration = Declaration::new(&key, &label, &label, category, info);
+    let declaration = Declaration::new(&key, &label, &label, category, catalogue_info(id));
     if descriptor.kind() == SettingKind::Bool {
         return Some(declaration.switch(default != 0));
+    }
+    if let Some(steps) = range_values(id) {
+        let mut declaration = declaration.values(steps.iter().map(ToString::to_string));
+        declaration.default = default.to_string();
+        return Some(declaration);
     }
     let choices = descriptor.domain().options()?;
     let mut declaration = declaration.values(choices.iter().map(|choice| choice.label.as_str()));
@@ -671,6 +770,35 @@ fn machine_declaration(id: SettingId) -> Option<Declaration> {
         declaration.default.clone_from(&choice.label);
     }
     Some(declaration)
+}
+
+/// The value the option text `text` gives the catalogue setting `id`, none when it is not one
+/// of its values.
+fn catalogue_value(id: SettingId, text: &str) -> Option<i32> {
+    let descriptor = zax_settings::catalogue::descriptor(id);
+    if descriptor.kind() == SettingKind::Bool {
+        return Some(i32::from(text == "enabled"));
+    }
+    if let Some(steps) = range_values(id) {
+        return text.parse().ok().filter(|value| steps.contains(value));
+    }
+    descriptor
+        .domain()
+        .options()?
+        .iter()
+        .find(|choice| choice.label == text)
+        .map(|choice| choice_value(choice.value))
+}
+
+/// The values the options give the catalogue settings `ids`.
+fn read_values(ids: &[SettingId], value: &dyn Fn(&str) -> Option<String>) -> Vec<(SettingId, i32)> {
+    ids.iter()
+        .filter_map(|&id| {
+            let descriptor = zax_settings::catalogue::descriptor(id);
+            let text = value(&core_options::core_option_key(&descriptor.key()))?;
+            catalogue_value(id, &text).map(|number| (id, number))
+        })
+        .collect()
 }
 
 /// A catalogue choice's value as the integer the setting holds.
@@ -688,22 +816,7 @@ fn read_machine(value: &dyn Fn(&str) -> Option<String>) -> Machine {
         Some("Fast") => Variant::Fast,
         _ => Variant::Standard,
     };
-    let values = machine::SETTINGS
-        .iter()
-        .filter_map(|&id| {
-            let descriptor = zax_settings::catalogue::descriptor(id);
-            let text = value(&core_options::core_option_key(&descriptor.key()))?;
-            if descriptor.kind() == SettingKind::Bool {
-                return Some((id, i32::from(text == "enabled")));
-            }
-            descriptor
-                .domain()
-                .options()?
-                .iter()
-                .find(|choice| choice.label == text)
-                .map(|choice| (id, choice_value(choice.value)))
-        })
-        .collect();
+    let values = read_values(&machine::SETTINGS, value);
     Machine { variant, values }
 }
 
@@ -785,6 +898,9 @@ pub fn read(value: &dyn Fn(&str) -> Option<String>, hacks: &[HackOption]) -> Opt
                 .unwrap_or(0)
         }),
         machine: read_machine(value),
+        picture: Picture {
+            values: read_values(&picture::SETTINGS, value),
+        },
         hacks: hacks
             .iter()
             .map(|option| {
@@ -992,5 +1108,37 @@ mod tests {
                 .values
                 .contains(&(SettingId::EmuOamDecay, 0))
         );
+    }
+
+    /// The picture settings: a numeric range comes in steps whose default is one, and a value
+    /// read back off the steps falls back to the default.
+    #[test]
+    fn the_picture_settings_come_in_steps() {
+        let list = declarations(&[]);
+        let saturation = list
+            .iter()
+            .find(|option| option.key == "zaxnes_video_tv_saturation")
+            .expect("the saturation is declared");
+        assert_eq!(saturation.category, "image");
+        assert_eq!(saturation.default, "100");
+        assert!(saturation.values.iter().any(|(value, _)| value == "150"));
+        let emphasis = list
+            .iter()
+            .find(|option| option.key == "zaxnes_video_emphasis_3d")
+            .expect("the emphasis in 3D is declared");
+        assert_eq!(emphasis.category, "three_d");
+        let options = read(
+            &|key| match key {
+                "zaxnes_video_tv_saturation" => Some("150".to_owned()),
+                "zaxnes_video_tv_hue" => Some("7".to_owned()),
+                "zaxnes_video_composite_signal" => Some("enabled".to_owned()),
+                _ => None,
+            },
+            &[],
+        );
+        let look = options.picture.tv_look();
+        assert_eq!(look.knobs.saturation, 150);
+        assert_eq!(look.knobs.hue, 0);
+        assert!(options.picture.composite().is_some());
     }
 }

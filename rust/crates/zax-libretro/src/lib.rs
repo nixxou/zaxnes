@@ -16,6 +16,7 @@ pub mod head_on_pull;
 pub mod machine;
 pub mod options;
 pub mod overscan;
+pub mod picture;
 pub mod profiles;
 pub mod scene_settings;
 pub mod three_d;
