@@ -175,7 +175,23 @@
     print: (t) => console.log(t),
     printErr: (t) => console.warn(t),
     setStatus: (t) => { status.textContent = t; },
-    onRuntimeInitialized: () => { status.textContent = ''; canvas.focus(); setInterval(pollRequests, 200); },
+    onRuntimeInitialized: () => {
+      status.textContent = '';
+      canvas.focus();
+      setInterval(pollRequests, 200);
+      // ?play=flappy (the README's link): straight into a bundled ROM, once the program has
+      // installed it.
+      const wanted = (new URLSearchParams(location.search).get('play') || '').toLowerCase();
+      const rom = wanted && BUNDLED.find((r) => r.title.toLowerCase().includes(wanted));
+      if (rom) {
+        const path = ROMS + '/' + rom.file;
+        const tryOpen = (left) => {
+          if (exists(path)) { FS.mkdirTree('/zaxnes-web'); FS.writeFile(OPEN_ANSWER, path); }
+          else if (left > 0) setTimeout(() => tryOpen(left - 1), 250);
+        };
+        setTimeout(() => tryOpen(40), 300);
+      }
+    },
     preRun: [() => {
       // Debugging aid: ?env=NAME=value (repeatable) sets environment variables of the program.
       for (const pair of new URLSearchParams(location.search).getAll('env')) {

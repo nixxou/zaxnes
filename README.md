@@ -8,6 +8,14 @@
 frame become little 3D blocks, in a scene with a real camera, lights and shadows: you can turn
 around the level, zoom in, or go back to plain 2D at any time.
 
+<p align="center">
+  <a href="https://nixxou.github.io/zaxnes/?play=flappy">
+    <img src="branding/zaxnes-web-demo.gif" alt="FlappyZaxNes in 3D - click to play Zaxnes in your browser" width="640">
+  </a>
+  <br>
+  <sub><b><a href="https://nixxou.github.io/zaxnes/?play=flappy">Play in your browser</a></b>: the whole emulator, compiled to WebAssembly. Bring your own ROMs; they stay in your browser.</sub>
+</p>
+
 It runs on **Windows**, **Linux**, **Android** (tablets and handhelds, with a gamepad or the touch
 pad) and **handheld consoles** through PortMaster (Anbernic H700 devices such as the RG40XXV and
 the RG35XX family, on muOS, Knulli or ROCKNIX).
