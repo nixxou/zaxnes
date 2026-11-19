@@ -9,16 +9,16 @@
 //! the Lua runtime and the GL objects are not to be shared between threads anyway.
 
 use std::cell::RefCell;
-use std::ffi::{c_char, c_uint, c_void, CStr, CString};
+use std::ffi::{CStr, CString, c_char, c_uint, c_void};
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Mutex, PoisonError};
 
-use zax_render::target::RenderTarget;
 use zax_render::SceneRenderer;
+use zax_render::target::RenderTarget;
 
-use crate::core::{Core, Options, MAX_HEIGHT, MAX_WIDTH, SAMPLE_RATE};
+use crate::core::{Core, MAX_HEIGHT, MAX_WIDTH, Options, SAMPLE_RATE};
 use crate::options;
 use crate::profiles;
 use crate::three_d::CameraNews;
@@ -36,6 +36,10 @@ const ENVIRONMENT_GET_VARIABLE_UPDATE: c_uint = 17;
 const ENVIRONMENT_GET_LOG_INTERFACE: c_uint = 27;
 const ENVIRONMENT_SET_SYSTEM_AV_INFO: c_uint = 32;
 const ENVIRONMENT_SET_GEOMETRY: c_uint = 37;
+const ENVIRONMENT_GET_CORE_OPTIONS_VERSION: c_uint = 52;
+const ENVIRONMENT_SET_CORE_OPTIONS_V2: c_uint = 67;
+/// `RETRO_NUM_CORE_OPTION_VALUES_MAX`: the values of an option, its closing null pair included.
+const OPTION_VALUES_MAX: usize = 128;
 
 const PIXEL_FORMAT_XRGB8888: c_uint = 1;
 const HW_CONTEXT_OPENGL_CORE: c_uint = 3;
@@ -79,7 +83,12 @@ const CAMERA: [(c_uint, c_uint, c_uint, &CStr); 7] = [
     (DEVICE_JOYPAD, 0, JOYPAD_L, c"Camera: farther"),
     (DEVICE_JOYPAD, 0, JOYPAD_R, c"Camera: nearer"),
     (DEVICE_JOYPAD, 0, JOYPAD_Y, c"2D / 3D (hold: 2D head on)"),
-    (DEVICE_JOYPAD, 0, JOYPAD_L2, c"Camera: put back (hold: keep)"),
+    (
+        DEVICE_JOYPAD,
+        0,
+        JOYPAD_L2,
+        c"Camera: put back (hold: keep)",
+    ),
     (DEVICE_JOYPAD, 0, JOYPAD_X, c"Default view"),
 ];
 
@@ -141,6 +150,42 @@ pub struct GameInfo {
 struct Variable {
     key: *const c_char,
     value: *const c_char,
+}
+
+/// `struct retro_core_option_value`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct OptionValue {
+    value: *const c_char,
+    label: *const c_char,
+}
+
+/// `struct retro_core_option_v2_category`.
+#[repr(C)]
+struct OptionCategory {
+    key: *const c_char,
+    desc: *const c_char,
+    info: *const c_char,
+}
+
+/// `struct retro_core_option_v2_definition`.
+#[repr(C)]
+struct OptionDefinition {
+    key: *const c_char,
+    desc: *const c_char,
+    desc_categorized: *const c_char,
+    info: *const c_char,
+    info_categorized: *const c_char,
+    category_key: *const c_char,
+    values: [OptionValue; OPTION_VALUES_MAX],
+    default_value: *const c_char,
+}
+
+/// `struct retro_core_options_v2`.
+#[repr(C)]
+struct OptionsV2 {
+    categories: *mut OptionCategory,
+    definitions: *mut OptionDefinition,
 }
 
 #[repr(C)]
@@ -306,11 +351,124 @@ fn system_directory() -> Option<PathBuf> {
     Some(PathBuf::from(folder.to_string_lossy().into_owned()))
 }
 
-/// Declares the core options, the game's hack options with them.
+/// Declares the core options, the game's hack options with them: in their submenus when the
+/// frontend knows the options of version 2, else as the flat list of the first API.
 fn declare_options(hacks: &[zax_nes::builtin_patches::HackOption]) {
-    let declared: Vec<(CString, CString)> = options::declarations(hacks)
-        .into_iter()
-        .filter_map(|(key, text)| Some((CString::new(key).ok()?, CString::new(text).ok()?)))
+    let list = options::declarations(hacks);
+    let mut version: c_uint = 0;
+    if environment(ENVIRONMENT_GET_CORE_OPTIONS_VERSION, &mut version)
+        && version >= 2
+        && declare_options_v2(&list)
+    {
+        return;
+    }
+    declare_variables(&list);
+}
+
+/// A C string of `text`, empty when it holds a NUL.
+fn c_text(text: &str) -> CString {
+    CString::new(text).unwrap_or_default()
+}
+
+/// `SET_CORE_OPTIONS_V2`: the submenus and the options with their explanations. The frontend
+/// copies everything during the call, so the strings only live as long as it.
+fn declare_options_v2(list: &[options::Declaration]) -> bool {
+    let null = std::ptr::null::<c_char>();
+    let category_texts: Vec<[CString; 3]> = options::CATEGORIES
+        .iter()
+        .map(|category| {
+            [
+                c_text(category.key),
+                c_text(category.label),
+                c_text(category.info),
+            ]
+        })
+        .collect();
+    let mut categories: Vec<OptionCategory> = category_texts
+        .iter()
+        .map(|[key, desc, info]| OptionCategory {
+            key: key.as_ptr(),
+            desc: desc.as_ptr(),
+            info: info.as_ptr(),
+        })
+        .collect();
+    categories.push(OptionCategory {
+        key: null,
+        desc: null,
+        info: null,
+    });
+    // Every string of the options, kept until the call is over.
+    let texts: Vec<([CString; 6], Vec<(CString, Option<CString>)>)> = list
+        .iter()
+        .map(|option| {
+            (
+                [
+                    c_text(&option.key),
+                    c_text(&option.label),
+                    c_text(&option.label_in_category),
+                    c_text(&option.info),
+                    c_text(option.category),
+                    c_text(option.default_value()),
+                ],
+                option
+                    .values
+                    .iter()
+                    .take(OPTION_VALUES_MAX - 1)
+                    .map(|(value, label)| (c_text(value), label.as_deref().map(c_text)))
+                    .collect(),
+            )
+        })
+        .collect();
+    let empty = OptionValue {
+        value: null,
+        label: null,
+    };
+    let mut definitions: Vec<OptionDefinition> = texts
+        .iter()
+        .map(
+            |([key, desc, in_category, info, category, default], values)| {
+                let mut slots = [empty; OPTION_VALUES_MAX];
+                for (slot, (value, label)) in slots.iter_mut().zip(values) {
+                    *slot = OptionValue {
+                        value: value.as_ptr(),
+                        label: label.as_ref().map_or(null, |label| label.as_ptr()),
+                    };
+                }
+                OptionDefinition {
+                    key: key.as_ptr(),
+                    desc: desc.as_ptr(),
+                    desc_categorized: in_category.as_ptr(),
+                    info: info.as_ptr(),
+                    info_categorized: null,
+                    category_key: category.as_ptr(),
+                    values: slots,
+                    default_value: default.as_ptr(),
+                }
+            },
+        )
+        .collect();
+    definitions.push(OptionDefinition {
+        key: null,
+        desc: null,
+        desc_categorized: null,
+        info: null,
+        info_categorized: null,
+        category_key: null,
+        values: [empty; OPTION_VALUES_MAX],
+        default_value: null,
+    });
+    let mut options = OptionsV2 {
+        categories: categories.as_mut_ptr(),
+        definitions: definitions.as_mut_ptr(),
+    };
+    environment(ENVIRONMENT_SET_CORE_OPTIONS_V2, &mut options)
+}
+
+/// `SET_VARIABLES`: the flat list of the first API, `"Name; default|other|..."`.
+fn declare_variables(list: &[options::Declaration]) {
+    let declared: Vec<(CString, CString)> = list
+        .iter()
+        .map(|option| (c_text(&option.key), c_text(&option.legacy())))
         .collect();
     let mut variables: Vec<Variable> = declared
         .iter()

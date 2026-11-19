@@ -1,9 +1,9 @@
 //! The core options `RetroArch` shows (the libretro "variables"): their keys, their choices, and
 //! how their values make [`Options`]. The first choice of each is its default.
 
+use zax_nes::NesRegion;
 use zax_nes::builtin_patches::HackOption;
 use zax_nes::ppu::SpriteLimit;
-use zax_nes::NesRegion;
 
 use crate::core::{Options, RegionChoice};
 use crate::three_d::RenderOptions;
@@ -87,112 +87,306 @@ const PALETTES: [&str; 11] = [
     "Wavebeam",
 ];
 
-/// The options to declare, as key and `"Description; choice|choice"`, the game's hack options
-/// (`hacks`, each with its default) after the others.
+/// A submenu of the core options (libretro's option categories, v2): its key, its name and its
+/// line of explanation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Category {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub info: &'static str,
+}
+
+/// The submenus, in the order the frontend lists them.
+pub const CATEGORIES: [Category; 5] = [
+    Category {
+        key: "image",
+        label: "Image",
+        info: "The picture of the console: palette, sprites, overscan.",
+    },
+    Category {
+        key: "three_d",
+        label: "3D",
+        info: "The 3D of the games that have a profile.",
+    },
+    Category {
+        key: "widescreen",
+        label: "Widescreen and scrolling",
+        info: "The widescreen of the games with a widescreen hack, and the 120 Hz scrolling.",
+    },
+    Category {
+        key: "hacks",
+        label: "Hack aids",
+        info: "The options of the game's hack (aids, testing aids).",
+    },
+    Category {
+        key: "emulation",
+        label: "Emulation",
+        info: "The console itself.",
+    },
+];
+
+/// One core option: its key (never renamed, the frontend keeps its value under it), its name in
+/// the flat list and in its submenu, its line of explanation, its submenu, and its values, each
+/// with the label shown (none: the value itself). The first value is the default.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Declaration {
+    pub key: String,
+    pub label: String,
+    pub label_in_category: String,
+    pub info: String,
+    pub category: &'static str,
+    pub values: Vec<(String, Option<String>)>,
+}
+
+impl Declaration {
+    fn new(key: &str, label: &str, in_category: &str, category: &'static str, info: &str) -> Self {
+        Self {
+            key: key.to_owned(),
+            label: label.to_owned(),
+            label_in_category: in_category.to_owned(),
+            info: info.to_owned(),
+            category,
+            values: Vec::new(),
+        }
+    }
+
+    /// With these values, shown as they are.
+    fn values<S: AsRef<str>>(mut self, values: impl IntoIterator<Item = S>) -> Self {
+        self.values = values
+            .into_iter()
+            .map(|value| (value.as_ref().to_owned(), None))
+            .collect();
+        self
+    }
+
+    /// A switch, on by default when `on`.
+    fn switch(self, on: bool) -> Self {
+        self.values(if on {
+            ["enabled", "disabled"]
+        } else {
+            ["disabled", "enabled"]
+        })
+    }
+
+    /// The default value.
+    #[must_use]
+    pub fn default_value(&self) -> &str {
+        self.values.first().map_or("", |(value, _)| value)
+    }
+
+    /// The declaration of the libretro API before categories (`SET_VARIABLES`):
+    /// `"Name; value|value"`, the default first.
+    #[must_use]
+    pub fn legacy(&self) -> String {
+        let values: Vec<&str> = self
+            .values
+            .iter()
+            .map(|(value, _)| value.as_str())
+            .collect();
+        format!("{}; {}", self.label, values.join("|"))
+    }
+}
+
+/// The options to declare, the game's hack options (`hacks`, each with its default) after the
+/// others.
 #[must_use]
 #[allow(clippy::too_many_lines)] // One entry per option.
-pub fn declarations(hacks: &[HackOption]) -> Vec<(String, String)> {
-    let resolutions: Vec<String> = RESOLUTIONS
-        .iter()
-        .map(|(width, height)| format!("{width}x{height}"))
-        .collect();
+pub fn declarations(hacks: &[HackOption]) -> Vec<Declaration> {
+    let resolutions = RESOLUTIONS.map(|(width, height)| format!("{width}x{height}"));
     let mut list = vec![
-        (
-            RENDERER.to_owned(),
-            "Renderer (restart); 3D for games with a profile|2D only".to_owned(),
-        ),
-        (
-            RESOLUTION.to_owned(),
-            format!("3D resolution (restart); {}", resolutions.join("|")),
-        ),
-        (
-            ANTI_ALIAS.to_owned(),
-            format!(
-                "3D anti-aliasing; {}",
-                ANTI_ALIASES.map(|(name, _)| name).join("|")
-            ),
-        ),
-        (SHADOWS.to_owned(), "3D shadows; enabled|disabled".to_owned()),
-        (STYLE.to_owned(), "3D visual style; Classic|Enhanced".to_owned()),
-        (
-            REFLECTIONS.to_owned(),
-            "3D reflections (Enhanced style); disabled|enabled".to_owned(),
-        ),
-        (
-            SKY.to_owned(),
-            format!("3D sky; {}", SKIES.map(|(name, _)| name).join("|")),
-        ),
-        (
-            FAST_LUA.to_owned(),
-            "3D optimised Lua (restart, unsafe code); disabled|enabled".to_owned(),
-        ),
-        (
-            WIDESCREEN.to_owned(),
-            "Widescreen (games with a widescreen hack); enabled|disabled".to_owned(),
-        ),
-        (
-            RATIO.to_owned(),
-            format!(
-                "Widescreen ratio; {}",
-                RATIOS.map(|(name, _)| name).join("|")
-            ),
-        ),
-        (
-            ADVANCED.to_owned(),
-            "Widescreen advanced mode; enabled|disabled".to_owned(),
-        ),
-        (
-            EXTRA.to_owned(),
-            format!(
-                "Widescreen extra margin (3D objects whole at the edges); {}",
-                EXTRA_PERCENT.map(|percent| format!("{percent}%")).join("|")
-            ),
-        ),
-        (
-            STRICT.to_owned(),
-            "Widescreen strict edges (3D); disabled|enabled".to_owned(),
-        ),
-        (
-            FORCE.to_owned(),
-            "Widescreen on other versions of a game (restart); disabled|enabled".to_owned(),
-        ),
-        (
-            SMOOTH.to_owned(),
-            "Smooth scrolling 120 Hz (2D, a display at 120 Hz only); disabled|enabled".to_owned(),
-        ),
-        (
-            SMOOTH_AHEAD.to_owned(),
-            "Smooth scrolling of every game (a frame run ahead); enabled|disabled".to_owned(),
-        ),
-        (REGION.to_owned(), "Region; Auto|NTSC|PAL|Dendy".to_owned()),
-        (
-            SPRITE_LIMIT.to_owned(),
-            "Sprite limit; 8 per line|Removed|Smart".to_owned(),
-        ),
-        (
-            PALETTE.to_owned(),
-            format!("Palette; {}", PALETTES.join("|")),
-        ),
+        // Image.
+        Declaration::new(
+            PALETTE,
+            "Palette",
+            "Palette",
+            "image",
+            "The colours of the console's picture.",
+        )
+        .values(PALETTES),
+        Declaration::new(
+            SPRITE_LIMIT,
+            "Sprite limit",
+            "Sprite limit",
+            "image",
+            "8 per line is the console's (sprites flicker); Removed draws them all; Smart removes \
+             it only where the game does not rely on it.",
+        )
+        .values(["8 per line", "Removed", "Smart"]),
     ];
     for (key, name) in OVERSCAN.iter().zip(OVERSCAN_NAMES) {
-        list.push((
-            (*key).to_owned(),
-            format!(
-                "Overscan {name} (left and right without widescreen); {}",
-                OVERSCAN_PIXELS.map(|pixels| format!("{pixels} px")).join("|")
-            ),
-        ));
+        list.push(
+            Declaration::new(
+                key,
+                &format!("Overscan {name}"),
+                &format!("Overscan {name}"),
+                "image",
+                "The pixels left out on that side, as a TV hid them. Left and right only \
+                 without widescreen.",
+            )
+            .values(OVERSCAN_PIXELS.map(|pixels| format!("{pixels} px"))),
+        );
     }
+    list.extend([
+        // 3D.
+        Declaration::new(
+            RENDERER,
+            "Renderer (restart)",
+            "Renderer (restart)",
+            "three_d",
+            "3D for the games that have a 3D profile (in RetroArch's system folder, \
+             Zaxnes/profiles, or carried by the core), or 2D only. Needs the glcore or gl video \
+             driver.",
+        )
+        .values(["3D for games with a profile", "2D only"]),
+        Declaration::new(
+            RESOLUTION,
+            "3D resolution (restart)",
+            "Resolution (restart)",
+            "three_d",
+            "The size the 3D is drawn at.",
+        )
+        .values(resolutions),
+        Declaration::new(
+            ANTI_ALIAS,
+            "3D anti-aliasing",
+            "Anti-aliasing",
+            "three_d",
+            "Smooths the edges of the 3D.",
+        )
+        .values(ANTI_ALIASES.map(|(name, _)| name)),
+        Declaration::new(
+            SHADOWS,
+            "3D shadows",
+            "Shadows",
+            "three_d",
+            "The shadows the blocks cast.",
+        )
+        .switch(true),
+        Declaration::new(
+            STYLE,
+            "3D visual style",
+            "Visual style",
+            "three_d",
+            "Classic is 3dSen's look; Enhanced adds the application's lighting and occlusion.",
+        )
+        .values(["Classic", "Enhanced"]),
+        Declaration::new(
+            REFLECTIONS,
+            "3D reflections (Enhanced style)",
+            "Reflections (Enhanced style)",
+            "three_d",
+            "Reflections on the floor, with the Enhanced style only.",
+        )
+        .switch(false),
+        Declaration::new(
+            SKY,
+            "3D sky",
+            "Sky",
+            "three_d",
+            "The sky behind the scene; Default is the profile's.",
+        )
+        .values(SKIES.map(|(name, _)| name)),
+        Declaration::new(
+            FAST_LUA,
+            "3D optimised Lua (restart, unsafe code)",
+            "Optimised Lua (restart, unsafe code)",
+            "three_d",
+            "Faster paths for the profiles' Lua scripts, written with unsafe code.",
+        )
+        .switch(false),
+        // Widescreen and scrolling.
+        Declaration::new(
+            WIDESCREEN,
+            "Widescreen (games with a widescreen hack)",
+            "Widescreen",
+            "widescreen",
+            "Widens the games Zaxnes has a widescreen hack for; the others keep their 4:3 \
+             picture.",
+        )
+        .switch(true),
+        Declaration::new(
+            RATIO,
+            "Widescreen ratio",
+            "Ratio",
+            "widescreen",
+            "The shape of the widened picture. Keep RetroArch's aspect ratio on Core provided.",
+        )
+        .values(RATIOS.map(|(name, _)| name)),
+        Declaration::new(
+            ADVANCED,
+            "Widescreen advanced mode",
+            "Advanced mode",
+            "widescreen",
+            "Applies the games' advanced hacks too (more of the game widened, objects in the \
+             margins).",
+        )
+        .switch(true),
+        Declaration::new(
+            EXTRA,
+            "Widescreen extra margin",
+            "Extra margin",
+            "widescreen",
+            "The margins and the height that much larger, so that the 3D objects at the edges \
+             are whole.",
+        )
+        .values(EXTRA_PERCENT.map(|percent| format!("{percent}%"))),
+        Declaration::new(
+            STRICT,
+            "Widescreen strict edges (3D)",
+            "Strict edges (3D)",
+            "widescreen",
+            "In 3D, cuts what lies past the widescreen margins.",
+        )
+        .switch(false),
+        Declaration::new(
+            FORCE,
+            "Widescreen on other versions of a game (restart)",
+            "Other versions of a game (restart)",
+            "widescreen",
+            "Forces the hack of another version of the game on this ROM (ROM hacks, \
+             translations). May fail.",
+        )
+        .switch(false),
+        Declaration::new(
+            SMOOTH,
+            "Smooth scrolling 120 Hz",
+            "Smooth scrolling 120 Hz",
+            "widescreen",
+            "In 2D, a picture between two frames along the camera's motion. Needs a display at \
+             120 Hz with RetroArch's refresh rate set to it (at 60 Hz the game runs at half \
+             speed). Leave RetroArch's run-ahead off.",
+        )
+        .switch(false),
+        Declaration::new(
+            SMOOTH_AHEAD,
+            "Smooth scrolling of every game",
+            "Smooth scrolling of every game",
+            "widescreen",
+            "For the games whose hack does not report its camera: the motion found by running a \
+             frame ahead.",
+        )
+        .switch(true),
+        // Emulation.
+        Declaration::new(
+            REGION,
+            "Region",
+            "Region",
+            "emulation",
+            "The console the game runs on; Auto follows the ROM.",
+        )
+        .values(["Auto", "NTSC", "PAL", "Dendy"]),
+    ]);
     for option in hacks {
-        let choices = if option.default {
-            "enabled|disabled"
-        } else {
-            "disabled|enabled"
-        };
-        list.push((
-            format!("{HACK}{}", option.key),
-            format!("Hack: {}; {choices}", option.label),
-        ));
+        list.push(
+            Declaration::new(
+                &format!("{HACK}{}", option.key),
+                &format!("Hack: {}", option.label),
+                option.label,
+                "hacks",
+                "An option of this game's hack.",
+            )
+            .switch(option.default),
+        );
     }
     list
 }
@@ -280,10 +474,12 @@ mod tests {
     #[test]
     fn the_first_choice_is_the_default_and_values_come_back() {
         let list = declarations(&[OPTION]);
-        assert!(list
-            .iter()
-            .any(|(key, text)| key == "zaxnes_hack_invincible"
-                && text == "Hack: Invincible; disabled|enabled"));
+        assert!(
+            list.iter()
+                .any(|option| option.key == "zaxnes_hack_invincible"
+                    && option.legacy() == "Hack: Invincible; disabled|enabled"
+                    && option.category == "hacks")
+        );
         let none = read(&|_| None, &[OPTION]);
         assert_eq!(
             none,
