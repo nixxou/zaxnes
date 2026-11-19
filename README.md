@@ -14,12 +14,8 @@ around the level, zoom in, or go back to plain 2D at any time.
   </a>
   <br>
   <sub><b><a href="https://nixxou.github.io/zaxnes/?play=flappy">Play in your browser</a></b>: the whole emulator, compiled to WebAssembly. Bring your own ROMs; they stay in your browser.</sub>
-</p>
-
-<p align="center">
-
-$\color{#800020}{\textbf{Experimental, this is not fully functional yet, all settings are set to minimum, expect better performance on the executable.}}$
-
+  <br>
+  <img src="branding/web-experimental.svg" alt="Experimental, this is not fully functional yet, all settings are set to minimum, expect better performance on the executable." width="720" height="18">
 </p>
 
 It runs on **Windows**, **Linux**, **Android** (tablets and handhelds, with a gamepad or the touch

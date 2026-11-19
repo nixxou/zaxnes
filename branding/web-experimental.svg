@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="18" viewBox="0 0 720 18">
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+           font-size: 12px; font-weight: 700; fill: #800020; }
+    @media (prefers-color-scheme: dark) { text { fill: #e0607a; } }
+  </style>
+  <text x="360" y="13" text-anchor="middle">Experimental, this is not fully functional yet, all settings are set to minimum, expect better performance on the executable.</text>
+</svg>
