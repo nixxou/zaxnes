@@ -217,7 +217,7 @@ impl Core {
             &mut self.nes,
             profile,
             tiles,
-            self.options.render,
+            &self.options.render,
             self.options.optimized_lua,
             log,
         )?);
@@ -271,7 +271,7 @@ impl Core {
         self.nes.set_sprite_limit(options.sprite_limit);
         if options.render != self.options.render {
             if let Some(three_d) = self.three_d.as_mut() {
-                three_d.set_render(&mut self.nes, options.render);
+                three_d.set_render(&mut self.nes, &options.render);
             }
         }
         let before = (self.margin(), self.options.overscan);
@@ -321,8 +321,16 @@ impl Core {
         let cut = self.overscan().in_force(i32::try_from(margin).unwrap_or(0));
         let side = |pixels: i32| u32::try_from(pixels.clamp(0, 64)).unwrap_or(0);
         // As `Overscan::leave_out`: a side cut takes the vertical margin past it along.
-        let top = if cut.top > 0 { margin_y + side(cut.top) } else { 0 };
-        let bottom = if cut.bottom > 0 { margin_y + side(cut.bottom) } else { 0 };
+        let top = if cut.top > 0 {
+            margin_y + side(cut.top)
+        } else {
+            0
+        };
+        let bottom = if cut.bottom > 0 {
+            margin_y + side(cut.bottom)
+        } else {
+            0
+        };
         let (left, right) = (side(cut.left), side(cut.right));
         (
             left,
@@ -355,11 +363,7 @@ impl Core {
         let to_off = NesCore::state_uses_widescreen(&state, 0) == Some(true);
         let carried = NesCore::state_builtin_patch(&state, 0).is_some_and(|patch| {
             let states = patch.states();
-            if to_off {
-                states.to_off
-            } else {
-                states.to_on
-            }
+            if to_off { states.to_off } else { states.to_on }
         });
         if !carried {
             self.nes.set_builtin_patches(before.0);
@@ -498,14 +502,11 @@ impl Core {
         let full_width = (pixels / full_height).max(1);
         let (x0, y0, width, height) = self.shown(full_width, full_height);
         let margin_y = full_height.saturating_sub(240) / 2;
-        let band = self
-            .nes
-            .picture_shift()
-            .map_or(0..0, |(_, start, end)| {
-                let start = u32::try_from(start).unwrap_or(0) + margin_y;
-                let end = u32::try_from(end).unwrap_or(0) + margin_y;
-                start..end
-            });
+        let band = self.nes.picture_shift().map_or(0..0, |(_, start, end)| {
+            let start = u32::try_from(start).unwrap_or(0) + margin_y;
+            let end = u32::try_from(end).unwrap_or(0) + margin_y;
+            start..end
+        });
         #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)] // A few pixels.
         let quarters = (shift * SMOOTH_SCALE as f32).round() as i64;
         let colours = Colours::of(&self.emphasis, self.indices.len());
@@ -532,7 +533,12 @@ impl Core {
                     .and_then(|overlay| overlay.get(x0 + out / scale))
                     .copied()
                     .filter(|index| *index != 0xFF);
-                let pixel = start + if still.is_some() { x0 + out / scale } else { column };
+                let pixel = start
+                    + if still.is_some() {
+                        x0 + out / scale
+                    } else {
+                        column
+                    };
                 let index = still.unwrap_or(row[column]);
                 self.frame.push(colours.get(index, &self.emphasis, pixel));
             }
@@ -649,11 +655,7 @@ impl Core {
             dots_per_frame -= 0.5;
         }
         let rate = dots_per_second / dots_per_frame;
-        if self.smooth() {
-            rate * 2.0
-        } else {
-            rate
-        }
+        if self.smooth() { rate * 2.0 } else { rate }
     }
 
     /// Whether the region in force is PAL's frame rate.
@@ -766,7 +768,10 @@ impl Colours {
                 .map(|entry| {
                     #[allow(clippy::cast_possible_truncation)] // 0-7
                     let bits = (entry >> 6) as u8;
-                    pack(zax_engine3d::palette::nes_color_emphasized(entry & 0x3F, bits))
+                    pack(zax_engine3d::palette::nes_color_emphasized(
+                        entry & 0x3F,
+                        bits,
+                    ))
                 })
                 .collect(),
         )

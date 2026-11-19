@@ -4,6 +4,7 @@
 //! application no more than this core may. The drawing itself is [`crate::ffi`]'s, into the
 //! frontend's framebuffer.
 
+use std::sync::{Arc, Mutex};
 use zax_engine3d::engine::ConversionEngine;
 use zax_engine3d::frame::ConversionFrame;
 use zax_engine3d::vectors::Vec3;
@@ -11,13 +12,12 @@ use zax_nes::{ControllerPortType, FrameBatch, NesCore, TileRecord};
 use zax_profiles::hash::tiles::TileResolver;
 use zax_profiles::profile::GameProfile;
 use zax_render::camera::{CameraMode, SceneCamera};
-use std::sync::{Arc, Mutex};
 
 use zax_render::scene::{BackdropState, SceneFrame, SceneState};
 use zax_scripting::{
-    lend_context, LuaColor, ProfileScriptRuntime, ScriptBackdrop, ScriptCamera, ScriptContext,
-    ScriptEnvironment, ScriptInput, ScriptLight, ScriptLog, ScriptMemory, ScriptProfileInfo,
-    ScriptNotification, ScriptSettings,
+    LuaColor, ProfileScriptRuntime, ScriptBackdrop, ScriptCamera, ScriptContext, ScriptEnvironment,
+    ScriptInput, ScriptLight, ScriptLog, ScriptMemory, ScriptNotification, ScriptProfileInfo,
+    ScriptSettings, lend_context,
 };
 use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
@@ -59,7 +59,7 @@ struct Buttons {
 
 /// The render settings the core options choose, written in the user layer of the settings as
 /// the application's options window writes them: a profile or a script may still change them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderOptions {
     /// `video.anti_alias`: 0 none, 1 MSAA 4x, 2 MSAA 8x, 3 SMAA.
     pub anti_alias: i32,
@@ -71,6 +71,9 @@ pub struct RenderOptions {
     pub reflections: bool,
     /// `scene.skybox`: -1 the default, 0 colour, 1 gradient, 2 fantasy.
     pub skybox: i32,
+    /// The settings exposed through the catalogue's libretro values
+    /// (`zax_settings::core_options`): each core option key with the value label chosen.
+    pub catalogue: Vec<(String, String)>,
 }
 
 impl Default for RenderOptions {
@@ -81,13 +84,17 @@ impl Default for RenderOptions {
             enhanced: false,
             reflections: false,
             skybox: -1,
+            catalogue: Vec::new(),
         }
     }
 }
 
 impl RenderOptions {
-    fn write(self, model: &mut SettingsModel) {
-        model.set(SettingId::VideoAntiAlias, SettingValue::Enum(self.anti_alias));
+    fn write(&self, model: &mut SettingsModel) {
+        model.set(
+            SettingId::VideoAntiAlias,
+            SettingValue::Enum(self.anti_alias),
+        );
         model.set(SettingId::RenderShadow, self.shadows);
         model.set(
             SettingId::RenderVisualStyle,
@@ -98,6 +105,9 @@ impl RenderOptions {
             SettingValue::Int(i32::from(self.reflections)),
         );
         model.set(SettingId::SceneSkybox, SettingValue::Enum(self.skybox));
+        for (key, label) in &self.catalogue {
+            zax_settings::core_options::try_apply(model, key, label);
+        }
     }
 }
 
@@ -142,7 +152,7 @@ impl ThreeD {
         nes: &mut NesCore,
         profile: &GameProfile,
         tiles: Option<TileResolver>,
-        render: RenderOptions,
+        render: &RenderOptions,
         optimized_lua: bool,
         log: fn(&str),
     ) -> Result<Self, String> {
@@ -419,7 +429,7 @@ impl ThreeD {
     }
 
     /// Puts the render settings `render` chooses in force at once.
-    pub fn set_render(&mut self, nes: &mut NesCore, render: RenderOptions) {
+    pub fn set_render(&mut self, nes: &mut NesCore, render: &RenderOptions) {
         let Some(runtime) = self.engine.script_host_as_mut::<ProfileScriptRuntime>() else {
             return;
         };

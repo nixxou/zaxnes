@@ -4,6 +4,8 @@
 use zax_nes::NesRegion;
 use zax_nes::builtin_patches::HackOption;
 use zax_nes::ppu::SpriteLimit;
+use zax_settings::catalogue::SettingId;
+use zax_settings::core_options::{self, LibretroCoreOption};
 
 use crate::core::{Options, RegionChoice};
 use crate::three_d::RenderOptions;
@@ -136,6 +138,7 @@ pub struct Declaration {
     pub info: String,
     pub category: &'static str,
     pub values: Vec<(String, Option<String>)>,
+    pub default: String,
 }
 
 impl Declaration {
@@ -147,6 +150,7 @@ impl Declaration {
             info: info.to_owned(),
             category,
             values: Vec::new(),
+            default: String::new(),
         }
     }
 
@@ -156,6 +160,11 @@ impl Declaration {
             .into_iter()
             .map(|value| (value.as_ref().to_owned(), None))
             .collect();
+        self.default = self
+            .values
+            .first()
+            .map(|(value, _)| value.clone())
+            .unwrap_or_default();
         self
     }
 
@@ -171,20 +180,86 @@ impl Declaration {
     /// The default value.
     #[must_use]
     pub fn default_value(&self) -> &str {
-        self.values.first().map_or("", |(value, _)| value)
+        &self.default
     }
 
     /// The declaration of the libretro API before categories (`SET_VARIABLES`):
     /// `"Name; value|value"`, the default first.
     #[must_use]
     pub fn legacy(&self) -> String {
-        let values: Vec<&str> = self
-            .values
-            .iter()
-            .map(|(value, _)| value.as_str())
+        let values: Vec<&str> = std::iter::once(self.default.as_str())
+            .chain(
+                self.values
+                    .iter()
+                    .map(|(value, _)| value.as_str())
+                    .filter(|value| *value != self.default),
+            )
             .collect();
         format!("{}; {}", self.label, values.join("|"))
     }
+}
+
+/// The settings of the application the core exposes with the catalogue's own libretro values
+/// (`zax_settings::core_options`, keys `zaxnes_<setting>`), so that their steps are the
+/// application's: the setting, its name in the flat list and in its submenu, its submenu, and its
+/// line of explanation.
+const CATALOGUE: [(SettingId, &str, &str, &str, &str); 7] = [
+    (
+        SettingId::CameraFov,
+        "3D field of view",
+        "Field of view",
+        "three_d",
+        "The camera's angle of view, in degrees; a profile may set its own.",
+    ),
+    (
+        SettingId::LightIntensity,
+        "3D light",
+        "Light",
+        "three_d",
+        "The strength of the scene's light.",
+    ),
+    (
+        SettingId::SceneBendLr,
+        "3D bend left-right",
+        "Bend left-right",
+        "three_d",
+        "Curves the scene from left to right, in degrees.",
+    ),
+    (
+        SettingId::SceneBendTb,
+        "3D bend top-bottom",
+        "Bend top-bottom",
+        "three_d",
+        "Curves the scene from top to bottom, in degrees.",
+    ),
+    (
+        SettingId::SceneArcH,
+        "3D arc horizontal",
+        "Arc horizontal",
+        "three_d",
+        "Rolls the scene round a horizontal arc, in degrees.",
+    ),
+    (
+        SettingId::SceneArcCenter,
+        "3D arc centre",
+        "Arc centre",
+        "three_d",
+        "Where the arc's pivot is, from the screen's centre to its edge.",
+    ),
+    (
+        SettingId::SceneBend2dMode,
+        "3D bend the 2D picture too",
+        "Bend the 2D picture too",
+        "three_d",
+        "The 2D picture shown in the 3D view bends like the scene; off keeps it flat.",
+    ),
+];
+
+/// The catalogue's core option of `setting`.
+fn catalogue_option(setting: SettingId) -> Option<&'static LibretroCoreOption> {
+    core_options::all()
+        .iter()
+        .find(|option| option.setting == setting)
 }
 
 /// The options to declare, the game's hack options (`hacks`, each with its default) after the
@@ -376,6 +451,15 @@ pub fn declarations(hacks: &[HackOption]) -> Vec<Declaration> {
         )
         .values(["Auto", "NTSC", "PAL", "Dendy"]),
     ]);
+    for (setting, label, in_category, category, info) in CATALOGUE {
+        let Some(option) = catalogue_option(setting) else {
+            continue;
+        };
+        let mut declaration = Declaration::new(&option.key, label, in_category, category, info)
+            .values(&option.values);
+        declaration.default.clone_from(&option.default_value);
+        list.push(declaration);
+    }
     for option in hacks {
         list.push(
             Declaration::new(
@@ -433,6 +517,16 @@ pub fn read(value: &dyn Fn(&str) -> Option<String>, hacks: &[HackOption]) -> Opt
             enhanced: value(STYLE).map_or(defaults.render.enhanced, |text| text == "Enhanced"),
             reflections: enabled(REFLECTIONS, defaults.render.reflections),
             skybox: choice(&SKIES, value(SKY), defaults.render.skybox),
+            catalogue: CATALOGUE
+                .iter()
+                .filter_map(|(setting, ..)| catalogue_option(*setting))
+                .map(|option| {
+                    let chosen = value(&option.key)
+                        .filter(|text| option.values.contains(text))
+                        .unwrap_or_else(|| option.default_value.clone());
+                    (option.key.clone(), chosen)
+                })
+                .collect(),
         },
         optimized_lua: enabled(FAST_LUA, defaults.optimized_lua),
         extra_percent: value(EXTRA)
@@ -481,10 +575,15 @@ mod tests {
                     && option.category == "hacks")
         );
         let none = read(&|_| None, &[OPTION]);
+        assert_eq!(none.render.catalogue.len(), CATALOGUE.len());
         assert_eq!(
             none,
             Options {
                 hacks: vec![("invincible".to_owned(), false)],
+                render: RenderOptions {
+                    catalogue: none.render.catalogue.clone(),
+                    ..RenderOptions::default()
+                },
                 ..Options::default()
             }
         );
@@ -517,8 +616,41 @@ mod tests {
                 anti_alias: 3,
                 enhanced: true,
                 skybox: 2,
+                catalogue: none.render.catalogue.clone(),
                 ..RenderOptions::default()
             }
         );
+    }
+
+    /// The 3D settings of the catalogue keep the application's values and default; a value the
+    /// list does not hold falls back to the default.
+    #[test]
+    fn the_catalogue_settings_come_with_their_values() {
+        let list = declarations(&[]);
+        let fov = list
+            .iter()
+            .find(|option| option.key == "zaxnes_camera_fov")
+            .expect("the field of view is declared");
+        assert_eq!(fov.category, "three_d");
+        assert_eq!(fov.default_value(), "70");
+        assert!(fov.legacy().starts_with("3D field of view; 70|"));
+        let read_back = read(
+            &|key| match key {
+                "zaxnes_camera_fov" => Some("90".to_owned()),
+                "zaxnes_light_intensity" => Some("not a value".to_owned()),
+                _ => None,
+            },
+            &[],
+        );
+        let chosen = |key: &str| {
+            read_back
+                .render
+                .catalogue
+                .iter()
+                .find(|(option, _)| option == key)
+                .map(|(_, label)| label.clone())
+        };
+        assert_eq!(chosen("zaxnes_camera_fov").as_deref(), Some("90"));
+        assert_eq!(chosen("zaxnes_light_intensity").as_deref(), Some("1.00"));
     }
 }
