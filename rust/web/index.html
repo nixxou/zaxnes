@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zaxnes</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #111; color: #ddd; font: 14px system-ui, sans-serif; }
+  #canvas { display: block; width: 100vw; height: 100vh; outline: none; }
+  #status { position: fixed; left: 8px; bottom: 8px; opacity: .8; pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
+<div id="status">Chargement…</div>
+<script>
+  const status = document.getElementById('status');
+  const canvas = document.getElementById('canvas');
+  function fitCanvas() {
+    const r = window.devicePixelRatio || 1;
+    canvas.width = Math.round(canvas.clientWidth * r);
+    canvas.height = Math.round(canvas.clientHeight * r);
+  }
+  fitCanvas();
+  var Module = {
+    canvas,
+    arguments: [],
+    print: (t) => console.log(t),
+    printErr: (t) => console.warn(t),
+    setStatus: (t) => { status.textContent = t; if (!t) status.remove(); },
+    onRuntimeInitialized: () => { canvas.focus(); },
+  };
+  window.addEventListener('error', (e) => { status.textContent = 'Erreur : ' + e.message; });
+</script>
+<script async src="zaxnes.js"></script>
+</body>
+</html>
