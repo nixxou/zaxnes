@@ -246,7 +246,7 @@ static FRONTEND: Mutex<Frontend> = Mutex::new(Frontend {
 /// The renderer of the 3D, on the frontend's OpenGL context, and the framebuffer it draws into.
 struct Gl {
     renderer: SceneRenderer,
-    gl: Rc<glow::Context>,
+    context: Rc<glow::Context>,
     target: Option<OwnTarget>,
 }
 
@@ -786,9 +786,9 @@ fn draw_three_d(frontend: &Frontend, core: &mut Core) -> bool {
             .is_none_or(|target| target.size != (width, height))
         {
             if let Some(old) = gl.target.take() {
-                old.delete(&gl.gl);
+                old.delete(&gl.context);
             }
-            gl.target = OwnTarget::new(&gl.gl, (width, height));
+            gl.target = OwnTarget::new(&gl.context, (width, height));
         }
         let own = gl.target.as_ref()?.framebuffer;
         let target = RenderTarget {
@@ -804,10 +804,11 @@ fn draw_three_d(frontend: &Frontend, core: &mut Core) -> bool {
             // SAFETY: OpenGL calls on the frontend's current context: the core's framebuffer
             // copied upside down into the frontend's, which stays bound for it.
             unsafe {
-                gl.gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(own));
-                gl.gl
+                gl.context
+                    .bind_framebuffer(glow::READ_FRAMEBUFFER, Some(own));
+                gl.context
                     .bind_framebuffer(glow::DRAW_FRAMEBUFFER, frontend_framebuffer);
-                gl.gl.blit_framebuffer(
+                gl.context.blit_framebuffer(
                     0,
                     0,
                     w,
@@ -819,7 +820,7 @@ fn draw_three_d(frontend: &Frontend, core: &mut Core) -> bool {
                     glow::COLOR_BUFFER_BIT,
                     glow::NEAREST,
                 );
-                gl.gl
+                gl.context
                     .bind_framebuffer(glow::FRAMEBUFFER, frontend_framebuffer);
             }
         }
@@ -943,7 +944,7 @@ extern "C" fn context_reset() {
             GL.with(|slot| {
                 *slot.borrow_mut() = Some(Gl {
                     renderer,
-                    gl,
+                    context: gl,
                     target: None,
                 });
             });
@@ -958,7 +959,7 @@ extern "C" fn context_destroy() {
     GL.with(|slot| {
         if let Some(mut gl) = slot.borrow_mut().take() {
             if let Some(target) = gl.target.take() {
-                target.delete(&gl.gl);
+                target.delete(&gl.context);
             }
         }
     });
