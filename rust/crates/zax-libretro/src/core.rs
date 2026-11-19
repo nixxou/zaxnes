@@ -176,6 +176,8 @@ pub struct Core {
     rgb: Vec<u8>,
     /// Which ports have a Zapper plugged in.
     zappers: [bool; 2],
+    /// Where each Zapper's pointer is on the 3D picture, 0 to 1 across and down.
+    pointers: [Option<(f32, f32)>; 2],
     /// Where each Zapper is aimed, which the console asks once a frame.
     aim: std::sync::Arc<std::sync::Mutex<[ZapperPosition; 2]>>,
     /// The last 2D picture shown: its left and top in the full picture, its size, and the full
@@ -234,6 +236,7 @@ impl Core {
             composite: zax_nes::composite::RowDecoder::default(),
             rgb: Vec::new(),
             zappers: [false; 2],
+            pointers: [None; 2],
             aim: std::sync::Arc::new(std::sync::Mutex::new([ZapperPosition::OFF_SCREEN; 2])),
             shown_area: (0, 0, 256, 240, 256, 240),
         };
@@ -820,6 +823,9 @@ impl Core {
     pub fn aim_zapper(&mut self, port: usize, point: Option<(f32, f32)>) {
         let (left, top, width, height, full_width, rows) = self.shown_area;
         let size = self.three_d_size();
+        if let Some(pointer) = self.pointers.get_mut(port) {
+            *pointer = point;
+        }
         let position = match point {
             Some(point) if self.three_d.is_some() => self
                 .three_d
@@ -850,6 +856,19 @@ impl Core {
                 *aim = position;
             }
         }
+    }
+
+    /// Where to draw a crosshair on the 3D picture: each Zapper's pointer, 0 to 1 across and
+    /// down; none without the option or outside 3D.
+    #[must_use]
+    pub fn three_d_crosshairs(&self) -> Vec<(f32, f32)> {
+        if !self.options.zapper_crosshair || self.three_d.is_none() {
+            return Vec::new();
+        }
+        (0..2)
+            .filter(|&port| self.zappers[port])
+            .filter_map(|port| self.pointers[port])
+            .collect()
     }
 
     /// Draws a crosshair where each Zapper is aimed, on the 2D picture just made.

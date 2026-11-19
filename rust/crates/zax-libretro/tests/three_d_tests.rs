@@ -300,10 +300,16 @@ fn a_zapper_aims_through_the_camera_in_3d() {
     play(&mut core, 60, |_| 0);
     let size = core.three_d_size();
     let three_d = core.three_d_mut().expect("in 3D");
-    let middle = three_d.aim((0.5, 0.5), size).expect("the middle meets the picture");
+    let middle = three_d
+        .aim((0.5, 0.5), size)
+        .expect("the middle meets the picture");
     assert!(middle.is_on_screen(), "{middle:?}");
-    let left = three_d.aim((0.25, 0.5), size).expect("the left meets the picture");
-    let lower = three_d.aim((0.5, 0.75), size).expect("the bottom meets the picture");
+    let left = three_d
+        .aim((0.25, 0.5), size)
+        .expect("the left meets the picture");
+    let lower = three_d
+        .aim((0.5, 0.75), size)
+        .expect("the bottom meets the picture");
     assert!(left.x < middle.x, "{left:?} {middle:?}");
     assert!(lower.y > middle.y, "{lower:?} {middle:?}");
 }

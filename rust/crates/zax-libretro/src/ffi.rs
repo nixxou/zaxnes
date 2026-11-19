@@ -886,6 +886,7 @@ fn draw_three_d(frontend: &Frontend, core: &mut Core) -> bool {
     let id = unsafe { framebuffer() };
     let frontend_framebuffer =
         NonZeroU32::new(u32::try_from(id).unwrap_or(0)).map(glow::NativeFramebuffer);
+    let crosshairs = core.three_d_crosshairs();
     let Some(three_d) = core.three_d_mut() else {
         return false;
     };
@@ -935,6 +936,7 @@ fn draw_three_d(frontend: &Frontend, core: &mut Core) -> bool {
                 gl.context
                     .bind_framebuffer(glow::FRAMEBUFFER, frontend_framebuffer);
             }
+            draw_crosshairs(&gl.context, &crosshairs, (w, h));
         }
         Some(result)
     });
@@ -1041,6 +1043,43 @@ pub extern "C" fn retro_cheat_reset() {}
 
 #[no_mangle]
 pub extern "C" fn retro_cheat_set(_index: c_uint, _enabled: bool, _code: *const c_char) {}
+
+/// Draws a crosshair at each point (0 to 1 across and down) of the frontend's framebuffer, bound
+/// and declared top-left: a white cross with a black edge, its size following the height.
+fn draw_crosshairs(gl: &glow::Context, points: &[(f32, f32)], (width, height): (i32, i32)) {
+    use glow::HasContext as _;
+    if points.is_empty() {
+        return;
+    }
+    let unit = (height / 240).max(1);
+    // SAFETY: OpenGL calls on the frontend's current context, its framebuffer bound; the
+    // scissor test is put back as it was.
+    unsafe {
+        let scissor = gl.is_enabled(glow::SCISSOR_TEST);
+        gl.enable(glow::SCISSOR_TEST);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+        for &(x, y) in points {
+            let (cx, cy) = ((x * width as f32) as i32, (y * height as f32) as i32);
+            // Arms from 2 to 6 units off the centre, 1 unit thick; the edge one unit around.
+            let arms = [
+                (cx + 2 * unit, cy, 4 * unit, unit),
+                (cx - 6 * unit, cy, 4 * unit, unit),
+                (cx, cy + 2 * unit, unit, 4 * unit),
+                (cx, cy - 6 * unit, unit, 4 * unit),
+            ];
+            for (colour, grow) in [(0.0, unit), (1.0, 0)] {
+                gl.clear_color(colour, colour, colour, 1.0);
+                for (ax, ay, aw, ah) in arms {
+                    gl.scissor(ax - grow, ay - grow, aw + 2 * grow, ah + 2 * grow);
+                    gl.clear(glow::COLOR_BUFFER_BIT);
+                }
+            }
+        }
+        if !scissor {
+            gl.disable(glow::SCISSOR_TEST);
+        }
+    }
+}
 
 /// The frontend made its OpenGL context (again): the renderer is made on it.
 extern "C" fn context_reset() {

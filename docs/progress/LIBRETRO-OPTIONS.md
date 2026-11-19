@@ -32,7 +32,7 @@ keys never renamed (players' `Zaxnes.opt` keeps its values). Tests with
 - Step 5, Zapper: both ports offer "NES pad" or "Zapper" (SET_CONTROLLER_INFO); the light gun's
   screen x/y aim at the 2D picture shown (crop and widescreen margins taken into account), its
   trigger (or reload, aimed off screen) gives the port byte 0x00, released 0x10; option "Zapper
-  crosshair" (Emulation, on, drawn on the 2D picture only). In 3D the aim goes through the
+  crosshair" (Emulation, on; in 3D drawn by scissored clears at the pointer, after the copy). In 3D the aim goes through the
   camera to the picture's plane with the application's code, moved from zax-app's
   input/zapper.rs to zax_render::zapper (zax-app re-exports it); test
   a_zapper_aims_through_the_camera_in_3d. RetroArch only reads a port's device from a remap file
