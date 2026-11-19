@@ -1017,4 +1017,7 @@ fn the_reset_frames_the_picture_like_the_2d_view_when_asked() {
     camera.reset_view();
     assert!((camera.current().distance() - 112.0 / half).abs() < 1e-2);
     assert!(camera.reset_distance() < three_d_sen);
+    // A script's reset keeps 3dSen's framing.
+    camera.reset_view_as_three_d_sen();
+    assert!((camera.current().distance() - three_d_sen).abs() < 1e-2);
 }

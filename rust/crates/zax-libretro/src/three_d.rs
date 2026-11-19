@@ -727,8 +727,10 @@ impl ScriptCamera for SceneCameraBridge<'_> {
         self.0.current_mut().target = target.into();
     }
 
+    // A script's reset and reading keep 3dSen's framing: `camera.frame_picture` only moves the
+    // application's default view (owner, 2026-11-19).
     fn reset_view(&mut self) {
-        self.0.reset_view();
+        self.0.reset_view_as_three_d_sen();
     }
 
     fn fov(&self) -> f32 {
@@ -740,7 +742,7 @@ impl ScriptCamera for SceneCameraBridge<'_> {
     }
 
     fn reset_distance(&self) -> f32 {
-        self.0.reset_distance()
+        zax_render::geometry::reset_distance(self.0.fov())
     }
 }
 

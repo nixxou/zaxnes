@@ -351,12 +351,24 @@ impl SceneCamera {
     /// asks (REQ-SCN-011). The unbounded value is [`SceneCamera::reset_distance`], what
     /// `Camera.ResetDistance` reads (AMD-040 REQ-LUA-113).
     pub fn reset_view(&mut self) {
+        let distance = self.reset_distance();
+        self.reset_view_at(distance);
+    }
+
+    /// The view reset of a script (`Camera.ResetView`): always 3dSen's framing (AMD-045
+    /// REQ-SCN-069), whatever `camera.frame_picture` says, so that a profile's staging is the
+    /// one it was written for. Only the application's own resets follow that setting.
+    pub fn reset_view_as_three_d_sen(&mut self) {
+        let distance = geometry::reset_distance(self.fov);
+        self.reset_view_at(distance);
+    }
+
+    fn reset_view_at(&mut self, distance: f32) {
         for setpoint in &mut self.setpoints {
             setpoint.angles = geometry::DEFAULT_ANGLES;
             setpoint.target = geometry::CENTER;
         }
 
-        let distance = self.reset_distance();
         self.current_mut().set_distance(distance);
     }
 
