@@ -2,7 +2,7 @@
 //! how their values make [`Options`]. The first choice of each is its default.
 
 use zax_nes::NesRegion;
-use zax_nes::builtin_patches::HackOption;
+use zax_nes::builtin_patches::{COMMON_OPTIONS, HackOption};
 use zax_nes::ppu::SpriteLimit;
 use zax_settings::catalogue::SettingId;
 use zax_settings::core_options::{self, LibretroCoreOption};
@@ -66,6 +66,12 @@ const RESOLUTIONS: [(u32, u32); 5] = [
 ];
 /// The prefix of the options of the game's hack: the option's own key follows.
 const HACK: &str = "zaxnes_hack_";
+/// The prefix of the options common to every game's hack (`COMMON_OPTIONS`).
+const AID: &str = "zaxnes_aid_";
+/// A common option's value that leaves each pack its own default.
+const PACK_DEFAULT: &str = "pack default";
+/// A game's hack option's value that follows the common option of the same key.
+const COMMON_SETTING: &str = "common setting";
 
 const RATIOS: [(&str, f32); 4] = [
     ("16:9", 16.0 / 9.0),
@@ -460,19 +466,50 @@ pub fn declarations(hacks: &[HackOption]) -> Vec<Declaration> {
         declaration.default.clone_from(&option.default_value);
         list.push(declaration);
     }
-    for option in hacks {
+    for (key, _) in COMMON_OPTIONS {
+        let label = common_label(key);
         list.push(
             Declaration::new(
-                &format!("{HACK}{}", option.key),
-                &format!("Hack: {}", option.label),
-                option.label,
+                &format!("{AID}{key}"),
+                &format!("All games: {label}"),
+                &format!("All games: {label}"),
                 "hacks",
-                "An option of this game's hack.",
+                "The default of this aid in every game whose hack has it; a game's own option \
+                 below, when not on Common setting, wins.",
             )
-            .switch(option.default),
+            .values([PACK_DEFAULT, "enabled", "disabled"]),
         );
     }
+    for option in hacks {
+        let common = COMMON_OPTIONS.iter().any(|(key, _)| *key == option.key);
+        let declaration = Declaration::new(
+            &format!("{HACK}{}", option.key),
+            &format!("Hack: {}", option.label),
+            option.label,
+            "hacks",
+            if common {
+                "An option of this game's hack. Common setting follows the All games option of \
+                 the same name."
+            } else {
+                "An option of this game's hack."
+            },
+        );
+        list.push(if common {
+            declaration.values([COMMON_SETTING, "enabled", "disabled"])
+        } else {
+            declaration.switch(option.default)
+        });
+    }
     list
+}
+
+/// The label of the common option `key`: the one a pack gives it.
+fn common_label(key: &str) -> String {
+    zax_nes::builtin_patches::patches()
+        .iter()
+        .flat_map(|patch| patch.options)
+        .find(|option| option.key == key)
+        .map_or_else(|| key.replace('_', " "), |option| option.label.to_owned())
 }
 
 /// The options the values give: `value` answers a key with its value, none when the frontend
@@ -546,8 +583,18 @@ pub fn read(value: &dyn Fn(&str) -> Option<String>, hacks: &[HackOption]) -> Opt
         hacks: hacks
             .iter()
             .map(|option| {
-                let key = format!("{HACK}{}", option.key);
-                (option.key.to_owned(), enabled(&key, option.default))
+                let own = value(&format!("{HACK}{}", option.key));
+                let on = match own.as_deref() {
+                    Some("enabled") => true,
+                    Some("disabled") => false,
+                    // Common setting, or none: the common option, else the pack's default.
+                    _ => match value(&format!("{AID}{}", option.key)).as_deref() {
+                        Some("enabled") => true,
+                        Some("disabled") => false,
+                        _ => option.default,
+                    },
+                };
+                (option.key.to_owned(), on)
             })
             .collect(),
     }
@@ -571,7 +618,7 @@ mod tests {
         assert!(
             list.iter()
                 .any(|option| option.key == "zaxnes_hack_invincible"
-                    && option.legacy() == "Hack: Invincible; disabled|enabled"
+                    && option.legacy() == "Hack: Invincible; common setting|enabled|disabled"
                     && option.category == "hacks")
         );
         let none = read(&|_| None, &[OPTION]);
@@ -652,5 +699,42 @@ mod tests {
         };
         assert_eq!(chosen("zaxnes_camera_fov").as_deref(), Some("90"));
         assert_eq!(chosen("zaxnes_light_intensity").as_deref(), Some("1.00"));
+    }
+
+    /// A game's aid follows its own option, else the All games one, else the pack's default.
+    #[test]
+    fn a_game_option_wins_over_the_common_one_over_the_pack() {
+        let on = |values: &[(&str, &str)]| {
+            let options = read(
+                &|key| {
+                    values
+                        .iter()
+                        .find(|(name, _)| *name == key)
+                        .map(|(_, value)| (*value).to_owned())
+                },
+                &[OPTION],
+            );
+            options.hacks[0].1
+        };
+        assert!(!on(&[]));
+        assert!(on(&[("zaxnes_aid_invincible", "enabled")]));
+        assert!(on(&[
+            ("zaxnes_aid_invincible", "enabled"),
+            ("zaxnes_hack_invincible", "common setting"),
+        ]));
+        assert!(!on(&[
+            ("zaxnes_aid_invincible", "enabled"),
+            ("zaxnes_hack_invincible", "disabled"),
+        ]));
+        assert!(on(&[
+            ("zaxnes_aid_invincible", "pack default"),
+            ("zaxnes_hack_invincible", "enabled"),
+        ]));
+        let list = declarations(&[]);
+        assert!(
+            list.iter()
+                .any(|option| option.key == "zaxnes_aid_margin_freeze"
+                    && option.default_value() == "pack default")
+        );
     }
 }

@@ -2331,6 +2331,19 @@ impl BuiltinPatch {
     }
 }
 
+/// The options several packs share, whose default the application's options window and the
+/// libretro core's options set for all of them (lot REWRITE-UI, owner, 2026-11-18): each key
+/// with the value the packs give it.
+pub const COMMON_OPTIONS: [(&str, bool); 6] = [
+    ("no_slowdown", true),
+    ("invincible", false),
+    ("level_select", false),
+    // Kirby's margin behaviour, meant for other games too (owner, 2026-11-18).
+    ("margin_enemies", true),
+    ("margin_freeze", false),
+    ("margin_freeze_tint", false),
+];
+
 /// An option of a built-in patch: bit `bit` of the extension's `$500A`, which the ROM reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HackOption {
