@@ -2773,7 +2773,7 @@ fn update_cursor(
         host.state() == EmulationState::Running,
         snapshot.pointer_moved,
         real,
-    );
+    ) || cfg!(target_os = "emscripten"); // Web: the page keeps the mouse (it clicks the pad).
     if input.pointer.cursor_visible() != visible {
         input.pointer.set_cursor_visible(visible);
     }

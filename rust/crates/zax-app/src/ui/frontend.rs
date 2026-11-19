@@ -607,6 +607,14 @@ impl ImguiFrontend {
     /// The touch pad's menu button, held or not, for the console interface's own pad (the web
     /// build, whose touch pad has no virtual controller to press it).
     pub fn set_touch_menu(&mut self, held: bool) {
+        // On the desktop (the web page), the press first brings the console interface over the
+        // game, by itself: it goes again when the game resumes.
+        if held && !self.console_shown() && self.handheld.is_some() && !self.device {
+            self.console = ConsoleMode {
+                active: true,
+                automatic: true,
+            };
+        }
         if self.console_shown() {
             self.platform
                 .pad_mut()

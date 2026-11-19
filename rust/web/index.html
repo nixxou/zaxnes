@@ -182,8 +182,7 @@
 
   var Module = {
     canvas,
-    // The console interface, driven like a handheld's (as the Android package does).
-    arguments: ['--handheld'],
+    arguments: [],
     print: (t) => console.log(t),
     printErr: (t) => console.warn(t),
     setStatus: (t) => { status.textContent = t; },
