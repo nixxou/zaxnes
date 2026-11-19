@@ -37,3 +37,13 @@ asked first). Tests: `cargo test -p zax-app --features bundled` with
   the import happens on arrival: one gesture fewer, same importer. Tests:
   the_waiting_bundles_are_the_bundle_files_of_the_import_folder,
   a_bundle_in_the_import_folder_is_imported_and_removed. Device check: pending.
+
+## Also on this branch
+
+- 3D framing (owner request, app-wide): `camera.frame_picture`, on by default, makes the view
+  reset frame the picture's visible rows as the head-on 2D view does (2D to 3D no longer draws
+  back); off is 3dSen's framing. A script's `Camera.ResetView` / `Camera.ResetDistance` keep
+  3dSen's framing. b9b5cad9, 1d0319ee.
+- Device: Retroid Pocket 5, APK installed; cold start and game replaced while running checked
+  (file:// request). content:// launch, return on quit, capture fix, bundle import and framing
+  left to the owner's hands-on check.
