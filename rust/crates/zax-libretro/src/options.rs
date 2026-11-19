@@ -12,7 +12,7 @@ use zax_settings::presets::{PRESETS, V};
 use crate::machine::{self, Machine, Variant};
 use crate::picture::{self, Picture};
 
-use crate::core::{Options, RegionChoice};
+use crate::core::{Options, RegionChoice, ThreeDAspect};
 use crate::three_d::RenderOptions;
 
 /// The value of the choice named `text` among `choices`, `default` for none.
@@ -62,13 +62,23 @@ const SKIES: [(&str, i32); 4] = [
     ("Fantasy", 2),
 ];
 
-const RESOLUTIONS: [(u32, u32); 5] = [
+/// The 3D resolutions, by their stored value: the 16:9 size the option has always stored, of
+/// which the height counts (the width follows the 3D's shape, `zaxnes_3d_aspect`).
+const RESOLUTIONS: [(u32, u32); 8] = [
+    (426, 240),
+    (640, 360),
+    (854, 480),
+    (960, 540),
     (1280, 720),
     (1920, 1080),
     (2560, 1440),
     (3840, 2160),
-    (960, 540),
 ];
+/// The resolution without a choice.
+const DEFAULT_RESOLUTION: (u32, u32) = (1280, 720);
+/// The shape of the 3D picture.
+const ASPECT: &str = "zaxnes_3d_aspect";
+const ASPECTS: [&str; 3] = ["16:9", "4:3", "Widescreen ratio"];
 /// The prefix of the options of the game's hack: the option's own key follows.
 const HACK: &str = "zaxnes_hack_";
 /// The performance / fidelity preset (`zax_settings::presets`).
@@ -534,14 +544,33 @@ pub fn declarations(hacks: &[HackOption]) -> Vec<Declaration> {
              driver.",
         )
         .values(["3D for games with a profile", "2D only"]),
+        {
+            let mut resolution = Declaration::new(
+                RESOLUTION,
+                "3D resolution (restart)",
+                "Resolution (restart)",
+                "three_d",
+                "The height the 3D is drawn at; 240p to 480p give the look of the 3D consoles of \
+                 the 1990s and suit a CRT. The width follows the 3D aspect ratio.",
+            )
+            .values(resolutions);
+            for (value, label) in &mut resolution.values {
+                *label = value
+                    .split_once('x')
+                    .map(|(_, height)| format!("{height}p"));
+            }
+            resolution.default = format!("{}x{}", DEFAULT_RESOLUTION.0, DEFAULT_RESOLUTION.1);
+            resolution
+        },
         Declaration::new(
-            RESOLUTION,
-            "3D resolution (restart)",
-            "Resolution (restart)",
+            ASPECT,
+            "3D aspect ratio (restart)",
+            "Aspect ratio (restart)",
             "three_d",
-            "The size the 3D is drawn at.",
+            "The shape of the 3D picture: 16:9; 4:3 (bezels made for 4:3, a CRT); or the \
+             widescreen ratio for a widened game, 4:3 for the others.",
         )
-        .values(resolutions),
+        .values(ASPECTS),
         Declaration::new(
             ANTI_ALIAS,
             "3D anti-aliasing",
@@ -996,6 +1025,11 @@ fn read_explicit(value: &dyn Fn(&str) -> Option<String>, hacks: &[HackOption]) -
                     .copied()
             })
             .unwrap_or(defaults.resolution),
+        three_d_aspect: match value(ASPECT).as_deref() {
+            Some("4:3") => ThreeDAspect::FourThree,
+            Some("Widescreen ratio") => ThreeDAspect::Widescreen,
+            _ => ThreeDAspect::Wide,
+        },
         render: RenderOptions {
             anti_alias: choice(&ANTI_ALIASES, value(ANTI_ALIAS), defaults.render.anti_alias),
             shadows: enabled(SHADOWS, defaults.render.shadows),

@@ -511,7 +511,7 @@ fn av_info(core: Option<&Core>) -> SystemAvInfo {
         (256, 240, (MAX_WIDTH, MAX_HEIGHT), 4.0 / 3.0, 60.098_8),
         |core| {
             if core.is_three_d() {
-                let (width, height) = core.options().resolution;
+                let (width, height) = core.three_d_size();
                 #[allow(clippy::cast_precision_loss)] // Screen sizes.
                 let aspect = width as f32 / height as f32;
                 (width, height, MAX_3D, aspect, core.frames_per_second())
@@ -692,7 +692,7 @@ fn steer(frontend: &Frontend, core: &mut Core, seconds: f32) {
 /// Draws the 3D into the frontend's framebuffer and hands it over; false when there is no
 /// renderer yet (the frontend has not reset the context).
 fn draw_three_d(frontend: &Frontend, core: &mut Core) -> bool {
-    let (width, height) = core.options().resolution;
+    let (width, height) = core.three_d_size();
     let Some(framebuffer) = frontend.framebuffer else {
         return false;
     };

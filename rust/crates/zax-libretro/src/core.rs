@@ -19,6 +19,8 @@ pub const SMOOTH_SCALE: u32 = 4;
 /// The widest picture: the NES's 256 pixels and the widest margins on each side, at the scale
 /// of the 120 Hz scrolling.
 pub const MAX_WIDTH: u32 = (256 + 2 * zax_nes::wide::MAX_MARGIN.unsigned_abs()) * SMOOTH_SCALE;
+/// The widest the 3D is drawn at (the frontend's `MAX_3D`): a wider shape loses height.
+pub const MAX_3D_WIDTH: u32 = 3840;
 /// The tallest picture: 240 lines and the tallest margins above and below.
 pub const MAX_HEIGHT: u32 = 240 + 2 * zax_nes::wide::MAX_VERTICAL_MARGIN.unsigned_abs();
 
@@ -55,6 +57,8 @@ pub struct Options {
     pub three_d: bool,
     /// The size the 3D is drawn at (at the next load).
     pub resolution: (u32, u32),
+    /// The shape of the 3D picture (its width follows from the resolution's height).
+    pub three_d_aspect: ThreeDAspect,
     /// The render settings of the 3D (at once).
     pub render: crate::three_d::RenderOptions,
     /// The console's settings: core variant and hardware (most at the next load).
@@ -96,6 +100,7 @@ impl Default for Options {
             hacks: Vec::new(),
             three_d: true,
             resolution: (1280, 720),
+            three_d_aspect: ThreeDAspect::Wide,
             render: crate::three_d::RenderOptions::default(),
             machine: crate::machine::Machine::default(),
             picture: crate::picture::Picture::default(),
@@ -119,6 +124,18 @@ pub struct Changed {
     pub timing: bool,
     /// The game's hack options changed (the widescreen switched): declare them again.
     pub hack_options: bool,
+}
+
+/// The shape of the 3D picture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ThreeDAspect {
+    /// 16:9, as the core has always drawn it.
+    #[default]
+    Wide,
+    /// 4:3, for bezels made for it and CRTs.
+    FourThree,
+    /// The widescreen ratio for a game it widens, 4:3 for the others.
+    Widescreen,
 }
 
 /// The game in play.
@@ -674,6 +691,38 @@ impl Core {
         let new = size != self.announced;
         self.announced = size;
         new
+    }
+
+    /// The size the 3D is drawn at: the resolution's height, the width its shape gives.
+    #[must_use]
+    pub fn three_d_size(&self) -> (u32, u32) {
+        let height = self.options.resolution.1.max(1);
+        let ratio = match self.options.three_d_aspect {
+            ThreeDAspect::Wide => 16.0 / 9.0,
+            ThreeDAspect::Widescreen if self.margin().0 > 0 => {
+                self.options.ratio.clamp(4.0 / 3.0, 32.0 / 9.0)
+            }
+            // 4:3, and the widescreen ratio of a game it does not widen.
+            ThreeDAspect::FourThree | ThreeDAspect::Widescreen => 4.0 / 3.0,
+        };
+        // An even width, as video sizes are.
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss
+        )] // Screen sizes.
+        let width = ((height as f32 * ratio / 2.0).round() as u32 * 2).max(2);
+        // Within the widest the frontend was told (3840): a wider shape loses height.
+        if width > MAX_3D_WIDTH {
+            #[allow(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                clippy::cast_precision_loss
+            )] // Screen sizes.
+            let height = ((MAX_3D_WIDTH as f32 / ratio / 2.0).round() as u32 * 2).max(2);
+            return (MAX_3D_WIDTH, height);
+        }
+        (width, height)
     }
 
     /// The width over the height of the picture as shown: square pixels, as the application
