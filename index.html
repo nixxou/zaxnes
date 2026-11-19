@@ -157,10 +157,13 @@
     if (file && typeof FS !== 'undefined') importRom(file);
   });
 
-  // The program's shortcuts are the program's: Ctrl+O must not open the browser's own file
-  // dialogue, Ctrl+S save the page, Ctrl+R reload it... (the program still gets the keys).
+  // The program's keys are the program's: Ctrl+O must not open the browser's own file dialogue,
+  // Ctrl+S save the page, Tab move the focus, F1 open the help... (the program still gets them).
   window.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && /^[a-z,]$/i.test(e.key) && !dialog.classList.contains('shown')) {
+    if (dialog.classList.contains('shown')) return;
+    // Tab and F1 open the console interface's menu: not the browser's focus move or help.
+    const programKey = e.key === 'Tab' || /^F([1-9]|10)$/.test(e.key);
+    if (programKey || ((e.ctrlKey || e.metaKey) && /^[a-z,]$/i.test(e.key))) {
       e.preventDefault();
     }
   }, true);
@@ -179,7 +182,8 @@
 
   var Module = {
     canvas,
-    arguments: [],
+    // The console interface, driven like a handheld's (as the Android package does).
+    arguments: ['--handheld'],
     print: (t) => console.log(t),
     printErr: (t) => console.warn(t),
     setStatus: (t) => { status.textContent = t; },
