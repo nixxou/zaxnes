@@ -25,12 +25,22 @@ Needs the Rust target (`rustup target add wasm32-unknown-emscripten`) and emsdk 
 - One thread: the emulation thread is refused and the frame runs on the main thread (existing
   fallback). The browser gets its turn after each swap (Asyncify, `window.rs`).
 - RetroAchievements offline (no TLS stack; `fetch` to wire in).
+- Starts on the fastest preset (owner request; `handheld::defaults::apply_fastest`).
+- The user data folder is an IDBFS mount (IndexedDB): settings, saves, states and imported ROMs
+  survive a reload; the page syncs every 3 s and when hidden.
+- Opening a ROM shows the page's dialogue (bundled ROMs, the player's earlier ROMs, drop, file
+  picker), reached by the "Ouvrir une ROM" button or File > Open. Page and program talk through
+  files of the in-memory file system (`web_bridge.rs`), so no `unsafe` was needed.
+- Touch pad offered. Emscripten's SDL has no virtual joysticks: the pad's buttons are read by
+  the application as player one's actions (`TouchPad::take_held`, taps latched for a frame).
+  With a real gamepad, the automatic mode keeps the buttons a gamepad lacks (menu, 2D/3D,
+  camera lock and recentring, rewind, fast forward).
 
 ## Still to do
 
 - Main loop through `emscripten_set_main_loop` instead of Asyncify (smaller, faster; Asyncify
   also warns it does not mix with wasm exceptions), swap paced by requestAnimationFrame.
-- ROMs and profiles from the page (file input, drag and drop); saves and settings persisted in
-  IndexedDB (IDBFS mount of the user data folder).
+- Importing 3D profiles from the page (ROMs are done).
+- The console list does not rescan the ROM folder after an import (the ROM opens directly).
 - Audio unlock on first click, gamepads, fonts with accents, the welcome/keys on the web.
 - Achievements through fetch; hide desktop-only options (shaders, MCP, native dialog).

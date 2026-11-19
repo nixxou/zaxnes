@@ -204,7 +204,11 @@ impl HostWindow {
 
         // The pads keep reporting when the window is not focused, as GLFW's polling did.
         sdl2::hint::set("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1");
-        // A finger is the touch pad's, not a mouse (Rust-only, owner request).
+        // A finger is the touch pad's, not a mouse (Rust-only, owner request); likewise on a
+        // touch screen in the browser.
+        if cfg!(target_os = "emscripten") {
+            sdl2::hint::set("SDL_TOUCH_MOUSE_EVENTS", "0");
+        }
         if cfg!(target_os = "android") {
             sdl2::hint::set("SDL_TOUCH_MOUSE_EVENTS", "0");
             // The accelerometer is not a gamepad: it would hide the touch pad of the "Auto" mode.

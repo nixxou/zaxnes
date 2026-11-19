@@ -504,6 +504,10 @@ impl Running {
         self.reopen_the_audio_output();
         self.follow_the_editor_setting();
         self.load_the_asked_state();
+        // Web build: the ROM the page's dialogue chose (a no-op elsewhere).
+        if let Some(path) = crate::web_bridge::take_open_answer() {
+            self.host.enqueue(Command::OpenRom, CommandArgs::of_text(&path));
+        }
         let frame_begin = self.clock.start();
         let busy_begin = Instant::now();
         let mark = self.clock.start();
@@ -768,6 +772,32 @@ impl Running {
         }
         if forward {
             snapshot.player_one |= crate::input::input_action::InputAction::FAST_FORWARD;
+        }
+        // Web build: no virtual controller carries the pad's buttons, they are the first
+        // player's here (the whole pad, or its extras alone beside a real gamepad).
+        {
+            use crate::input::input_action::InputAction;
+            use zax_platform::input::touch::TouchControl;
+            for (control, action) in [
+                (TouchControl::Up, InputAction::UP),
+                (TouchControl::Down, InputAction::DOWN),
+                (TouchControl::Left, InputAction::LEFT),
+                (TouchControl::Right, InputAction::RIGHT),
+                (TouchControl::A, InputAction::A),
+                (TouchControl::B, InputAction::B),
+                (TouchControl::Select, InputAction::SELECT),
+                (TouchControl::Start, InputAction::START),
+                (TouchControl::Menu, InputAction::MENU),
+            ] {
+                if self.input.touch.take_held(control) {
+                    snapshot.player_one |= action;
+                }
+            }
+        }
+        for command in self.input.touch.take_commands() {
+            if let Some(command) = Command::from_name(command) {
+                self.host.enqueue(command, CommandArgs::default());
+            }
         }
         let capturing = self.source.rebinding().suppresses_actions();
         self.ui.handle_shortcuts(
@@ -1739,6 +1769,10 @@ fn load_settings(options: &AppOptions, paths: &UserDataPaths) -> (SettingsStore,
     }
     if cfg!(target_os = "android") {
         handheld::defaults::apply_android(&mut model);
+    }
+    // Web build (owner request): starts on the fastest preset.
+    if cfg!(target_os = "emscripten") {
+        handheld::defaults::apply_fastest(&mut model);
     }
     // Rust-only (owner request): the region comes from the ROM header unless the user turned the
     // automatic mode off, so a European dump runs at 50 Hz (`emu.auto_tv_mode` is off in C#).

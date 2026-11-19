@@ -37,3 +37,4 @@ pub mod single_instance;
 pub mod three_d_sen_command;
 pub mod ui;
 pub mod user_data_paths;
+pub mod web_bridge;

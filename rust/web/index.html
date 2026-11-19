@@ -6,14 +6,64 @@
 <title>Zaxnes</title>
 <style>
   html, body { margin: 0; height: 100%; background: #111; color: #ddd; font: 14px system-ui, sans-serif; }
-  #canvas { display: block; width: 100vw; height: 100vh; outline: none; }
+  #canvas { display: block; width: 100vw; height: 100vh; outline: none; touch-action: none; }
   #status { position: fixed; left: 8px; bottom: 8px; opacity: .8; pointer-events: none; }
+  #open { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+          background: rgba(0,0,0,.6); z-index: 10; }
+  #open.shown { display: flex; }
+  .panel { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto;
+           background: #1b1d24; border: 1px solid #3a3e4a; border-radius: 10px; padding: 18px; box-sizing: border-box; }
+  .panel h2 { margin: 0 0 12px; font-size: 18px; color: #ffd84a; }
+  .panel h3 { margin: 16px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: #9aa0ad; }
+  .rom { display: block; width: 100%; text-align: left; margin: 4px 0; padding: 10px 12px; border-radius: 6px;
+         border: 1px solid #3a3e4a; background: #252833; color: #eee; font: inherit; cursor: pointer; }
+  .rom:hover, .rom:focus { border-color: #ffd84a; outline: none; }
+  .rom small { color: #9aa0ad; margin-left: 6px; }
+  #drop { margin-top: 6px; padding: 22px 12px; border: 2px dashed #4a4f5d; border-radius: 8px; text-align: center; color: #aab; }
+  #drop.over, body.dragging #drop { border-color: #ffd84a; color: #fff; }
+  .row { display: flex; gap: 8px; justify-content: space-between; margin-top: 14px; }
+  .btn { padding: 9px 14px; border-radius: 6px; border: 1px solid #3a3e4a; background: #252833; color: #eee; font: inherit; cursor: pointer; }
+  .btn.main { background: #ffd84a; color: #111; border-color: #ffd84a; }
+  .empty { color: #777; font-style: italic; }
+  #open-button { position: fixed; top: 6px; left: 50%; transform: translateX(-50%); z-index: 5;
+                 padding: 5px 12px; border-radius: 14px; border: 1px solid #3a3e4a; background: rgba(27,29,36,.75);
+                 color: #eee; font: 13px system-ui, sans-serif; cursor: pointer; opacity: .45; transition: opacity .2s; }
+  #open-button:hover, #open-button:focus { opacity: 1; outline: none; }
 </style>
 </head>
 <body>
 <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
 <div id="status">Chargement…</div>
+<button id="open-button" title="Ouvrir une ROM">Ouvrir une ROM…</button>
+
+<div id="open" role="dialog" aria-modal="true" aria-labelledby="open-title">
+  <div class="panel">
+    <h2 id="open-title">Ouvrir une ROM</h2>
+    <h3>Incluses</h3>
+    <div id="bundled"></div>
+    <h3>Vos ROMs</h3>
+    <div id="mine"></div>
+    <h3>Depuis votre ordinateur</h3>
+    <div id="drop">Déposez un fichier ici (.nes, .fds, .unf, .zip)</div>
+    <div class="row">
+      <button class="btn main" id="browse">Parcourir…</button>
+      <button class="btn" id="cancel">Annuler</button>
+    </div>
+    <input type="file" id="file" accept=".nes,.fds,.unf,.unif,.zip" hidden>
+  </div>
+</div>
+
 <script>
+  // The user data folder of the program (SDL_GetPrefPath under Emscripten), kept in IndexedDB.
+  const DATA = '/home/web_user/.local/share/Zaxnes';
+  const ROMS = DATA + '/roms';
+  // The exchange files with the program (rust/crates/zax-app/src/web_bridge.rs).
+  const OPEN_REQUEST = '/zaxnes-web/open-request';
+  const OPEN_ANSWER = '/zaxnes-web/open-answer';
+  // The ROMs shipped with the program (installed into ROMS by the program itself).
+  const BUNDLED = [{ title: 'FlappyZaxNes', file: 'FlappyZaxNes.nes', note: 'démo 3D' }];
+  const ROM_FILE = /\.(nes|fds|unf|unif|zip)$/i;
+
   const status = document.getElementById('status');
   const canvas = document.getElementById('canvas');
   function fitCanvas() {
@@ -22,19 +72,124 @@
     canvas.height = Math.round(canvas.clientHeight * r);
   }
   fitCanvas();
+
+  // --- Persistence: the whole user data folder lives in IndexedDB. ---
+  let syncing = false, dirty = false;
+  function save() {
+    if (typeof FS === 'undefined' || !FS.syncfs) return;
+    if (syncing) { dirty = true; return; }
+    syncing = true;
+    FS.syncfs(false, (err) => {
+      syncing = false;
+      if (err) console.warn('Zaxnes: saving to IndexedDB failed', err);
+      if (dirty) { dirty = false; save(); }
+    });
+  }
+  setInterval(save, 3000);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
+  window.addEventListener('pagehide', save);
+
+  // --- The ROM dialogue. ---
+  const dialog = document.getElementById('open');
+  const fileInput = document.getElementById('file');
+  function exists(path) { try { return FS.analyzePath(path).exists; } catch (e) { return false; } }
+  function choose(path) {
+    FS.mkdirTree('/zaxnes-web');
+    FS.writeFile(OPEN_ANSWER, path);
+    closeDialog();
+    save();
+  }
+  function romButton(title, path, note) {
+    const b = document.createElement('button');
+    b.className = 'rom';
+    b.textContent = title;
+    if (note) { const s = document.createElement('small'); s.textContent = note; b.appendChild(s); }
+    b.onclick = () => choose(path);
+    return b;
+  }
+  function fillLists() {
+    const bundled = document.getElementById('bundled');
+    const mine = document.getElementById('mine');
+    bundled.replaceChildren(); mine.replaceChildren();
+    const shipped = new Set(BUNDLED.map((r) => r.file.toLowerCase()));
+    for (const r of BUNDLED) bundled.appendChild(romButton(r.title, ROMS + '/' + r.file, r.note));
+    let files = [];
+    try { files = FS.readdir(ROMS).filter((f) => ROM_FILE.test(f) && !shipped.has(f.toLowerCase())); } catch (e) {}
+    files.sort((a, b) => a.localeCompare(b));
+    if (!files.length) {
+      const p = document.createElement('div'); p.className = 'empty';
+      p.textContent = 'Aucune pour l’instant : les ROMs que vous ouvrez restent ici.';
+      mine.appendChild(p);
+    }
+    for (const f of files) mine.appendChild(romButton(f.replace(ROM_FILE, ''), ROMS + '/' + f));
+  }
+  function openDialog() { fillLists(); dialog.classList.add('shown'); document.getElementById('browse').focus(); }
+  function closeDialog() { dialog.classList.remove('shown'); canvas.focus(); }
+  document.getElementById('cancel').onclick = closeDialog;
+  document.getElementById('open-button').onclick = (e) => { e.currentTarget.blur(); openDialog(); };
+  document.getElementById('browse').onclick = () => fileInput.click();
+  dialog.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeDialog(); } });
+  fileInput.onchange = () => { if (fileInput.files[0]) importRom(fileInput.files[0]); fileInput.value = ''; };
+
+  // A file of the player's machine: copied into the ROM folder (so it stays), then opened.
+  async function importRom(file) {
+    if (!ROM_FILE.test(file.name)) { alertBox('Ce fichier n’est pas une ROM reconnue : ' + file.name); return; }
+    const name = file.name.replace(/[\/\\]/g, '_');
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    FS.mkdirTree(ROMS);
+    FS.writeFile(ROMS + '/' + name, bytes);
+    choose(ROMS + '/' + name);
+  }
+  function alertBox(text) { status.textContent = text; status.style.display = 'block'; setTimeout(() => status.textContent = '', 5000); }
+
+  // Drop anywhere on the page, dialogue open or not.
+  const drop = document.getElementById('drop');
+  window.addEventListener('dragover', (e) => { e.preventDefault(); document.body.classList.add('dragging'); });
+  window.addEventListener('dragleave', (e) => { if (!e.relatedTarget) document.body.classList.remove('dragging'); });
+  window.addEventListener('drop', (e) => {
+    e.preventDefault();
+    document.body.classList.remove('dragging');
+    const file = e.dataTransfer && e.dataTransfer.files[0];
+    if (file && typeof FS !== 'undefined') importRom(file);
+  });
+
+  // The program's shortcuts are the program's: Ctrl+O must not open the browser's own file
+  // dialogue, Ctrl+S save the page, Ctrl+R reload it... (the program still gets the keys).
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && /^[a-z,]$/i.test(e.key) && !dialog.classList.contains('shown')) {
+      e.preventDefault();
+    }
+  }, true);
+
+  // The program asks for the dialogue by creating OPEN_REQUEST.
+  function pollRequests() {
+    if (exists(OPEN_REQUEST)) {
+      try { FS.unlink(OPEN_REQUEST); } catch (e) {}
+      openDialog();
+    }
+  }
+
   var Module = {
     canvas,
     arguments: [],
     print: (t) => console.log(t),
     printErr: (t) => console.warn(t),
-    setStatus: (t) => { status.textContent = t; if (!t) status.remove(); },
-    onRuntimeInitialized: () => { canvas.focus(); },
-    // Debugging aid: ?env=NAME=value (repeatable) sets environment variables of the program.
+    setStatus: (t) => { status.textContent = t; },
+    onRuntimeInitialized: () => { status.textContent = ''; canvas.focus(); setInterval(pollRequests, 200); },
     preRun: [() => {
+      // Debugging aid: ?env=NAME=value (repeatable) sets environment variables of the program.
       for (const pair of new URLSearchParams(location.search).getAll('env')) {
         const at = pair.indexOf('=');
         if (at > 0) ENV[pair.slice(0, at)] = pair.slice(at + 1);
       }
+      // The user data folder from IndexedDB, before the program starts.
+      FS.mkdirTree(DATA);
+      FS.mount(Module.IDBFS || IDBFS, {}, DATA);
+      addRunDependency('zaxnes-idbfs');
+      FS.syncfs(true, (err) => {
+        if (err) console.warn('Zaxnes: reading IndexedDB failed', err);
+        removeRunDependency('zaxnes-idbfs');
+      });
     }],
   };
   window.addEventListener('error', (e) => { status.textContent = 'Erreur : ' + e.message; });
