@@ -19,6 +19,8 @@ keys never renamed (players' `Zaxnes.opt` keeps its values). Tests with
 - Step 2b, the aids' All games options (COMMON_OPTIONS moved to zax-nes): d9edd31f.
 - Step 2c, core variant, console hardware, VS DIP, sound profile (src/machine.rs): 725e2a60
   (checked in RetroArch: Fidelity+ and Fast start).
+- Step 2d, television, composite signal (RF checked on SMB in RetroArch), emphasis in 3D
+  (src/picture.rs): 41c2bfd6. Step 2 complete.
 - Real checks use a scratch RetroArch config whose rgui_config_directory is in the scratchpad,
   so the owner's Zaxnes.opt is no longer written.
 
