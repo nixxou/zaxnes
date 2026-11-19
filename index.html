@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Zaxnes</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #111; color: #ddd; font: 14px system-ui, sans-serif; }
-  #canvas { display: block; width: 100vw; height: 100vh; outline: none; touch-action: none; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #111; color: #ddd; font: 14px system-ui, sans-serif; }
+  /* dvh: the height actually visible on a phone, under its browser's bars. */
+  #canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; outline: none; touch-action: none; }
   #status { position: fixed; left: 8px; bottom: 8px; opacity: .8; pointer-events: none; }
   #open { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
           background: rgba(0,0,0,.6); z-index: 10; }
@@ -29,6 +30,7 @@
                  padding: 5px 12px; border-radius: 14px; border: 1px solid #3a3e4a; background: rgba(27,29,36,.75);
                  color: #eee; font: 13px system-ui, sans-serif; cursor: pointer; opacity: .45; transition: opacity .2s; }
   #open-button:hover, #open-button:focus { opacity: 1; outline: none; }
+  body.playing #open-button { display: none; }
 </style>
 </head>
 <body>
@@ -60,6 +62,7 @@
   // The exchange files with the program (rust/crates/zax-app/src/web_bridge.rs).
   const OPEN_REQUEST = '/zaxnes-web/open-request';
   const OPEN_ANSWER = '/zaxnes-web/open-answer';
+  const STATE = '/zaxnes-web/state';
   // The ROMs shipped with the program (installed into ROMS by the program itself).
   const BUNDLED = [{ title: 'FlappyZaxNes', file: 'FlappyZaxNes.nes', note: 'démo 3D' }];
   const ROM_FILE = /\.(nes|fds|unf|unif|zip)$/i;
@@ -67,7 +70,8 @@
   const status = document.getElementById('status');
   const canvas = document.getElementById('canvas');
   function fitCanvas() {
-    const r = window.devicePixelRatio || 1;
+    // At most twice the CSS pixels: a phone's 3x screen would cost the 3D twice as much again.
+    const r = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.round(canvas.clientWidth * r);
     canvas.height = Math.round(canvas.clientHeight * r);
   }
@@ -167,6 +171,10 @@
       try { FS.unlink(OPEN_REQUEST); } catch (e) {}
       openDialog();
     }
+    // The page's own button only while no game is on the screen.
+    let state = '';
+    try { state = FS.readFile(STATE, { encoding: 'utf8' }); } catch (e) {}
+    document.body.classList.toggle('playing', state === 'playing');
   }
 
   var Module = {
