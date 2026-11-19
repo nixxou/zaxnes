@@ -815,7 +815,9 @@ impl Running {
                 }
                 // The console interface reads its own pad: the menu button opens its in-game
                 // menu (on Android the virtual controller's guide button does that).
-                if control == TouchControl::Menu {
+                // Web only: elsewhere the virtual controller's guide button already does it, and
+                // writing the button every frame would cut a Menu held on a real pad or key.
+                if cfg!(target_os = "emscripten") && control == TouchControl::Menu {
                     self.ui.set_touch_menu(held);
                 }
             }
