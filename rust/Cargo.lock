@@ -2785,7 +2785,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "zax-achievements"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "cc",
  "ureq",
@@ -2793,14 +2793,14 @@ dependencies = [
 
 [[package]]
 name = "zax-android"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "zax-app",
 ]
 
 [[package]]
 name = "zax-app"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "glow",
  "imgui",
@@ -2833,14 +2833,14 @@ dependencies = [
 
 [[package]]
 name = "zax-core-api"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "zax-nes",
 ]
 
 [[package]]
 name = "zax-engine3d"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "rstest",
  "thiserror 2.0.21",
@@ -2851,14 +2851,14 @@ dependencies = [
 
 [[package]]
 name = "zax-fceux"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "zax-core-api",
 ]
 
 [[package]]
 name = "zax-goldens"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2866,7 +2866,7 @@ dependencies = [
 
 [[package]]
 name = "zax-harness"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde_json",
  "sha1",
@@ -2886,7 +2886,7 @@ dependencies = [
 
 [[package]]
 name = "zax-libretro"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "glow",
  "png 0.17.16",
@@ -2900,7 +2900,7 @@ dependencies = [
 
 [[package]]
 name = "zax-nes"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde_json",
  "sha1",
@@ -2912,7 +2912,7 @@ dependencies = [
 
 [[package]]
 name = "zax-neshawk"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "zax-core-api",
  "zax-nes",
@@ -2920,7 +2920,7 @@ dependencies = [
 
 [[package]]
 name = "zax-platform"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "glow",
  "imgui",
@@ -2935,7 +2935,7 @@ dependencies = [
 
 [[package]]
 name = "zax-profiles"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "getrandom 0.3.4",
  "rstest",
@@ -2949,7 +2949,7 @@ dependencies = [
 
 [[package]]
 name = "zax-render"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "flate2",
  "glow",
@@ -2970,7 +2970,7 @@ dependencies = [
 
 [[package]]
 name = "zax-scripting"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "getrandom 0.3.4",
  "mlua",
@@ -2983,7 +2983,7 @@ dependencies = [
 
 [[package]]
 name = "zax-settings"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "rstest",
  "serde_json",
