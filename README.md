@@ -9,8 +9,8 @@ frame become little 3D blocks, in a scene with a real camera, lights and shadows
 around the level, zoom in, or go back to plain 2D at any time.
 
 It runs on **Windows**, **Linux**, **Android** (tablets and handhelds, with a gamepad or the touch
-pad), **handheld consoles** through PortMaster (Anbernic H700 devices such as the RG40XXV and the
-RG35XX family, on muOS, Knulli or ROCKNIX) and **RetroArch**.
+pad) and **handheld consoles** through PortMaster (Anbernic H700 devices such as the RG40XXV and
+the RG35XX family, on muOS, Knulli or ROCKNIX).
 
 - **Uses your 3dSen profiles.** Import them from your own 3dSen install in one click. 3dSen 2.0,
   2.1 and 2.2 profiles work too. Zaxnes also comes with a few profiles of its own (*Faxanadu*,
@@ -196,8 +196,6 @@ Each game can run on one of three engines, picked in its options:
   touch pad on Android.
 - Vulkan and DirectX 12 on the desktop, besides OpenGL. In Vulkan, ReShade can use the depth of
   the 3D scene.
-- A **libretro core** for RetroArch, with the 3D, the widescreen and the 120 Hz scrolling; see
-  [`rust/crates/zax-libretro/README.md`](rust/crates/zax-libretro/README.md).
 
 The user guide, in French, is [HOWTO-RUN.md](HOWTO-RUN.md): menus, shortcuts, options, where your
 files go, and the command line. The handheld controls are in the
@@ -245,6 +243,3 @@ Every [release](../../releases) has one package per platform:
 
 **The only game included is FlappyZaxNes**, with its 3D profile (see above); the 3D profiles made
 for Zaxnes come with every package. For any other game you need your own, legally owned ROMs.
-
-The libretro core isn't in the release packages yet: build it from source, as
-[`rust/crates/zax-libretro/README.md`](rust/crates/zax-libretro/README.md) explains.
