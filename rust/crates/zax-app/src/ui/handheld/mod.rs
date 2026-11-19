@@ -853,6 +853,7 @@ impl HandheldUi {
             return;
         }
         self.launch_wait = LAUNCH_CHECK_SECONDS;
+        self.import_waiting_bundles(host);
         let Some(request) = crate::launch_request::take(&host.paths().root) else {
             return;
         };
@@ -874,6 +875,42 @@ impl HandheldUi {
         }
         if matches!(self.screen, Screen::Overlay | Screen::States) {
             self.screen = Screen::InGame;
+        }
+    }
+
+    /// The 3dSen bundles waiting in the user data's import folder (opened with or shared to
+    /// Zaxnes on Android, or copied there): imported with the same importer as the desktop's
+    /// (3dSen 1.x to 2.2), then removed, a message saying what came of it. Not during a game.
+    fn import_waiting_bundles(&mut self, host: &mut AppHost) {
+        if matches!(self.screen, Screen::InGame) {
+            return;
+        }
+        let bundles = crate::launch_request::waiting_bundles(&host.paths().root);
+        if bundles.is_empty() {
+            return;
+        }
+        let mut imported = 0;
+        for bundle in bundles {
+            let report = host.games_mut().import_from_three_d_sen(&bundle);
+            crate::app_log::line(&report.message);
+            match report.summary {
+                Some(summary) => {
+                    imported += summary.imported;
+                    host.notifications
+                        .show_normal(&crate::ui::notifications::three_d_sen_summary(
+                            summary.imported,
+                            summary.already_present,
+                            summary.failed,
+                        ));
+                }
+                None => {
+                    host.notifications.show_error(&report.message);
+                }
+            }
+            let _ = std::fs::remove_file(&bundle);
+        }
+        if imported > 0 {
+            self.refresh_roms(host);
         }
     }
 

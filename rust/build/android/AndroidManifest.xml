@@ -49,6 +49,12 @@
                 <data android:mimeType="application/octet-stream" />
                 <data android:mimeType="application/x-nes-rom" />
             </intent-filter>
+            <!-- A 3dSen .bundle shared to Zaxnes: its profiles are imported. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
         </activity>
     </application>
 </manifest>

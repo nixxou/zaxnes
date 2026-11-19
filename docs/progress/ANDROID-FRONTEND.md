@@ -28,6 +28,12 @@ asked first). Tests: `cargo test -p zax-app --features bundled` with
   Limit: a `file://` path outside the app's folder needs a storage permission Zaxnes does not
   ask for; frontends that send `content://` (ES-DE's provider launch) work.
 
-## Next
-
-3. 3dSen `.bundle` import on the device.
+- 3. 3dSen `.bundle` import on the device. A `.bundle` opened with (VIEW) or shared to (SEND,
+  EXTRA_STREAM) Zaxnes is copied by the activity, under its own name, into `import/` of the user
+  data (a `.part` renamed); one can be copied there from a computer too. The console interface,
+  outside a game, imports each waiting bundle with the desktop's importer
+  (`import_from_three_d_sen`, 3dSen 1.x to 2.2), shows the counts or the error, removes the
+  bundle and refreshes the list. No JNI. Instead of a menu entry listing the bundles (the plan),
+  the import happens on arrival: one gesture fewer, same importer. Tests:
+  the_waiting_bundles_are_the_bundle_files_of_the_import_folder,
+  a_bundle_in_the_import_folder_is_imported_and_removed. Device check: pending.

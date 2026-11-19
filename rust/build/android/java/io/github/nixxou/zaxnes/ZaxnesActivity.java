@@ -68,6 +68,10 @@ public class ZaxnesActivity extends SDLActivity {
         }
         Uri uri = intent.getData();
         String rom = null;
+        // "Share to Zaxnes": the file is the stream extra.
+        if (uri == null && Intent.ACTION_SEND.equals(intent.getAction())) {
+            uri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+        }
         if (uri == null) {
             String extra = intent.getStringExtra("ROM");
             if (extra != null && !extra.isEmpty()) {
@@ -81,6 +85,16 @@ public class ZaxnesActivity extends SDLActivity {
         }
         try {
             if (!folder.isDirectory() && !folder.mkdirs()) {
+                return;
+            }
+            // A 3dSen bundle is not a game: it waits in the import folder, where the console
+            // interface imports its profiles.
+            if (uri != null && "content".equals(uri.getScheme())
+                    && displayName(uri).toLowerCase(java.util.Locale.ROOT).endsWith(".bundle")) {
+                File root = getExternalFilesDir(null);
+                if (root != null) {
+                    copyContent(uri, new File(root, "import"));
+                }
                 return;
             }
             if (uri != null) {
@@ -107,14 +121,16 @@ public class ZaxnesActivity extends SDLActivity {
         }
     }
 
-    /** Copies the game of {@code uri} into {@code folder} under its own name; its path. */
-    private String copyContent(Uri uri, File folder) throws Exception {
+    /** The name of the file of {@code uri}, never a path; "game.nes" without one. */
+    private String displayName(Uri uri) {
         String name = null;
         try (Cursor cursor = getContentResolver().query(
                 uri, new String[] { OpenableColumns.DISPLAY_NAME }, null, null, null)) {
             if (cursor != null && cursor.moveToFirst()) {
                 name = cursor.getString(0);
             }
+        } catch (Exception error) {
+            name = null;
         }
         if (name == null || name.isEmpty()) {
             name = uri.getLastPathSegment();
@@ -122,8 +138,12 @@ public class ZaxnesActivity extends SDLActivity {
         if (name == null || name.isEmpty()) {
             name = "game.nes";
         }
-        // A name, never a path.
-        name = name.replace('/', '_').replace('\\', '_');
+        return name.replace('/', '_').replace('\\', '_');
+    }
+
+    /** Copies the file of {@code uri} into {@code folder} under its own name; its path. */
+    private String copyContent(Uri uri, File folder) throws Exception {
+        String name = displayName(uri);
         if (!folder.isDirectory() && !folder.mkdirs()) {
             return null;
         }

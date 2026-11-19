@@ -9,6 +9,7 @@ mod ui_harness;
 use std::path::PathBuf;
 
 use common::SyntheticRom;
+use ui_harness::bundle_support::synthetic_bundle::{self, SyntheticBundleOptions};
 use ui_harness::{ImGuiHarness, UiHarness};
 use zax_app::emulation::emulation_state::EmulationState;
 use zax_app::persistence::app_settings::{AppSettings as _, AppSettingsMut as _};
@@ -814,4 +815,40 @@ fn a_game_a_frontend_asks_for_plays_and_quitting_goes_back_to_it() {
     tap(&mut harness, &mut handheld, PadButton::A);
     harness.settle();
     assert!(harness.host.quit_requested());
+}
+
+/// A 3dSen bundle opened with or shared to Zaxnes on Android (the activity copies it into the
+/// import folder) is imported by the console interface, then removed.
+#[test]
+fn a_bundle_in_the_import_folder_is_imported_and_removed() {
+    use zax_profiles::import::{UnityCompression, BUNDLE_EXTENSION, BUNDLE_PREFIX};
+    let (mut harness, mut handheld) = start(&[], &["Game.nes"]);
+    let mut profile = zax_profiles::profile::GameProfile::create_empty();
+    profile.id = Some("ABCDEFGHIJKL".to_owned());
+    profile.title = Some("Pinball".to_owned());
+    zax_profiles::export::normalize(&mut profile, None).expect("a valid profile");
+    let bytes = zax_profiles::format::save(&profile, zax_profiles::layout::FieldPresence::All);
+    let bundle = synthetic_bundle::build(
+        &[("Pinball", bytes)],
+        &SyntheticBundleOptions {
+            block_compression: UnityCompression::Lz4,
+            block_size: 128 * 1024,
+            info_at_end: true,
+            ..SyntheticBundleOptions::default()
+        },
+    );
+    let folder = harness
+        .paths
+        .root
+        .join(zax_app::launch_request::IMPORT_FOLDER);
+    std::fs::create_dir_all(&folder).unwrap();
+    let file = folder.join(format!("{BUNDLE_PREFIX}feedface{BUNDLE_EXTENSION}"));
+    std::fs::write(&file, bundle).unwrap();
+    press(&mut harness, &mut handheld, &[]);
+    assert!(harness
+        .paths
+        .profiles_directory
+        .join("Pinball.3dn")
+        .is_file());
+    assert!(!file.exists());
 }
