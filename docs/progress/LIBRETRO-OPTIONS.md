@@ -13,6 +13,14 @@ keys never renamed (players' `Zaxnes.opt` keeps its values). Tests with
 
 - L0. Untitled profiles (3dSen 2.0) go by their file name, as in the application (issue #2):
   bb7731f3, log line 32aa1089. Checked in RetroArch with Contra.
+- Step 1, options v2 in submenus: 3285054e, d12561a3. RetroArch takes SET_CORE_OPTIONS_V2.
+- Step 2a, 3D field of view, light, geometry from the catalogue's libretro values: 97811a59
+  (checked in RetroArch: FOV 45, bend 20).
+- Step 2b, the aids' All games options (COMMON_OPTIONS moved to zax-nes): d9edd31f.
+- Step 2c, core variant, console hardware, VS DIP, sound profile (src/machine.rs): 725e2a60
+  (checked in RetroArch: Fidelity+ and Fast start).
+- Real checks use a scratch RetroArch config whose rgui_config_directory is in the scratchpad,
+  so the owner's Zaxnes.opt is no longer written.
 
 ## Steps
 
