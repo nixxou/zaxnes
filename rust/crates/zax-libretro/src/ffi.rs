@@ -370,6 +370,10 @@ fn c_text(text: &str) -> CString {
     CString::new(text).unwrap_or_default()
 }
 
+/// The strings of one option: key, name, name in its submenu, explanation, submenu, default;
+/// then each value with its label.
+type OptionTexts = ([CString; 6], Vec<(CString, Option<CString>)>);
+
 /// `SET_CORE_OPTIONS_V2`: the submenus and the options with their explanations. The frontend
 /// copies everything during the call, so the strings only live as long as it.
 fn declare_options_v2(list: &[options::Declaration]) -> bool {
@@ -398,7 +402,7 @@ fn declare_options_v2(list: &[options::Declaration]) -> bool {
         info: null,
     });
     // Every string of the options, kept until the call is over.
-    let texts: Vec<([CString; 6], Vec<(CString, Option<CString>)>)> = list
+    let texts: Vec<OptionTexts> = list
         .iter()
         .map(|option| {
             (
