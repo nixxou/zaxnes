@@ -21,8 +21,9 @@ And even without the 3D, it's a solid NES emulator:
 - **Widescreen.** About 20 games show more of the level past the edges of the screen, like
   *Super Mario Bros. 3*, *Zelda II*, *Metroid* and the six *Mega Man*. ([details](#widescreen))
 - **Accurate.** It's cycle accurate: compared cycle by cycle with a transistor-level simulation
-  of the NES chips, its timing matches every time. It passes all 147 AccuracyCoin tests and
-  supports over 400 mappers, the Famicom Disk System included. ([details](#accuracy))
+  of the NES chips, its timing matches. Where the two still differ, tests made on real consoles
+  side with Zaxnes. It passes all 147 AccuracyCoin tests and supports over 400 mappers, the
+  Famicom Disk System included. ([details](#accuracy))
 - **Or fast.** A fast core for small handhelds gives the same results with less CPU. You pick
   fast or accurate with one slider. ([details](#fast-or-accurate))
 - **Extra cores.** FCEUX, and a NesHawk-compatible core that plays BizHawk TAS movies (`.bk2`)
@@ -145,6 +146,9 @@ Zaxnes aims to behave exactly like the console, down to the cycle.
   32,131 of them stolen by DMA, with **no timing difference**. The details are in
   [`docs/review/SUBCYCLE-PROOF.md`](docs/review/SUBCYCLE-PROOF.md).
 - **AccuracyCoin: 147 of 147**, in all four CPU/PPU alignments a console can power on with.
+- **Test ROMs** (blargg, holy-mapperel and others): 215 of the 219 that can be judged pass, each
+  with the console model it was made for. The 4 that fail are expected: 3 test the MMC3's
+  revision A, and `power_up_palette` checks a power-on state that varies between consoles.
 - **Over 400 mappers**, the **Famicom Disk System**, the **VS. System** (with its cabinet buttons)
   and newer boards like the Rainbow.
 - **PAL** measured on the netlist of the PAL chip (2C07), and Dendy.
@@ -153,6 +157,13 @@ Zaxnes aims to behave exactly like the console, down to the cycle.
   the dot crawl), S-Video or RF. You can also pick a TV: modern screen, or a measured tube (US,
   Japanese or PAL) with its own gamma and phosphors, and turn its tint, colour, contrast and
   brightness knobs.
+
+An independent AI agent (Fable 5.2) then audited all of this with test programs of its own, run
+on the same chip simulations. It agreed on the CPU (230 opcodes, dummy reads and writes
+included), the DMA, the APU's frame counter and the test ROMs. It found five gaps. One was a real
+bug and is fixed (`$2007` writes during rendering). For two of them, the simulation disagrees with
+tests made on real consoles (AccuracyCoin, blargg's), so Zaxnes keeps what the console does. The
+last two come from the test bench, or are exact in the Fidelity+ mode.
 
 The few known gaps are listed, with their sources, in
 [`docs/review/FIDELITY-LEADS.md`](docs/review/FIDELITY-LEADS.md).
