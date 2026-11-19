@@ -750,9 +750,9 @@ pub fn declarations(hacks: &[HackOption]) -> Vec<Declaration> {
             "Zapper crosshair",
             "Zapper crosshair",
             "emulation",
-            "A crosshair where the Zapper is aimed. Plug the Zapper into a port in RetroArch's \
-             Controls (device type Zapper) and aim with a light gun or the mouse; the Zapper \
-             aims at the 2D picture (renderer on 2D only for a game that has a 3D profile).",
+            "A crosshair where the Zapper is aimed, on the 2D picture (none in 3D yet). Plug \
+             the Zapper into a port in RetroArch's Controls (device type Zapper) and aim with a \
+             light gun or the mouse; in 3D it aims through the camera, as in the application.",
         )
         .switch(true),
     );

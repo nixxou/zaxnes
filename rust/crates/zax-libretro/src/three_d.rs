@@ -394,6 +394,27 @@ impl ThreeD {
         }
     }
 
+    /// The NES pixel a Zapper aimed at `point` of a picture of `size` points at, through the
+    /// camera of the last frame, as the application aims it (`zax_render::zapper`, REQ-INP-063
+    /// and REQ-INP-124); `None` when the ray misses the picture's plane.
+    #[must_use]
+    pub fn aim(&self, point: (f32, f32), size: (u32, u32)) -> Option<zax_nes::ZapperPosition> {
+        #[allow(clippy::cast_precision_loss)] // Screen sizes.
+        let (width, height) = (size.0.max(1) as f32, size.1.max(1) as f32);
+        let view = self
+            .scene
+            .camera
+            .build_view(self.scene.view_clipping(), width / height);
+        zax_render::zapper::try_aim_bent(
+            &view,
+            [point.0 * width, point.1 * height],
+            [width, height],
+            self.zapper_offset.into(),
+            1.0,
+            self.scene.effective_bend(),
+        )
+    }
+
     /// Y and L2 for a frame of `real_seconds`, as the application's handheld interface has them.
     /// Y: a short press switches between 2D and 3D, a hold shows the game in 2D head on. L2: a
     /// hold keeps the camera's angles and distance, a short press puts them back.

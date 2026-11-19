@@ -32,8 +32,12 @@ keys never renamed (players' `Zaxnes.opt` keeps its values). Tests with
 - Step 5, Zapper: both ports offer "NES pad" or "Zapper" (SET_CONTROLLER_INFO); the light gun's
   screen x/y aim at the 2D picture shown (crop and widescreen margins taken into account), its
   trigger (or reload, aimed off screen) gives the port byte 0x00, released 0x10; option "Zapper
-  crosshair" (Emulation, on). In 3D the gun points away (aiming into the scene would need a ray
-  against the picture plane: later). Test a_zapper_aimed_at_the_picture_shows_its_crosshair_there;
+  crosshair" (Emulation, on, drawn on the 2D picture only). In 3D the aim goes through the
+  camera to the picture's plane with the application's code, moved from zax-app's
+  input/zapper.rs to zax_render::zapper (zax-app re-exports it); test
+  a_zapper_aims_through_the_camera_in_3d. RetroArch only reads a port's device from a remap file
+  (Quick Menu > Controls > Port 2 > Device Type saves one), and keeps a pointer to the device
+  types the core declares: they are static. Test a_zapper_aimed_at_the_picture_shows_its_crosshair_there;
   RetroArch: Duck Hunt loads with port 2 on Zapper, title screen not skipped (trigger released).
   Not checked by hand: shooting with the mouse (needs the owner at the window).
 - Real checks use a scratch RetroArch config whose rgui_config_directory is in the scratchpad,

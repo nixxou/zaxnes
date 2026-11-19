@@ -815,11 +815,18 @@ impl Core {
     }
 
     /// Aims the Zapper of `port` at `point` of the picture shown, 0 to 1 across and down, or
-    /// away from the screen. The 3D view is not aimed into: there the gun points away.
+    /// away from the screen. In 3D the aim goes through the camera to the picture's plane, as
+    /// in the application.
     pub fn aim_zapper(&mut self, port: usize, point: Option<(f32, f32)>) {
         let (left, top, width, height, full_width, rows) = self.shown_area;
+        let size = self.three_d_size();
         let position = match point {
-            Some((x, y)) if self.three_d.is_none() => {
+            Some(point) if self.three_d.is_some() => self
+                .three_d
+                .as_ref()
+                .and_then(|three_d| three_d.aim(point, size))
+                .unwrap_or(ZapperPosition::OFF_SCREEN),
+            Some((x, y)) => {
                 let margin = full_width.saturating_sub(256) / 2;
                 let margin_y = rows.saturating_sub(240) / 2;
                 #[allow(
