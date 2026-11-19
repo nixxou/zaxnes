@@ -12,8 +12,8 @@ It runs on **Windows**, **Linux**, **Android** (tablets and handhelds, with a ga
 pad), **handheld consoles** through PortMaster (Anbernic H700 devices such as the RG40XXV and the
 RG35XX family, on muOS, Knulli or ROCKNIX) and **RetroArch**.
 
-- **Uses your 3dSen profiles.** Import them from your own 3dSen install in one click. 3dSen 2.0
-  and 2.1 profiles work too. Zaxnes also comes with a few profiles of its own (*Faxanadu*,
+- **Uses your 3dSen profiles.** Import them from your own 3dSen install in one click. 3dSen 2.0,
+  2.1 and 2.2 profiles work too. Zaxnes also comes with a few profiles of its own (*Faxanadu*,
   *Metal Force*), and more are on the way. ([details](#the-3d-profiles))
 
 And even without the 3D, it's a solid NES emulator:
@@ -57,8 +57,8 @@ whole scene keeps going.
 your own profile folder. Nothing is downloaded, nothing is shared, and your 3dSen install is left
 alone. On a handheld, run the import on a PC and copy the `profiles` folder to the card.
 
-The import works with every version of 3dSen, **2.0 and 2.1** included, and Zaxnes plays what
-those versions added: reflections, bend, the new camera and Lua features.
+The import works with every version of 3dSen, **2.0, 2.1 and 2.2** included, and Zaxnes plays
+what those versions added: reflections, bend, the new camera and Lua features.
 
 ### Profiles made for Zaxnes
 
