@@ -237,7 +237,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::KEYS_COMMANDS, "Menu commands"),
     // ------------------------------------------------------ file browser
     (keys::BROWSER_COMPUTER, "This computer"),
-    (keys::BROWSER_FILTER_NES_ROMS, "NES ROMs (*.nes, *.unf, *.studybox, *.fds, *.zip)"),
+    (keys::BROWSER_FILTER_NES_ROMS, "NES ROMs (*.nes, *.unf, *.studybox, *.fds, *.zip, *.7z)"),
     (keys::BROWSER_FILTER_NES_FILES, ".nes, .unf, .studybox and .fds files"),
     (keys::BROWSER_FILTER_MOVIES, "Movies (.fm2, .fcm, .bk2, .mv)"),
     (keys::MOVIE_BAR_PLAY, "Play"),
@@ -254,7 +254,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::PENS_VIEW_ZAXNES, "3D as Zaxnes draws it"),
     (keys::PENS_VIEW_3DSEN, "3D as 3dSen draws it (the Zaxnes blocks of the scripts left out)"),
     (keys::PENS_VIEW_HANDHELD, "3D as Zaxnes draws it on a handheld"),
-    (keys::BROWSER_FILTER_ZIP, ".zip archives"),
+    (keys::BROWSER_FILTER_ZIP, ".zip and .7z archives"),
     (keys::BROWSER_FILTER_PROFILES, "3D profiles (*.3dn, *.3dh)"),
     (keys::BROWSER_FILTER_BUNDLE, "3dSen profile bundle (*.bundle)"),
     (keys::BROWSER_FILTER_PNG, "PNG images (*.png)"),

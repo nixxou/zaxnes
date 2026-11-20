@@ -48,12 +48,20 @@
                 <data android:scheme="file" />
                 <data android:mimeType="application/octet-stream" />
                 <data android:mimeType="application/x-nes-rom" />
+                <!-- A game in an archive: its first game is played. -->
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="application/x-7z-compressed" />
             </intent-filter>
-            <!-- A 3dSen .bundle shared to Zaxnes: its profiles are imported. -->
+            <!-- A 3dSen .bundle shared to Zaxnes: its profiles are imported; a game, or an
+                 archive of one, shared to it is played. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="application/x-7z-compressed" />
             </intent-filter>
         </activity>
     </application>

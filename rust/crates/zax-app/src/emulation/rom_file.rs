@@ -5,7 +5,7 @@
 //! up in the same bytes in memory as a bare file's.
 
 use std::fs;
-use std::io::Read;
+use std::io::{Cursor, Read, Seek};
 use std::path::Path;
 
 use zip::ZipArchive;
@@ -27,6 +27,11 @@ pub const ARCHIVE_EXTENSIONS: [&str; 2] = ["zip", "7z"];
 pub const PROFILE_EXTENSION: &str = "3dn";
 /// A hack pack packed with the game: it takes the place of the catalogue's pack for it.
 pub const PACK_EXTENSION: &str = "zxpk";
+
+/// The first bytes of a zip.
+const ZIP_MAGIC: &[u8] = b"PK\x03\x04";
+/// The first bytes of a 7z.
+const SEVEN_ZIP_MAGIC: &[u8] = &[b'7', b'z', 0xBC, 0xAF, 0x27, 0x1C];
 
 /// The largest file read out of an archive.
 const MAX_ENTRY_BYTES: u64 = 64 * 1024 * 1024;
@@ -108,8 +113,8 @@ pub fn read_content(path: &Path) -> Result<GameContent, String> {
         .extension()
         .map(|extension| extension.to_string_lossy().to_lowercase());
     let rom = match extension.as_deref() {
-        Some("zip") => return read_archive(path, Archive::zip(path)?),
-        Some("7z") => return read_archive(path, Archive::seven_zip(path)?),
+        Some("zip") => return read_archive(path, Archive::zip(open(path)?)?),
+        Some("7z") => return read_archive(path, Archive::seven_zip(open(path)?)?),
         Some("rar") => return Err(RAR_UNSUPPORTED_MESSAGE.to_owned()),
         Some(kind @ ("studybox" | "fds" | "qd")) => {
             let bytes = fs::read(path).map_err(|error| error.to_string())?;
@@ -117,6 +122,14 @@ pub fn read_content(path: &Path) -> Result<GameContent, String> {
         }
         _ => {
             let image = fs::read(path).map_err(|error| error.to_string())?;
+            // An archive under another name (a frontend's file without its extension): known by
+            // its first bytes, a comparison of four bytes for any other game.
+            if image.starts_with(ZIP_MAGIC) {
+                return read_archive(path, Archive::zip(Cursor::new(image))?);
+            }
+            if image.starts_with(SEVEN_ZIP_MAGIC) {
+                return read_archive(path, Archive::seven_zip(Cursor::new(image))?);
+            }
             RomData {
                 image,
                 name: file_name(path),
@@ -188,22 +201,24 @@ fn file_name(path: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// An archive open for reading.
-enum Archive {
-    Zip(ZipArchive<fs::File>),
-    SevenZip(sevenz_rust2::ArchiveReader<fs::File>),
+fn open(path: &Path) -> Result<fs::File, String> {
+    fs::File::open(path).map_err(|error| error.to_string())
 }
 
-impl Archive {
-    fn zip(path: &Path) -> Result<Self, String> {
-        let file = fs::File::open(path).map_err(|error| error.to_string())?;
+/// An archive open for reading, from its file or from its bytes.
+enum Archive<R: Read + Seek> {
+    Zip(ZipArchive<R>),
+    SevenZip(sevenz_rust2::ArchiveReader<R>),
+}
+
+impl<R: Read + Seek> Archive<R> {
+    fn zip(file: R) -> Result<Self, String> {
         ZipArchive::new(file)
             .map(Self::Zip)
             .map_err(|_| CORRUPTED_ZIP_MESSAGE.to_owned())
     }
 
-    fn seven_zip(path: &Path) -> Result<Self, String> {
-        let file = fs::File::open(path).map_err(|error| error.to_string())?;
+    fn seven_zip(file: R) -> Result<Self, String> {
         let mut reader = sevenz_rust2::ArchiveReader::new(file, sevenz_rust2::Password::empty())
             .map_err(|_| UNCOMPRESSION_FAILED_MESSAGE.to_owned())?;
         // One thread: a ROM is small, and the web build has none to spare.
@@ -282,7 +297,7 @@ fn base_name(name: &str) -> &str {
 }
 
 /// The game of the archive at `path`, with its profile and its pack.
-fn read_archive(path: &Path, mut archive: Archive) -> Result<GameContent, String> {
+fn read_archive<R: Read + Seek>(path: &Path, mut archive: Archive<R>) -> Result<GameContent, String> {
     let names = archive.names();
     let first_of = |kind: &str| names.iter().find(|name| extension_of(name) == kind).cloned();
     let game = names
@@ -398,7 +413,7 @@ mod tests {
     fn a_seven_zip_gives_its_first_game_and_its_profile() {
         let path = temp("Game (Japan).7z");
         let mut writer = sevenz_rust2::ArchiveWriter::create(&path).expect("7z");
-        for (name, bytes) in [("notes.txt", &b"x"[..]), ("Game.fds", b"FDSdisk"), ("Game.3dn", b"p")] {
+        for (name, bytes) in [("notes.txt", &b"x"[..]), ("Game.fds", b"FDS\x1adisk"), ("Game.3dn", b"p")] {
             writer
                 .push_archive_entry(sevenz_rust2::ArchiveEntry::new_file(name), Some(bytes))
                 .expect("entry");
@@ -409,17 +424,28 @@ mod tests {
         let folder = path.parent().expect("folder").to_path_buf();
         let path = folder.join("Game2.7z");
         let mut writer = sevenz_rust2::ArchiveWriter::create(&path).expect("7z");
-        for (name, bytes) in [("Game.3dn", &b"p"[..]), ("Game.nes", b"NESrom")] {
+        for (name, bytes) in [("Game.3dn", &b"p"[..]), ("Game.nes", b"NES\x1arom")] {
             writer
                 .push_archive_entry(sevenz_rust2::ArchiveEntry::new_file(name), Some(bytes))
                 .expect("entry");
         }
         writer.finish().expect("finish");
         let content = read_content(&path).expect("content");
-        assert_eq!(content.rom.image, b"NESrom");
+        assert_eq!(content.rom.image, b"NES\x1arom");
         assert_eq!(content.rom.name, "Game2.nes");
         assert_eq!(content.profile.expect("profile").bytes, b"p");
         assert!(content.pack.is_none());
+    }
+
+    #[test]
+    fn an_archive_without_its_extension_is_known_by_its_bytes() {
+        let zipped = temp("named.zip");
+        zip_of(&zipped, &[("Game.nes", b"NES\x1arom")]);
+        let path = temp("game");
+        fs::copy(&zipped, &path).expect("copy");
+        let content = read_content(&path).expect("content");
+        assert_eq!(content.rom.image, b"NES\x1arom");
+        assert_eq!(content.rom.name, "game.nes");
     }
 
     #[test]

@@ -132,13 +132,9 @@ pub fn scan(directory: &Path) -> Vec<RomEntry> {
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| {
-            path.is_file()
-                && path.extension().is_some_and(|extension| {
-                    // Lot MAPPERS-P: UNIF images and Study Box tapes too; lot FDS: disk images.
-                    ["nes", "unf", "unif", "studybox", "fds", "qd"]
-                        .iter()
-                        .any(|known| extension.eq_ignore_ascii_case(known))
-                })
+            // Lot MAPPERS-P: UNIF images and Study Box tapes too; lot FDS: disk images; and the
+            // `.zip` and `.7z` archives of a game (owner request), by their extension alone.
+            path.is_file() && crate::emulation::rom_file::is_rom_file(path)
         })
         .map(RomEntry::new)
         .collect();

@@ -46,12 +46,12 @@
     <h3>Vos ROMs</h3>
     <div id="mine"></div>
     <h3>Depuis votre ordinateur</h3>
-    <div id="drop">Déposez un fichier ici (.nes, .fds, .unf, .zip)</div>
+    <div id="drop">Déposez un fichier ici (.nes, .fds, .unf, .zip, .7z)</div>
     <div class="row">
       <button class="btn main" id="browse">Parcourir…</button>
       <button class="btn" id="cancel">Annuler</button>
     </div>
-    <input type="file" id="file" accept=".nes,.fds,.unf,.unif,.zip" hidden>
+    <input type="file" id="file" accept=".nes,.fds,.unf,.unif,.zip,.7z" hidden>
   </div>
 </div>
 
@@ -65,7 +65,7 @@
   const STATE = '/zaxnes-web/state';
   // The ROMs shipped with the program (installed into ROMS by the program itself).
   const BUNDLED = [{ title: 'FlappyZaxNes', file: 'FlappyZaxNes.nes', note: 'démo 3D' }];
-  const ROM_FILE = /\.(nes|fds|unf|unif|zip)$/i;
+  const ROM_FILE = /\.(nes|fds|unf|unif|zip|7z)$/i;
 
   const status = document.getElementById('status');
   const canvas = document.getElementById('canvas');
@@ -196,8 +196,10 @@
     }
     name = name.replace(/[\/\\:*?"<>|]/g, '_').trim() || 'rom';
     if (!ROM_FILE.test(name)) {
-      const head = String.fromCharCode(...bytes.slice(0, 4));
-      name += head === 'PK\x03\x04' ? '.zip' : head === 'FDS\x1a' ? '.fds' : head.startsWith('UNIF') ? '.unf' : '.nes';
+      const head = String.fromCharCode(...bytes.slice(0, 6));
+      name += head.startsWith('PK\x03\x04') ? '.zip'
+        : head === '7z\xbc\xaf\x27\x1c' ? '.7z'
+        : head.startsWith('FDS\x1a') ? '.fds' : head.startsWith('UNIF') ? '.unf' : '.nes';
     }
     return name;
   }
