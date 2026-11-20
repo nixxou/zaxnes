@@ -17,7 +17,7 @@ use zax_settings::values::SettingValue;
 const PIPELINE_AUTO: i32 = 1;
 
 /// Every switch one handheld default sets.
-fn defaults() -> [(SettingId, SettingValue); 14] {
+fn defaults() -> [(SettingId, SettingValue); 13] {
     [
         // AMD-055 REQ-SCN-079, the two quality rungs. The style itself is **Classic** on a
         // handheld as on the desktop — that is the setting's own default (REQ-SCN-078) and at

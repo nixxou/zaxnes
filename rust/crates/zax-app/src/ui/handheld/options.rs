@@ -588,7 +588,7 @@ pub const CAMERA_ROWS: [OptionRow; 4] = [
 /// run-ahead's frames and does nothing without it. The debugging view that goes with it
 /// (`emu.smooth_scroll_view`) is **not** here: like `audio.latency_ms` it stays a desktop row,
 /// this screen being a short curated list.
-pub const EMULATION_ROWS: [OptionRow; 41] = [
+pub const EMULATION_ROWS: [OptionRow; 42] = [
     OptionRow::Setting(SettingId::EmuEngine),
     // Lot CARTDB: the cartridge database and the power-on RAM, as in the window.
     OptionRow::Setting(SettingId::EmuCartridgeDb),
