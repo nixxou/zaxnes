@@ -201,7 +201,7 @@
       close: 'Fermer',
       notRom: 'Ce fichier n’est pas une ROM reconnue : ', romImported: 'ROM importée : ',
       downloading: 'Téléchargement…', cors: 'Fichier inaccessible : le site qui l’héberge ne permet pas à une autre page de le télécharger (CORS), ou l’adresse ne répond pas. ',
-      notFound: 'Fichier introuvable ', tooBig: 'Ce fichier n’a pas la taille d’une ROM : ',
+      notFound: 'Fichier introuvable ', tooBig: 'Ce fichier n’a pas la taille d’une ROM : ', tooBigImport: 'Fichier trop gros pour un import (plus de 512 Mo) : ',
       profileTitle: 'Importer un profil 3D', profileText: 'Profils 3D (.3dn, .3dh), fichier de profils de 3dSen (.bundle), ou une archive .zip / .7z qui le contient (même tout un dossier de 3dSen) : ils rejoignent vos profils, celui d’un même identifiant est remplacé.',
       profileDrop: 'Déposez un fichier ici (.3dn, .3dh, .bundle, .zip, .7z)', profileImport: 'Importer…',
       notProfile: 'Ce fichier n’est ni un profil 3D ni des données 3dSen : ', importing: 'Import en cours : ',
@@ -239,7 +239,7 @@
       close: 'Close',
       notRom: 'This file is not a known ROM: ', romImported: 'ROM imported: ',
       downloading: 'Downloading…', cors: 'File out of reach: the site hosting it does not let another page download it (CORS), or the address does not answer. ',
-      notFound: 'File not found ', tooBig: 'This file does not have the size of a ROM: ',
+      notFound: 'File not found ', tooBig: 'This file does not have the size of a ROM: ', tooBigImport: 'File too big for an import (over 512 MB): ',
       profileTitle: 'Import a 3D profile', profileText: '3D profiles (.3dn, .3dh), 3dSen’s profiles file (.bundle), or a .zip / .7z archive holding it (even a whole 3dSen folder): they join your profiles, one of the same identifier is replaced.',
       profileDrop: 'Drop a file here (.3dn, .3dh, .bundle, .zip, .7z)', profileImport: 'Import…',
       notProfile: 'This file is neither a 3D profile nor 3dSen data: ', importing: 'Importing: ',
@@ -536,9 +536,21 @@
     return name;
   }
   // `onProgress(received, total)` follows the download, total 0 when the server does not say.
+  // archive.org lets another page read a file only through its /cors/ address (its /download/
+  // one redirects to a storage server that does not allow it); a file inside a zip, served by
+  // its archive viewer, is allowed as it is.
+  function readableUrl(url) {
+    let u;
+    try { u = new URL(url); } catch (e) { return url; }
+    const direct = /^(?:www\.)?archive\.org$/i.test(u.hostname) ? /^\/download\/([^/]+)\/(.+)$/.exec(u.pathname)
+      : /\.archive\.org$/i.test(u.hostname) ? /^\/\d+\/items\/([^/]+)\/(.+)$/.exec(u.pathname) : null;
+    // A member of an archive (NES.zip/NES%2FGame.zip): the viewer, which allows it.
+    if (!direct || /\.(zip|7z|rar|tar)\//i.test(direct[2])) return url;
+    return 'https://archive.org/cors/' + direct[1] + '/' + direct[2] + u.search;
+  }
   async function download(url, kind, onProgress) {
     let response;
-    try { response = await fetch(url); }
+    try { response = await fetch(readableUrl(url)); }
     catch (e) {
       // A network error, or a server that does not allow other sites to read its files (CORS):
       // the browser does not tell the two apart.
@@ -546,6 +558,10 @@
     }
     if (!response.ok) throw new Error(t('notFound') + '(' + response.status + ') : ' + url);
     const total = Number(response.headers.get('Content-Length')) || 0;
+    // A ROM is at most a few MB; a 3dSen installation (an import) a hundred or so.
+    const limit = kind === 'rom' ? 64 * 1024 * 1024 : 512 * 1024 * 1024;
+    const tooBig = () => new Error(t(kind === 'rom' ? 'tooBig' : 'tooBigImport') + url);
+    if (total > limit) throw tooBig();
     let bytes;
     if (response.body && response.body.getReader && onProgress) {
       const reader = response.body.getReader();
@@ -556,7 +572,7 @@
         if (done) break;
         parts.push(value);
         received += value.length;
-        if (received > 64 * 1024 * 1024) throw new Error(t('tooBig') + url);
+        if (received > limit) throw tooBig();
         onProgress(received, total);
       }
       bytes = new Uint8Array(received);
@@ -565,7 +581,7 @@
     } else {
       bytes = new Uint8Array(await response.arrayBuffer());
     }
-    if (bytes.length < 16 || bytes.length > 64 * 1024 * 1024) throw new Error(t('tooBig') + url);
+    if (bytes.length < 16 || bytes.length > limit) throw tooBig();
     return { name: remoteName(url, response, bytes, kind === 'rom' ? ROM_FILE : PROFILE_FILE), bytes };
   }
   // The value of `key` in the address: an http(s) URL takes the rest of the parameter, '&' and
