@@ -19,6 +19,8 @@ if [ ! -d "$pages" ]; then
 fi
 find "$pages" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
 cp "$site/index.html" "$site/zaxnes.js" "$site/zaxnes.wasm" "$pages/"
+# The interface's face (Roboto, Apache-2.0, with its licence).
+cp -r "$site/fonts" "$pages/"
 touch "$pages/.nojekyll"
 git -C "$pages" add -A
 git -C "$pages" commit -q -m "Zaxnes web build $(git -C "$repo" rev-parse --short HEAD)" || echo "nothing changed"
