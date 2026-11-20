@@ -2375,8 +2375,116 @@ const HEADER_SIZE: usize = 16;
 
 /// The patches whose bytes are there: the catalogue's built-in ones, and those whose pack file
 /// was found (see [`crate::pack_files`]), in the catalogue's order. Built once, on first use.
+///
+/// While a game brought its own pack ([`set_packed_pack`]), that pack stands in its catalogue
+/// entry's place: everything that reads the patches sees it, with nothing else to change. Without
+/// one, the only cost is the reading of an atomic flag.
 #[must_use]
 pub fn patches() -> &'static [BuiltinPatch] {
+    if PACKED_ACTIVE.load(std::sync::atomic::Ordering::Acquire) {
+        if let Some(patches) = PACKED.read().ok().and_then(|slot| *slot) {
+            return patches;
+        }
+    }
+    base_patches()
+}
+
+/// Whether [`PACKED`] holds a list (read before its lock, so that the usual case takes none).
+static PACKED_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The patches with a game's own pack in its entry's place.
+static PACKED: std::sync::RwLock<Option<&'static [BuiltinPatch]>> = std::sync::RwLock::new(None);
+/// The lists made so far, by entry and pack CRC: opening the same archive again makes no new one.
+static PACKED_MADE: std::sync::Mutex<Vec<(usize, u32, &'static [BuiltinPatch])>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// A game brought its own hack pack (a `.zxpk` in its archive, owner request): `bytes`, named
+/// `file_name`, takes the place of the pack of the catalogue entry it is for until
+/// [`clear_packed_pack`] or another call. That entry is the one of the same pack file name, else
+/// the one made for `image` (by its CRC or the signatures of its pack), else the one whose pack
+/// has the same name inside. A pack carries the hack's code and hooks only: its boot settings
+/// come from the catalogue, so a pack of a game it does not know cannot be applied.
+///
+/// # Errors
+/// What to tell the player: the bytes are not a hack pack, or no entry is made for it.
+pub fn set_packed_pack(
+    file_name: &str,
+    bytes: &[u8],
+    image: &[u8],
+) -> Result<&'static str, String> {
+    clear_packed_pack();
+    if !crate::hack_pack::is_pack(bytes) {
+        return Err(format!("{file_name}: not a Zaxnes hack pack"));
+    }
+    let crc = crc32(bytes);
+    let mut made = PACKED_MADE.lock().map_err(|_| "packs".to_owned())?;
+    // The bytes are kept for the program's life, as the packs of the folder are: once per pack.
+    let bps: &'static [u8] = made
+        .iter()
+        .find(|(_, sum, _)| *sum == crc)
+        .and_then(|(at, _, list)| list.iter().find(|patch| patch.name == CATALOGUE[*at].name))
+        .map_or_else(
+            || &*Box::leak(bytes.to_vec().into_boxed_slice()),
+            |patch| patch.bps,
+        );
+    let pack = crate::hack_pack::HackPack::read(bps)
+        .ok_or_else(|| format!("{file_name}: not a Zaxnes hack pack"))?;
+    let by_file = CATALOGUE.iter().position(|patch| {
+        !patch.pack_file.is_empty() && patch.pack_file.eq_ignore_ascii_case(file_name)
+    });
+    let by_rom = || {
+        patch_for(image)
+            .and_then(|found| CATALOGUE.iter().position(|patch| patch.name == found.name))
+    };
+    let by_name = || {
+        base_patches().iter().find_map(|patch| {
+            let known = crate::hack_pack::HackPack::read(patch.bps)?;
+            (known.name == pack.name)
+                .then(|| CATALOGUE.iter().position(|entry| entry.name == patch.name))
+                .flatten()
+        })
+    };
+    let index = by_file
+        .or_else(by_rom)
+        .or_else(by_name)
+        .ok_or_else(|| format!("{file_name}: no game of the catalogue is made for this pack"))?;
+    let list =
+        if let Some((_, _, list)) = made.iter().find(|(at, sum, _)| *at == index && *sum == crc) {
+            *list
+        } else {
+            let list: Vec<BuiltinPatch> = CATALOGUE
+                .iter()
+                .enumerate()
+                .filter_map(|(at, patch)| {
+                    if at == index {
+                        return Some(BuiltinPatch { bps, ..*patch });
+                    }
+                    base_patches()
+                        .iter()
+                        .find(|kept| kept.name == patch.name)
+                        .copied()
+                })
+                .collect();
+            let list: &'static [BuiltinPatch] = Box::leak(list.into_boxed_slice());
+            made.push((index, crc, list));
+            list
+        };
+    if let Ok(mut slot) = PACKED.write() {
+        *slot = Some(list);
+        PACKED_ACTIVE.store(true, std::sync::atomic::Ordering::Release);
+    }
+    Ok(CATALOGUE[index].name)
+}
+
+/// The catalogue's packs again, a game's own pack forgotten.
+pub fn clear_packed_pack() {
+    PACKED_ACTIVE.store(false, std::sync::atomic::Ordering::Release);
+    if let Ok(mut slot) = PACKED.write() {
+        *slot = None;
+    }
+}
+
+/// The patches of the catalogue, without a game's own pack.
+fn base_patches() -> &'static [BuiltinPatch] {
     static PATCHES: std::sync::OnceLock<Vec<BuiltinPatch>> = std::sync::OnceLock::new();
     PATCHES.get_or_init(|| {
         CATALOGUE
@@ -2819,6 +2927,38 @@ pub fn crc32(data: &[u8]) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_game_s_own_pack_stands_in_its_entry_s_place() {
+        // The same bytes as the folder's pack, so that the tests running beside see no change.
+        let file = "smb1-world-widescreen.zxpk";
+        let Some(bytes) = crate::pack_files::get(file) else {
+            return;
+        };
+        let name = set_packed_pack(file, bytes, &[]).expect("the pack's entry");
+        let entry = patches()
+            .iter()
+            .find(|patch| patch.name == name)
+            .expect("entry");
+        assert_ne!(entry.bps.as_ptr(), bytes.as_ptr());
+        assert_eq!(entry.bps, bytes);
+        assert_eq!(patches().len(), base_patches().len());
+        // Set again: the same list, nothing more kept.
+        set_packed_pack(file, bytes, &[]).expect("again");
+        let again = patches()
+            .iter()
+            .find(|patch| patch.name == name)
+            .expect("entry");
+        assert_eq!(again.bps.as_ptr(), entry.bps.as_ptr());
+        clear_packed_pack();
+        let back = patches()
+            .iter()
+            .find(|patch| patch.name == name)
+            .expect("entry");
+        assert_eq!(back.bps.as_ptr(), bytes.as_ptr());
+        assert!(set_packed_pack("x.zxpk", b"BPS1", &[]).is_err());
+        assert!(!PACKED_ACTIVE.load(std::sync::atomic::Ordering::Acquire));
+    }
 
     /// A BPS number as the format writes it.
     fn number(mut value: usize) -> Vec<u8> {

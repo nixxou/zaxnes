@@ -297,9 +297,17 @@ fn base_name(name: &str) -> &str {
 }
 
 /// The game of the archive at `path`, with its profile and its pack.
-fn read_archive<R: Read + Seek>(path: &Path, mut archive: Archive<R>) -> Result<GameContent, String> {
+fn read_archive<R: Read + Seek>(
+    path: &Path,
+    mut archive: Archive<R>,
+) -> Result<GameContent, String> {
     let names = archive.names();
-    let first_of = |kind: &str| names.iter().find(|name| extension_of(name) == kind).cloned();
+    let first_of = |kind: &str| {
+        names
+            .iter()
+            .find(|name| extension_of(name) == kind)
+            .cloned()
+    };
     let game = names
         .iter()
         .find(|name| GAME_EXTENSIONS.contains(&extension_of(name).as_str()))
@@ -395,7 +403,10 @@ mod tests {
         assert_eq!(content.rom.image, b"NES\x1arom");
         assert_eq!(content.rom.name, "Game (USA).nes");
         let profile = content.profile.expect("profile");
-        assert_eq!((profile.name.as_str(), profile.bytes.as_slice()), ("Game.3dn", &b"profile"[..]));
+        assert_eq!(
+            (profile.name.as_str(), profile.bytes.as_slice()),
+            ("Game.3dn", &b"profile"[..])
+        );
         assert_eq!(content.pack.expect("pack").bytes, b"ZXPKpack");
         assert_eq!(read(&path).expect("rom").image, b"NES\x1arom");
     }
@@ -413,7 +424,11 @@ mod tests {
     fn a_seven_zip_gives_its_first_game_and_its_profile() {
         let path = temp("Game (Japan).7z");
         let mut writer = sevenz_rust2::ArchiveWriter::create(&path).expect("7z");
-        for (name, bytes) in [("notes.txt", &b"x"[..]), ("Game.fds", b"FDS\x1adisk"), ("Game.3dn", b"p")] {
+        for (name, bytes) in [
+            ("notes.txt", &b"x"[..]),
+            ("Game.fds", b"FDS\x1adisk"),
+            ("Game.3dn", b"p"),
+        ] {
             writer
                 .push_archive_entry(sevenz_rust2::ArchiveEntry::new_file(name), Some(bytes))
                 .expect("entry");
