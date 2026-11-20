@@ -596,6 +596,17 @@ pub fn slot_label(slot: i32, record: Option<&SaveSlotRecord>) -> String {
     format!("{} {slot} — {}", text::slot_prefix(), state_stamp(record))
 }
 
+/// The short label of a slot (owner request, the in-game menu): `1:vide`, `1:30/12 14:05`.
+#[must_use]
+pub fn slot_short_label(slot: i32, record: Option<&SaveSlotRecord>) -> String {
+    let day_first = crate::ui::strings::language() == crate::ui::strings::UiLanguage::French;
+    let stamp = record
+        .filter(|record| record.is_occupied())
+        .and_then(|record| save_state_file::format_short_timestamp(record.saved_at, day_first))
+        .unwrap_or_else(text::empty_slot);
+    format!("{slot}:{stamp}")
+}
+
 fn state_stamp(record: Option<&SaveSlotRecord>) -> String {
     match record {
         Some(record) if record.is_occupied() => save_state_file::format_timestamp(record.saved_at),

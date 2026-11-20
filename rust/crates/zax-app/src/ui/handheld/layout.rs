@@ -5,8 +5,9 @@ use super::Screen;
 use crate::ui::fonts::FontSizes;
 use crate::ui::keys;
 
-/// Body text height, in pixels, on a 480-pixel-high display.
-const BODY_AT_480: f32 = 22.0;
+/// Body text height, in pixels, on a 480-pixel-high display: a quarter smaller than the 22 it
+/// was (owner request, 2026-11-20), everywhere the console interface runs.
+const BODY_AT_480: f32 = 16.5;
 /// Smallest row, in pixels: a thumb-sized target on a 3.5 inch screen.
 pub const MINIMUM_ROW: f32 = 36.0;
 
@@ -252,19 +253,21 @@ mod tests {
             ..one
         };
         assert!((two.hint_band() - one.hint_band() - one.hint_line_step()).abs() < 0.01);
-        assert!(two.visible_rows(480.0) < one.visible_rows(480.0));
+        // Rows of the minimum height may still fit beside the second line: never more of them.
+        assert!(two.visible_rows(480.0) <= one.visible_rows(480.0));
+        assert!(two.visible_rows(1080.0) < one.visible_rows(1080.0));
     }
 
     #[test]
     fn the_sizes_follow_the_height_of_the_display() {
         let small = Metrics::for_height(480.0);
-        assert!((small.font - 22.0).abs() < f32::EPSILON);
+        assert!((small.font - 17.0).abs() < f32::EPSILON);
         assert!(small.row >= MINIMUM_ROW);
         let square = Metrics::for_height(720.0);
         assert!(square.font > small.font && square.row > small.row);
         // Even a tiny display keeps a readable font and a row to press.
         let tiny = Metrics::for_height(240.0);
-        assert!(tiny.font >= 20.0 && tiny.row >= MINIMUM_ROW);
+        assert!(tiny.font >= 14.0 && tiny.row >= MINIMUM_ROW);
     }
 
     #[test]

@@ -466,3 +466,51 @@ fn read_section<'a>(cursor: &mut &'a [u8]) -> Option<&'a [u8]> {
     *cursor = rest;
     Some(section)
 }
+
+/// The short text of the instant `unix_seconds` in local time (owner request, the in-game
+/// menu): day and month in the order of `day_first`'s language (`30/12` in French, `12/30` in
+/// English), the year only when it is not this one, then the hour and the minutes; `None` for
+/// an empty slot.
+#[must_use]
+pub fn format_short_timestamp(unix_seconds: i64, day_first: bool) -> Option<String> {
+    if unix_seconds <= 0 {
+        return None;
+    }
+    let offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
+    let instant = OffsetDateTime::from_unix_timestamp(unix_seconds)
+        .ok()?
+        .to_offset(offset);
+    let this_year = OffsetDateTime::now_utc().to_offset(offset).year();
+    Some(short_timestamp(instant, this_year, day_first))
+}
+
+/// [`format_short_timestamp`] of `instant`, `this_year` being the current one.
+fn short_timestamp(instant: OffsetDateTime, this_year: i32, day_first: bool) -> String {
+    let (day, month) = (instant.day(), u8::from(instant.month()));
+    let date = if day_first {
+        format!("{day:02}/{month:02}")
+    } else {
+        format!("{month:02}/{day:02}")
+    };
+    let year = if instant.year() == this_year {
+        String::new()
+    } else {
+        format!("/{:02}", instant.year().rem_euclid(100))
+    };
+    format!("{date}{year} {:02}:{:02}", instant.hour(), instant.minute())
+}
+
+#[cfg(test)]
+mod short_timestamp_tests {
+    use super::short_timestamp;
+    use time::macros::datetime;
+
+    #[test]
+    fn the_short_stamp_drops_the_seconds_and_this_year() {
+        let instant = datetime!(2026-12-30 09:05:41 UTC);
+        assert_eq!("30/12 09:05", short_timestamp(instant, 2026, true));
+        assert_eq!("12/30 09:05", short_timestamp(instant, 2026, false));
+        assert_eq!("30/12/26 09:05", short_timestamp(instant, 2027, true));
+        assert_eq!("12/30/26 09:05", short_timestamp(instant, 2027, false));
+    }
+}

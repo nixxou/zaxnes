@@ -1448,7 +1448,7 @@ impl HandheldUi {
             OverlayItem::SaveState | OverlayItem::LoadState => {
                 let slot = self.overlay.slot();
                 let record = frame.host.slots.find(&numbered_slot_id(slot));
-                format!("< {} >", menu_bar::slot_label(slot, record))
+                format!("<{}>", menu_bar::slot_short_label(slot, record))
             }
             OverlayItem::Camera => format!("< {} >", options::camera_label(self.overlay.camera())),
             OverlayItem::Speed => format!(
