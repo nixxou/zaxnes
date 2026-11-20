@@ -27,6 +27,23 @@ pub fn offered() -> bool {
     })
 }
 
+/// The gestures of a touch screen without the touch pad: a computer's touch screen, behind
+/// `ZAXNES_TOUCH_GESTURES=1` for now (owner request, off by default): taps and slides in the
+/// console interface, one finger turning the 3D camera and two pinching its zoom in game.
+#[must_use]
+pub fn gestures_only() -> bool {
+    static GESTURES: OnceLock<bool> = OnceLock::new();
+    *GESTURES.get_or_init(|| {
+        !offered() && std::env::var("ZAXNES_TOUCH_GESTURES").is_ok_and(|v| v == "1")
+    })
+}
+
+/// Whether the fingers are followed: the touch pad offered, or its gestures alone.
+#[must_use]
+pub fn fingers_followed() -> bool {
+    offered() || gestures_only()
+}
+
 /// Web build (owner request): with a real gamepad connected, the automatic mode keeps the
 /// buttons a gamepad does not have (the menu, 2D/3D, the camera's lock and recentring, the
 /// rewind and the fast forward) instead of hiding the whole pad.

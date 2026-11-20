@@ -434,7 +434,7 @@ impl SdlInput {
 
     /// Updates the snapshots with one SDL event.
     pub fn handle_event(&mut self, event: &Event) {
-        if super::touch::offered() {
+        if super::touch::fingers_followed() {
             self.touch.handle_event(event);
             self.follow_touch_camera();
         }

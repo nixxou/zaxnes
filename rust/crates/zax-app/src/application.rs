@@ -1087,14 +1087,19 @@ impl Running {
             frames_per_second: debug.frames_per_second as f32,
             profile_line: self.profiler.as_ref().map_or("", FrameProfiler::summary),
         };
-        if zax_platform::input::touch::offered() {
-            let mode = zax_platform::input::touch::TouchPadMode::from_setting(
-                frame
-                    .host
-                    .settings()
-                    .get(zax_settings::catalogue::SettingId::InputTouchPad)
-                    .as_int(),
-            );
+        if zax_platform::input::touch::fingers_followed() {
+            // The gestures alone (a computer's touch screen): the pad is never drawn.
+            let mode = if zax_platform::input::touch::gestures_only() {
+                zax_platform::input::touch::TouchPadMode::Off
+            } else {
+                zax_platform::input::touch::TouchPadMode::from_setting(
+                    frame
+                        .host
+                        .settings()
+                        .get(zax_settings::catalogue::SettingId::InputTouchPad)
+                        .as_int(),
+                )
+            };
             let options = touch_options(frame.host.settings());
             #[allow(clippy::cast_precision_loss)] // window sizes are far below 2^24
             let size = |(width, height): (u32, u32)| [width as f32, height as f32];
@@ -3029,10 +3034,7 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     let hack_options = host.hack_option_bits();
     let scene_scale = host.scene_scale();
     // `emu.smooth_scroll_3d`: the 3D scene slides as well (owner, 2026-11-20).
-    let smooth_3d = host
-        .settings()
-        .get(SettingId::EmuSmoothScroll3d)
-        .as_bool();
+    let smooth_3d = host.settings().get(SettingId::EmuSmoothScroll3d).as_bool();
     // The smooth scrolling from the run-ahead: nothing to draw between two frames at 60 frames a
     // second or less, nor a real frame to slide from without run-ahead; then nothing is done.
     let smooth_ahead = host

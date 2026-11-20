@@ -524,7 +524,9 @@ impl ImguiFrontend {
                     }
                     // The web page is a desktop for the interface, but a phone's fingers are
                     // fingers there too: only while one acts, so the mouse keeps its own way.
-                    let web_touch = cfg!(target_os = "emscripten")
+                    // A computer's touch screen too, its gestures turned on.
+                    let web_touch = (cfg!(target_os = "emscripten")
+                        || zax_platform::input::touch::gestures_only())
                         && (!taps.is_empty()
                             || self.touch_point.is_some()
                             || self.touch_was_down

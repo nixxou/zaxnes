@@ -206,7 +206,9 @@ impl HostWindow {
         sdl2::hint::set("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1");
         // A finger is the touch pad's, not a mouse (Rust-only, owner request); likewise on a
         // touch screen in the browser.
-        if cfg!(target_os = "emscripten") {
+        // And on a computer's touch screen whose gestures are on (`ZAXNES_TOUCH_GESTURES=1`):
+        // a tap would otherwise click twice, as a finger and as the mouse SDL makes of it.
+        if cfg!(target_os = "emscripten") || crate::input::touch::gestures_only() {
             sdl2::hint::set("SDL_TOUCH_MOUSE_EVENTS", "0");
         }
         if cfg!(target_os = "android") {
