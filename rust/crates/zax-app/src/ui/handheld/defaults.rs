@@ -79,11 +79,9 @@ fn defaults() -> [(SettingId, SettingValue); 14] {
         // measured worse there than both None and 5 once the core had its own thread, because
         // the second frame of a pair waits for the emulation thread in series.
         (SettingId::EmuCatchUp, SettingValue::Enum(5)),
-        // The smooth scrolling from the run-ahead does nothing without run-ahead or at 60 Hz,
-        // and both are the handheld's case. Kept as an explicit handheld default even though
-        // KIRBY-MERGE made the catalogue default `false` as well (`docs/progress/KIRBY-MERGE.md`
-        // §2.4, (S4)): if the global default ever goes back on, the handheld still says no.
-        (SettingId::EmuSmoothScrollAhead, SettingValue::Bool(false)),
+        // `emu.smooth_scroll_ahead` follows the catalogue and the presets, on (owner,
+        // 2026-11-20): it does nothing without run-ahead (0 here) or at 60 Hz, the handhelds'
+        // case, so it costs nothing; a 120 Hz screen with run-ahead gets it.
     ]
 }
 
