@@ -27,6 +27,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::ChooseProfile
             | Command::ImportProfile
             | Command::ImportThreeDSen
+            | Command::ImportThreeDSenSteam
+            | Command::ImportThreeDSenBundle
+            | Command::ImportThreeDSenArchive
             | Command::SetCameraMode => !loading,
             Command::LaunchGame => !loading && has_text(args),
             Command::Reset | Command::ToggleTwoDimensional => {
@@ -163,6 +166,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::ChooseProfile
             | Command::ImportProfile
             | Command::ImportThreeDSen
+            | Command::ImportThreeDSenSteam
+            | Command::ImportThreeDSenBundle
+            | Command::ImportThreeDSenArchive
             | Command::ResumeLast
             | Command::SearchLibrary
             | Command::Quit => self.execute_file(command, args),

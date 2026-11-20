@@ -21,6 +21,7 @@ pub mod handheld_mode;
 pub mod head_on_pull;
 pub mod input;
 pub mod import_folder;
+pub mod steam_three_d_sen;
 pub mod launch_request;
 pub mod library_game_catalog;
 pub mod mcp;

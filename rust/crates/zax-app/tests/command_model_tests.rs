@@ -103,6 +103,10 @@ fn req_ui_205_the_model_enumerates_every_menu_command() {
         SwitchDiskSide,
         InsertNextDisk,
         EjectDisk,
+        // The ways of importing 3dSen's profiles (owner request, 2026-11-20).
+        ImportThreeDSenSteam,
+        ImportThreeDSenBundle,
+        ImportThreeDSenArchive,
     ];
     for command in expected {
         assert!(

@@ -98,6 +98,15 @@ pub fn three_d_sen_filters() -> Vec<FileFilter> {
     ]
 }
 
+/// The filters of the dialog that takes an archive of 3dSen (owner request, 2026-11-20).
+#[must_use]
+pub fn three_d_sen_archive_filters() -> Vec<FileFilter> {
+    vec![
+        filter(keys::BROWSER_FILTER_ZIP, &["zip", "7z"]),
+        filter(keys::BROWSER_FILTER_ALL, &[]),
+    ]
+}
+
 /// The filters of the cover import dialog (Q-050).
 #[must_use]
 pub fn cover_filters() -> Vec<FileFilter> {

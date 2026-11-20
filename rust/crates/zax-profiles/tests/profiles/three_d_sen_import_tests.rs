@@ -572,7 +572,10 @@ fn amd067_an_embedded_rom_is_skipped_and_its_profile_imported() {
             ],
         )
         .unwrap();
-    assert_eq!((1, 0, 1), (summary.imported, summary.already_present, summary.failed));
+    assert_eq!(
+        (1, 0, 1),
+        (summary.imported, summary.already_present, summary.failed)
+    );
     assert_eq!(bytes, files.read_all_bytes(&destination("A.3dn")).unwrap());
     assert!(!files.file_exists(&destination("A (2).3dn")));
     assert!(log.any_contains("Embedded ROM skipped: A"));
@@ -585,7 +588,10 @@ fn amd067_an_embedded_rom_is_skipped_and_its_profile_imported() {
             &[asset("A", bytes), asset("A", ines_rom())],
         )
         .unwrap();
-    assert_eq!((1, 0, 0), (summary.imported, summary.already_present, summary.failed));
+    assert_eq!(
+        (1, 0, 0),
+        (summary.imported, summary.already_present, summary.failed)
+    );
     assert!(summary.is_complete());
     assert_eq!(1, summary.results.len());
 }
@@ -638,7 +644,10 @@ fn a_bundle_without_a_profile_is_refused() {
         .import_from(Path::new("/downloads/other.bundle"))
         .unwrap_err();
 
-    assert!(error.to_string().contains("not a 3dSen profile bundle"), "{error}");
+    assert!(
+        error.to_string().contains("not a 3dSen profile bundle"),
+        "{error}"
+    );
     assert!(!files.file_exists(&destination("readme.3dn")));
 }
 
@@ -661,7 +670,9 @@ fn a_zip_holding_an_installation_is_read() {
     files.add_file(Path::new("/downloads/3dSen.zip"), &bytes);
     let importer = ThreeDSenImporter::new(&files, Path::new(DESTINATION), None);
 
-    let summary = importer.import_from(Path::new("/downloads/3dSen.zip")).unwrap();
+    let summary = importer
+        .import_from(Path::new("/downloads/3dSen.zip"))
+        .unwrap();
 
     assert_eq!(1, summary.imported);
     assert!(files.file_exists(&destination("Pinball.3dn")));
@@ -671,7 +682,8 @@ fn a_zip_holding_an_installation_is_read() {
 #[test]
 fn a_seven_zip_holding_the_bundle_is_read_and_an_empty_one_refused() {
     let seven_zip = |entries: &[(&str, Vec<u8>)]| {
-        let mut writer = sevenz_rust2::ArchiveWriter::new(std::io::Cursor::new(Vec::new())).unwrap();
+        let mut writer =
+            sevenz_rust2::ArchiveWriter::new(std::io::Cursor::new(Vec::new())).unwrap();
         for (name, bytes) in entries {
             writer
                 .push_archive_entry(
@@ -693,7 +705,20 @@ fn a_seven_zip_holding_the_bundle_is_read_and_an_empty_one_refused() {
     );
     let importer = ThreeDSenImporter::new(&files, Path::new(DESTINATION), None);
 
-    assert_eq!(1, importer.import_from(Path::new("/downloads/a.7z")).unwrap().imported);
-    let error = importer.import_from(Path::new("/downloads/b.7z")).unwrap_err();
-    assert!(error.to_string().contains("no 3dSen profile was found in the archive"), "{error}");
+    assert_eq!(
+        1,
+        importer
+            .import_from(Path::new("/downloads/a.7z"))
+            .unwrap()
+            .imported
+    );
+    let error = importer
+        .import_from(Path::new("/downloads/b.7z"))
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("no 3dSen profile was found in the archive"),
+        "{error}"
+    );
 }

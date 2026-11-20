@@ -856,8 +856,10 @@ fn a_bundle_in_the_import_folder_is_imported_and_marked_done() {
         .is_file());
     // The bundle stays, marked imported (owner request, 2026-11-20): not imported again.
     assert!(file.exists());
-    assert!(std::fs::read_to_string(folder.join(format!("{BUNDLE_PREFIX}feedface{BUNDLE_EXTENSION}.done")))
-        .unwrap()
-        .starts_with("ok"));
+    assert!(std::fs::read_to_string(
+        folder.join(format!("{BUNDLE_PREFIX}feedface{BUNDLE_EXTENSION}.done"))
+    )
+    .unwrap()
+    .starts_with("ok"));
     assert!(folder.join("README.txt").is_file());
 }

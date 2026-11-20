@@ -106,6 +106,9 @@ commands! {
     ChooseProfile => "file.choose_profile", Shortcut::None, false;
     ImportProfile => "file.import_profile", Shortcut::None, false;
     ImportThreeDSen => "file.import_3dsen", Shortcut::None, false;
+    ImportThreeDSenSteam => "file.import_3dsen_steam", Shortcut::None, false;
+    ImportThreeDSenBundle => "file.import_3dsen_bundle", Shortcut::None, false;
+    ImportThreeDSenArchive => "file.import_3dsen_archive", Shortcut::None, false;
     ResumeLast => "resume.last", Shortcut::None, false;
     SearchLibrary => "library.search", Shortcut::None, false;
     Quit => "app.quit", Shortcut::Fixed("Ctrl+Q"), false;

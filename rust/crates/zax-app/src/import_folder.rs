@@ -83,10 +83,7 @@ pub fn process(host: &mut AppHost) -> usize {
                         text: format!("{name}: {}", done.message),
                     },
                     _ => {
-                        crate::app_log::line(&format!(
-                            "profile refused: {name}: {}",
-                            done.message
-                        ));
+                        crate::app_log::line(&format!("profile refused: {name}: {}", done.message));
                         ImportResult {
                             ok: false,
                             id: None,
@@ -98,7 +95,11 @@ pub fn process(host: &mut AppHost) -> usize {
         };
         folder::mark_done(
             &path,
-            &format!("{}: {}", if result.ok { "ok" } else { "error" }, result.text),
+            &format!(
+                "{}: {}",
+                if result.ok { "ok" } else { "error" },
+                result.text
+            ),
         );
         results.push(result);
     }

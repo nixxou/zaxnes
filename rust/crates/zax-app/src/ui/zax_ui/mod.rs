@@ -28,6 +28,7 @@ use super::confirm_dialog::ConfirmationView;
 use super::file_browser::{self, FileBrowserModel};
 use super::file_picker::{FilePicker, PickPoll, PickRequest};
 use super::key_config::KeyConfigModel;
+use super::keys;
 use super::menu_bar::MenuBarModel;
 use super::menu_shortcuts::{self, ShortcutCommand, ShortcutModifiers};
 use super::notifications;
@@ -89,8 +90,12 @@ pub enum BrowserPurpose {
     Profile,
     /// The ROM folder of the console mode (Rust-only).
     RomsFolder,
-    /// A 3dSen installation or bundle to import.
+    /// A 3dSen installation folder to import.
     ThreeDSen,
+    /// 3dSen's profiles file (`.bundle`) to import, whatever its name (owner request).
+    ThreeDSenBundle,
+    /// An archive holding 3dSen or its profiles file.
+    ThreeDSenArchive,
     /// A movie to play (EDITOR-1): `.fm2` or Zaxnes's own.
     Movie,
 }
@@ -429,6 +434,25 @@ impl ZaxUi {
                     None => self.open_browser(host, BrowserPurpose::ThreeDSen),
                 }
             }
+            Command::ImportThreeDSenBundle => {
+                self.open_browser(host, BrowserPurpose::ThreeDSenBundle);
+            }
+            Command::ImportThreeDSenArchive => {
+                self.open_browser(host, BrowserPurpose::ThreeDSenArchive);
+            }
+            // Owner request: Steam's 3dSen, found by itself, imported at once.
+            Command::ImportThreeDSenSteam => {
+                match crate::steam_three_d_sen::installations().into_iter().next() {
+                    Some(installation) => {
+                        self.import_three_d_sen(host, &installation.to_string_lossy());
+                    }
+                    None => {
+                        let message = strings::get(keys::IMPORT_THREE_DSEN_STEAM_MISSING);
+                        host.notifications.show_error(&message);
+                        self.log(message);
+                    }
+                }
+            }
             Command::OpenMovie => self.open_browser(host, BrowserPurpose::Movie),
             Command::CancelModal => self.cancel_topmost_modal(),
             Command::ShowOptions => self.state.options = true,
@@ -575,6 +599,8 @@ impl ZaxUi {
         match purpose {
             BrowserPurpose::Rom => text::open_rom_title(),
             BrowserPurpose::ThreeDSen => text::import_three_d_sen_title(),
+            BrowserPurpose::ThreeDSenBundle => strings::get(keys::IMPORT_THREE_DSEN_BUNDLE_TITLE),
+            BrowserPurpose::ThreeDSenArchive => strings::get(keys::IMPORT_THREE_DSEN_ARCHIVE_TITLE),
             BrowserPurpose::Profile => text::import_profile_title(),
             BrowserPurpose::RomsFolder => text::roms_folder_title(),
             BrowserPurpose::Movie => text::open_movie_title(),
@@ -584,7 +610,10 @@ impl ZaxUi {
     fn browser_filters(purpose: BrowserPurpose) -> Vec<file_browser::FileFilter> {
         match purpose {
             BrowserPurpose::Rom => file_browser::rom_filters(),
-            BrowserPurpose::ThreeDSen => file_browser::three_d_sen_filters(),
+            BrowserPurpose::ThreeDSen | BrowserPurpose::ThreeDSenBundle => {
+                file_browser::three_d_sen_filters()
+            }
+            BrowserPurpose::ThreeDSenArchive => file_browser::three_d_sen_archive_filters(),
             BrowserPurpose::Profile => file_browser::profile_filters(),
             BrowserPurpose::RomsFolder => Vec::new(),
             BrowserPurpose::Movie => file_browser::movie_filters(),
@@ -676,7 +705,9 @@ impl ZaxUi {
         match self.purpose {
             BrowserPurpose::Rom => host.enqueue(Command::OpenRom, CommandArgs::of_text(path)),
             BrowserPurpose::Movie => host.enqueue(Command::OpenMovie, CommandArgs::of_text(path)),
-            BrowserPurpose::ThreeDSen => self.import_three_d_sen(host, path),
+            BrowserPurpose::ThreeDSen
+            | BrowserPurpose::ThreeDSenBundle
+            | BrowserPurpose::ThreeDSenArchive => self.import_three_d_sen(host, path),
             BrowserPurpose::Profile => self.import_profile(host, path),
             BrowserPurpose::RomsFolder => {
                 host.update_settings(|model| model.set(SettingId::UiRomsFolder, path));

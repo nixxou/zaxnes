@@ -137,10 +137,15 @@ fn read_archive(
     })?;
     let names = archive.names();
     let base = |name: &String| file_name(Path::new(name)).to_lowercase();
-    let mut candidates: Vec<&String> = names.iter().filter(|name| is_bundle_name(&base(name))).collect();
-    candidates.extend(names.iter().filter(|name| {
-        base(name).ends_with(BUNDLE_EXTENSION) && !is_bundle_name(&base(name))
-    }));
+    let mut candidates: Vec<&String> = names
+        .iter()
+        .filter(|name| is_bundle_name(&base(name)))
+        .collect();
+    candidates.extend(
+        names
+            .iter()
+            .filter(|name| base(name).ends_with(BUNDLE_EXTENSION) && !is_bundle_name(&base(name))),
+    );
     candidates.extend(names.iter().filter(|name| {
         let base = base(name);
         base.starts_with("sharedassets") && base.ends_with(".assets")
@@ -170,7 +175,9 @@ fn not_three_d_sen(path: &Path) -> UnityAssetFormatError {
 
 /// The message of the usual search, which names the layout it looked for.
 fn search_failure(files: &dyn ProfileFileSystem, path: &Path) -> UnityAssetFormatError {
-    locate_bundle(files, path).err().unwrap_or_else(|| not_three_d_sen(path))
+    locate_bundle(files, path)
+        .err()
+        .unwrap_or_else(|| not_three_d_sen(path))
 }
 
 fn file_name(path: &Path) -> String {

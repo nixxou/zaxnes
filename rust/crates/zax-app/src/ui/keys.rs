@@ -57,6 +57,10 @@ pub const WINDOW_OPEN_MOVIE: &str = "window.open_movie";
 pub const WINDOW_IMPORT_PROFILE: &str = "window.import_profile";
 pub const WINDOW_IMPORT_COVER: &str = "window.import_cover";
 pub const WINDOW_IMPORT_THREE_DSEN: &str = "window.import_3dsen";
+pub const MENU_IMPORT_THREE_DSEN: &str = "menu.import_3dsen";
+pub const IMPORT_THREE_DSEN_STEAM_MISSING: &str = "import_3dsen.steam_missing";
+pub const IMPORT_THREE_DSEN_BUNDLE_TITLE: &str = "import_3dsen.bundle_title";
+pub const IMPORT_THREE_DSEN_ARCHIVE_TITLE: &str = "import_3dsen.archive_title";
 
 // -------------------------------------------------------------- buttons
 pub const BUTTON_CLOSE: &str = "button.close";
@@ -647,6 +651,10 @@ pub const PUBLISHED: &[&str] = &[
     WINDOW_IMPORT_PROFILE,
     WINDOW_IMPORT_COVER,
     WINDOW_IMPORT_THREE_DSEN,
+    MENU_IMPORT_THREE_DSEN,
+    IMPORT_THREE_DSEN_STEAM_MISSING,
+    IMPORT_THREE_DSEN_BUNDLE_TITLE,
+    IMPORT_THREE_DSEN_ARCHIVE_TITLE,
     BUTTON_CLOSE,
     BUTTON_CANCEL,
     BUTTON_OPEN,

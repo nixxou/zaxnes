@@ -60,7 +60,10 @@ pub fn import_waiting(system: &Path) -> Vec<(bool, String)> {
                 Err(error) => (false, error.to_string()),
             },
         };
-        folder::mark_done(&path, &format!("{}: {text}", if ok { "ok" } else { "error" }));
+        folder::mark_done(
+            &path,
+            &format!("{}: {text}", if ok { "ok" } else { "error" }),
+        );
         results.push((ok, format!("{name}: {text}")));
     }
     results
@@ -159,7 +162,8 @@ mod tests {
 
     #[test]
     fn the_import_folder_copies_a_profile_and_marks_what_it_did() {
-        let system = std::env::temp_dir().join(format!("zax-libretro-import-{}", std::process::id()));
+        let system =
+            std::env::temp_dir().join(format!("zax-libretro-import-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&system);
         let folder = system.join(IMPORT_FOLDER);
         std::fs::create_dir_all(&folder).unwrap();
@@ -168,9 +172,16 @@ mod tests {
         std::fs::write(folder.join("broken.bundle"), b"not a bundle").unwrap();
         let results = import_waiting(&system);
         assert_eq!(2, results.len(), "{results:?}");
-        assert_eq!(profile, std::fs::read(system.join(FOLDER).join("Mine.3dn")).unwrap());
-        assert!(results.iter().any(|(ok, text)| !ok && text.starts_with("broken.bundle")));
-        assert!(folder.join("Mine.3dn.done").is_file() && folder.join("broken.bundle.done").is_file());
+        assert_eq!(
+            profile,
+            std::fs::read(system.join(FOLDER).join("Mine.3dn")).unwrap()
+        );
+        assert!(results
+            .iter()
+            .any(|(ok, text)| !ok && text.starts_with("broken.bundle")));
+        assert!(
+            folder.join("Mine.3dn.done").is_file() && folder.join("broken.bundle.done").is_file()
+        );
         assert!(folder.join("README.txt").is_file());
         // Done once.
         assert!(import_waiting(&system).is_empty());

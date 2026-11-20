@@ -1152,7 +1152,10 @@ fn start_three_d(core: &mut Core, name: &str, image: &[u8]) {
     // there is imported once, before a profile is looked for.
     if let Some(system) = system_directory() {
         for (ok, text) in profiles::import_waiting(&system) {
-            log(if ok { LOG_INFO } else { LOG_ERROR }, &format!("import: {text}"));
+            log(
+                if ok { LOG_INFO } else { LOG_ERROR },
+                &format!("import: {text}"),
+            );
         }
     }
     if !core.options().three_d {
