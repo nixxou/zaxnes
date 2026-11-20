@@ -61,6 +61,7 @@ thiserror = "2"
 time = { version = "0.3", features = ["formatting", "macros", "local-offset"] }
 sha1 = { version = "0.11.0", default-features = false }
 zip = { version = "7.3.0", default-features = false, features = ["deflate"] }
+sevenz-rust2 = { version = "0.25.0", default-features = false }
 sdl2 = "0.38"
 glow = "0.16"
 wgpu = { version = "30.0.0", optional = true, default-features = false, features = [
@@ -79,6 +80,7 @@ png = "0.17"
 [dev-dependencies]
 rstest = "0.26"
 walkdir = "2"
+sevenz-rust2 = { version = "0.25.0", default-features = false, features = ["compress"] }
 
 [build-dependencies]
 # The slang shader pack (feature `shaders`), zipped into the executable by build.rs.
