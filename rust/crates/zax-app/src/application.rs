@@ -315,6 +315,15 @@ impl Running {
         let (store, mut model) = load_settings(options, &paths);
         let demo_rom = install_demo_game(&paths, &model);
         install_bundled_profiles(&paths);
+        // Web build: which profiles are the program's own, not the player's.
+        let shipped: Vec<&str> = std::iter::once(crate::demo_game::PROFILE_NAME)
+            .chain(
+                crate::bundled_profiles::PROFILES
+                    .iter()
+                    .map(|(name, _)| *name),
+            )
+            .collect();
+        crate::web_bridge::report_shipped_profiles(&shipped);
         #[cfg(feature = "shaders")]
         install_shader_pack(&paths);
         let mut catalog = LibraryGameCatalog::open(asset_root.as_deref(), &paths, Box::new(log));

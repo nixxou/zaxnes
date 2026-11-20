@@ -39,6 +39,20 @@ pub const REMOTE_GAMES: &str = "/zaxnes-web/remote-games";
 /// Written by the page when [`REMOTE_GAMES`] changed; removed by the application once it read it.
 pub const GAMES_CHANGED: &str = "/zaxnes-web/games-changed";
 
+/// Written by the application at its start: the file names of the 3D profiles it installs
+/// itself in the user's profiles (the demo's, the bundled ones), one per line; the page tells
+/// the player's own profiles from them.
+pub const SHIPPED_PROFILES: &str = "/zaxnes-web/shipped-profiles";
+
+/// Tells the page which profile files the program installs itself.
+pub fn report_shipped_profiles(names: &[&str]) {
+    if active() {
+        let _ = std::fs::create_dir_all(FOLDER);
+        let text: String = names.iter().map(|name| format!("{name}\n")).collect();
+        let _ = std::fs::write(SHIPPED_PROFILES, text);
+    }
+}
+
 /// The first line of [`OPEN_REQUEST`] that asks the page to download a game and play it.
 const REMOTE_REQUEST: &str = "remote";
 

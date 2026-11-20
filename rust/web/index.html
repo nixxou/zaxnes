@@ -653,6 +653,9 @@
   // game downloaded when it is played (then kept, as the ROMs of ?play=). ---
   const LIBRARIES = DATA + '/web-libraries.json';
   const GAME_LINK = /\.(nes|zip|7z|fds|unf|unif)$/i;
+  // The profiles of 3dSen (zax-profiles installation.rs BUNDLE_PREFIX): a page of games that
+  // links to it gives its 3D profiles too, not a game.
+  const BUNDLE_LINK = /^defaultprofiles_assets_all_.*\.bundle$/i;
   function libraries() {
     try { return JSON.parse(FS.readFile(LIBRARIES, { encoding: 'utf8' })) || []; } catch (e) { return []; }
   }
@@ -674,6 +677,7 @@
     const base = response.url || url;
     const seen = new Set();
     const games = [];
+    const bundles = [];
     for (const link of page.querySelectorAll('a[href]')) {
       let target;
       try { target = new URL(link.getAttribute('href'), base); } catch (e) { continue; }
@@ -684,11 +688,13 @@
       if (file && GAME_LINK.test(file)) name = file.split('/').pop();
       try { name = decodeURIComponent(name); } catch (e) { /* kept as it is */ }
       name = name.split('/').pop();
-      if (!GAME_LINK.test(name) || seen.has(target.href)) continue;
+      if (seen.has(target.href)) continue;
+      if (BUNDLE_LINK.test(name)) { seen.add(target.href); bundles.push({ name, url: target.href }); continue; }
+      if (!GAME_LINK.test(name)) continue;
       seen.add(target.href);
       games.push({ name, url: target.href });
     }
-    return games;
+    return Object.assign(games, { bundles });
   }
   // A Google Drive folder, through the Drive API (its folder pages cannot be read from another
   // page); the files themselves download from drive.usercontent.google.com, which allows it.
@@ -739,20 +745,48 @@
     const step = win && win.step(t('libraryReading'));
     try {
       const games = await readLibrary(url);
-      if (!games.length) throw new Error(t('libraryNone'));
+      const bundles = games.bundles || [];
+      if (!games.length && !bundles.length) throw new Error(t('libraryNone'));
       const all = libraries().filter((l) => l.url !== url);
       let title = url;
       try { const u = new URL(url); title = u.hostname + decodeURIComponent(u.pathname + u.search).slice(0, 80); } catch (e) {}
-      all.unshift({ url, title, games, at: Date.now() });
+      all.unshift({ url, title, games: [...games], bundles, at: Date.now() });
       saveLibraries(all);
       publishRemoteGames();
       if (step) { step.detail(games.length + ''); step.done(); win.finish(true, t('libraryFound', games.length)); }
       fillLibraries(url);
+      await importLibraryProfiles(url);
       return games;
     } catch (e) {
       if (step) { step.fail(); win.finish(false, e.message); } else alertBox(e.message);
       return null;
     }
+  }
+  // The 3D profiles of the 3dSen bundle a page links to, while the player has none of their
+  // own (the built-in ones aside): downloaded and imported once, as an ?import= of it.
+  function hasOwnProfiles() {
+    // The program's own (web_bridge.rs SHIPPED_PROFILES): the demo's and the bundled ones.
+    let shipped = [];
+    try { shipped = FS.readFile('/zaxnes-web/shipped-profiles', { encoding: 'utf8' }).split('\n').map((n) => n.trim().toLowerCase()); } catch (e) {}
+    return list(PROFILES).some((name) => /\.(3dn|3dh)$/i.test(name) && !shipped.includes(name.toLowerCase()));
+  }
+  async function importLibraryProfiles(url) {
+    const library = libraries().find((l) => l.url === url);
+    const bundle = library && (library.bundles || [])[0];
+    if (!bundle || cachedImport(bundle.url)) return;
+    // The program says which profiles are its own once it started (shipped-profiles).
+    for (let i = 0; i < 100 && !exists('/zaxnes-web/shipped-profiles'); i++) await new Promise((r) => setTimeout(r, 100));
+    if (hasOwnProfiles()) return;
+    const win = progressWindow(t('progressImport'));
+    try {
+      const file = await downloadStep(win, bundle.url, 'profile');
+      const before = profileSizes();
+      const lines = (await importProfiles([file], win)) || [];
+      const after = profileSizes();
+      const made = {};
+      for (const [name, bytes] of Object.entries(after)) if (before[name] !== bytes) made[name] = bytes;
+      if (lines[0] && lines[0].ok) rememberDownload(bundle.url, { kind: 'import', id: lines[0].id, count: lines[0].count, files: made });
+    } catch (e) { win.finish(false, e.message); }
   }
   // A game of a page: played from the copy downloaded before, else downloaded now.
   async function playFromLibrary(game, profile) {
@@ -1141,6 +1175,7 @@
     const library = addressValues('library')[0];
     if (library && /^https?:\/\//i.test(library)) {
       if (!libraries().some((l) => l.url === library)) await addLibrary(library, true);
+      else await importLibraryProfiles(library);
     }
     // The program's list shows the games of the pages added before.
     publishRemoteGames();
