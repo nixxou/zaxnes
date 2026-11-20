@@ -1363,7 +1363,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
          of the run-ahead's frames of latency on smoother motion. Status bars and the sprites \
          that move with the camera stay where they are. Nothing happens without run-ahead or at \
          60 frames a second or less. A game whose hack pack reports its own camera uses that \
-         instead. The 3D scene follows only with the setting below. Default: off, whatever the \
+         instead. The 3D scene follows only with the setting below. Default: on, whatever the \
          preset.",
     ),
     (

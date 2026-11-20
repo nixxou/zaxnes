@@ -2680,10 +2680,11 @@ fn video_smooth_scroll(out: &mut Vec<SettingDescriptor>) {
         SettingDescriptor::new(
             SettingId::EmuSmoothScrollAhead,
             SettingKind::Bool,
-            // Off by default, whatever the preset (owner, 2026-11-20; it was on from 2026-11-11):
-            // on, with run-ahead and a display above 61 Hz, it shifts the playfield of every game,
-            // pack or not; at 60 Hz or below it does nothing.
-            SettingValue::Bool(false),
+            // On by default, whatever the preset (owner, 2026-11-11, confirmed 2026-11-20): with
+            // run-ahead and a display above 61 Hz, it shifts the 2D playfield of every game, pack
+            // or not; at 60 Hz or below it does nothing. The 3D follows only with
+            // `emu.smooth_scroll_3d`.
+            SettingValue::Bool(true),
             SettingScope::User,
             SettingEffect::Immediate,
             SettingTheme::Emulation,

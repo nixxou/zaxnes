@@ -1335,7 +1335,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
          d'état et les sprites qui suivent la caméra restent où ils sont. Sans run-ahead ou à 60 \
          images par seconde ou moins, rien ne se passe. Un jeu dont le pack de hacks rapporte sa \
          propre caméra utilise celle-ci à la place. La scène 3D ne suit qu'avec le réglage \
-         suivant. Par défaut : désactivé, quel que soit le préréglage.",
+         suivant. Par défaut : activé, quel que soit le préréglage.",
     ),
     (
         "detail.emu.smooth_scroll_3d",
