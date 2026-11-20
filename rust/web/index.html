@@ -201,7 +201,7 @@
       close: 'Fermer',
       notRom: 'Ce fichier n’est pas une ROM reconnue : ', romImported: 'ROM importée : ',
       downloading: 'Téléchargement…', cors: 'Fichier inaccessible : le site qui l’héberge ne permet pas à une autre page de le télécharger (CORS), ou l’adresse ne répond pas. ',
-      notFound: 'Fichier introuvable ', tooBig: 'Ce fichier n’a pas la taille d’une ROM : ', tooBigImport: 'Fichier trop gros pour un import (plus de 512 Mo) : ',
+      notFound: 'Fichier introuvable ', isPage: 'Cette adresse est une page web, pas un fichier : ', tooBig: 'Ce fichier n’a pas la taille d’une ROM : ', tooBigImport: 'Fichier trop gros pour un import (plus de 512 Mo) : ',
       profileTitle: 'Importer un profil 3D', profileText: 'Profils 3D (.3dn, .3dh), fichier de profils de 3dSen (.bundle), ou une archive .zip / .7z qui le contient (même tout un dossier de 3dSen) : ils rejoignent vos profils, celui d’un même identifiant est remplacé.',
       profileDrop: 'Déposez un fichier ici (.3dn, .3dh, .bundle, .zip, .7z)', profileImport: 'Importer…',
       notProfile: 'Ce fichier n’est ni un profil 3D ni des données 3dSen : ', importing: 'Import en cours : ',
@@ -239,7 +239,7 @@
       close: 'Close',
       notRom: 'This file is not a known ROM: ', romImported: 'ROM imported: ',
       downloading: 'Downloading…', cors: 'File out of reach: the site hosting it does not let another page download it (CORS), or the address does not answer. ',
-      notFound: 'File not found ', tooBig: 'This file does not have the size of a ROM: ', tooBigImport: 'File too big for an import (over 512 MB): ',
+      notFound: 'File not found ', isPage: 'This address is a web page, not a file: ', tooBig: 'This file does not have the size of a ROM: ', tooBigImport: 'File too big for an import (over 512 MB): ',
       profileTitle: 'Import a 3D profile', profileText: '3D profiles (.3dn, .3dh), 3dSen’s profiles file (.bundle), or a .zip / .7z archive holding it (even a whole 3dSen folder): they join your profiles, one of the same identifier is replaced.',
       profileDrop: 'Drop a file here (.3dn, .3dh, .bundle, .zip, .7z)', profileImport: 'Import…',
       notProfile: 'This file is neither a 3D profile nor 3dSen data: ', importing: 'Importing: ',
@@ -497,7 +497,10 @@
       win.finish(true, t('romReady') + name);
       message('rom-messages', 'ok', t('romImported') + name);
       fillRoms();
-    } catch (e) { win.finish(false, e.message); message('rom-messages', 'error', e.message); }
+    } catch (e) {
+      if (e.page) { win.close(); addLibrary(url); return; }
+      win.finish(false, e.message); message('rom-messages', 'error', e.message);
+    }
   };
 
   // --- Downloads: ?play=, ?profile=, ?import= and the address fields. ---
@@ -557,6 +560,8 @@
       throw new Error(t('cors') + url);
     }
     if (!response.ok) throw new Error(t('notFound') + '(' + response.status + ') : ' + url);
+    const isPage = () => Object.assign(new Error(t('isPage') + url), { page: true });
+    if (/text\/html|application\/xhtml/i.test(response.headers.get('Content-Type') || '')) throw isPage();
     const total = Number(response.headers.get('Content-Length')) || 0;
     // A ROM is at most a few MB; a 3dSen installation (an import) a hundred or so.
     const limit = kind === 'rom' ? 64 * 1024 * 1024 : 512 * 1024 * 1024;
@@ -582,6 +587,8 @@
       bytes = new Uint8Array(await response.arrayBuffer());
     }
     if (bytes.length < 16 || bytes.length > limit) throw tooBig();
+    const head = new TextDecoder().decode(bytes.subarray(0, 64)).trimStart().toLowerCase();
+    if (head.startsWith('<!doctype html') || head.startsWith('<html')) throw isPage();
     return { name: remoteName(url, response, bytes, kind === 'rom' ? ROM_FILE : PROFILE_FILE), bytes };
   }
   // The value of `key` in the address: an http(s) URL takes the rest of the parameter, '&' and
