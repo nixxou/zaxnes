@@ -313,7 +313,9 @@ mod tests {
         assert_eq!(Some(&OverlayItem::WebManageCache), items.last());
         go_to(&mut model, OverlayItem::WebImportProfile);
         assert_eq!(
-            Some(OverlayCommand::WebDialog(crate::web_bridge::WebDialog::Profile)),
+            Some(OverlayCommand::WebDialog(
+                crate::web_bridge::WebDialog::Profile
+            )),
             model.handle(PadButton::A)
         );
         model.set_web(false);

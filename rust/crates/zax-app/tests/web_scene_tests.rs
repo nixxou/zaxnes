@@ -19,16 +19,24 @@ fn the_demo_game_builds_a_3d_draw_list() {
         .profile;
     let mut harness = LoopHarness::create();
     let rom_path = harness.write_rom(ROM, "FlappyZaxNes.nes");
-    harness
-        .catalog()
-        .add_with("game", Some(&rom_path), Some(profile), false, Some("FlappyZaxNes"));
+    harness.catalog().add_with(
+        "game",
+        Some(&rom_path),
+        Some(profile),
+        false,
+        Some("FlappyZaxNes"),
+    );
     harness.run_with(Command::LaunchGame, CommandArgs::of_text("game"));
     harness.settle();
     harness.run_frames(120);
     let session = harness.host.session_mut().expect("a session");
     let list = session.build_draw_list();
     let tiles = list.tiles().len();
-    let meshes = list.tiles().iter().filter(|tile| tile.mesh.is_some()).count();
+    let meshes = list
+        .tiles()
+        .iter()
+        .filter(|tile| tile.mesh.is_some())
+        .count();
     println!("draw tiles {tiles} meshes {meshes}");
     assert!(tiles > 0, "the demo game draws something in 3D");
 }

@@ -389,7 +389,11 @@ impl HandheldUi {
         self.library = ProfileChooserModel::new(host.games().library())
             .all()
             .to_vec();
-        let mut entries = rom_list::scan(&self.roms_directory);
+        // Web build: the games of the pages of games, downloaded when played (owner request).
+        let mut entries = rom_list::with_remote_games(
+            rom_list::scan(&self.roms_directory),
+            &crate::web_bridge::remote_games(),
+        );
         // The widescreen of the games without one of their own: the global value.
         let mut global = host.settings().clone();
         global.clear_session_layer();
@@ -397,6 +401,13 @@ impl HandheldUi {
         let global_on = global.get(SettingId::VideoWidescreen).as_int() != 0;
         for entry in &mut entries {
             entry.profile = self.profile_of(host, entry);
+            if entry.remote.is_some() {
+                // No file to study nor options of its own yet: its widescreen is the name's.
+                entry.widescreen_other = hacks::other_rom_patch(entry.profile_title(), &entry.name)
+                    .map(|patch| patch.name);
+                entry.widescreen_unstudied = entry.widescreen_other.is_some();
+                continue;
+            }
             Self::find_widescreen(host, entry);
             entry.widescreen_on = host
                 .game_options(&entry.path.to_string_lossy())
@@ -638,7 +649,11 @@ impl HandheldUi {
             #[allow(clippy::cast_possible_truncation)] // a few notches
             let notches = input.wheel.round() as i64;
             if self.screen == Screen::Overlay && notches != 0 {
-                let button = if notches > 0 { PadButton::Up } else { PadButton::Down };
+                let button = if notches > 0 {
+                    PadButton::Up
+                } else {
+                    PadButton::Down
+                };
                 for _ in 0..notches.unsigned_abs() {
                     self.press(button, frame);
                 }
@@ -1051,6 +1066,40 @@ impl HandheldUi {
     }
 
     fn carry_out_home(&mut self, command: RomListCommand, host: &mut AppHost) {
+        // A game of a page of games: played once the page downloaded it, which then answers as
+        // for any ROM; its file, options and hacks come with the download.
+        let remote = |path: &Path| {
+            self.roms
+                .entries()
+                .iter()
+                .find(|entry| entry.path == path)
+                .and_then(|entry| entry.remote.clone().map(|url| (url, entry.clone())))
+        };
+        match &command {
+            RomListCommand::Play(path) => {
+                if let Some((url, entry)) = remote(path) {
+                    // As for a ROM of the folder: its profile, else "2D Mode".
+                    let profile = entry
+                        .profile
+                        .as_ref()
+                        .map(|profile| profile.id.clone())
+                        .or_else(|| host.games().two_dimensional_mode_id());
+                    crate::web_bridge::request_remote_game(&url, &entry.name, profile.as_deref());
+                    return;
+                }
+            }
+            RomListCommand::ChooseProfile(_)
+            | RomListCommand::Options
+            | RomListCommand::ResumeLast => {}
+            RomListCommand::GameOptions(path)
+            | RomListCommand::Widescreen(path)
+            | RomListCommand::Hacks(path)
+            | RomListCommand::Achievements(path) => {
+                if remote(path).is_some() {
+                    return;
+                }
+            }
+        }
         match command {
             RomListCommand::Play(path) => {
                 let profile = self
@@ -1768,4 +1817,3 @@ fn apply_camera(preset: CameraPreset, host: &mut AppHost) {
         CameraPreset::ResetView => host.enqueue(Command::ResetView, CommandArgs::default()),
     }
 }
-

@@ -36,7 +36,10 @@ fn the_2d_row_steps_from_off_to_the_first_preset_and_back() {
         settings.get(SettingId::Shader2dPreset).as_text(),
         first.variants[0].path
     );
-    assert_eq!(value_text(row, &settings, CameraPreset::Orbit), first.name());
+    assert_eq!(
+        value_text(row, &settings, CameraPreset::Orbit),
+        first.name()
+    );
     // Every 3D and widescreen mode follows the 2D slot by default.
     assert_eq!(
         resolve(&settings, true, true).map(|choice| choice.preset),
@@ -103,7 +106,10 @@ fn the_pre_filter_stays_in_front_of_the_preset() {
         format!("{}|crt/crt-easymode.slangp", PRE_FILTERS[0].path)
     );
     // The preset row still names the family of the preset behind it.
-    let light = LOOKS.iter().position(|look| look.key == "crt_light").unwrap();
+    let light = LOOKS
+        .iter()
+        .position(|look| look.key == "crt_light")
+        .unwrap();
     assert_eq!(
         shader_panel::slot_pick(&settings, slot),
         SlotPick::Look(light)

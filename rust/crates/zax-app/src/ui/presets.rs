@@ -7,7 +7,7 @@ use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
 use zax_settings::values::SettingValue;
 
-pub use zax_settings::presets::{Preset, V, PRESETS};
+pub use zax_settings::presets::{Preset, PRESETS, V};
 
 /// Whether the settings still hold every value `preset` writes.
 #[must_use]

@@ -536,7 +536,9 @@ impl Running {
             return;
         }
         self.import_checked = Some(now);
-        if crate::import_folder::process(&mut self.host) > 0 {
+        // Web build: the page's pages of games changed (one added, one game downloaded).
+        let imported = crate::import_folder::process(&mut self.host) > 0;
+        if imported | crate::web_bridge::take_games_changed() {
             self.ui.profiles_imported(&self.host);
         }
     }

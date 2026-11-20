@@ -706,6 +706,27 @@
     } while (pageToken);
     return games;
   }
+  // The games of the pages not downloaded yet, for the program's list (web_bridge.rs
+  // REMOTE_GAMES): it shows them with the ROMs, and asks for one when it is played.
+  const REMOTE_GAMES = '/zaxnes-web/remote-games';
+  const GAMES_CHANGED = '/zaxnes-web/games-changed';
+  function publishRemoteGames() {
+    const seen = new Set();
+    const lines = [];
+    for (const library of libraries()) {
+      for (const game of library.games) {
+        if (seen.has(game.url) || cachedRom(game.url)) continue;
+        seen.add(game.url);
+        const name = game.name.replace(GAME_LINK, '').replace(/[\t\r\n]/g, ' ');
+        lines.push(name + '\t' + game.url.replace(/[\t\r\n]/g, ''));
+      }
+    }
+    try {
+      FS.mkdirTree('/zaxnes-web');
+      FS.writeFile(REMOTE_GAMES, lines.join('\n') + '\n');
+      FS.writeFile(GAMES_CHANGED, '1');
+    } catch (e) {}
+  }
   async function addLibrary(url, quiet) {
     const win = quiet ? null : progressWindow(t('libraries'));
     const step = win && win.step(t('libraryReading'));
@@ -717,6 +738,7 @@
       try { const u = new URL(url); title = u.hostname + decodeURIComponent(u.pathname + u.search).slice(0, 80); } catch (e) {}
       all.unshift({ url, title, games, at: Date.now() });
       saveLibraries(all);
+      publishRemoteGames();
       if (step) { step.detail(games.length + ''); step.done(); win.finish(true, t('libraryFound', games.length)); }
       fillLibraries(url);
       return games;
@@ -726,7 +748,8 @@
     }
   }
   // A game of a page: played from the copy downloaded before, else downloaded now.
-  async function playFromLibrary(game) {
+  async function playFromLibrary(game, profile) {
+    if (profile) wantedProfile = profile;
     const cached = cachedRom(game.url);
     if (cached) { play(cached); return; }
     const win = progressWindow(t('progressRom'));
@@ -735,8 +758,10 @@
       win.close();
       const path = storeRom(game.name, bytes);
       rememberDownload(game.url, { kind: 'rom', path, size: bytes.length });
+      // Now a ROM of the folder: out of the remote games.
+      publishRemoteGames();
       play(path);
-    } catch (e) { win.finish(false, e.message); }
+    } catch (e) { wantedProfile = null; win.finish(false, e.message); }
   }
   function fillLibraries(open) {
     const box = document.getElementById('libraries');
@@ -751,7 +776,7 @@
       const refresh = document.createElement('button'); refresh.className = 'btn small'; refresh.textContent = t('libraryRefresh');
       refresh.onclick = (e) => { e.preventDefault(); addLibrary(library.url); };
       const remove = document.createElement('button'); remove.className = 'btn small danger'; remove.textContent = t('libraryRemove');
-      remove.onclick = (e) => { e.preventDefault(); saveLibraries(libraries().filter((l) => l.url !== library.url)); fillLibraries(); };
+      remove.onclick = (e) => { e.preventDefault(); saveLibraries(libraries().filter((l) => l.url !== library.url)); publishRemoteGames(); fillLibraries(); };
       summary.append(label, refresh, remove);
       const inner = document.createElement('div'); inner.className = 'inner';
       const filter = document.createElement('input'); filter.className = 'filter'; filter.placeholder = t('libraryFilter');
@@ -1084,6 +1109,14 @@
     if (exists(OPEN_REQUEST)) {
       let wanted = 'rom';
       try { wanted = FS.readFile(OPEN_REQUEST, { encoding: 'utf8' }).trim() || 'rom'; FS.unlink(OPEN_REQUEST); } catch (e) {}
+      if (wanted.startsWith('remote\n')) {
+        const [, url, name, profile] = wanted.split('\n');
+        // The game as its page listed it (its file name, extension included).
+        const known = libraries().flatMap((l) => l.games).find((g) => g.url === (url || '').trim());
+        const game = known || { url: (url || '').trim(), name: (name || 'game').trim() + '.nes' };
+        if (game.url) playFromLibrary(game, (profile || '').trim() || null);
+        return;
+      }
       if (wanted === 'profile') clearMessages('profile-messages');
       showDialog(dialogs[wanted] ? wanted : 'rom');
     }
@@ -1101,9 +1134,9 @@
     const library = addressValues('library')[0];
     if (library && /^https?:\/\//i.test(library)) {
       if (!libraries().some((l) => l.url === library)) await addLibrary(library, true);
-      showDialog('rom');
-      fillLibraries(library);
     }
+    // The program's list shows the games of the pages added before.
+    publishRemoteGames();
     const imports = addressValues('import');
     let profile = addressValues('profile')[0] || null;
     const remotes = [...imports];

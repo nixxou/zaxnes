@@ -11,6 +11,11 @@
 //!   user data's import folder; the application imports them and tells how it went in
 //!   [`IMPORT_RESULT`], which the page shows in its dialogue.
 //!
+//! - The page lists in [`REMOTE_GAMES`] the games of the pages of games the player added
+//!   (archive.org and the like) that are not downloaded yet; the home list shows them with the
+//!   others, and playing one asks the page to download it ([`request_remote_game`]), which then
+//!   answers as for any ROM. The page writes [`GAMES_CHANGED`] when that list changed.
+//!
 //! On every other platform the functions do nothing.
 
 /// The folder of the exchange files.
@@ -26,6 +31,78 @@ pub const IMPORT_RESULT: &str = "/zaxnes-web/import-result";
 
 /// Written by the application: `playing` while a game is on the screen, `idle` otherwise.
 pub const STATE: &str = "/zaxnes-web/state";
+
+/// Written by the page: one game per line, `<name>\t<url>`, the games of its pages of games not
+/// downloaded yet.
+pub const REMOTE_GAMES: &str = "/zaxnes-web/remote-games";
+
+/// Written by the page when [`REMOTE_GAMES`] changed; removed by the application once it read it.
+pub const GAMES_CHANGED: &str = "/zaxnes-web/games-changed";
+
+/// The first line of [`OPEN_REQUEST`] that asks the page to download a game and play it.
+const REMOTE_REQUEST: &str = "remote";
+
+/// A game of a page of games, downloaded only when it is played (owner request, 2026-11-20).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteGame {
+    /// The name shown: the end of its address, without its extension.
+    pub name: String,
+    /// Its address.
+    pub url: String,
+}
+
+/// The games the text of [`REMOTE_GAMES`] lists; a line without a name or an address is skipped.
+#[must_use]
+pub fn parse_remote_games(text: &str) -> Vec<RemoteGame> {
+    text.lines()
+        .filter_map(|line| {
+            let (name, url) = line.split_once('\t')?;
+            let (name, url) = (name.trim(), url.trim());
+            (!name.is_empty() && !url.is_empty()).then(|| RemoteGame {
+                name: name.to_owned(),
+                url: url.to_owned(),
+            })
+        })
+        .collect()
+}
+
+/// The games of the page's pages of games not downloaded yet; none off the web.
+#[must_use]
+pub fn remote_games() -> Vec<RemoteGame> {
+    if !active() {
+        return Vec::new();
+    }
+    std::fs::read_to_string(REMOTE_GAMES)
+        .map(|text| parse_remote_games(&text))
+        .unwrap_or_default()
+}
+
+/// Whether the page changed its list of games since the last call.
+#[must_use]
+pub fn take_games_changed() -> bool {
+    active() && std::fs::remove_file(GAMES_CHANGED).is_ok()
+}
+
+/// The text of [`OPEN_REQUEST`] asking the page to download the game at `url` and play it,
+/// with the 3D profile `profile` when one goes with it.
+#[must_use]
+pub fn remote_request_text(url: &str, name: &str, profile: Option<&str>) -> String {
+    let flat = |text: &str| text.replace(['\n', '\r'], " ");
+    format!(
+        "{REMOTE_REQUEST}\n{}\n{}\n{}\n",
+        flat(url),
+        flat(name),
+        flat(profile.unwrap_or(""))
+    )
+}
+
+/// Asks the page to download the game at `url` and play it.
+pub fn request_remote_game(url: &str, name: &str, profile: Option<&str>) {
+    if active() {
+        let _ = std::fs::create_dir_all(FOLDER);
+        let _ = std::fs::write(OPEN_REQUEST, remote_request_text(url, name, profile));
+    }
+}
 
 /// A dialogue of the page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,7 +213,11 @@ pub fn report_import(results: &[ImportResult]) {
         .iter()
         .map(|result| {
             let flat = result.text.replace(['\n', '\r'], " ");
-            let id = result.id.as_deref().unwrap_or("").replace(['|', '\n', '\r'], " ");
+            let id = result
+                .id
+                .as_deref()
+                .unwrap_or("")
+                .replace(['|', '\n', '\r'], " ");
             format!(
                 "{}|{id}|{}|{flat}\n",
                 if result.ok { "ok" } else { "error" },
@@ -178,5 +259,34 @@ mod tests {
             OpenAnswer::parse("/roms/a.nes\nprofile= Super Mario Bros. \n")
                 .and_then(|answer| answer.profile)
         );
+    }
+
+    #[test]
+    fn the_remote_games_are_a_name_and_an_address_per_line() {
+        let games = parse_remote_games(
+            "Metal Force\thttps://a/b.zip\n\nno address\t \n Zelda \t https://a/z.nes \n",
+        );
+        assert_eq!(
+            vec![
+                RemoteGame {
+                    name: "Metal Force".to_owned(),
+                    url: "https://a/b.zip".to_owned()
+                },
+                RemoteGame {
+                    name: "Zelda".to_owned(),
+                    url: "https://a/z.nes".to_owned()
+                },
+            ],
+            games
+        );
+    }
+
+    #[test]
+    fn a_remote_request_names_the_address_the_game_and_its_profile() {
+        assert_eq!(
+            "remote\nhttps://a/b.zip\nMetal Force\nmetal\n",
+            remote_request_text("https://a/b.zip", "Metal Force", Some("metal"))
+        );
+        assert_eq!("remote\nu\nn \n\n", remote_request_text("u", "n\n", None));
     }
 }

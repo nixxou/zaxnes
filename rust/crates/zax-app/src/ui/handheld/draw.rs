@@ -772,6 +772,7 @@ impl HandheldUi {
         }
     }
 
+    #[allow(clippy::too_many_lines)] // One row per game, its badges in their order.
     fn draw_home(&self, ui: &Ui, frame: &UiFrame<'_>) {
         let Some(_window) = full_screen(ui, "##home", BACKGROUND) else {
             return;
@@ -812,6 +813,10 @@ impl HandheldUi {
             } else {
                 tag.1
             };
+            // A game of a page of games, downloaded when it is played (web build).
+            if entry.remote.is_some() {
+                badges.push(("[web]", DIM));
+            }
             if entry.widescreen || entry.widescreen_other.is_some() {
                 // Grey while off, coloured once on, red for a version of the game the hack is
                 // not made for (owner request).

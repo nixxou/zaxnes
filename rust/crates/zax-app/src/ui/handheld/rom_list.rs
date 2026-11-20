@@ -46,6 +46,9 @@ pub struct RomEntry {
     /// Whether this row is the `Resume` entry of AMD-053 REQ-LOOP-076 rather than a ROM file: it
     /// heads the list while the resume point stands, and its `name` is the title of its game.
     pub resume: bool,
+    /// The address of a game of a page of games (web build), not downloaded yet: playing it
+    /// downloads it (owner request, 2026-11-20).
+    pub remote: Option<String>,
 }
 
 impl RomEntry {
@@ -66,6 +69,18 @@ impl RomEntry {
             widescreen_forced: false,
             widescreen_unstudied: false,
             resume: false,
+            remote: None,
+        }
+    }
+
+    /// The row of a game of a page of games, at `url`, shown as `name`; its path is only a key
+    /// of the list, no file.
+    #[must_use]
+    pub fn remote_row(index: usize, name: &str, url: &str) -> Self {
+        Self {
+            name: name.to_owned(),
+            remote: Some(url.to_owned()),
+            ..Self::new(PathBuf::from(format!("{REMOTE_FOLDER}/{index}")))
         }
     }
 
@@ -119,6 +134,34 @@ pub enum RomListCommand {
     Achievements(PathBuf),
     /// Load the resume point (AMD-053 REQ-LOOP-076): the `Resume` row at the head of the list.
     ResumeLast,
+}
+
+/// The folder the paths of the remote rows are under; nothing is ever written there.
+pub const REMOTE_FOLDER: &str = "/zaxnes-web/remote";
+
+/// The rows of `remote` games added to the `local` ones, sorted with them by name; a remote game
+/// whose name a local file already has is left out (the copy downloaded before).
+#[must_use]
+pub fn with_remote_games(
+    mut local: Vec<RomEntry>,
+    remote: &[crate::web_bridge::RemoteGame],
+) -> Vec<RomEntry> {
+    if remote.is_empty() {
+        return local;
+    }
+    let present: std::collections::HashSet<String> = local
+        .iter()
+        .map(|entry| entry.name.to_lowercase())
+        .collect();
+    local.extend(
+        remote
+            .iter()
+            .enumerate()
+            .filter(|(_, game)| !present.contains(&game.name.to_lowercase()))
+            .map(|(index, game)| RomEntry::remote_row(index, &game.name, &game.url)),
+    );
+    local.sort_by_cached_key(|entry| (entry.name.to_lowercase(), entry.path.clone()));
+    local
 }
 
 /// The ROM files of `directory`, sorted by name without regard to case. A folder that cannot be
@@ -336,6 +379,30 @@ mod tests {
     use super::*;
     use zax_profiles::catalogue::ProfileOrigin;
     use zax_profiles::library::GameProfileSource;
+
+    #[test]
+    fn the_remote_games_join_the_list_by_name_without_the_local_copies() {
+        use crate::web_bridge::RemoteGame;
+        let local = vec![
+            RomEntry::new(PathBuf::from("/roms/Castlevania.nes")),
+            RomEntry::new(PathBuf::from("/roms/Zelda.nes")),
+        ];
+        let remote = [
+            RemoteGame {
+                name: "Metal Force".to_owned(),
+                url: "https://a/m.zip".to_owned(),
+            },
+            RemoteGame {
+                name: "castlevania".to_owned(),
+                url: "https://a/c.zip".to_owned(),
+            },
+        ];
+        let list = with_remote_games(local, &remote);
+        let names: Vec<&str> = list.iter().map(|entry| entry.name.as_str()).collect();
+        assert_eq!(vec!["Castlevania", "Metal Force", "Zelda"], names);
+        assert_eq!(Some("https://a/m.zip"), list[1].remote.as_deref());
+        assert_eq!(None, list[0].remote);
+    }
 
     fn list(names: &[&str]) -> RomListModel {
         RomListModel::new(
