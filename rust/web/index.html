@@ -168,6 +168,62 @@
     }
   }, true);
 
+  // --- ?play=<URL of a ROM> ---
+  // The URL may be given encoded (encodeURIComponent) or as it is: a value that starts with
+  // http(s):// takes the rest of the address, '&', '?' and '#' included, so a link pasted raw
+  // still works. Put `play` last then (any `env` before it).
+  function playUrl() {
+    const search = location.search;
+    const at = search.search(/[?&]play=/);
+    if (at < 0) return null;
+    let raw = search.slice(at + 6) + location.hash;
+    if (/^https?%3A/i.test(raw)) {
+      const end = raw.indexOf('&');
+      try { raw = decodeURIComponent(end < 0 ? raw : raw.slice(0, end)); } catch (e) { return null; }
+    }
+    return /^https?:\/\//i.test(raw) ? raw : null;
+  }
+  // The file's name: the server's (Content-Disposition), else the URL's last segment; given the
+  // extension its first bytes say when it has none the program knows.
+  function romName(url, response, bytes) {
+    let name = '';
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+    if (match) { try { name = decodeURIComponent(match[1]); } catch (e) { name = match[1]; } }
+    if (!name) {
+      const path = new URL(response.url || url).pathname;
+      try { name = decodeURIComponent(path.split('/').pop() || ''); } catch (e) { name = path.split('/').pop() || ''; }
+    }
+    name = name.replace(/[\/\\:*?"<>|]/g, '_').trim() || 'rom';
+    if (!ROM_FILE.test(name)) {
+      const head = String.fromCharCode(...bytes.slice(0, 4));
+      name += head === 'PK\x03\x04' ? '.zip' : head === 'FDS\x1a' ? '.fds' : head.startsWith('UNIF') ? '.unf' : '.nes';
+    }
+    return name;
+  }
+  async function playRemote(url) {
+    status.style.display = 'block';
+    status.textContent = 'Téléchargement de la ROM…';
+    let response;
+    try {
+      response = await fetch(url);
+    } catch (e) {
+      // A network error, or a server that does not allow other sites to read its files (CORS):
+      // the browser does not tell the two apart.
+      alertBox('ROM inaccessible : le site qui l’héberge ne permet pas à une autre page de la '
+        + 'télécharger (CORS), ou l’adresse ne répond pas. ' + url);
+      return;
+    }
+    if (!response.ok) { alertBox('ROM introuvable (' + response.status + ') : ' + url); return; }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.length < 16 || bytes.length > 64 * 1024 * 1024) { alertBox('Ce fichier n’est pas une ROM : ' + url); return; }
+    const name = romName(url, response, bytes);
+    FS.mkdirTree(ROMS);
+    FS.writeFile(ROMS + '/' + name, bytes);
+    status.textContent = '';
+    choose(ROMS + '/' + name);
+  }
+
   // The program asks for the dialogue by creating OPEN_REQUEST.
   function pollRequests() {
     if (exists(OPEN_REQUEST)) {
@@ -190,6 +246,9 @@
       status.textContent = '';
       canvas.focus();
       setInterval(pollRequests, 200);
+      // ?play=https://... : a ROM on the web, downloaded into the ROM folder, then played.
+      const remote = playUrl();
+      if (remote) { playRemote(remote); return; }
       // ?play=flappy (the README's link): straight into a bundled ROM, once the program has
       // installed it.
       const wanted = (new URLSearchParams(location.search).get('play') || '').toLowerCase();
