@@ -46,6 +46,7 @@ pub fn process(host: &mut AppHost) -> usize {
                         ImportResult {
                             ok: summary.failed == 0,
                             id: None,
+                            imported: summary.imported,
                             text: format!("{name}: {text}"),
                         }
                     }
@@ -54,6 +55,7 @@ pub fn process(host: &mut AppHost) -> usize {
                         ImportResult {
                             ok: false,
                             id: None,
+                            imported: 0,
                             text: format!("{name}: {}", report.message),
                         }
                     }
@@ -74,12 +76,14 @@ pub fn process(host: &mut AppHost) -> usize {
                         ImportResult {
                             ok: true,
                             id: Some(profile.id),
+                            imported: 1,
                             text,
                         }
                     }
                     (ProfileImportOutcome::AlreadyBuiltIn, _) => ImportResult {
                         ok: true,
                         id: None,
+                        imported: 0,
                         text: format!("{name}: {}", done.message),
                     },
                     _ => {
@@ -87,6 +91,7 @@ pub fn process(host: &mut AppHost) -> usize {
                         ImportResult {
                             ok: false,
                             id: None,
+                            imported: 0,
                             text: format!("{name}: {}", done.message),
                         }
                     }

@@ -52,6 +52,21 @@
   #bar button { padding: 5px 12px; border-radius: 14px; border: 1px solid #3a3e4a; background: rgba(27,29,36,.75);
                 color: #eee; font: 13px Roboto, system-ui, sans-serif; cursor: pointer; }
   body.playing #bar { display: none; }
+  /* The progress window (owner request): over the dialogues. */
+  #dlg-progress { z-index: 20; }
+  .steps { margin: 6px 0; }
+  .steps div { padding: 5px 0; display: flex; gap: 10px; align-items: baseline; }
+  .steps .mark { width: 18px; text-align: center; flex: none; }
+  .steps .run .mark { color: #ffd84a; }
+  .steps .ok .mark { color: #7bd88f; }
+  .steps .fail .mark { color: #ff8a80; }
+  .steps .detail { color: #9aa0ad; margin-left: auto; white-space: nowrap; }
+  .bar { height: 8px; background: #2a2d38; border-radius: 4px; overflow: hidden; margin: 8px 0; }
+  .bar div { height: 100%; width: 0; background: #ffd84a; transition: width .15s; }
+  .bar.busy div { width: 30%; animation: busy 1.1s ease-in-out infinite; }
+  @keyframes busy { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+  .final { margin-top: 10px; font-weight: 600; }
+  .final.ok { color: #9fe0ad; } .final.error { color: #ffb3ad; }
 </style>
 </head>
 <body>
@@ -125,12 +140,24 @@
   </div>
 </div>
 
+<div class="dialog" id="dlg-progress" role="dialog" aria-modal="true">
+  <div class="panel">
+    <h2 id="progress-title"></h2>
+    <div class="steps" id="progress-steps"></div>
+    <div class="bar" id="progress-bar"><div></div></div>
+    <div class="final" id="progress-final"></div>
+    <div class="row"><span class="grow"></span><button class="btn" id="progress-close" data-t="close"></button></div>
+  </div>
+</div>
+
 <script>
   // The user data folder of the program (SDL_GetPrefPath under Emscripten), kept in IndexedDB.
   const DATA = '/home/web_user/.local/share/Zaxnes';
   const ROMS = DATA + '/roms';
   // Where the program imports 3D profiles and 3dSen data from (launch_request.rs, IMPORT_FOLDER).
   const IMPORT = DATA + '/import';
+  // The user's 3D profiles.
+  const PROFILES = DATA + '/profiles';
   // The exchange files with the program (rust/crates/zax-app/src/web_bridge.rs).
   const OPEN_REQUEST = '/zaxnes-web/open-request';
   const OPEN_ANSWER = '/zaxnes-web/open-answer';
@@ -176,6 +203,11 @@
       cat_roms: 'ROMs', cat_saves: 'Sauvegardes d’état', cat_battery: 'Sauvegardes de cartouche', cat_profiles: 'Profils 3D',
       cat_tiles: 'Cache des tuiles 3D', cat_covers: 'Jaquettes', cat_movies: 'Films', cat_logs: 'Journaux',
       cat_settings: 'Réglages, touches et bibliothèque', cat_other: 'Autres',
+      progressImport: 'Import de profils 3D', progressRom: 'Téléchargement d’une ROM',
+      stepDownload: 'Téléchargement', stepRead: 'Lecture et décompression', stepImport: 'Import des profils',
+      importedN: '{0} profil(s) importé(s).', importedNone: 'Aucun nouveau profil : ils étaient déjà là.',
+      romReady: 'ROM prête : ', failed: 'Échec : ',
+      cached: 'déjà téléchargé', importCached: 'Déjà importé depuis cette adresse, profils inchangés : rien à retélécharger.',
     },
     en: {
       barRom: 'Open a ROM…', barProfile: '3D profiles…', barStorage: 'Storage…',
@@ -204,6 +236,11 @@
       cat_roms: 'ROMs', cat_saves: 'Save states', cat_battery: 'Cartridge saves', cat_profiles: '3D profiles',
       cat_tiles: '3D tile cache', cat_covers: 'Covers', cat_movies: 'Movies', cat_logs: 'Logs',
       cat_settings: 'Settings, keys and library', cat_other: 'Other',
+      progressImport: 'Importing 3D profiles', progressRom: 'Downloading a ROM',
+      stepDownload: 'Downloading', stepRead: 'Reading and unpacking', stepImport: 'Importing the profiles',
+      importedN: '{0} profile(s) imported.', importedNone: 'No new profile: they were there already.',
+      romReady: 'ROM ready: ', failed: 'Failed: ',
+      cached: 'downloaded already', importCached: 'Imported from this address already, profiles unchanged: nothing to download again.',
     },
   };
   let lang = (navigator.language || 'en').toLowerCase().startsWith('fr') ? 'fr' : 'en';
@@ -307,6 +344,57 @@
   document.getElementById('bar-profile').onclick = (e) => { e.currentTarget.blur(); clearMessages('profile-messages'); showDialog('profile'); };
   document.getElementById('bar-storage').onclick = (e) => { e.currentTarget.blur(); showDialog('storage'); };
 
+  // --- The progress window (owner request): download, reading, then what came of it. ---
+  const progressDialog = document.getElementById('dlg-progress');
+  document.getElementById('progress-close').onclick = () => {
+    progressDialog.classList.remove('shown');
+    if (!anyDialog()) canvas.focus();
+  };
+  function progressWindow(title) {
+    applyLanguage();
+    document.getElementById('progress-title').textContent = title;
+    const steps = document.getElementById('progress-steps');
+    const bar = document.getElementById('progress-bar');
+    const final = document.getElementById('progress-final');
+    const close = document.getElementById('progress-close');
+    steps.replaceChildren();
+    final.textContent = ''; final.className = 'final';
+    bar.style.display = ''; bar.classList.add('busy'); bar.firstChild.style.width = '';
+    close.disabled = true;
+    progressDialog.classList.add('shown');
+    return {
+      step(label) {
+        const row = document.createElement('div');
+        row.className = 'run';
+        const mark = document.createElement('span'); mark.className = 'mark'; mark.textContent = '…';
+        const text = document.createElement('span'); text.textContent = label;
+        const detail = document.createElement('span'); detail.className = 'detail';
+        row.append(mark, text, detail);
+        steps.appendChild(row);
+        bar.classList.add('busy'); bar.firstChild.style.width = '';
+        return {
+          detail(value) { detail.textContent = value; },
+          done() { row.className = 'ok'; mark.textContent = '✓'; },
+          fail() { row.className = 'fail'; mark.textContent = '✗'; },
+        };
+      },
+      // A share of the work done (0 to 1), or null for work of unknown length.
+      bar(fraction) {
+        if (fraction === null) { bar.classList.add('busy'); bar.firstChild.style.width = ''; return; }
+        bar.classList.remove('busy');
+        bar.firstChild.style.width = Math.round(Math.min(1, fraction) * 100) + '%';
+      },
+      finish(ok, text) {
+        bar.style.display = 'none';
+        final.className = 'final ' + (ok ? 'ok' : 'error');
+        final.textContent = text;
+        close.disabled = false;
+        close.focus();
+      },
+      close() { progressDialog.classList.remove('shown'); },
+    };
+  }
+
   // --- Playing: the answer the program reads (web_bridge.rs), with the profile ?profile= asked. ---
   let wantedProfile = null;
   function play(path) {
@@ -376,14 +464,14 @@
   document.getElementById('rom-url-go').onclick = async () => {
     const url = document.getElementById('rom-url').value.trim();
     if (!url) return;
-    const note = message('rom-messages', 'info', t('downloading') + ' ' + url);
+    const win = progressWindow(t('progressRom'));
     try {
-      const { name, bytes } = await download(url, 'rom');
+      const { name, bytes } = await downloadStep(win, url, 'rom');
       storeRom(name, bytes);
-      note.remove();
+      win.finish(true, t('romReady') + name);
       message('rom-messages', 'ok', t('romImported') + name);
       fillRoms();
-    } catch (e) { note.remove(); message('rom-messages', 'error', e.message); }
+    } catch (e) { win.finish(false, e.message); message('rom-messages', 'error', e.message); }
   };
 
   // --- Downloads: ?play=, ?profile=, ?import= and the address fields. ---
@@ -421,7 +509,8 @@
     }
     return name;
   }
-  async function download(url, kind) {
+  // `onProgress(received, total)` follows the download, total 0 when the server does not say.
+  async function download(url, kind, onProgress) {
     let response;
     try { response = await fetch(url); }
     catch (e) {
@@ -430,7 +519,26 @@
       throw new Error(t('cors') + url);
     }
     if (!response.ok) throw new Error(t('notFound') + '(' + response.status + ') : ' + url);
-    const bytes = new Uint8Array(await response.arrayBuffer());
+    const total = Number(response.headers.get('Content-Length')) || 0;
+    let bytes;
+    if (response.body && response.body.getReader && onProgress) {
+      const reader = response.body.getReader();
+      const parts = [];
+      let received = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        parts.push(value);
+        received += value.length;
+        if (received > 64 * 1024 * 1024) throw new Error(t('tooBig') + url);
+        onProgress(received, total);
+      }
+      bytes = new Uint8Array(received);
+      let at = 0;
+      for (const part of parts) { bytes.set(part, at); at += part.length; }
+    } else {
+      bytes = new Uint8Array(await response.arrayBuffer());
+    }
     if (bytes.length < 16 || bytes.length > 64 * 1024 * 1024) throw new Error(t('tooBig') + url);
     return { name: remoteName(url, response, bytes, kind === 'rom' ? ROM_FILE : PROFILE_FILE), bytes };
   }
@@ -454,6 +562,42 @@
       }
     }
     return values;
+  }
+
+  // --- What was downloaded (owner request): a reload (F5) of an address with ?play= or
+  // ?import= does not download again what is still there, unchanged. Kept in the user data
+  // (IndexedDB): for a ROM its file and size, for an import the profile files it made and
+  // their sizes. ---
+  const DOWNLOADS = DATA + '/web-downloads.json';
+  function downloads() {
+    try { return JSON.parse(FS.readFile(DOWNLOADS, { encoding: 'utf8' })) || {}; } catch (e) { return {}; }
+  }
+  function rememberDownload(url, entry) {
+    const all = downloads();
+    all[url] = Object.assign({ at: Date.now() }, entry);
+    // The 50 latest addresses.
+    const kept = Object.entries(all).sort((a, b) => b[1].at - a[1].at).slice(0, 50);
+    try { FS.writeFile(DOWNLOADS, JSON.stringify(Object.fromEntries(kept))); save(); } catch (e) {}
+  }
+  function fileSize(path) { try { return FS.stat(path).size; } catch (e) { return -1; } }
+  // The ROM downloaded from `url` before, still there with its size; its path.
+  function cachedRom(url) {
+    const entry = downloads()[url];
+    return entry && entry.kind === 'rom' && fileSize(entry.path) === entry.size ? entry.path : null;
+  }
+  // The import made from `url` before, its profile files still there with their sizes.
+  function cachedImport(url) {
+    const entry = downloads()[url];
+    if (!entry || entry.kind !== 'import') return null;
+    const unchanged = Object.entries(entry.files || {})
+      .every(([name, bytes]) => fileSize(PROFILES + '/' + name) === bytes);
+    return unchanged ? entry : null;
+  }
+  // The profile files and their sizes, to tell what an import made.
+  function profileSizes() {
+    const sizes = {};
+    for (const name of list(PROFILES)) sizes[name] = fileSize(PROFILES + '/' + name);
+    return sizes;
   }
 
   // --- 3D profiles and 3dSen data: put in the import folder; the program imports them and
@@ -484,8 +628,8 @@
     let text = '';
     try { text = FS.readFile(IMPORT_RESULT, { encoding: 'utf8' }); FS.unlink(IMPORT_RESULT); } catch (e) { return; }
     const lines = text.split('\n').filter(Boolean).map((line) => {
-      const [kind, id, ...rest] = line.split('|');
-      return { ok: kind === 'ok', id: id || null, text: rest.join('|') };
+      const [kind, id, count, ...rest] = line.split('|');
+      return { ok: kind === 'ok', id: id || null, count: Number(count) || 0, text: rest.join('|') };
     });
     for (const path of pageImports) {
       if (!exists(path + '.done')) continue;
@@ -498,18 +642,49 @@
     if (!waiters.length) for (const l of lines) message('profile-messages', l.ok ? 'ok' : 'error', l.text);
     save();
   }
-  async function importProfiles(files) {
+  // A download step of the window `win` for `url`: the percentage, or the size received.
+  async function downloadStep(win, url, kind) {
+    let shown = url.split('?')[0].split('/').pop() || url;
+    try { shown = decodeURIComponent(shown); } catch (e) { /* kept as it is */ }
+    const step = win.step(t('stepDownload') + ' : ' + shown);
+    try {
+      const file = await download(url, kind, (received, total) => {
+        step.detail(total ? Math.round(received * 100 / total) + ' %' : size(received));
+        win.bar(total ? received / total : null);
+      });
+      step.detail(size(file.bytes.length));
+      step.done();
+      return file;
+    } catch (e) { step.fail(); throw e; }
+  }
+  // Imports `files` (profiles, bundles, archives) in the window `win`, opened by the caller
+  // when it downloads first: the program reads them, then says how many profiles came.
+  async function importProfiles(files, win) {
     const kept = [];
     for (const f of files) {
       if (PROFILE_FILE.test(f.name)) kept.push(f);
       else message('profile-messages', 'error', t('notProfile') + f.name);
     }
-    if (!kept.length) return null;
-    const note = message('profile-messages', 'info', t('importing') + kept.map((f) => f.name).join(', '));
+    if (!kept.length) { if (win) win.finish(false, t('notProfile') + files.map((f) => f.name).join(', ')); return null; }
+    win = win || progressWindow(t('progressImport'));
+    const step = win.step(/\.(zip|7z|bundle|assets)$/i.test(kept[0].name) ? t('stepRead') : t('stepImport'));
+    step.detail(kept.map((f) => f.name).join(', '));
+    win.bar(null);
     const lines = await storeImports(kept);
-    note.remove();
-    if (!lines) { message('profile-messages', 'info', t('noAnswer')); return null; }
+    if (!lines) {
+      step.fail();
+      win.finish(false, t('noAnswer'));
+      message('profile-messages', 'info', t('noAnswer'));
+      return null;
+    }
+    const ok = lines.every((l) => l.ok);
+    const count = lines.reduce((sum, l) => sum + l.count, 0);
+    if (ok) step.done(); else step.fail();
     for (const l of lines) message('profile-messages', l.ok ? 'ok' : 'error', l.text);
+    const failures = lines.filter((l) => !l.ok).map((l) => l.text).join(' ; ');
+    win.finish(ok && true, ok
+      ? (count ? t('importedN', count) : t('importedNone'))
+      : (count ? t('importedN', count) + ' ' : '') + t('failed') + failures);
     return lines;
   }
   const profileInput = document.getElementById('profile-file');
@@ -522,9 +697,9 @@
   document.getElementById('profile-url-go').onclick = async () => {
     const url = document.getElementById('profile-url').value.trim();
     if (!url) return;
-    const note = message('profile-messages', 'info', t('downloading') + ' ' + url);
-    try { const file = await download(url, 'profile'); note.remove(); await importProfiles([file]); }
-    catch (e) { note.remove(); message('profile-messages', 'error', e.message); }
+    const win = progressWindow(t('progressImport'));
+    try { const file = await downloadStep(win, url, 'profile'); await importProfiles([file], win); }
+    catch (e) { win.finish(false, e.message); message('profile-messages', 'error', e.message); }
   };
 
   // Drop anywhere on the page: a ROM is played (or imported when the ROM dialogue is open), a
@@ -742,27 +917,54 @@
     let profile = addressValues('profile')[0] || null;
     const remotes = [...imports];
     if (profile && /^https?:\/\//i.test(profile)) { remotes.push(profile); profile = null; }
-    if (remotes.length) {
-      status.textContent = t('downloading');
+    // Imported already from those addresses, their profiles unchanged: nothing to do (a reload).
+    const profileUrl = addressValues('profile')[0];
+    const fresh = remotes.filter((url) => !cachedImport(url));
+    if (profile === null && profileUrl && /^https?:\/\//i.test(profileUrl) && !fresh.includes(profileUrl)) {
+      profile = cachedImport(profileUrl).id || null;
+    }
+    if (fresh.length) {
+      const win = progressWindow(t('progressImport'));
       const files = [];
-      for (const url of remotes) {
-        try { files.push(await download(url, 'profile')); } catch (e) { alertBox(e.message); }
+      const errors = [];
+      for (const url of fresh) {
+        try { files.push(Object.assign(await downloadStep(win, url, 'profile'), { url })); } catch (e) { errors.push(e.message); }
       }
       if (files.length) {
-        const lines = (await storeImports(files)) || [];
-        for (const l of lines) if (!l.ok) alertBox(l.text);
+        const before = profileSizes();
+        const lines = (await importProfiles(files, win)) || [];
+        // What each import made, remembered for a reload (one file per address here).
+        const after = profileSizes();
+        const made = {};
+        for (const [name, bytes] of Object.entries(after)) if (before[name] !== bytes) made[name] = bytes;
+        lines.forEach((line, index) => {
+          if (line.ok && files[index]) {
+            rememberDownload(files[index].url, { kind: 'import', id: line.id, count: line.count, files: files.length === 1 ? made : {} });
+          }
+        });
         // The profile given by its URL: the one that file became.
-        const last = lines.length === files.length ? lines[lines.length - 1] : null;
-        if (!profile && addressValues('profile')[0] && last && last.id) profile = last.id;
+        const at = files.findIndex((f) => f.url === profileUrl);
+        if (!profile && at >= 0 && lines[at] && lines[at].id) profile = lines[at].id;
+        if (errors.length) message('profile-messages', 'error', errors.join(' ; '));
+      } else {
+        win.finish(false, errors.join(' ; '));
       }
-      status.textContent = '';
     }
     wantedProfile = profile;
     const wanted = addressValues('play')[0] || '';
     if (/^https?:\/\//i.test(wanted)) {
-      status.textContent = t('downloading');
-      try { const { name, bytes } = await download(wanted, 'rom'); status.textContent = ''; play(storeRom(name, bytes)); }
-      catch (e) { status.textContent = ''; alertBox(e.message); }
+      // Downloaded before and still there, unchanged: played without downloading it again.
+      const cached = cachedRom(wanted);
+      if (cached) { play(cached); return; }
+      const win = progressWindow(t('progressRom'));
+      try {
+        const { name, bytes } = await downloadStep(win, wanted, 'rom');
+        // Straight into the game: the window goes, unless an import above left its result.
+        if (!fresh.length) win.close(); else win.finish(true, t('romReady') + name);
+        const path = storeRom(name, bytes);
+        rememberDownload(wanted, { kind: 'rom', path, size: bytes.length });
+        play(path);
+      } catch (e) { win.finish(false, e.message); }
       return;
     }
     // ?play=flappy (the README's link): straight into a bundled ROM, once the program has

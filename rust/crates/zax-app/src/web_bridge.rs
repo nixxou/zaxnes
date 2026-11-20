@@ -19,8 +19,9 @@ pub const FOLDER: &str = "/zaxnes-web";
 pub const OPEN_REQUEST: &str = "/zaxnes-web/open-request";
 /// Written by the page: the ROM to open, as a path of the file system.
 pub const OPEN_ANSWER: &str = "/zaxnes-web/open-answer";
-/// Written by the application: one line per imported file, `ok|<profile id>|<text>` or
-/// `error||<text>` (the identifier empty for a bundle, which brings many).
+/// Written by the application: one line per imported file, `ok|<profile id>|<count>|<text>` or
+/// `error||0|<text>` (the identifier empty for a bundle, which brings many; the count, how many
+/// profiles it brought).
 pub const IMPORT_RESULT: &str = "/zaxnes-web/import-result";
 
 /// Written by the application: `playing` while a game is on the screen, `idle` otherwise.
@@ -120,6 +121,8 @@ pub struct ImportResult {
     pub ok: bool,
     /// The identifier of the profile it became, for a single profile.
     pub id: Option<String>,
+    /// How many profiles it brought (the page's progress window says it).
+    pub imported: usize,
     /// What to tell the player.
     pub text: String,
 }
@@ -134,7 +137,11 @@ pub fn report_import(results: &[ImportResult]) {
         .map(|result| {
             let flat = result.text.replace(['\n', '\r'], " ");
             let id = result.id.as_deref().unwrap_or("").replace(['|', '\n', '\r'], " ");
-            format!("{}|{id}|{flat}\n", if result.ok { "ok" } else { "error" })
+            format!(
+                "{}|{id}|{}|{flat}\n",
+                if result.ok { "ok" } else { "error" },
+                result.imported
+            )
         })
         .collect();
     let _ = std::fs::create_dir_all(FOLDER);

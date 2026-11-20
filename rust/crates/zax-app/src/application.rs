@@ -526,10 +526,13 @@ impl Running {
             return;
         }
         let now = Instant::now();
-        if self
-            .import_checked
-            .is_some_and(|checked| now.duration_since(checked).as_secs_f32() < 1.0)
-        {
+        // The first look a second after the start: the interface has its language by then, and
+        // its notifications say what came of the import in it.
+        let Some(checked) = self.import_checked else {
+            self.import_checked = Some(now);
+            return;
+        };
+        if now.duration_since(checked).as_secs_f32() < 1.0 {
             return;
         }
         self.import_checked = Some(now);
