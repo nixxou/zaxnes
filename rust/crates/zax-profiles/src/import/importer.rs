@@ -12,8 +12,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::installation::locate_bundle;
-use super::profile_bundle::read_text_assets;
+use super::source::read_profile_source;
 use super::text_asset::UnityTextAsset;
 use super::UnityAssetFormatError;
 use crate::catalogue::{ProfileFileSystem, UserProfileFolder};
@@ -171,8 +170,9 @@ impl<'a> ThreeDSenImporter<'a> {
         &self,
         installation_or_bundle_path: &Path,
     ) -> Result<ThreeDSenImportSummary, ThreeDSenImportError> {
-        let bundle = locate_bundle(self.files, installation_or_bundle_path)?;
-        let assets = read_text_assets(&self.files.read_all_bytes(&bundle)?)?;
+        // A bundle, an installation, an archive holding either, or an old version's data file
+        // (owner request, 2026-11-20); refused when it holds no 3dSen profile.
+        let (bundle, assets) = read_profile_source(self.files, installation_or_bundle_path)?;
         Ok(self.import(&bundle, &assets)?)
     }
 

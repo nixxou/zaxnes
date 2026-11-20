@@ -2958,10 +2958,12 @@ dependencies = [
  "rstest",
  "serde",
  "serde_json",
+ "sevenz-rust2",
  "sha2",
  "thiserror 2.0.21",
  "time",
  "zax-settings",
+ "zip",
 ]
 
 [[package]]

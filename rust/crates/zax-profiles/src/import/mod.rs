@@ -8,6 +8,7 @@ mod installation;
 mod lz4;
 mod profile_bundle;
 mod serialized_file;
+mod source;
 mod text_asset;
 
 pub use bundle::{
@@ -25,6 +26,7 @@ pub use installation::{
 pub use lz4::decode as decode_lz4_block;
 pub use profile_bundle::read_text_assets;
 pub use serialized_file::{UnityObject, UnitySerializedFile};
+pub use source::{read_profile_file, read_profile_source};
 pub use text_asset::{UnityTextAsset, CLASS_ID as TEXT_ASSET_CLASS_ID};
 
 /// A bundle, a serialized file or an asset is not what the reader supports or is damaged.

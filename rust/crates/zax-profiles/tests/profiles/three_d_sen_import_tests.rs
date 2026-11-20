@@ -600,3 +600,100 @@ fn amd067_an_incomplete_ines_header_still_fails() {
         .unwrap();
     assert_eq!((0, 1), (summary.imported, summary.failed));
 }
+
+/// A bundle of profiles, as 3dSen 2.0 lays it out.
+fn profile_bundle() -> Vec<u8> {
+    synthetic_bundle::build(
+        &[("Pinball", profile("ABCDEFGHIJKL", "Pinball"))],
+        &SyntheticBundleOptions::three_d_sen_2(),
+    )
+}
+
+/// Owner request (2026-11-20): a bundle chosen under another name is read for its content.
+#[test]
+fn a_bundle_under_another_name_is_read_for_its_content() {
+    let files = FakeProfileFileSystem::new();
+    files.add_file(Path::new("/downloads/profiles.bundle"), &profile_bundle());
+    let importer = ThreeDSenImporter::new(&files, Path::new(DESTINATION), None);
+
+    let summary = importer
+        .import_from(Path::new("/downloads/profiles.bundle"))
+        .unwrap();
+
+    assert_eq!(1, summary.imported);
+}
+
+/// Owner request: a bundle of another game, without a 3dSen profile, is refused by name.
+#[test]
+fn a_bundle_without_a_profile_is_refused() {
+    let files = FakeProfileFileSystem::new();
+    let other = synthetic_bundle::build(
+        &[("readme", b"not a profile".to_vec())],
+        &SyntheticBundleOptions::three_d_sen_2(),
+    );
+    files.add_file(Path::new("/downloads/other.bundle"), &other);
+    let importer = ThreeDSenImporter::new(&files, Path::new(DESTINATION), None);
+
+    let error = importer
+        .import_from(Path::new("/downloads/other.bundle"))
+        .unwrap_err();
+
+    assert!(error.to_string().contains("not a 3dSen profile bundle"), "{error}");
+    assert!(!files.file_exists(&destination("readme.3dn")));
+}
+
+/// Owner request: a zip holding a whole 3dSen folder gives the bundle in it.
+#[test]
+fn a_zip_holding_an_installation_is_read() {
+    use std::io::Write;
+    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let options = zip::write::SimpleFileOptions::default();
+    zip.start_file("3dSen/readme.txt", options).unwrap();
+    zip.write_all(b"hello").unwrap();
+    zip.start_file(
+        format!("3dSen/3dSen_Data/StreamingAssets/aa/StandaloneWindows/{BUNDLE_PREFIX}ab{BUNDLE_EXTENSION}"),
+        options,
+    )
+    .unwrap();
+    zip.write_all(&profile_bundle()).unwrap();
+    let bytes = zip.finish().unwrap().into_inner();
+    let files = FakeProfileFileSystem::new();
+    files.add_file(Path::new("/downloads/3dSen.zip"), &bytes);
+    let importer = ThreeDSenImporter::new(&files, Path::new(DESTINATION), None);
+
+    let summary = importer.import_from(Path::new("/downloads/3dSen.zip")).unwrap();
+
+    assert_eq!(1, summary.imported);
+    assert!(files.file_exists(&destination("Pinball.3dn")));
+}
+
+/// Owner request: a 7z holding the bundle alone is read; an archive without one is refused.
+#[test]
+fn a_seven_zip_holding_the_bundle_is_read_and_an_empty_one_refused() {
+    let seven_zip = |entries: &[(&str, Vec<u8>)]| {
+        let mut writer = sevenz_rust2::ArchiveWriter::new(std::io::Cursor::new(Vec::new())).unwrap();
+        for (name, bytes) in entries {
+            writer
+                .push_archive_entry(
+                    sevenz_rust2::ArchiveEntry::new_file(name),
+                    Some(bytes.as_slice()),
+                )
+                .unwrap();
+        }
+        writer.finish().unwrap().into_inner()
+    };
+    let files = FakeProfileFileSystem::new();
+    files.add_file(
+        Path::new("/downloads/a.7z"),
+        &seven_zip(&[("profiles.bundle", profile_bundle())]),
+    );
+    files.add_file(
+        Path::new("/downloads/b.7z"),
+        &seven_zip(&[("notes.txt", b"nothing".to_vec())]),
+    );
+    let importer = ThreeDSenImporter::new(&files, Path::new(DESTINATION), None);
+
+    assert_eq!(1, importer.import_from(Path::new("/downloads/a.7z")).unwrap().imported);
+    let error = importer.import_from(Path::new("/downloads/b.7z")).unwrap_err();
+    assert!(error.to_string().contains("no 3dSen profile was found in the archive"), "{error}");
+}

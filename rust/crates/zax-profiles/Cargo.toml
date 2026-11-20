@@ -17,7 +17,12 @@ thiserror = "2"
 time = "0.3"
 getrandom = { version = "0.3", features = ["std"] }
 sha2 = "0.10"
+# The 3dSen profiles of a zip or 7z archive (owner request, 2026-11-20).
+zip = { version = "7.3.0", default-features = false, features = ["deflate"] }
+sevenz-rust2 = { version = "0.25.0", default-features = false }
 
 [dev-dependencies]
 rstest = "0.26"
+zip = { version = "7.3.0", default-features = false, features = ["deflate"] }
+sevenz-rust2 = { version = "0.25.0", default-features = false, features = ["compress"] }
 time = { version = "0.3", features = ["macros"] }
