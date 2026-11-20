@@ -634,6 +634,16 @@ impl HandheldUi {
             }
             input.wheel = 0.0;
         } else {
+            // The in-game menu has no scrollbar: the wheel and a finger's slide move its
+            // selection, the rows it shows following it when it is taller than the screen.
+            #[allow(clippy::cast_possible_truncation)] // a few notches
+            let notches = input.wheel.round() as i64;
+            if self.screen == Screen::Overlay && notches != 0 {
+                let button = if notches > 0 { PadButton::Up } else { PadButton::Down };
+                for _ in 0..notches.unsigned_abs() {
+                    self.press(button, frame);
+                }
+            }
             input.wheel = 0.0;
         }
         let presses = pointer::presses(&self.zones.borrow(), &input, self.focus_rank.get());

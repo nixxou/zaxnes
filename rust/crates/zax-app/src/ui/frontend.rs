@@ -522,7 +522,14 @@ impl ImguiFrontend {
                     if self.system_typing && !taps.is_empty() {
                         zax_platform::input::text::show_system_keyboard(true);
                     }
-                    if device {
+                    // The web page is a desktop for the interface, but a phone's fingers are
+                    // fingers there too: only while one acts, so the mouse keeps its own way.
+                    let web_touch = cfg!(target_os = "emscripten")
+                        && (!taps.is_empty()
+                            || self.touch_point.is_some()
+                            || self.touch_was_down
+                            || self.swipe != 0.0);
+                    if device || web_touch {
                         touch_on_console(
                             handheld,
                             frame,
