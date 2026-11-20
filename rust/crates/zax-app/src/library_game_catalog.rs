@@ -468,6 +468,28 @@ impl GameCatalog for LibraryGameCatalog {
         self.profiles.remove(game_id);
     }
 
+    fn find_profile(&self, wanted: &str) -> Option<String> {
+        let wanted = wanted.trim();
+        let entries = self.library.entries();
+        if let Some(entry) = entries.iter().find(|entry| entry.id() == wanted) {
+            return Some(entry.id().to_owned());
+        }
+        let lower = wanted.to_lowercase();
+        if let Some(entry) = entries
+            .iter()
+            .find(|entry| entry.title.to_lowercase() == lower)
+        {
+            return Some(entry.id().to_owned());
+        }
+        let mut starting = entries
+            .iter()
+            .filter(|entry| entry.title.to_lowercase().starts_with(&lower));
+        match (starting.next(), starting.next()) {
+            (Some(entry), None) if !lower.is_empty() => Some(entry.id().to_owned()),
+            _ => None,
+        }
+    }
+
     fn import_packed_profile(&mut self, name: &str, bytes: &[u8]) -> Option<String> {
         if !self.paths.is_writable {
             return None;

@@ -524,8 +524,18 @@ impl Running {
         self.load_the_asked_state();
         // Web build: the ROM the page's dialogue chose, and whether a game is on the screen
         // for the page (it hides its own button then). No-ops elsewhere.
-        if let Some(path) = crate::web_bridge::take_open_answer() {
-            self.host.enqueue(Command::OpenRom, CommandArgs::of_text(&path));
+        if let Some(answer) = crate::web_bridge::take_open_answer() {
+            // `?profile=` named the 3D profile to play it with: straight into the game.
+            let profile = answer
+                .profile
+                .as_deref()
+                .and_then(|wanted| self.host.games().find_profile(wanted));
+            match profile {
+                Some(game_id) => self.host.launch_rom_with_profile(&answer.path, &game_id),
+                None => self
+                    .host
+                    .enqueue(Command::OpenRom, CommandArgs::of_text(&answer.path)),
+            }
         }
         crate::web_bridge::report_playing(self.ui.game_on_screen());
         let frame_begin = self.clock.start();

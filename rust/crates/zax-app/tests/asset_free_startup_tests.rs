@@ -235,6 +235,7 @@ fn req_pub_002_the_repository_carries_no_asset_file() {
     let mut branding = 0;
     let mut demo = 0;
     let mut profiles = 0;
+    let mut web_fonts = 0;
     for entry in WalkDir::new(repository)
         .into_iter()
         .filter_entry(|entry| {
@@ -277,6 +278,10 @@ fn req_pub_002_the_repository_carries_no_asset_file() {
             } else if relative.starts_with("rust/profiles") {
                 // and the 3D profiles made for Zaxnes
                 profiles += 1;
+            } else if relative.starts_with("rust/web/fonts") {
+                // and the web build's interface face (Roboto, Apache-2.0): a page cannot read the
+                // system's faces
+                web_fonts += 1;
             } else {
                 stowaways.push(relative.display().to_string());
             }
@@ -292,6 +297,11 @@ fn req_pub_002_the_repository_carries_no_asset_file() {
     if profiles > 0 {
         let notices = std::fs::read_to_string(repository.join("ASSETS-LICENSES.md")).unwrap();
         assert!(notices.contains("rust/profiles/"));
+    }
+    if web_fonts > 0 {
+        let notices = std::fs::read_to_string(repository.join("ASSETS-LICENSES.md")).unwrap();
+        assert!(notices.contains("rust/web/fonts/"));
+        assert!(notices.contains("Apache-2.0"));
     }
     if demo > 0 {
         let notices = std::fs::read_to_string(repository.join("ASSETS-LICENSES.md")).unwrap();

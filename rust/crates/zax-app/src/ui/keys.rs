@@ -370,6 +370,9 @@ pub const HANDHELD_MENU_LOAD_STATE: &str = "handheld.menu.load_state";
 pub const HANDHELD_MENU_GAME_SPEED: &str = "handheld.menu.game_speed";
 pub const HANDHELD_MENU_QUIT_TO_LIST: &str = "handheld.menu.quit_to_list";
 pub const HANDHELD_MENU_EXIT: &str = "handheld.menu.exit";
+pub const HANDHELD_MENU_WEB_OPEN_ROM: &str = "handheld.menu.web_open_rom";
+pub const HANDHELD_MENU_WEB_IMPORT_PROFILE: &str = "handheld.menu.web_import_profile";
+pub const HANDHELD_MENU_WEB_MANAGE_CACHE: &str = "handheld.menu.web_manage_cache";
 pub const HANDHELD_OPTION_RENDER_SCALE: &str = "handheld.option.render_scale";
 pub const HANDHELD_OPTION_FRAME_CAP: &str = "handheld.option.frame_cap";
 pub const HANDHELD_OPTION_CAMERA: &str = "handheld.option.camera";
@@ -848,6 +851,9 @@ pub const PUBLISHED: &[&str] = &[
     HANDHELD_MENU_GAME_SPEED,
     HANDHELD_MENU_QUIT_TO_LIST,
     HANDHELD_MENU_EXIT,
+    HANDHELD_MENU_WEB_OPEN_ROM,
+    HANDHELD_MENU_WEB_IMPORT_PROFILE,
+    HANDHELD_MENU_WEB_MANAGE_CACHE,
     HANDHELD_OPTION_RENDER_SCALE,
     HANDHELD_OPTION_FRAME_CAP,
     HANDHELD_OPTION_CAMERA,

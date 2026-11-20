@@ -43,6 +43,27 @@ pub fn waiting_bundles(root: &Path) -> Vec<PathBuf> {
     bundles
 }
 
+/// The 3D profiles (`.3dn`, `.3dh`) waiting in the user data folder `root` beside the bundles
+/// (the web page puts those the player imports there), by name.
+#[must_use]
+pub fn waiting_profiles(root: &Path) -> Vec<PathBuf> {
+    let Ok(listing) = std::fs::read_dir(root.join(IMPORT_FOLDER)) else {
+        return Vec::new();
+    };
+    let mut profiles: Vec<PathBuf> = listing
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file()
+                && path.extension().is_some_and(|extension| {
+                    extension.eq_ignore_ascii_case("3dn") || extension.eq_ignore_ascii_case("3dh")
+                })
+        })
+        .collect();
+    profiles.sort();
+    profiles
+}
+
 /// A game asked by another application.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchRequest {

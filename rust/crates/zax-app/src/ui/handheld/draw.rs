@@ -1390,6 +1390,9 @@ impl HandheldUi {
             OverlayItem::Hacks => keys::MENU_AIDS,
             OverlayItem::Achievements => keys::TAB_ACHIEVEMENTS,
             OverlayItem::QuitToList => keys::HANDHELD_MENU_QUIT_TO_LIST,
+            OverlayItem::WebOpenRom => keys::HANDHELD_MENU_WEB_OPEN_ROM,
+            OverlayItem::WebImportProfile => keys::HANDHELD_MENU_WEB_IMPORT_PROFILE,
+            OverlayItem::WebManageCache => keys::HANDHELD_MENU_WEB_MANAGE_CACHE,
             OverlayItem::ExitToLauncher => keys::HANDHELD_MENU_EXIT,
         })
     }

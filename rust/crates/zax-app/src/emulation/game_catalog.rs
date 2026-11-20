@@ -106,6 +106,12 @@ pub trait GameCatalog {
         None
     }
 
+    /// The entry `wanted` names: its identifier, else its title (case ignored), else the only
+    /// title that starts with it. A catalogue without a library finds none.
+    fn find_profile(&self, _wanted: &str) -> Option<String> {
+        None
+    }
+
     /// Builds again the profile file of `game_id` from its project of the editor mode
     /// (`editor_mode.rs`), before a script reload reads it: `None` when it has no project, else
     /// whether the build went through. A catalogue without files has no project.

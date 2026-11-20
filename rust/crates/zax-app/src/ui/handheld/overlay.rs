@@ -30,12 +30,18 @@ pub enum OverlayItem {
     Achievements,
     /// Stop the game and show the ROM list.
     QuitToList,
-    /// Leave the application.
+    /// Web build: the page's ROM dialogue (owner request).
+    WebOpenRom,
+    /// Web build: the page's dialogue that imports 3D profiles and 3dSen data.
+    WebImportProfile,
+    /// Web build: the page's view of what the browser keeps.
+    WebManageCache,
+    /// Leave the application (not in the web build: a page has no launcher to go back to).
     ExitToLauncher,
 }
 
 /// The rows, in order.
-pub const ITEMS: [OverlayItem; 11] = [
+pub const ITEMS: [OverlayItem; 14] = [
     OverlayItem::Resume,
     OverlayItem::SaveState,
     OverlayItem::LoadState,
@@ -46,6 +52,9 @@ pub const ITEMS: [OverlayItem; 11] = [
     OverlayItem::Hacks,
     OverlayItem::Achievements,
     OverlayItem::QuitToList,
+    OverlayItem::WebOpenRom,
+    OverlayItem::WebImportProfile,
+    OverlayItem::WebManageCache,
     OverlayItem::ExitToLauncher,
 ];
 
@@ -100,6 +109,8 @@ pub enum OverlayCommand {
     Achievements,
     /// Stop the game, back to the ROM list.
     QuitToList,
+    /// Web build: show this dialogue of the page, the menu staying open behind it.
+    WebDialog(crate::web_bridge::WebDialog),
     /// Leave the application.
     ExitToLauncher,
 }
@@ -114,6 +125,8 @@ pub struct OverlayModel {
     speed: i32,
     /// Whether the achievements' row shows (RetroAchievements on).
     achievements: bool,
+    /// Whether the menu is the web build's: its page's rows, no exit to a launcher.
+    web: bool,
 }
 
 impl Default for OverlayModel {
@@ -132,7 +145,13 @@ impl OverlayModel {
             camera: CameraPreset::Orbit,
             speed: 10,
             achievements: false,
+            web: crate::web_bridge::active(),
         }
+    }
+
+    /// Makes the menu the web build's or not (tests; the build decides otherwise).
+    pub const fn set_web(&mut self, web: bool) {
+        self.web = web;
     }
 
     /// Shows the achievements' row or not (RetroAchievements on or off).
@@ -146,6 +165,13 @@ impl OverlayModel {
         ITEMS
             .into_iter()
             .filter(|item| self.achievements || *item != OverlayItem::Achievements)
+            .filter(|item| match item {
+                OverlayItem::WebOpenRom
+                | OverlayItem::WebImportProfile
+                | OverlayItem::WebManageCache => self.web,
+                OverlayItem::ExitToLauncher => !self.web,
+                _ => true,
+            })
             .collect()
     }
 
@@ -256,6 +282,13 @@ impl OverlayModel {
             OverlayItem::Hacks => OverlayCommand::Hacks,
             OverlayItem::Achievements => OverlayCommand::Achievements,
             OverlayItem::QuitToList => OverlayCommand::QuitToList,
+            OverlayItem::WebOpenRom => OverlayCommand::WebDialog(crate::web_bridge::WebDialog::Rom),
+            OverlayItem::WebImportProfile => {
+                OverlayCommand::WebDialog(crate::web_bridge::WebDialog::Profile)
+            }
+            OverlayItem::WebManageCache => {
+                OverlayCommand::WebDialog(crate::web_bridge::WebDialog::Storage)
+            }
             OverlayItem::ExitToLauncher => OverlayCommand::ExitToLauncher,
         }
     }
@@ -269,6 +302,22 @@ mod tests {
         while model.selected() != item {
             model.handle(PadButton::Down);
         }
+    }
+
+    #[test]
+    fn the_web_menu_has_the_page_s_rows_and_no_exit() {
+        let mut model = OverlayModel::new();
+        model.set_web(true);
+        let items = model.items();
+        assert!(!items.contains(&OverlayItem::ExitToLauncher));
+        assert_eq!(Some(&OverlayItem::WebManageCache), items.last());
+        go_to(&mut model, OverlayItem::WebImportProfile);
+        assert_eq!(
+            Some(OverlayCommand::WebDialog(crate::web_bridge::WebDialog::Profile)),
+            model.handle(PadButton::A)
+        );
+        model.set_web(false);
+        assert!(!model.items().contains(&OverlayItem::WebOpenRom));
     }
 
     #[test]
