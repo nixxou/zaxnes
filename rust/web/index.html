@@ -190,9 +190,23 @@
     const disposition = response.headers.get('Content-Disposition') || '';
     const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
     if (match) { try { name = decodeURIComponent(match[1]); } catch (e) { name = match[1]; } }
+    // The last segment of a path, or of a query value naming a file, decoded.
+    const lastPart = (text) => {
+      let part = (text || '').split(/[\/\\]/).pop() || '';
+      try { part = decodeURIComponent(part); } catch (e) { /* kept as it is */ }
+      return part;
+    };
     if (!name) {
-      const path = new URL(response.url || url).pathname;
-      try { name = decodeURIComponent(path.split('/').pop() || ''); } catch (e) { name = path.split('/').pop() || ''; }
+      // The URL given first (a redirection, as archive.org's to view_archive.php, says less),
+      // then a `file=` of the final URL, then its path; the first that names a ROM, else the last.
+      const candidates = [];
+      try { candidates.push(lastPart(new URL(url).pathname)); } catch (e) { /* not a URL */ }
+      try {
+        const final = new URL(response.url || url);
+        candidates.push(lastPart(final.searchParams.get('file')), lastPart(final.pathname));
+      } catch (e) { /* not a URL */ }
+      name = candidates.find((part) => ROM_FILE.test(part))
+        || candidates.find((part) => part && !/\.(php|aspx?|cgi|html?)$/i.test(part)) || '';
     }
     name = name.replace(/[\/\\:*?"<>|]/g, '_').trim() || 'rom';
     if (!ROM_FILE.test(name)) {
