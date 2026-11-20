@@ -52,6 +52,30 @@
   #bar button { padding: 5px 12px; border-radius: 14px; border: 1px solid #3a3e4a; background: rgba(27,29,36,.75);
                 color: #eee; font: 13px Roboto, system-ui, sans-serif; cursor: pointer; }
   body.playing #bar { display: none; }
+  /* The progress window (owner request): over the dialogues. */
+  #dlg-progress { z-index: 20; }
+  .steps { margin: 6px 0; }
+  .steps div { padding: 5px 0; display: flex; gap: 10px; align-items: baseline; }
+  .steps .mark { width: 18px; text-align: center; flex: none; }
+  .steps .run .mark { color: #ffd84a; }
+  .steps .ok .mark { color: #7bd88f; }
+  .steps .fail .mark { color: #ff8a80; }
+  .steps .detail { color: #9aa0ad; margin-left: auto; white-space: nowrap; }
+  .bar { height: 8px; background: #2a2d38; border-radius: 4px; overflow: hidden; margin: 8px 0; }
+  .bar div { height: 100%; width: 0; background: #ffd84a; transition: width .15s; }
+  .bar.busy div { width: 30%; animation: busy 1.1s ease-in-out infinite; }
+  @keyframes busy { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+  .final { margin-top: 10px; font-weight: 600; }
+  .final.ok { color: #9fe0ad; } .final.error { color: #ffb3ad; }
+  /* The game pages (owner request): a list of a page's games, downloaded when played. */
+  details.library { margin: 6px 0; border: 1px solid #3a3e4a; border-radius: 6px; background: #20232c; }
+  details.library summary { padding: 9px 12px; cursor: pointer; display: flex; gap: 8px; align-items: center; }
+  details.library summary .grow { flex: 1; word-break: break-all; }
+  details.library .inner { padding: 0 10px 10px; }
+  details.library input.filter { width: 100%; box-sizing: border-box; margin: 4px 0; padding: 7px 9px; border-radius: 6px;
+    border: 1px solid #3a3e4a; background: #12141a; color: #eee; font: inherit; }
+  details.library .games { max-height: 320px; overflow: auto; }
+  details.library .rom small.got { color: #7bd88f; }
 </style>
 </head>
 <body>
@@ -70,6 +94,13 @@
     <div id="bundled"></div>
     <h3 data-t="romMine"></h3>
     <div id="mine"></div>
+    <h3 data-t="libraries"></h3>
+    <p data-t="librariesText"></p>
+    <div class="row">
+      <input class="url" id="library-url" type="url" placeholder="https://…">
+      <button class="btn" id="library-add" data-t="libraryAdd"></button>
+    </div>
+    <div id="libraries"></div>
     <h3 data-t="romComputer"></h3>
     <div class="drop" data-t="romDrop"></div>
     <div class="row">
@@ -103,7 +134,7 @@
     </div>
     <div class="messages" id="profile-messages"></div>
     <div class="row"><span class="grow"></span><button class="btn" data-close data-t="close"></button></div>
-    <input type="file" id="profile-file" accept=".3dn,.3dh,.bundle" multiple hidden>
+    <input type="file" id="profile-file" accept=".3dn,.3dh,.bundle,.zip,.7z" multiple hidden>
   </div>
 </div>
 
@@ -125,12 +156,24 @@
   </div>
 </div>
 
+<div class="dialog" id="dlg-progress" role="dialog" aria-modal="true">
+  <div class="panel">
+    <h2 id="progress-title"></h2>
+    <div class="steps" id="progress-steps"></div>
+    <div class="bar" id="progress-bar"><div></div></div>
+    <div class="final" id="progress-final"></div>
+    <div class="row"><span class="grow"></span><button class="btn" id="progress-close" data-t="close"></button></div>
+  </div>
+</div>
+
 <script>
   // The user data folder of the program (SDL_GetPrefPath under Emscripten), kept in IndexedDB.
   const DATA = '/home/web_user/.local/share/Zaxnes';
   const ROMS = DATA + '/roms';
   // Where the program imports 3D profiles and 3dSen data from (launch_request.rs, IMPORT_FOLDER).
   const IMPORT = DATA + '/import';
+  // The user's 3D profiles.
+  const PROFILES = DATA + '/profiles';
   // The exchange files with the program (rust/crates/zax-app/src/web_bridge.rs).
   const OPEN_REQUEST = '/zaxnes-web/open-request';
   const OPEN_ANSWER = '/zaxnes-web/open-answer';
@@ -141,7 +184,11 @@
   const BUNDLED = [{ title: 'FlappyZaxNes', file: 'FlappyZaxNes.nes', noteKey: 'demo' }];
   const DEMO_MARKER = DATA + '/demo-game.txt';
   const ROM_FILE = /\.(nes|fds|unf|unif|zip|7z)$/i;
-  const PROFILE_FILE = /\.(3dn|3dh|bundle)$/i;
+  // What the profile import takes: profiles, 3dSen's bundle, or an archive holding it (the
+  // program looks for the bundle inside, rust/crates/zax-profiles/src/import/source.rs).
+  const PROFILE_FILE = /\.(3dn|3dh|bundle|zip|7z)$/i;
+  // Dropped anywhere, a zip or a 7z is a ROM; in the profile dialogue, a 3dSen archive.
+  const PROFILE_ONLY_FILE = /\.(3dn|3dh|bundle)$/i;
 
   // --- Language: the program's (ui.language of its settings), else the browser's. ---
   const TEXT = {
@@ -154,9 +201,9 @@
       close: 'Fermer',
       notRom: 'Ce fichier n’est pas une ROM reconnue : ', romImported: 'ROM importée : ',
       downloading: 'Téléchargement…', cors: 'Fichier inaccessible : le site qui l’héberge ne permet pas à une autre page de le télécharger (CORS), ou l’adresse ne répond pas. ',
-      notFound: 'Fichier introuvable ', tooBig: 'Ce fichier n’a pas la taille d’une ROM : ',
-      profileTitle: 'Importer un profil 3D', profileText: 'Profils 3D (.3dn, .3dh) et données de 3dSen (.bundle) : ils rejoignent vos profils, celui d’un même identifiant est remplacé.',
-      profileDrop: 'Déposez un fichier ici (.3dn, .3dh, .bundle)', profileImport: 'Importer…',
+      notFound: 'Fichier introuvable ', isPage: 'Cette adresse est une page web, pas un fichier : ', tooBig: 'Ce fichier n’a pas la taille d’une ROM : ', tooBigImport: 'Fichier trop gros pour un import (plus de 512 Mo) : ',
+      profileTitle: 'Importer un profil 3D', profileText: 'Profils 3D (.3dn, .3dh), fichier de profils de 3dSen (.bundle), ou une archive .zip / .7z qui le contient (même tout un dossier de 3dSen) : ils rejoignent vos profils, celui d’un même identifiant est remplacé.',
+      profileDrop: 'Déposez un fichier ici (.3dn, .3dh, .bundle, .zip, .7z)', profileImport: 'Importer…',
       notProfile: 'Ce fichier n’est ni un profil 3D ni des données 3dSen : ', importing: 'Import en cours : ',
       noAnswer: 'Le programme n’a pas répondu : l’import se fera à la prochaine ouverture de la liste des jeux.',
       storageTitle: 'Stockage du navigateur', storageCategories: 'Données', storageRoms: 'Vos ROMs',
@@ -172,6 +219,16 @@
       cat_roms: 'ROMs', cat_saves: 'Sauvegardes d’état', cat_battery: 'Sauvegardes de cartouche', cat_profiles: 'Profils 3D',
       cat_tiles: 'Cache des tuiles 3D', cat_covers: 'Jaquettes', cat_movies: 'Films', cat_logs: 'Journaux',
       cat_settings: 'Réglages, touches et bibliothèque', cat_other: 'Autres',
+      progressImport: 'Import de profils 3D', progressRom: 'Téléchargement d’une ROM',
+      stepDownload: 'Téléchargement', stepRead: 'Lecture et décompression', stepImport: 'Import des profils',
+      importedN: '{0} profil(s) importé(s).', importedNone: 'Aucun nouveau profil : ils étaient déjà là.',
+      romReady: 'ROM prête : ', failed: 'Échec : ',
+      cached: 'déjà téléchargé',
+      libraries: 'Depuis une page de jeux', librariesText: 'L’adresse d’une page qui liste des jeux (archive.org…) : ses jeux s’ajoutent à la liste des jeux, chacun téléchargé seulement quand on le lance.',
+      libraryAdd: 'Ajouter', libraryReading: 'Lecture de la page', libraryFound: '{0} jeu(x) trouvé(s).', libraryNone: 'Aucun lien vers un jeu sur cette page.',
+      libraryFilter: 'Chercher un jeu…', libraryMore: '{0} autre(s) : affinez la recherche.', libraryRemove: 'Retirer', libraryRefresh: 'Relire',
+      driveKey: 'Un dossier Google Drive ne peut être lu par une autre page que par l’API de Google Drive, qui demande une clé d’API (paramètre ?drivekey=).',
+      gotLocal: 'téléchargé', importCached: 'Déjà importé depuis cette adresse, profils inchangés : rien à retélécharger.',
     },
     en: {
       barRom: 'Open a ROM…', barProfile: '3D profiles…', barStorage: 'Storage…',
@@ -182,9 +239,9 @@
       close: 'Close',
       notRom: 'This file is not a known ROM: ', romImported: 'ROM imported: ',
       downloading: 'Downloading…', cors: 'File out of reach: the site hosting it does not let another page download it (CORS), or the address does not answer. ',
-      notFound: 'File not found ', tooBig: 'This file does not have the size of a ROM: ',
-      profileTitle: 'Import a 3D profile', profileText: '3D profiles (.3dn, .3dh) and 3dSen data (.bundle): they join your profiles, one of the same identifier is replaced.',
-      profileDrop: 'Drop a file here (.3dn, .3dh, .bundle)', profileImport: 'Import…',
+      notFound: 'File not found ', isPage: 'This address is a web page, not a file: ', tooBig: 'This file does not have the size of a ROM: ', tooBigImport: 'File too big for an import (over 512 MB): ',
+      profileTitle: 'Import a 3D profile', profileText: '3D profiles (.3dn, .3dh), 3dSen’s profiles file (.bundle), or a .zip / .7z archive holding it (even a whole 3dSen folder): they join your profiles, one of the same identifier is replaced.',
+      profileDrop: 'Drop a file here (.3dn, .3dh, .bundle, .zip, .7z)', profileImport: 'Import…',
       notProfile: 'This file is neither a 3D profile nor 3dSen data: ', importing: 'Importing: ',
       noAnswer: 'The program did not answer: the import will happen when the list of games next opens.',
       storageTitle: 'Browser storage', storageCategories: 'Data', storageRoms: 'Your ROMs',
@@ -200,6 +257,16 @@
       cat_roms: 'ROMs', cat_saves: 'Save states', cat_battery: 'Cartridge saves', cat_profiles: '3D profiles',
       cat_tiles: '3D tile cache', cat_covers: 'Covers', cat_movies: 'Movies', cat_logs: 'Logs',
       cat_settings: 'Settings, keys and library', cat_other: 'Other',
+      progressImport: 'Importing 3D profiles', progressRom: 'Downloading a ROM',
+      stepDownload: 'Downloading', stepRead: 'Reading and unpacking', stepImport: 'Importing the profiles',
+      importedN: '{0} profile(s) imported.', importedNone: 'No new profile: they were there already.',
+      romReady: 'ROM ready: ', failed: 'Failed: ',
+      cached: 'downloaded already',
+      libraries: 'From a page of games', librariesText: 'The address of a page listing games (archive.org…): its games join the list of games, each downloaded only when it is played.',
+      libraryAdd: 'Add', libraryReading: 'Reading the page', libraryFound: '{0} game(s) found.', libraryNone: 'No link to a game on this page.',
+      libraryFilter: 'Search a game…', libraryMore: '{0} more: narrow the search.', libraryRemove: 'Remove', libraryRefresh: 'Read again',
+      driveKey: 'A Google Drive folder can be read by another page only through the Google Drive API, which needs an API key (parameter ?drivekey=).',
+      gotLocal: 'downloaded', importCached: 'Imported from this address already, profiles unchanged: nothing to download again.',
     },
   };
   let lang = (navigator.language || 'en').toLowerCase().startsWith('fr') ? 'fr' : 'en';
@@ -281,7 +348,7 @@
   function showDialog(name) {
     applyLanguage();
     for (const [key, d] of Object.entries(dialogs)) d.classList.toggle('shown', key === name);
-    if (name === 'rom') fillRoms();
+    if (name === 'rom') { fillRoms(); fillLibraries(); }
     if (name === 'storage') fillStorage();
     const first = dialogs[name].querySelector('.btn.main') || dialogs[name].querySelector('[data-close]');
     if (first) first.focus();
@@ -302,6 +369,57 @@
   document.getElementById('bar-rom').onclick = (e) => { e.currentTarget.blur(); showDialog('rom'); };
   document.getElementById('bar-profile').onclick = (e) => { e.currentTarget.blur(); clearMessages('profile-messages'); showDialog('profile'); };
   document.getElementById('bar-storage').onclick = (e) => { e.currentTarget.blur(); showDialog('storage'); };
+
+  // --- The progress window (owner request): download, reading, then what came of it. ---
+  const progressDialog = document.getElementById('dlg-progress');
+  document.getElementById('progress-close').onclick = () => {
+    progressDialog.classList.remove('shown');
+    if (!anyDialog()) canvas.focus();
+  };
+  function progressWindow(title) {
+    applyLanguage();
+    document.getElementById('progress-title').textContent = title;
+    const steps = document.getElementById('progress-steps');
+    const bar = document.getElementById('progress-bar');
+    const final = document.getElementById('progress-final');
+    const close = document.getElementById('progress-close');
+    steps.replaceChildren();
+    final.textContent = ''; final.className = 'final';
+    bar.style.display = ''; bar.classList.add('busy'); bar.firstChild.style.width = '';
+    close.disabled = true;
+    progressDialog.classList.add('shown');
+    return {
+      step(label) {
+        const row = document.createElement('div');
+        row.className = 'run';
+        const mark = document.createElement('span'); mark.className = 'mark'; mark.textContent = '…';
+        const text = document.createElement('span'); text.textContent = label;
+        const detail = document.createElement('span'); detail.className = 'detail';
+        row.append(mark, text, detail);
+        steps.appendChild(row);
+        bar.classList.add('busy'); bar.firstChild.style.width = '';
+        return {
+          detail(value) { detail.textContent = value; },
+          done() { row.className = 'ok'; mark.textContent = '✓'; },
+          fail() { row.className = 'fail'; mark.textContent = '✗'; },
+        };
+      },
+      // A share of the work done (0 to 1), or null for work of unknown length.
+      bar(fraction) {
+        if (fraction === null) { bar.classList.add('busy'); bar.firstChild.style.width = ''; return; }
+        bar.classList.remove('busy');
+        bar.firstChild.style.width = Math.round(Math.min(1, fraction) * 100) + '%';
+      },
+      finish(ok, text) {
+        bar.style.display = 'none';
+        final.className = 'final ' + (ok ? 'ok' : 'error');
+        final.textContent = text;
+        close.disabled = false;
+        close.focus();
+      },
+      close() { progressDialog.classList.remove('shown'); },
+    };
+  }
 
   // --- Playing: the answer the program reads (web_bridge.rs), with the profile ?profile= asked. ---
   let wantedProfile = null;
@@ -372,14 +490,17 @@
   document.getElementById('rom-url-go').onclick = async () => {
     const url = document.getElementById('rom-url').value.trim();
     if (!url) return;
-    const note = message('rom-messages', 'info', t('downloading') + ' ' + url);
+    const win = progressWindow(t('progressRom'));
     try {
-      const { name, bytes } = await download(url, 'rom');
+      const { name, bytes } = await downloadStep(win, url, 'rom');
       storeRom(name, bytes);
-      note.remove();
+      win.finish(true, t('romReady') + name);
       message('rom-messages', 'ok', t('romImported') + name);
       fillRoms();
-    } catch (e) { note.remove(); message('rom-messages', 'error', e.message); }
+    } catch (e) {
+      if (e.page) { win.close(); addLibrary(url); return; }
+      win.finish(false, e.message); message('rom-messages', 'error', e.message);
+    }
   };
 
   // --- Downloads: ?play=, ?profile=, ?import= and the address fields. ---
@@ -417,17 +538,57 @@
     }
     return name;
   }
-  async function download(url, kind) {
+  // `onProgress(received, total)` follows the download, total 0 when the server does not say.
+  // archive.org lets another page read a file only through its /cors/ address (its /download/
+  // one redirects to a storage server that does not allow it); a file inside a zip, served by
+  // its archive viewer, is allowed as it is.
+  function readableUrl(url) {
+    let u;
+    try { u = new URL(url); } catch (e) { return url; }
+    const direct = /^(?:www\.)?archive\.org$/i.test(u.hostname) ? /^\/download\/([^/]+)\/(.+)$/.exec(u.pathname)
+      : /\.archive\.org$/i.test(u.hostname) ? /^\/\d+\/items\/([^/]+)\/(.+)$/.exec(u.pathname) : null;
+    // A member of an archive (NES.zip/NES%2FGame.zip): the viewer, which allows it.
+    if (!direct || /\.(zip|7z|rar|tar)\//i.test(direct[2])) return url;
+    return 'https://archive.org/cors/' + direct[1] + '/' + direct[2] + u.search;
+  }
+  async function download(url, kind, onProgress) {
     let response;
-    try { response = await fetch(url); }
+    try { response = await fetch(readableUrl(url)); }
     catch (e) {
       // A network error, or a server that does not allow other sites to read its files (CORS):
       // the browser does not tell the two apart.
       throw new Error(t('cors') + url);
     }
     if (!response.ok) throw new Error(t('notFound') + '(' + response.status + ') : ' + url);
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.length < 16 || bytes.length > 64 * 1024 * 1024) throw new Error(t('tooBig') + url);
+    const isPage = () => Object.assign(new Error(t('isPage') + url), { page: true });
+    if (/text\/html|application\/xhtml/i.test(response.headers.get('Content-Type') || '')) throw isPage();
+    const total = Number(response.headers.get('Content-Length')) || 0;
+    // A ROM is at most a few MB; a 3dSen installation (an import) a hundred or so.
+    const limit = kind === 'rom' ? 64 * 1024 * 1024 : 512 * 1024 * 1024;
+    const tooBig = () => new Error(t(kind === 'rom' ? 'tooBig' : 'tooBigImport') + url);
+    if (total > limit) throw tooBig();
+    let bytes;
+    if (response.body && response.body.getReader && onProgress) {
+      const reader = response.body.getReader();
+      const parts = [];
+      let received = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        parts.push(value);
+        received += value.length;
+        if (received > limit) throw tooBig();
+        onProgress(received, total);
+      }
+      bytes = new Uint8Array(received);
+      let at = 0;
+      for (const part of parts) { bytes.set(part, at); at += part.length; }
+    } else {
+      bytes = new Uint8Array(await response.arrayBuffer());
+    }
+    if (bytes.length < 16 || bytes.length > limit) throw tooBig();
+    const head = new TextDecoder().decode(bytes.subarray(0, 64)).trimStart().toLowerCase();
+    if (head.startsWith('<!doctype html') || head.startsWith('<html')) throw isPage();
     return { name: remoteName(url, response, bytes, kind === 'rom' ? ROM_FILE : PROFILE_FILE), bytes };
   }
   // The value of `key` in the address: an http(s) URL takes the rest of the parameter, '&' and
@@ -441,7 +602,7 @@
     while ((found = pattern.exec(search))) {
       let raw = search.slice(found.index + found[0].length);
       if (/^https?:\/\//i.test(raw)) {
-        const next = raw.search(/&(play|profile|import|env)=/);
+        const next = raw.search(/&(play|profile|import|library|drivekey|env)=/);
         values.push(next < 0 ? raw : raw.slice(0, next));
       } else {
         const end = raw.search(/[&#]/);
@@ -452,12 +613,259 @@
     return values;
   }
 
+  // --- What was downloaded (owner request): a reload (F5) of an address with ?play= or
+  // ?import= does not download again what is still there, unchanged. Kept in the user data
+  // (IndexedDB): for a ROM its file and size, for an import the profile files it made and
+  // their sizes. ---
+  const DOWNLOADS = DATA + '/web-downloads.json';
+  function downloads() {
+    try { return JSON.parse(FS.readFile(DOWNLOADS, { encoding: 'utf8' })) || {}; } catch (e) { return {}; }
+  }
+  function rememberDownload(url, entry) {
+    const all = downloads();
+    all[url] = Object.assign({ at: Date.now() }, entry);
+    // The 50 latest addresses.
+    const kept = Object.entries(all).sort((a, b) => b[1].at - a[1].at).slice(0, 50);
+    try { FS.writeFile(DOWNLOADS, JSON.stringify(Object.fromEntries(kept))); save(); } catch (e) {}
+  }
+  function fileSize(path) { try { return FS.stat(path).size; } catch (e) { return -1; } }
+  // The ROM downloaded from `url` before, still there with its size; its path.
+  function cachedRom(url) {
+    const entry = downloads()[url];
+    return entry && entry.kind === 'rom' && fileSize(entry.path) === entry.size ? entry.path : null;
+  }
+  // The import made from `url` before, its profile files still there with their sizes.
+  function cachedImport(url) {
+    const entry = downloads()[url];
+    if (!entry || entry.kind !== 'import') return null;
+    const unchanged = Object.entries(entry.files || {})
+      .every(([name, bytes]) => fileSize(PROFILES + '/' + name) === bytes);
+    return unchanged ? entry : null;
+  }
+  // The profile files and their sizes, to tell what an import made.
+  function profileSizes() {
+    const sizes = {};
+    for (const name of list(PROFILES)) sizes[name] = fileSize(PROFILES + '/' + name);
+    return sizes;
+  }
+
+  // --- Pages of games (owner request): a page's links to games, kept in the user data, each
+  // game downloaded when it is played (then kept, as the ROMs of ?play=). ---
+  const LIBRARIES = DATA + '/web-libraries.json';
+  const GAME_LINK = /\.(nes|zip|7z|fds|unf|unif)$/i;
+  // The profiles of 3dSen (zax-profiles installation.rs BUNDLE_PREFIX): a page of games that
+  // links to it gives its 3D profiles too, not a game.
+  const BUNDLE_LINK = /^defaultprofiles_assets_all_.*\.bundle$/i;
+  function libraries() {
+    try { return JSON.parse(FS.readFile(LIBRARIES, { encoding: 'utf8' })) || []; } catch (e) { return []; }
+  }
+  function saveLibraries(all) { try { FS.writeFile(LIBRARIES, JSON.stringify(all)); save(); } catch (e) {} }
+  // The Drive API key: ?drivekey=, kept once given.
+  function driveKey() {
+    const given = addressValues('drivekey')[0];
+    if (given) { try { FS.writeFile(DATA + '/web-drive-key.txt', given); } catch (e) {} return given; }
+    try { return FS.readFile(DATA + '/web-drive-key.txt', { encoding: 'utf8' }).trim() || null; } catch (e) { return null; }
+  }
+  // The games of the page at `url`: [{ name, url }].
+  async function readLibrary(url) {
+    const folder = /drive\.google\.com\/drive\/(?:u\/\d+\/)?folders\/([A-Za-z0-9_-]+)/.exec(url);
+    if (folder) return readDriveFolder(folder[1]);
+    let response;
+    try { response = await fetch(url); } catch (e) { throw new Error(t('cors') + url); }
+    if (!response.ok) throw new Error(t('notFound') + '(' + response.status + ') : ' + url);
+    const page = new DOMParser().parseFromString(await response.text(), 'text/html');
+    const base = response.url || url;
+    const seen = new Set();
+    const games = [];
+    const bundles = [];
+    for (const link of page.querySelectorAll('a[href]')) {
+      let target;
+      try { target = new URL(link.getAttribute('href'), base); } catch (e) { continue; }
+      if (!/^https?:$/.test(target.protocol)) continue;
+      // The file's name: the end of its path, or a file= of its query (archive.org's viewer).
+      let name = target.pathname.split('/').pop() || '';
+      const file = target.searchParams.get('file');
+      if (file && GAME_LINK.test(file)) name = file.split('/').pop();
+      try { name = decodeURIComponent(name); } catch (e) { /* kept as it is */ }
+      name = name.split('/').pop();
+      if (seen.has(target.href)) continue;
+      if (BUNDLE_LINK.test(name)) { seen.add(target.href); bundles.push({ name, url: target.href }); continue; }
+      if (!GAME_LINK.test(name)) continue;
+      seen.add(target.href);
+      games.push({ name, url: target.href });
+    }
+    return Object.assign(games, { bundles });
+  }
+  // A Google Drive folder, through the Drive API (its folder pages cannot be read from another
+  // page); the files themselves download from drive.usercontent.google.com, which allows it.
+  async function readDriveFolder(id) {
+    const key = driveKey();
+    if (!key) throw new Error(t('driveKey'));
+    const games = [];
+    let pageToken = '';
+    do {
+      const api = 'https://www.googleapis.com/drive/v3/files?pageSize=1000&fields=nextPageToken,files(id,name)'
+        + '&q=' + encodeURIComponent("'" + id + "' in parents and trashed=false")
+        + '&key=' + encodeURIComponent(key) + (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
+      const response = await fetch(api);
+      if (!response.ok) throw new Error('Google Drive (' + response.status + ')');
+      const data = await response.json();
+      for (const f of data.files || []) {
+        if (GAME_LINK.test(f.name)) {
+          games.push({ name: f.name, url: 'https://drive.usercontent.google.com/download?id=' + f.id + '&export=download' });
+        }
+      }
+      pageToken = data.nextPageToken || '';
+    } while (pageToken);
+    return games;
+  }
+  // The games of the pages not downloaded yet, for the program's list (web_bridge.rs
+  // REMOTE_GAMES): it shows them with the ROMs, and asks for one when it is played.
+  const REMOTE_GAMES = '/zaxnes-web/remote-games';
+  const GAMES_CHANGED = '/zaxnes-web/games-changed';
+  function publishRemoteGames() {
+    const seen = new Set();
+    const lines = [];
+    for (const library of libraries()) {
+      for (const game of library.games) {
+        if (seen.has(game.url) || cachedRom(game.url)) continue;
+        seen.add(game.url);
+        const name = game.name.replace(GAME_LINK, '').replace(/[\t\r\n]/g, ' ');
+        lines.push(name + '\t' + game.url.replace(/[\t\r\n]/g, ''));
+      }
+    }
+    try {
+      FS.mkdirTree('/zaxnes-web');
+      FS.writeFile(REMOTE_GAMES, lines.join('\n') + '\n');
+      FS.writeFile(GAMES_CHANGED, '1');
+    } catch (e) {}
+  }
+  async function addLibrary(url, quiet) {
+    const win = quiet ? null : progressWindow(t('libraries'));
+    const step = win && win.step(t('libraryReading'));
+    try {
+      const games = await readLibrary(url);
+      const bundles = games.bundles || [];
+      if (!games.length && !bundles.length) throw new Error(t('libraryNone'));
+      const all = libraries().filter((l) => l.url !== url);
+      let title = url;
+      try { const u = new URL(url); title = u.hostname + decodeURIComponent(u.pathname + u.search).slice(0, 80); } catch (e) {}
+      all.unshift({ url, title, games: [...games], bundles, at: Date.now() });
+      saveLibraries(all);
+      publishRemoteGames();
+      if (step) { step.detail(games.length + ''); step.done(); win.finish(true, t('libraryFound', games.length)); }
+      fillLibraries(url);
+      await importLibraryProfiles(url);
+      return games;
+    } catch (e) {
+      if (step) { step.fail(); win.finish(false, e.message); } else alertBox(e.message);
+      return null;
+    }
+  }
+  // The 3D profiles of the 3dSen bundle a page links to, while the player has none of their
+  // own (the built-in ones aside): downloaded and imported once, as an ?import= of it.
+  function hasOwnProfiles() {
+    // The program's own (web_bridge.rs SHIPPED_PROFILES): the demo's and the bundled ones.
+    let shipped = [];
+    try { shipped = FS.readFile('/zaxnes-web/shipped-profiles', { encoding: 'utf8' }).split('\n').map((n) => n.trim().toLowerCase()); } catch (e) {}
+    return list(PROFILES).some((name) => /\.(3dn|3dh)$/i.test(name) && !shipped.includes(name.toLowerCase()));
+  }
+  async function importLibraryProfiles(url) {
+    const library = libraries().find((l) => l.url === url);
+    const bundle = library && (library.bundles || [])[0];
+    if (!bundle || cachedImport(bundle.url)) return;
+    // The program says which profiles are its own once it started (shipped-profiles).
+    for (let i = 0; i < 100 && !exists('/zaxnes-web/shipped-profiles'); i++) await new Promise((r) => setTimeout(r, 100));
+    if (hasOwnProfiles()) return;
+    const win = progressWindow(t('progressImport'));
+    try {
+      const file = await downloadStep(win, bundle.url, 'profile');
+      const before = profileSizes();
+      const lines = (await importProfiles([file], win)) || [];
+      const after = profileSizes();
+      const made = {};
+      for (const [name, bytes] of Object.entries(after)) if (before[name] !== bytes) made[name] = bytes;
+      if (lines[0] && lines[0].ok) rememberDownload(bundle.url, { kind: 'import', id: lines[0].id, count: lines[0].count, files: made });
+    } catch (e) { win.finish(false, e.message); }
+  }
+  // A game of a page: played from the copy downloaded before, else downloaded now.
+  async function playFromLibrary(game, profile) {
+    if (profile) wantedProfile = profile;
+    const cached = cachedRom(game.url);
+    if (cached) { play(cached); return; }
+    const win = progressWindow(t('progressRom'));
+    try {
+      const { bytes } = await downloadStep(win, game.url, 'rom');
+      win.close();
+      const path = storeRom(game.name, bytes);
+      rememberDownload(game.url, { kind: 'rom', path, size: bytes.length });
+      // Now a ROM of the folder: out of the remote games.
+      publishRemoteGames();
+      play(path);
+    } catch (e) { wantedProfile = null; win.finish(false, e.message); }
+  }
+  function fillLibraries(open) {
+    const box = document.getElementById('libraries');
+    box.replaceChildren();
+    for (const library of libraries()) {
+      const details = document.createElement('details');
+      details.className = 'library';
+      details.open = library.url === open;
+      const summary = document.createElement('summary');
+      const label = document.createElement('span'); label.className = 'grow';
+      label.textContent = library.title + ' (' + library.games.length + ')';
+      const refresh = document.createElement('button'); refresh.className = 'btn small'; refresh.textContent = t('libraryRefresh');
+      refresh.onclick = (e) => { e.preventDefault(); addLibrary(library.url); };
+      const remove = document.createElement('button'); remove.className = 'btn small danger'; remove.textContent = t('libraryRemove');
+      remove.onclick = (e) => { e.preventDefault(); saveLibraries(libraries().filter((l) => l.url !== library.url)); publishRemoteGames(); fillLibraries(); };
+      summary.append(label, refresh, remove);
+      const inner = document.createElement('div'); inner.className = 'inner';
+      const filter = document.createElement('input'); filter.className = 'filter'; filter.placeholder = t('libraryFilter');
+      const games = document.createElement('div'); games.className = 'games';
+      // The first 300 matches drawn: a page may list thousands.
+      const draw = () => {
+        const words = filter.value.toLowerCase().split(/\s+/).filter(Boolean);
+        const matches = library.games.filter((g) => words.every((w) => g.name.toLowerCase().includes(w)));
+        games.replaceChildren();
+        for (const game of matches.slice(0, 300)) {
+          const button = romButton(game.name.replace(GAME_LINK, ''), null, cachedRom(game.url) ? t('gotLocal') : '');
+          const got = button.querySelector('small'); if (got) got.className = 'got';
+          button.onclick = () => playFromLibrary(game);
+          games.appendChild(button);
+        }
+        if (matches.length > 300) {
+          const more = document.createElement('div'); more.className = 'empty'; more.textContent = t('libraryMore', matches.length - 300);
+          games.appendChild(more);
+        }
+      };
+      filter.oninput = draw;
+      details.ontoggle = () => { if (details.open && !games.childElementCount) draw(); };
+      if (details.open) draw();
+      inner.append(filter, games);
+      details.append(summary, inner);
+      box.appendChild(details);
+    }
+  }
+  document.getElementById('library-add').onclick = () => {
+    const url = document.getElementById('library-url').value.trim();
+    if (url) addLibrary(url);
+  };
+
   // --- 3D profiles and 3dSen data: put in the import folder; the program imports them and
   // answers in IMPORT_RESULT (a line per file: ok|<id>|<text> or error||<text>). ---
   let importWaiters = [];
+  // The files the page put there: once imported, they and their .done marker go (the browser's
+  // storage is not kept full of them).
+  let pageImports = [];
   function storeImports(files) {
     FS.mkdirTree(IMPORT);
-    for (const { name, bytes } of files) FS.writeFile(IMPORT + '/' + safeName(name), bytes);
+    for (const { name, bytes } of files) {
+      const path = IMPORT + '/' + safeName(name);
+      // Put again: imported again.
+      try { FS.unlink(path + '.done'); } catch (e) {}
+      FS.writeFile(path, bytes);
+      pageImports.push(path);
+    }
     return new Promise((resolve) => {
       const waiter = { resolve, timer: setTimeout(() => {
         importWaiters = importWaiters.filter((w) => w !== waiter);
@@ -471,27 +879,63 @@
     let text = '';
     try { text = FS.readFile(IMPORT_RESULT, { encoding: 'utf8' }); FS.unlink(IMPORT_RESULT); } catch (e) { return; }
     const lines = text.split('\n').filter(Boolean).map((line) => {
-      const [kind, id, ...rest] = line.split('|');
-      return { ok: kind === 'ok', id: id || null, text: rest.join('|') };
+      const [kind, id, count, ...rest] = line.split('|');
+      return { ok: kind === 'ok', id: id || null, count: Number(count) || 0, text: rest.join('|') };
     });
+    for (const path of pageImports) {
+      if (!exists(path + '.done')) continue;
+      try { FS.unlink(path); FS.unlink(path + '.done'); } catch (e) {}
+    }
+    pageImports = pageImports.filter((path) => exists(path));
     const waiters = importWaiters;
     importWaiters = [];
     for (const w of waiters) { clearTimeout(w.timer); w.resolve(lines); }
     if (!waiters.length) for (const l of lines) message('profile-messages', l.ok ? 'ok' : 'error', l.text);
     save();
   }
-  async function importProfiles(files) {
+  // A download step of the window `win` for `url`: the percentage, or the size received.
+  async function downloadStep(win, url, kind) {
+    let shown = url.split('?')[0].split('/').pop() || url;
+    try { shown = decodeURIComponent(shown); } catch (e) { /* kept as it is */ }
+    const step = win.step(t('stepDownload') + ' : ' + shown);
+    try {
+      const file = await download(url, kind, (received, total) => {
+        step.detail(total ? Math.round(received * 100 / total) + ' %' : size(received));
+        win.bar(total ? received / total : null);
+      });
+      step.detail(size(file.bytes.length));
+      step.done();
+      return file;
+    } catch (e) { step.fail(); throw e; }
+  }
+  // Imports `files` (profiles, bundles, archives) in the window `win`, opened by the caller
+  // when it downloads first: the program reads them, then says how many profiles came.
+  async function importProfiles(files, win) {
     const kept = [];
     for (const f of files) {
       if (PROFILE_FILE.test(f.name)) kept.push(f);
       else message('profile-messages', 'error', t('notProfile') + f.name);
     }
-    if (!kept.length) return null;
-    const note = message('profile-messages', 'info', t('importing') + kept.map((f) => f.name).join(', '));
+    if (!kept.length) { if (win) win.finish(false, t('notProfile') + files.map((f) => f.name).join(', ')); return null; }
+    win = win || progressWindow(t('progressImport'));
+    const step = win.step(/\.(zip|7z|bundle|assets)$/i.test(kept[0].name) ? t('stepRead') : t('stepImport'));
+    step.detail(kept.map((f) => f.name).join(', '));
+    win.bar(null);
     const lines = await storeImports(kept);
-    note.remove();
-    if (!lines) { message('profile-messages', 'info', t('noAnswer')); return null; }
+    if (!lines) {
+      step.fail();
+      win.finish(false, t('noAnswer'));
+      message('profile-messages', 'info', t('noAnswer'));
+      return null;
+    }
+    const ok = lines.every((l) => l.ok);
+    const count = lines.reduce((sum, l) => sum + l.count, 0);
+    if (ok) step.done(); else step.fail();
     for (const l of lines) message('profile-messages', l.ok ? 'ok' : 'error', l.text);
+    const failures = lines.filter((l) => !l.ok).map((l) => l.text).join(' ; ');
+    win.finish(ok && true, ok
+      ? (count ? t('importedN', count) : t('importedNone'))
+      : (count ? t('importedN', count) + ' ' : '') + t('failed') + failures);
     return lines;
   }
   const profileInput = document.getElementById('profile-file');
@@ -504,9 +948,9 @@
   document.getElementById('profile-url-go').onclick = async () => {
     const url = document.getElementById('profile-url').value.trim();
     if (!url) return;
-    const note = message('profile-messages', 'info', t('downloading') + ' ' + url);
-    try { const file = await download(url, 'profile'); note.remove(); await importProfiles([file]); }
-    catch (e) { note.remove(); message('profile-messages', 'error', e.message); }
+    const win = progressWindow(t('progressImport'));
+    try { const file = await downloadStep(win, url, 'profile'); await importProfiles([file], win); }
+    catch (e) { win.finish(false, e.message); message('profile-messages', 'error', e.message); }
   };
 
   // Drop anywhere on the page: a ROM is played (or imported when the ROM dialogue is open), a
@@ -518,8 +962,9 @@
     document.body.classList.remove('dragging');
     if (typeof FS === 'undefined') return;
     const files = [...((e.dataTransfer && e.dataTransfer.files) || [])];
-    const profiles = files.filter((f) => PROFILE_FILE.test(f.name));
-    const roms = files.filter((f) => !PROFILE_FILE.test(f.name));
+    const asProfile = dialogs.profile.classList.contains('shown') ? PROFILE_FILE : PROFILE_ONLY_FILE;
+    const profiles = files.filter((f) => asProfile.test(f.name));
+    const roms = files.filter((f) => !asProfile.test(f.name));
     if (profiles.length) {
       if (!dialogs.profile.classList.contains('shown')) { clearMessages('profile-messages'); showDialog('profile'); }
       const read = await Promise.all(profiles.map(async (f) => ({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) })));
@@ -705,6 +1150,14 @@
     if (exists(OPEN_REQUEST)) {
       let wanted = 'rom';
       try { wanted = FS.readFile(OPEN_REQUEST, { encoding: 'utf8' }).trim() || 'rom'; FS.unlink(OPEN_REQUEST); } catch (e) {}
+      if (wanted.startsWith('remote\n')) {
+        const [, url, name, profile] = wanted.split('\n');
+        // The game as its page listed it (its file name, extension included).
+        const known = libraries().flatMap((l) => l.games).find((g) => g.url === (url || '').trim());
+        const game = known || { url: (url || '').trim(), name: (name || 'game').trim() + '.nes' };
+        if (game.url) playFromLibrary(game, (profile || '').trim() || null);
+        return;
+      }
       if (wanted === 'profile') clearMessages('profile-messages');
       showDialog(dialogs[wanted] ? wanted : 'rom');
     }
@@ -719,31 +1172,65 @@
   // ?profile=<identifier, title or URL> is the profile to play with; ?play=<URL or bundled
   // name> the ROM. ---
   async function startFromAddress() {
+    const library = addressValues('library')[0];
+    if (library && /^https?:\/\//i.test(library)) {
+      if (!libraries().some((l) => l.url === library)) await addLibrary(library, true);
+      else await importLibraryProfiles(library);
+    }
+    // The program's list shows the games of the pages added before.
+    publishRemoteGames();
     const imports = addressValues('import');
     let profile = addressValues('profile')[0] || null;
     const remotes = [...imports];
     if (profile && /^https?:\/\//i.test(profile)) { remotes.push(profile); profile = null; }
-    if (remotes.length) {
-      status.textContent = t('downloading');
+    // Imported already from those addresses, their profiles unchanged: nothing to do (a reload).
+    const profileUrl = addressValues('profile')[0];
+    const fresh = remotes.filter((url) => !cachedImport(url));
+    if (profile === null && profileUrl && /^https?:\/\//i.test(profileUrl) && !fresh.includes(profileUrl)) {
+      profile = cachedImport(profileUrl).id || null;
+    }
+    if (fresh.length) {
+      const win = progressWindow(t('progressImport'));
       const files = [];
-      for (const url of remotes) {
-        try { files.push(await download(url, 'profile')); } catch (e) { alertBox(e.message); }
+      const errors = [];
+      for (const url of fresh) {
+        try { files.push(Object.assign(await downloadStep(win, url, 'profile'), { url })); } catch (e) { errors.push(e.message); }
       }
       if (files.length) {
-        const lines = (await storeImports(files)) || [];
-        for (const l of lines) if (!l.ok) alertBox(l.text);
+        const before = profileSizes();
+        const lines = (await importProfiles(files, win)) || [];
+        // What each import made, remembered for a reload (one file per address here).
+        const after = profileSizes();
+        const made = {};
+        for (const [name, bytes] of Object.entries(after)) if (before[name] !== bytes) made[name] = bytes;
+        lines.forEach((line, index) => {
+          if (line.ok && files[index]) {
+            rememberDownload(files[index].url, { kind: 'import', id: line.id, count: line.count, files: files.length === 1 ? made : {} });
+          }
+        });
         // The profile given by its URL: the one that file became.
-        const last = lines.length === files.length ? lines[lines.length - 1] : null;
-        if (!profile && addressValues('profile')[0] && last && last.id) profile = last.id;
+        const at = files.findIndex((f) => f.url === profileUrl);
+        if (!profile && at >= 0 && lines[at] && lines[at].id) profile = lines[at].id;
+        if (errors.length) message('profile-messages', 'error', errors.join(' ; '));
+      } else {
+        win.finish(false, errors.join(' ; '));
       }
-      status.textContent = '';
     }
     wantedProfile = profile;
     const wanted = addressValues('play')[0] || '';
     if (/^https?:\/\//i.test(wanted)) {
-      status.textContent = t('downloading');
-      try { const { name, bytes } = await download(wanted, 'rom'); status.textContent = ''; play(storeRom(name, bytes)); }
-      catch (e) { status.textContent = ''; alertBox(e.message); }
+      // Downloaded before and still there, unchanged: played without downloading it again.
+      const cached = cachedRom(wanted);
+      if (cached) { play(cached); return; }
+      const win = progressWindow(t('progressRom'));
+      try {
+        const { name, bytes } = await downloadStep(win, wanted, 'rom');
+        // Straight into the game: the window goes, unless an import above left its result.
+        if (!fresh.length) win.close(); else win.finish(true, t('romReady') + name);
+        const path = storeRom(name, bytes);
+        rememberDownload(wanted, { kind: 'rom', path, size: bytes.length });
+        play(path);
+      } catch (e) { win.finish(false, e.message); }
       return;
     }
     // ?play=flappy (the README's link): straight into a bundled ROM, once the program has
