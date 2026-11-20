@@ -32,7 +32,7 @@ use crate::ui::text;
 ///
 /// Adding a setting to the desktop window therefore does not add a console row: a console row is
 /// an owner decision, written down here and placed by a page table.
-pub const ROW_SETTINGS: [SettingId; 107] = [
+pub const ROW_SETTINGS: [SettingId; 108] = [
     SettingId::VideoVSync,
     SettingId::VideoFrameRate,
     SettingId::VideoSkipFrame,
@@ -138,6 +138,7 @@ pub const ROW_SETTINGS: [SettingId; 107] = [
     // holds every `Setting` row of a game's options to being offered globally too, and this is a
     // game's option (`game_options::GAME_EMULATION_ROWS`). Its debugging view stays desktop-only.
     SettingId::EmuSmoothScrollAhead,
+    SettingId::EmuSmoothScroll3d,
     SettingId::EmuCatchUp,
     SettingId::EmuLuaSmoothGc,
     SettingId::EmuLuaOptimized,

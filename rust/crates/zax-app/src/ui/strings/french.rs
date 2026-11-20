@@ -499,6 +499,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
         "setting.emu.smooth_scroll_ahead",
         "Défilement lissé (interpolé par run-ahead)",
     ),
+    ("setting.emu.smooth_scroll_3d", "Défilement lissé aussi en 3D"),
     (
         "setting.emu.smooth_scroll_view",
         "Afficher la zone du défilement lissé (rouge, sprites fixes en vert)",
@@ -1328,12 +1329,22 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (
         "detail.emu.smooth_scroll_ahead",
         "Expérimental. Sur un affichage plus rapide que la console, dessine la partie qui défile \
-         de l'image entre deux images émulées, en 2D comme en 3D : l'image est montrée ramenée au \
-         défilement que l'image réelle du run-ahead a dessiné, puis glisse vers le sien au fil de \
-         l'image, ce qui dépense une des images de latence du run-ahead en un mouvement plus \
-         fluide. Les barres d'état et les sprites qui suivent la caméra restent où ils sont. Sans \
-         run-ahead ou à 60 images par seconde ou moins, rien ne se passe. Un jeu dont le pack de \
-         hacks rapporte sa propre caméra utilise celle-ci à la place. Par défaut : désactivé.",
+         de l'image entre deux images émulées : l'image est montrée ramenée au défilement que \
+         l'image réelle du run-ahead a dessiné, puis glisse vers le sien au fil de l'image, ce qui \
+         dépense une des images de latence du run-ahead en un mouvement plus fluide. Les barres \
+         d'état et les sprites qui suivent la caméra restent où ils sont. Sans run-ahead ou à 60 \
+         images par seconde ou moins, rien ne se passe. Un jeu dont le pack de hacks rapporte sa \
+         propre caméra utilise celle-ci à la place. La scène 3D ne suit qu'avec le réglage \
+         suivant. Par défaut : désactivé, quel que soit le préréglage.",
+    ),
+    (
+        "detail.emu.smooth_scroll_3d",
+        "Expérimental. Le défilement lissé, qu'il vienne du run-ahead ou d'un pack de hacks qui \
+         rapporte sa caméra, fait aussi glisser la partie qui défile de la scène 3D, pas \
+         seulement de l'image 2D. La 3D est alors dessinée au rythme de l'écran (120 ou 144 fois \
+         par seconde au lieu de 60), ce qui coûte sur les machines modestes. À 60 images par \
+         seconde ou moins, rien ne se passe. Par défaut : désactivé, quel que soit le \
+         préréglage.",
     ),
     (
         "detail.emu.smooth_scroll_view",

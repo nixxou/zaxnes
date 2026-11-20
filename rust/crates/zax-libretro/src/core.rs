@@ -89,6 +89,8 @@ pub struct Options {
     /// With `smooth_120`, the motion of any game found by running a frame ahead
     /// (`emu.smooth_scroll_ahead`), when its hack does not report its camera.
     pub smooth_ahead: bool,
+    /// With `smooth_120`, the 3D scene slides as well (`emu.smooth_scroll_3d`).
+    pub smooth_3d: bool,
 }
 
 impl Default for Options {
@@ -115,6 +117,7 @@ impl Default for Options {
             force_patch: false,
             smooth_120: false,
             smooth_ahead: true,
+            smooth_3d: false,
         }
     }
 }
@@ -309,7 +312,9 @@ impl Core {
             self.nes.set_region(region);
             changed.timing = true;
         }
-        if options.smooth_120 != self.options.smooth_120 {
+        if options.smooth_120 != self.options.smooth_120
+            || (self.three_d.is_some() && options.smooth_3d != self.options.smooth_3d)
+        {
             changed.timing = true;
             changed.geometry = true;
             self.half = None;
@@ -545,9 +550,9 @@ impl Core {
         self.options.smooth_120 && self.three_d.is_none()
     }
 
-    /// Whether the 120 Hz scrolling is in force, in 2D or in 3D: two calls a frame.
-    const fn doubled(&self) -> bool {
-        self.options.smooth_120
+    /// Whether the 120 Hz scrolling is in force, in 2D or (asked for) in 3D: two calls a frame.
+    fn doubled(&self) -> bool {
+        self.options.smooth_120 && (self.three_d.is_none() || self.options.smooth_3d)
     }
 
     /// [`Core::run_smooth`] in 3D: the first call runs the frame and converts it, its tiles where

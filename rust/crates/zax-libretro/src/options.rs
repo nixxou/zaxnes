@@ -38,6 +38,8 @@ const FAST_LUA: &str = "zaxnes_3d_fast_lua";
 const EXTRA: &str = "zaxnes_widescreen_extra";
 const SMOOTH: &str = "zaxnes_smooth_120";
 const SMOOTH_AHEAD: &str = "zaxnes_smooth_ahead";
+/// The 120 Hz scrolling in 3D as well.
+const SMOOTH_3D: &str = "zaxnes_smooth_3d";
 const STRICT: &str = "zaxnes_widescreen_strict_edges";
 const FORCE: &str = "zaxnes_widescreen_other_versions";
 const OVERSCAN: [&str; 4] = [
@@ -684,8 +686,8 @@ pub fn declarations(hacks: &[HackOption]) -> Vec<Declaration> {
             "Smooth scrolling 120 Hz",
             "Smooth scrolling 120 Hz",
             "widescreen",
-            "A picture between two frames along the camera's motion, in 2D and in 3D. Needs a \
-             display at 120 Hz with RetroArch's refresh rate set to it (at 60 Hz the game runs at half \
+            "In 2D, a picture between two frames along the camera's motion (in 3D too with the \
+             option below). Needs a display at 120 Hz with RetroArch's refresh rate set to it (at 60 Hz the game runs at half \
              speed). Leave RetroArch's run-ahead off.",
         )
         .switch(false),
@@ -698,6 +700,15 @@ pub fn declarations(hacks: &[HackOption]) -> Vec<Declaration> {
              frame ahead.",
         )
         .switch(true),
+        Declaration::new(
+            SMOOTH_3D,
+            "Smooth scrolling in 3D too",
+            "Smooth scrolling in 3D too",
+            "widescreen",
+            "The 120 Hz scrolling slides the 3D scene's playfield as well, the 3D drawn twice a \
+             frame.",
+        )
+        .switch(false),
         // Emulation.
         Declaration::new(
             REGION,
@@ -1071,6 +1082,7 @@ fn read_explicit(value: &dyn Fn(&str) -> Option<String>, hacks: &[HackOption]) -
         strict_edges: enabled(STRICT, defaults.strict_edges),
         smooth_120: enabled(SMOOTH, defaults.smooth_120),
         smooth_ahead: enabled(SMOOTH_AHEAD, defaults.smooth_ahead),
+        smooth_3d: enabled(SMOOTH_3D, defaults.smooth_3d),
         force_patch: enabled(FORCE, defaults.force_patch),
         overscan: OVERSCAN.map(|key| {
             value(key)

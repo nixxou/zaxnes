@@ -322,9 +322,10 @@ pub const SIMPLE_AUDIO_ROWS: [OptionRow; 3] = [
 ];
 
 /// *Emulation* in the simple mode.
-pub const SIMPLE_EMULATION_ROWS: [OptionRow; 6] = [
+pub const SIMPLE_EMULATION_ROWS: [OptionRow; 7] = [
     OptionRow::Setting(SettingId::EmuRunAhead),
     OptionRow::Setting(SettingId::EmuSmoothScrollAhead),
+    OptionRow::Setting(SettingId::EmuSmoothScroll3d),
     OptionRow::Setting(SettingId::EmuRainbowNetwork),
     OptionRow::Setting(SettingId::EmuExactRate),
     OptionRow::Setting(SettingId::EmuRealtimeInput),
@@ -625,6 +626,7 @@ pub const EMULATION_ROWS: [OptionRow; 41] = [
     OptionRow::Setting(SettingId::EmuLatePresent),
     OptionRow::Setting(SettingId::EmuRunAhead),
     OptionRow::Setting(SettingId::EmuSmoothScrollAhead),
+    OptionRow::Setting(SettingId::EmuSmoothScroll3d),
     OptionRow::Setting(SettingId::EmuGameSpeed),
     OptionRow::Setting(SettingId::EmuAutoTvMode),
     OptionRow::Setting(SettingId::EmuTvMode),

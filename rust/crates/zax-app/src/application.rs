@@ -3018,6 +3018,11 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     zax_engine3d::palette::set_tv_look(tv_look(host.settings()));
     let hack_options = host.hack_option_bits();
     let scene_scale = host.scene_scale();
+    // `emu.smooth_scroll_3d`: the 3D scene slides as well (owner, 2026-11-20).
+    let smooth_3d = host
+        .settings()
+        .get(SettingId::EmuSmoothScroll3d)
+        .as_bool();
     // The smooth scrolling from the run-ahead: nothing to draw between two frames at 60 frames a
     // second or less, nor a real frame to slide from without run-ahead; then nothing is done.
     let smooth_ahead = host
@@ -3146,7 +3151,7 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         // from the shift and motion kept with the frame the scene shows.
         let smooth = session.published_smooth();
         scene.three_d_shift = match (smooth.shift, smooth.motion) {
-            (Some((shift, start, end)), Some(motion)) => {
+            (Some((shift, start, end)), Some(motion)) if smooth_3d => {
                 #[allow(clippy::cast_possible_truncation)] // 0 to 1.
                 let along = motion * phase as f32;
                 state.picture_between = true;

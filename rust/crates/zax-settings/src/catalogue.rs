@@ -221,6 +221,7 @@ setting_ids! {
     VideoWidescreenStrictEdges => "video.widescreen_strict_edges",
     VideoWidescreenAdvanced => "video.widescreen_advanced",
     EmuSmoothScrollAhead => "emu.smooth_scroll_ahead",
+    EmuSmoothScroll3d => "emu.smooth_scroll_3d",
     EmuSmoothScrollView => "emu.smooth_scroll_view",
     VideoRemoveSpriteLimit => "video.remove_sprite_limit",
     VideoOverscanNtscTop => "video.overscan_ntsc_top",

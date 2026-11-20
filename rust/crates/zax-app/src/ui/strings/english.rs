@@ -772,6 +772,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
         "setting.emu.smooth_scroll_ahead",
         "Smooth scrolling (interpolated from run-ahead)",
     ),
+    ("setting.emu.smooth_scroll_3d", "Smooth scrolling in 3D too"),
     (
         "setting.emu.smooth_scroll_view",
         "Show the smooth scrolling's band (red, still sprites green)",
@@ -1357,12 +1358,21 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         "detail.emu.smooth_scroll_ahead",
         "Experimental. On a display faster than the console, draws the scrolling part of the \
-         picture between two emulated frames, in 2D and in 3D: the picture is shown shifted back \
-         to the scroll the run-ahead's real frame drew, and slides to its own over the frame, \
-         which spends one of the run-ahead's frames of latency on smoother motion. Status bars \
-         and the sprites that move with the camera stay where they are. Nothing happens without \
-         run-ahead or at 60 frames a second or less. A game whose hack pack reports its own \
-         camera uses that instead. Default: off.",
+         picture between two emulated frames: the picture is shown shifted back to the scroll \
+         the run-ahead's real frame drew, and slides to its own over the frame, which spends one \
+         of the run-ahead's frames of latency on smoother motion. Status bars and the sprites \
+         that move with the camera stay where they are. Nothing happens without run-ahead or at \
+         60 frames a second or less. A game whose hack pack reports its own camera uses that \
+         instead. The 3D scene follows only with the setting below. Default: off, whatever the \
+         preset.",
+    ),
+    (
+        "detail.emu.smooth_scroll_3d",
+        "Experimental. The smooth scrolling, from the run-ahead or from a hack pack that reports \
+         its camera, slides the playfield of the 3D scene too, not only of the 2D picture. The \
+         3D is then drawn at the display's rate (120 or 144 times a second rather than 60), which \
+         costs on modest machines. Nothing happens at 60 frames a second or less. Default: off, \
+         whatever the preset.",
     ),
     (
         "detail.emu.smooth_scroll_view",

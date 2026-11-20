@@ -306,6 +306,7 @@ const EMULATION: &[LayoutEntry] = &[
     // KIRBY-MERGE: the experimental smooth scrolling and its view, under the run-ahead, because
     // one of its frames is what the smoothing spends and neither does anything without it.
     LayoutEntry::Row(SettingId::EmuSmoothScrollAhead),
+    LayoutEntry::Row(SettingId::EmuSmoothScroll3d),
     LayoutEntry::Row(SettingId::EmuSmoothScrollView),
     LayoutEntry::Group(OptionsGroup::Region),
     LayoutEntry::Row(SettingId::EmuAutoTvMode),

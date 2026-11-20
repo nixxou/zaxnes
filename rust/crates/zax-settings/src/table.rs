@@ -2680,16 +2680,29 @@ fn video_smooth_scroll(out: &mut Vec<SettingDescriptor>) {
         SettingDescriptor::new(
             SettingId::EmuSmoothScrollAhead,
             SettingKind::Bool,
-            // **On** by default (owner decision, 2026-11-11), on the desktop and Android; the
-            // PortMaster defaults keep it off. KIRBY-MERGE had it off (`docs/progress/KIRBY-MERGE.md`
-            // §2.4, (S4)): on, with the default run-ahead of 1 and a display above 61 Hz, it shifts
-            // the 2D playfield of every game, pack or not; at 60 Hz or below it does nothing.
-            SettingValue::Bool(true),
+            // Off by default, whatever the preset (owner, 2026-11-20; it was on from 2026-11-11):
+            // on, with run-ahead and a display above 61 Hz, it shifts the playfield of every game,
+            // pack or not; at 60 Hz or below it does nothing.
+            SettingValue::Bool(false),
             SettingScope::User,
             SettingEffect::Immediate,
             SettingTheme::Emulation,
         )
         .with_label("Smooth scrolling (interpolated from run-ahead)"),
+    );
+    // Owner request, 2026-11-20: the smooth scrolling, from the run-ahead or a hack's camera,
+    // slides the 3D scene's playfield too. Off by default, whatever the preset; it draws the 3D
+    // at the display's rate. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuSmoothScroll3d,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Emulation,
+        )
+        .with_label("Smooth scrolling in 3D too"),
     );
     // Rust-only (owner request): the band the smooth scrolling slides tinted red, the sprites it
     // keeps still green, to see what it does. Not exposed to Lua.

@@ -190,6 +190,7 @@ const PAGES: [Page; 8] = [
         simple: &[
             Simple::Row(SettingId::EmuRunAhead),
             Simple::Row(SettingId::EmuSmoothScrollAhead),
+            Simple::Row(SettingId::EmuSmoothScroll3d),
             Simple::Row(SettingId::EmuRainbowNetwork),
             Simple::Row(SettingId::EmuExactRate),
             Simple::Row(SettingId::EmuRealtimeInput),

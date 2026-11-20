@@ -14,6 +14,8 @@ Render;Ombres;render.shadow;un passage d ombre en plus (GPU);oui;tout de suite;o
 Render;Éclairage du backdrop;render.backdrop_lighting;léger (GPU);oui;tout de suite;oui;oui;oui;oui;oui;oui;non;non;non;non;non
 Emulation;Vitesse de jeu;emu.game_speed;proportionnel à la vitesse;normale;tout de suite;oui;normale;normale;normale;normale;normale;non;non;non;non;non
 Emulation;Run-ahead;emu.run_ahead;chaque cran = une émulation complète de plus;1;tout de suite;oui;0;1;1;1;1;oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode)
+Emulation;Défilement lissé (run-ahead);emu.smooth_scroll_ahead;rien de plus que le run-ahead déjà payé;non;tout de suite;oui;non;non;non;non;non;oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode)
+Emulation;Défilement lissé aussi en 3D;emu.smooth_scroll_3d;la 3D dessinée au rythme de l écran (120/144 Hz au lieu de 60);non;tout de suite;oui;non;non;non;non;non;oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode);oui (proposé par le mode)
 Emulation;Moteur d'émulation (ce jeu);emu.engine;FCEUX plus rapide que Zaxnes, autres options greyées;Zaxnes;au prochain chargement;oui;Zaxnes;Zaxnes;Zaxnes;Zaxnes;Zaxnes;non;non;non;non;non
 Emulation;Corruption par OAMADDR;emu.oamaddr_write_corruption;aucun (défaut matériel, certains jeux rares en ont besoin);non;au prochain chargement;oui;non;non;non;non;oui;non;non;non;non;oui (proposé par le mode)
 Emulation;Rattrapage en cas de retard (frames);emu.catch_up;borne le travail quand la machine est en retard;2;tout de suite;oui;2;2;2;2;2;non;non;non;non;non
@@ -36,7 +38,6 @@ Emulation;Présentation tardive;emu.late_present;aucun calcul, moins de latence;
 Video;;video.widescreen_advanced;patchs avancés (suraccélération CPU);oui;au prochain chargement;oui;oui;oui;oui;oui;oui;non;non;non;non;non
 Video;Écran large (ROM prévues pour);video.widescreen;plus de tuiles à émuler, convertir et dessiner;Off;tout de suite;oui;Off;Off;Off;Off;Off;oui;oui;oui;oui;oui
 Video;Largeur supplémentaire de l'écran large;video.widescreen_extra;marges supplémentaires;+20 %;tout de suite;oui;+20 %;+20 %;+20 %;+20 %;+20 %;oui;oui;oui;oui;oui
-Emulation;Défilement lissé (interpolé par run-ahead);emu.smooth_scroll_ahead;émule des images en avance pour lisser le défilement;oui;tout de suite;oui;oui;oui;oui;oui;oui;oui;oui;oui;oui;oui
 Video;Supprimer la limite de 8 sprites par ligne;video.remove_sprite_limit;plus de sprites dessinés;Smart;tout de suite;oui;Smart;Smart;Smart;Smart;Smart;non;non;non;non;non
 Video;Signal composite;video.composite_signal;simulation du signal TV (calcul de l image);non;tout de suite;oui;non;non;non;non;non;oui;oui;oui;oui (proposé par le mode);oui (proposé par le mode)
 Video;Résolution du shader;video.shader_resolution;résolution des shaders (GPU);100 %;tout de suite;oui;100 %;100 %;100 %;100 %;100 %;non;non;non;non;non

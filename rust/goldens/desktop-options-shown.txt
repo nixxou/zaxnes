@@ -67,6 +67,7 @@ emu.mmc3_revision
 emu.cpu_revision
 emu.oamaddr_write_corruption
 emu.run_ahead
+emu.smooth_scroll_3d
 emu.smooth_scroll_ahead
 emu.smooth_scroll_view
 emu.tv_mode

@@ -169,6 +169,7 @@ options
       emu.late_present
       emu.run_ahead
       emu.smooth_scroll_ahead
+      emu.smooth_scroll_3d
       emu.game_speed
       emu.auto_tv_mode
       emu.tv_mode
@@ -245,6 +246,7 @@ simple options
   page.simple_emulation
     emu.run_ahead
     emu.smooth_scroll_ahead
+    emu.smooth_scroll_3d
     emu.rainbow_network
     emu.exact_rate
     emu.realtime_input

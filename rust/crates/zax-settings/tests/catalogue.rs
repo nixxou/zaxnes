@@ -134,6 +134,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "emu.ppu_revision",
             "emu.rainbow_network",
             "emu.realtime_input",
+            "emu.smooth_scroll_3d",
             "emu.smooth_scroll_ahead",
             "emu.smooth_scroll_view",
             "emu.vs_dip_1",

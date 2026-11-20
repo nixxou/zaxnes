@@ -512,8 +512,9 @@ fn ro_3_every_console_setting_is_a_row_the_console_can_step() {
     // FIDPLUS-D3a `emu.late_present`,
     // MAPPERS-N `emu.rainbow_network` (mapper 682's ESP) and the eight `emu.vs_dip_N`, FAST-1
     // `emu.fast_core`. REWRITE-UI step 23 adds the ten rows of the signal options, and the
-    // owner's request of 2026-11-19 `camera.frame_picture`.
-    assert_eq!(107, advanced::ROW_SETTINGS.len());
+    // owner's request of 2026-11-19 `camera.frame_picture`, and of 2026-11-20
+    // `emu.smooth_scroll_3d`.
+    assert_eq!(108, advanced::ROW_SETTINGS.len());
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::EmuEngine));
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::AudioClassicOutput));
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::EmuSmoothScrollAhead));
