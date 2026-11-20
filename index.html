@@ -5,53 +5,123 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Zaxnes</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #111; color: #ddd; font: 14px system-ui, sans-serif; }
+  /* The page's own text in the interface's face (rust/web/fonts). */
+  @font-face { font-family: Roboto; src: url(fonts/Roboto-Regular.ttf); font-weight: 400; }
+  @font-face { font-family: Roboto; src: url(fonts/Roboto-Bold.ttf); font-weight: 700; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #111; color: #ddd; font: 14px Roboto, system-ui, sans-serif; }
   /* dvh: the height actually visible on a phone, under its browser's bars. */
   #canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; outline: none; touch-action: none; }
-  #status { position: fixed; left: 8px; bottom: 8px; opacity: .8; pointer-events: none; }
-  #open { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
-          background: rgba(0,0,0,.6); z-index: 10; }
-  #open.shown { display: flex; }
-  .panel { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto;
+  #status { position: fixed; left: 8px; bottom: 8px; opacity: .8; pointer-events: none; max-width: calc(100vw - 16px); }
+  .dialog { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+            background: rgba(0,0,0,.6); z-index: 10; }
+  .dialog.shown { display: flex; }
+  .panel { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto;
            background: #1b1d24; border: 1px solid #3a3e4a; border-radius: 10px; padding: 18px; box-sizing: border-box; }
   .panel h2 { margin: 0 0 12px; font-size: 18px; color: #ffd84a; }
   .panel h3 { margin: 16px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: #9aa0ad; }
+  .panel p { margin: 4px 0; color: #aab; }
   .rom { display: block; width: 100%; text-align: left; margin: 4px 0; padding: 10px 12px; border-radius: 6px;
          border: 1px solid #3a3e4a; background: #252833; color: #eee; font: inherit; cursor: pointer; }
   .rom:hover, .rom:focus { border-color: #ffd84a; outline: none; }
   .rom small { color: #9aa0ad; margin-left: 6px; }
-  #drop { margin-top: 6px; padding: 22px 12px; border: 2px dashed #4a4f5d; border-radius: 8px; text-align: center; color: #aab; }
-  #drop.over, body.dragging #drop { border-color: #ffd84a; color: #fff; }
-  .row { display: flex; gap: 8px; justify-content: space-between; margin-top: 14px; }
+  .drop { margin-top: 6px; padding: 18px 12px; border: 2px dashed #4a4f5d; border-radius: 8px; text-align: center; color: #aab; }
+  body.dragging .drop { border-color: #ffd84a; color: #fff; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: space-between; margin-top: 12px; }
+  .row .grow { flex: 1; }
   .btn { padding: 9px 14px; border-radius: 6px; border: 1px solid #3a3e4a; background: #252833; color: #eee; font: inherit; cursor: pointer; }
+  .btn:hover, .btn:focus { border-color: #ffd84a; outline: none; }
   .btn.main { background: #ffd84a; color: #111; border-color: #ffd84a; }
+  .btn.small { padding: 4px 9px; font-size: 12px; }
+  .btn.danger:hover { border-color: #ff6b6b; color: #ff9b9b; }
+  input.url { flex: 1; min-width: 180px; padding: 8px 10px; border-radius: 6px; border: 1px solid #3a3e4a;
+              background: #12141a; color: #eee; font: inherit; }
   .empty { color: #777; font-style: italic; }
-  #open-button { position: fixed; top: 6px; left: 50%; transform: translateX(-50%); z-index: 5;
-                 padding: 5px 12px; border-radius: 14px; border: 1px solid #3a3e4a; background: rgba(27,29,36,.75);
-                 color: #eee; font: 13px system-ui, sans-serif; cursor: pointer; opacity: .45; transition: opacity .2s; }
-  #open-button:hover, #open-button:focus { opacity: 1; outline: none; }
-  body.playing #open-button { display: none; }
+  .messages { margin-top: 10px; }
+  .messages div { padding: 6px 10px; margin: 4px 0; border-radius: 6px; word-break: break-word; }
+  .messages .ok { background: #1f3a26; color: #9fe0ad; }
+  .messages .error { background: #42201f; color: #ffb3ad; }
+  .messages .info { background: #23283a; color: #b8c4e8; }
+  table.storage { width: 100%; border-collapse: collapse; }
+  table.storage td { padding: 6px 4px; border-bottom: 1px solid #2a2d38; vertical-align: middle; }
+  table.storage td.size { text-align: right; color: #ccd; white-space: nowrap; }
+  table.storage td.act { text-align: right; white-space: nowrap; }
+  table.storage td.name { word-break: break-all; }
+  #bar { position: fixed; top: 6px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; gap: 6px;
+         opacity: .45; transition: opacity .2s; }
+  #bar:hover, #bar:focus-within { opacity: 1; }
+  #bar button { padding: 5px 12px; border-radius: 14px; border: 1px solid #3a3e4a; background: rgba(27,29,36,.75);
+                color: #eee; font: 13px Roboto, system-ui, sans-serif; cursor: pointer; }
+  body.playing #bar { display: none; }
 </style>
 </head>
 <body>
 <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
-<div id="status">Chargement…</div>
-<button id="open-button" title="Ouvrir une ROM">Ouvrir une ROM…</button>
+<div id="status"></div>
+<div id="bar">
+  <button id="bar-rom" data-t="barRom"></button>
+  <button id="bar-profile" data-t="barProfile"></button>
+  <button id="bar-storage" data-t="barStorage"></button>
+</div>
 
-<div id="open" role="dialog" aria-modal="true" aria-labelledby="open-title">
+<div class="dialog" id="dlg-rom" role="dialog" aria-modal="true">
   <div class="panel">
-    <h2 id="open-title">Ouvrir une ROM</h2>
-    <h3>Incluses</h3>
+    <h2 data-t="romTitle"></h2>
+    <h3 data-t="romBundled"></h3>
     <div id="bundled"></div>
-    <h3>Vos ROMs</h3>
+    <h3 data-t="romMine"></h3>
     <div id="mine"></div>
-    <h3>Depuis votre ordinateur</h3>
-    <div id="drop">Déposez un fichier ici (.nes, .fds, .unf, .zip)</div>
+    <h3 data-t="romComputer"></h3>
+    <div class="drop" data-t="romDrop"></div>
     <div class="row">
-      <button class="btn main" id="browse">Parcourir…</button>
-      <button class="btn" id="cancel">Annuler</button>
+      <button class="btn main" id="rom-browse" data-t="romBrowse"></button>
+      <button class="btn" id="rom-import" data-t="romImport"></button>
     </div>
-    <input type="file" id="file" accept=".nes,.fds,.unf,.unif,.zip" hidden>
+    <h3 data-t="fromUrl"></h3>
+    <div class="row">
+      <input class="url" id="rom-url" type="url" placeholder="https://…">
+      <button class="btn" id="rom-url-go" data-t="download"></button>
+    </div>
+    <div class="messages" id="rom-messages"></div>
+    <div class="row"><span class="grow"></span><button class="btn" data-close data-t="close"></button></div>
+    <input type="file" id="rom-file-play" accept=".nes,.fds,.unf,.unif,.zip,.7z" hidden>
+    <input type="file" id="rom-file-import" accept=".nes,.fds,.unf,.unif,.zip,.7z" multiple hidden>
+  </div>
+</div>
+
+<div class="dialog" id="dlg-profile" role="dialog" aria-modal="true">
+  <div class="panel">
+    <h2 data-t="profileTitle"></h2>
+    <p data-t="profileText"></p>
+    <div class="drop" data-t="profileDrop"></div>
+    <div class="row">
+      <button class="btn main" id="profile-import" data-t="profileImport"></button>
+    </div>
+    <h3 data-t="fromUrl"></h3>
+    <div class="row">
+      <input class="url" id="profile-url" type="url" placeholder="https://…">
+      <button class="btn" id="profile-url-go" data-t="download"></button>
+    </div>
+    <div class="messages" id="profile-messages"></div>
+    <div class="row"><span class="grow"></span><button class="btn" data-close data-t="close"></button></div>
+    <input type="file" id="profile-file" accept=".3dn,.3dh,.bundle" multiple hidden>
+  </div>
+</div>
+
+<div class="dialog" id="dlg-storage" role="dialog" aria-modal="true">
+  <div class="panel">
+    <h2 data-t="storageTitle"></h2>
+    <p id="storage-summary"></p>
+    <p id="storage-persist"></p>
+    <div class="row" id="storage-persist-row"><button class="btn" id="storage-persist-go" data-t="persistAsk"></button></div>
+    <h3 data-t="storageCategories"></h3>
+    <table class="storage" id="storage-categories"></table>
+    <h3 data-t="storageRoms"></h3>
+    <table class="storage" id="storage-roms"></table>
+    <div class="messages" id="storage-messages"></div>
+    <div class="row">
+      <button class="btn danger" id="storage-all" data-t="storageAll"></button>
+      <button class="btn" data-close data-t="close"></button>
+    </div>
   </div>
 </div>
 
@@ -59,13 +129,91 @@
   // The user data folder of the program (SDL_GetPrefPath under Emscripten), kept in IndexedDB.
   const DATA = '/home/web_user/.local/share/Zaxnes';
   const ROMS = DATA + '/roms';
+  // Where the program imports 3D profiles and 3dSen data from (launch_request.rs, IMPORT_FOLDER).
+  const IMPORT = DATA + '/import';
   // The exchange files with the program (rust/crates/zax-app/src/web_bridge.rs).
   const OPEN_REQUEST = '/zaxnes-web/open-request';
   const OPEN_ANSWER = '/zaxnes-web/open-answer';
+  const IMPORT_RESULT = '/zaxnes-web/import-result';
   const STATE = '/zaxnes-web/state';
-  // The ROMs shipped with the program (installed into ROMS by the program itself).
-  const BUNDLED = [{ title: 'FlappyZaxNes', file: 'FlappyZaxNes.nes', note: 'démo 3D' }];
-  const ROM_FILE = /\.(nes|fds|unf|unif|zip)$/i;
+  // The ROMs shipped with the program (installed into ROMS by the program itself, once per
+  // version: DEMO_MARKER says it was).
+  const BUNDLED = [{ title: 'FlappyZaxNes', file: 'FlappyZaxNes.nes', noteKey: 'demo' }];
+  const DEMO_MARKER = DATA + '/demo-game.txt';
+  const ROM_FILE = /\.(nes|fds|unf|unif|zip|7z)$/i;
+  const PROFILE_FILE = /\.(3dn|3dh|bundle)$/i;
+
+  // --- Language: the program's (ui.language of its settings), else the browser's. ---
+  const TEXT = {
+    fr: {
+      barRom: 'Ouvrir une ROM…', barProfile: 'Profils 3D…', barStorage: 'Stockage…',
+      romTitle: 'Ouvrir une ROM', romBundled: 'Incluses', romMine: 'Vos ROMs', demo: 'démo 3D',
+      romNone: 'Aucune pour l’instant : les ROMs que vous ouvrez ou importez restent ici.',
+      romComputer: 'Depuis votre ordinateur', romDrop: 'Déposez un fichier ici (.nes, .fds, .unf, .zip, .7z)',
+      romBrowse: 'Jouer un fichier…', romImport: 'Importer…', fromUrl: 'Depuis une adresse', download: 'Télécharger',
+      close: 'Fermer',
+      notRom: 'Ce fichier n’est pas une ROM reconnue : ', romImported: 'ROM importée : ',
+      downloading: 'Téléchargement…', cors: 'Fichier inaccessible : le site qui l’héberge ne permet pas à une autre page de le télécharger (CORS), ou l’adresse ne répond pas. ',
+      notFound: 'Fichier introuvable ', tooBig: 'Ce fichier n’a pas la taille d’une ROM : ',
+      profileTitle: 'Importer un profil 3D', profileText: 'Profils 3D (.3dn, .3dh) et données de 3dSen (.bundle) : ils rejoignent vos profils, celui d’un même identifiant est remplacé.',
+      profileDrop: 'Déposez un fichier ici (.3dn, .3dh, .bundle)', profileImport: 'Importer…',
+      notProfile: 'Ce fichier n’est ni un profil 3D ni des données 3dSen : ', importing: 'Import en cours : ',
+      noAnswer: 'Le programme n’a pas répondu : l’import se fera à la prochaine ouverture de la liste des jeux.',
+      storageTitle: 'Stockage du navigateur', storageCategories: 'Données', storageRoms: 'Vos ROMs',
+      storageAll: 'Tout effacer', storageUsed: 'Zaxnes occupe ', storageQuota: ' ; le navigateur accorde à ce site jusqu’à ',
+      persistOn: 'Stockage persistant : oui, le navigateur ne l’efface pas de lui-même.',
+      persistOff: 'Stockage persistant : non, le navigateur peut l’effacer s’il manque de place.',
+      persistAsk: 'Demander un stockage persistant', persistRefused: 'Le navigateur a refusé (il l’accorde souvent à un site installé ou souvent visité).',
+      files: ' fichiers', clear: 'Vider', rename: 'Renommer', remove: 'Supprimer',
+      confirmClear: 'Effacer « {0} » ? Cette action est définitive.', confirmAll: 'Effacer toutes les données de Zaxnes dans ce navigateur ? Cette action est définitive.',
+      confirmRemove: 'Supprimer la ROM « {0} » et ses sauvegardes ?', renamePrompt: 'Nouveau nom de « {0} » :',
+      renamed: 'Renommée : ', removed: 'Supprimée : ', cleared: 'Vidé : ', badName: 'Nom refusé : ', exists: 'Ce nom existe déjà : ',
+      reloading: 'La page va se recharger pour en tenir compte…',
+      cat_roms: 'ROMs', cat_saves: 'Sauvegardes d’état', cat_battery: 'Sauvegardes de cartouche', cat_profiles: 'Profils 3D',
+      cat_tiles: 'Cache des tuiles 3D', cat_covers: 'Jaquettes', cat_movies: 'Films', cat_logs: 'Journaux',
+      cat_settings: 'Réglages, touches et bibliothèque', cat_other: 'Autres',
+    },
+    en: {
+      barRom: 'Open a ROM…', barProfile: '3D profiles…', barStorage: 'Storage…',
+      romTitle: 'Open a ROM', romBundled: 'Included', romMine: 'Your ROMs', demo: '3D demo',
+      romNone: 'None yet: the ROMs you open or import stay here.',
+      romComputer: 'From your computer', romDrop: 'Drop a file here (.nes, .fds, .unf, .zip, .7z)',
+      romBrowse: 'Play a file…', romImport: 'Import…', fromUrl: 'From an address', download: 'Download',
+      close: 'Close',
+      notRom: 'This file is not a known ROM: ', romImported: 'ROM imported: ',
+      downloading: 'Downloading…', cors: 'File out of reach: the site hosting it does not let another page download it (CORS), or the address does not answer. ',
+      notFound: 'File not found ', tooBig: 'This file does not have the size of a ROM: ',
+      profileTitle: 'Import a 3D profile', profileText: '3D profiles (.3dn, .3dh) and 3dSen data (.bundle): they join your profiles, one of the same identifier is replaced.',
+      profileDrop: 'Drop a file here (.3dn, .3dh, .bundle)', profileImport: 'Import…',
+      notProfile: 'This file is neither a 3D profile nor 3dSen data: ', importing: 'Importing: ',
+      noAnswer: 'The program did not answer: the import will happen when the list of games next opens.',
+      storageTitle: 'Browser storage', storageCategories: 'Data', storageRoms: 'Your ROMs',
+      storageAll: 'Erase everything', storageUsed: 'Zaxnes uses ', storageQuota: '; the browser grants this site up to ',
+      persistOn: 'Persistent storage: yes, the browser does not erase it on its own.',
+      persistOff: 'Persistent storage: no, the browser may erase it when space runs short.',
+      persistAsk: 'Ask for persistent storage', persistRefused: 'The browser refused (it often grants it to an installed or often visited site).',
+      files: ' files', clear: 'Clear', rename: 'Rename', remove: 'Remove',
+      confirmClear: 'Erase “{0}”? This cannot be undone.', confirmAll: 'Erase all of Zaxnes’s data in this browser? This cannot be undone.',
+      confirmRemove: 'Remove the ROM “{0}” and its saves?', renamePrompt: 'New name of “{0}”:',
+      renamed: 'Renamed: ', removed: 'Removed: ', cleared: 'Cleared: ', badName: 'Name refused: ', exists: 'This name exists already: ',
+      reloading: 'The page will reload to take it into account…',
+      cat_roms: 'ROMs', cat_saves: 'Save states', cat_battery: 'Cartridge saves', cat_profiles: '3D profiles',
+      cat_tiles: '3D tile cache', cat_covers: 'Covers', cat_movies: 'Movies', cat_logs: 'Logs',
+      cat_settings: 'Settings, keys and library', cat_other: 'Other',
+    },
+  };
+  let lang = (navigator.language || 'en').toLowerCase().startsWith('fr') ? 'fr' : 'en';
+  function t(key, arg) { return (TEXT[lang][key] || TEXT.en[key] || key).replace('{0}', arg ?? ''); }
+  function applyLanguage() {
+    try {
+      const settings = JSON.parse(FS.readFile(DATA + '/settings.json', { encoding: 'utf8' }));
+      const chosen = settings && settings.values && settings.values['ui.language'];
+      if (typeof chosen === 'string' && chosen) lang = chosen.toLowerCase().startsWith('fr') ? 'fr' : 'en';
+    } catch (e) { /* no settings yet: the browser's language */ }
+    document.documentElement.lang = lang;
+    for (const node of document.querySelectorAll('[data-t]')) node.textContent = t(node.dataset.t);
+  }
+  applyLanguage();
 
   const status = document.getElementById('status');
   const canvas = document.getElementById('canvas');
@@ -76,6 +224,7 @@
     canvas.height = Math.round(canvas.clientHeight * r);
   }
   fitCanvas();
+  function alertBox(text) { status.textContent = text; setTimeout(() => { if (status.textContent === text) status.textContent = ''; }, 6000); }
 
   // --- Persistence: the whole user data folder lives in IndexedDB. ---
   let syncing = false, dirty = false;
@@ -89,78 +238,461 @@
       if (dirty) { dirty = false; save(); }
     });
   }
+  function saveThen(next) {
+    if (syncing) { setTimeout(() => saveThen(next), 100); return; }
+    syncing = true;
+    FS.syncfs(false, (err) => { syncing = false; if (err) console.warn('Zaxnes: saving failed', err); next(); });
+  }
   setInterval(save, 3000);
   document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
   window.addEventListener('pagehide', save);
 
-  // --- The ROM dialogue. ---
-  const dialog = document.getElementById('open');
-  const fileInput = document.getElementById('file');
+  // --- File system helpers. ---
   function exists(path) { try { return FS.analyzePath(path).exists; } catch (e) { return false; } }
-  function choose(path) {
+  function isDir(path) { try { return FS.isDir(FS.stat(path).mode); } catch (e) { return false; } }
+  function list(path) { try { return FS.readdir(path).filter((n) => n !== '.' && n !== '..'); } catch (e) { return []; } }
+  function walk(path, each) {
+    for (const name of list(path)) {
+      const full = path + '/' + name;
+      if (isDir(full)) walk(full, each); else { try { each(full, FS.stat(full).size); } catch (e) {} }
+    }
+  }
+  function removeTree(path) {
+    if (!exists(path)) return;
+    if (!isDir(path)) { FS.unlink(path); return; }
+    for (const name of list(path)) removeTree(path + '/' + name);
+    try { FS.rmdir(path); } catch (e) {}
+  }
+  function safeName(name) { return (name || '').replace(/[\/\\:*?"<>|\x00-\x1f]/g, '_').trim(); }
+  function size(bytes) {
+    const units = lang === 'fr' ? ['o', 'Ko', 'Mo', 'Go'] : ['B', 'KB', 'MB', 'GB'];
+    let value = bytes, unit = 0;
+    while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+    return (unit ? value.toFixed(value < 10 ? 1 : 0) : value) + ' ' + units[unit];
+  }
+
+  // --- Dialogs. ---
+  const dialogs = {
+    rom: document.getElementById('dlg-rom'),
+    profile: document.getElementById('dlg-profile'),
+    storage: document.getElementById('dlg-storage'),
+  };
+  function anyDialog() { return Object.values(dialogs).some((d) => d.classList.contains('shown')); }
+  function showDialog(name) {
+    applyLanguage();
+    for (const [key, d] of Object.entries(dialogs)) d.classList.toggle('shown', key === name);
+    if (name === 'rom') fillRoms();
+    if (name === 'storage') fillStorage();
+    const first = dialogs[name].querySelector('.btn.main') || dialogs[name].querySelector('[data-close]');
+    if (first) first.focus();
+  }
+  function closeDialogs() { for (const d of Object.values(dialogs)) d.classList.remove('shown'); canvas.focus(); }
+  for (const d of Object.values(dialogs)) {
+    d.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeDialogs(); } });
+    for (const b of d.querySelectorAll('[data-close]')) b.onclick = closeDialogs;
+  }
+  function message(box, kind, text) {
+    const div = document.createElement('div');
+    div.className = kind;
+    div.textContent = text;
+    document.getElementById(box).prepend(div);
+    return div;
+  }
+  function clearMessages(box) { document.getElementById(box).replaceChildren(); }
+  document.getElementById('bar-rom').onclick = (e) => { e.currentTarget.blur(); showDialog('rom'); };
+  document.getElementById('bar-profile').onclick = (e) => { e.currentTarget.blur(); clearMessages('profile-messages'); showDialog('profile'); };
+  document.getElementById('bar-storage').onclick = (e) => { e.currentTarget.blur(); showDialog('storage'); };
+
+  // --- Playing: the answer the program reads (web_bridge.rs), with the profile ?profile= asked. ---
+  let wantedProfile = null;
+  function play(path) {
     FS.mkdirTree('/zaxnes-web');
-    FS.writeFile(OPEN_ANSWER, path);
-    closeDialog();
+    FS.writeFile(OPEN_ANSWER, path + (wantedProfile ? '\nprofile=' + wantedProfile + '\n' : '\n'));
+    wantedProfile = null;
+    closeDialogs();
     save();
   }
+
+  // --- The ROM dialogue. ---
   function romButton(title, path, note) {
     const b = document.createElement('button');
     b.className = 'rom';
     b.textContent = title;
     if (note) { const s = document.createElement('small'); s.textContent = note; b.appendChild(s); }
-    b.onclick = () => choose(path);
+    b.onclick = () => play(path);
     return b;
   }
-  function fillLists() {
+  function userRoms() {
+    const shipped = new Set(BUNDLED.map((r) => r.file.toLowerCase()));
+    return list(ROMS).filter((f) => ROM_FILE.test(f) && !shipped.has(f.toLowerCase())).sort((a, b) => a.localeCompare(b));
+  }
+  function fillRoms() {
     const bundled = document.getElementById('bundled');
     const mine = document.getElementById('mine');
     bundled.replaceChildren(); mine.replaceChildren();
-    const shipped = new Set(BUNDLED.map((r) => r.file.toLowerCase()));
-    for (const r of BUNDLED) bundled.appendChild(romButton(r.title, ROMS + '/' + r.file, r.note));
-    let files = [];
-    try { files = FS.readdir(ROMS).filter((f) => ROM_FILE.test(f) && !shipped.has(f.toLowerCase())); } catch (e) {}
-    files.sort((a, b) => a.localeCompare(b));
+    for (const r of BUNDLED) bundled.appendChild(romButton(r.title, ROMS + '/' + r.file, t(r.noteKey)));
+    const files = userRoms();
     if (!files.length) {
-      const p = document.createElement('div'); p.className = 'empty';
-      p.textContent = 'Aucune pour l’instant : les ROMs que vous ouvrez restent ici.';
+      const p = document.createElement('div'); p.className = 'empty'; p.textContent = t('romNone');
       mine.appendChild(p);
     }
     for (const f of files) mine.appendChild(romButton(f.replace(ROM_FILE, ''), ROMS + '/' + f));
   }
-  function openDialog() { fillLists(); dialog.classList.add('shown'); document.getElementById('browse').focus(); }
-  function closeDialog() { dialog.classList.remove('shown'); canvas.focus(); }
-  document.getElementById('cancel').onclick = closeDialog;
-  document.getElementById('open-button').onclick = (e) => { e.currentTarget.blur(); openDialog(); };
-  document.getElementById('browse').onclick = () => fileInput.click();
-  dialog.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeDialog(); } });
-  fileInput.onchange = () => { if (fileInput.files[0]) importRom(fileInput.files[0]); fileInput.value = ''; };
-
-  // A file of the player's machine: copied into the ROM folder (so it stays), then opened.
-  async function importRom(file) {
-    if (!ROM_FILE.test(file.name)) { alertBox('Ce fichier n’est pas une ROM reconnue : ' + file.name); return; }
-    const name = file.name.replace(/[\/\\]/g, '_');
-    const bytes = new Uint8Array(await file.arrayBuffer());
+  // A ROM's bytes kept in the ROM folder; its path.
+  function storeRom(name, bytes) {
     FS.mkdirTree(ROMS);
-    FS.writeFile(ROMS + '/' + name, bytes);
-    choose(ROMS + '/' + name);
+    const path = ROMS + '/' + safeName(name);
+    FS.writeFile(path, bytes);
+    save();
+    return path;
   }
-  function alertBox(text) { status.textContent = text; status.style.display = 'block'; setTimeout(() => status.textContent = '', 5000); }
+  async function readRom(file) {
+    if (!ROM_FILE.test(file.name)) throw new Error(t('notRom') + file.name);
+    return storeRom(file.name, new Uint8Array(await file.arrayBuffer()));
+  }
+  const romPlayInput = document.getElementById('rom-file-play');
+  const romImportInput = document.getElementById('rom-file-import');
+  document.getElementById('rom-browse').onclick = () => romPlayInput.click();
+  document.getElementById('rom-import').onclick = () => romImportInput.click();
+  romPlayInput.onchange = async () => {
+    const file = romPlayInput.files[0];
+    romPlayInput.value = '';
+    if (!file) return;
+    try { play(await readRom(file)); } catch (e) { message('rom-messages', 'error', e.message); }
+  };
+  romImportInput.onchange = async () => {
+    const files = [...romImportInput.files];
+    romImportInput.value = '';
+    for (const file of files) {
+      try { await readRom(file); message('rom-messages', 'ok', t('romImported') + file.name); }
+      catch (e) { message('rom-messages', 'error', e.message); }
+    }
+    fillRoms();
+  };
+  document.getElementById('rom-url-go').onclick = async () => {
+    const url = document.getElementById('rom-url').value.trim();
+    if (!url) return;
+    const note = message('rom-messages', 'info', t('downloading') + ' ' + url);
+    try {
+      const { name, bytes } = await download(url, 'rom');
+      storeRom(name, bytes);
+      note.remove();
+      message('rom-messages', 'ok', t('romImported') + name);
+      fillRoms();
+    } catch (e) { note.remove(); message('rom-messages', 'error', e.message); }
+  };
 
-  // Drop anywhere on the page, dialogue open or not.
-  const drop = document.getElementById('drop');
+  // --- Downloads: ?play=, ?profile=, ?import= and the address fields. ---
+  // The file's name: the server's (Content-Disposition), else the URL's; given the extension its
+  // first bytes say when it has none the program knows.
+  function remoteName(url, response, bytes, known) {
+    let name = '';
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+    if (match) { try { name = decodeURIComponent(match[1]); } catch (e) { name = match[1]; } }
+    const lastPart = (text) => {
+      let part = (text || '').split(/[\/\\]/).pop() || '';
+      try { part = decodeURIComponent(part); } catch (e) { /* kept as it is */ }
+      return part;
+    };
+    if (!name) {
+      // The URL given first (a redirection, as archive.org's to view_archive.php, says less),
+      // then a `file=` of the final URL, then its path; the first that names a known file.
+      const candidates = [];
+      try { candidates.push(lastPart(new URL(url).pathname)); } catch (e) { /* not a URL */ }
+      try {
+        const final = new URL(response.url || url);
+        candidates.push(lastPart(final.searchParams.get('file')), lastPart(final.pathname));
+      } catch (e) { /* not a URL */ }
+      name = candidates.find((part) => known.test(part))
+        || candidates.find((part) => part && !/\.(php|aspx?|cgi|html?)$/i.test(part)) || '';
+    }
+    name = safeName(name) || 'file';
+    if (!known.test(name)) {
+      const head = String.fromCharCode(...bytes.slice(0, 6));
+      name += head.startsWith('PK\x03\x04') ? '.zip'
+        : head === '7z\xbc\xaf\x27\x1c' ? '.7z'
+        : head.startsWith('FDS\x1a') ? '.fds' : head.startsWith('UNIF') ? '.unf'
+        : known === PROFILE_FILE ? '.3dn' : '.nes';
+    }
+    return name;
+  }
+  async function download(url, kind) {
+    let response;
+    try { response = await fetch(url); }
+    catch (e) {
+      // A network error, or a server that does not allow other sites to read its files (CORS):
+      // the browser does not tell the two apart.
+      throw new Error(t('cors') + url);
+    }
+    if (!response.ok) throw new Error(t('notFound') + '(' + response.status + ') : ' + url);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.length < 16 || bytes.length > 64 * 1024 * 1024) throw new Error(t('tooBig') + url);
+    return { name: remoteName(url, response, bytes, kind === 'rom' ? ROM_FILE : PROFILE_FILE), bytes };
+  }
+  // The value of `key` in the address: an http(s) URL takes the rest of the parameter, '&' and
+  // '#' included when it is the last one, so a link pasted raw still works; one given encoded
+  // (encodeURIComponent) ends at the next '&'.
+  function addressValues(key) {
+    const search = location.search + location.hash;
+    const values = [];
+    const pattern = new RegExp('[?&]' + key + '=', 'g');
+    let found;
+    while ((found = pattern.exec(search))) {
+      let raw = search.slice(found.index + found[0].length);
+      if (/^https?:\/\//i.test(raw)) {
+        const next = raw.search(/&(play|profile|import|env)=/);
+        values.push(next < 0 ? raw : raw.slice(0, next));
+      } else {
+        const end = raw.search(/[&#]/);
+        raw = end < 0 ? raw : raw.slice(0, end);
+        try { values.push(decodeURIComponent(raw.replace(/\+/g, ' '))); } catch (e) { values.push(raw); }
+      }
+    }
+    return values;
+  }
+
+  // --- 3D profiles and 3dSen data: put in the import folder; the program imports them and
+  // answers in IMPORT_RESULT (a line per file: ok|<id>|<text> or error||<text>). ---
+  let importWaiters = [];
+  function storeImports(files) {
+    FS.mkdirTree(IMPORT);
+    for (const { name, bytes } of files) FS.writeFile(IMPORT + '/' + safeName(name), bytes);
+    return new Promise((resolve) => {
+      const waiter = { resolve, timer: setTimeout(() => {
+        importWaiters = importWaiters.filter((w) => w !== waiter);
+        resolve(null);
+      }, 15000) };
+      importWaiters.push(waiter);
+    });
+  }
+  function takeImportResult() {
+    if (!exists(IMPORT_RESULT)) return;
+    let text = '';
+    try { text = FS.readFile(IMPORT_RESULT, { encoding: 'utf8' }); FS.unlink(IMPORT_RESULT); } catch (e) { return; }
+    const lines = text.split('\n').filter(Boolean).map((line) => {
+      const [kind, id, ...rest] = line.split('|');
+      return { ok: kind === 'ok', id: id || null, text: rest.join('|') };
+    });
+    const waiters = importWaiters;
+    importWaiters = [];
+    for (const w of waiters) { clearTimeout(w.timer); w.resolve(lines); }
+    if (!waiters.length) for (const l of lines) message('profile-messages', l.ok ? 'ok' : 'error', l.text);
+    save();
+  }
+  async function importProfiles(files) {
+    const kept = [];
+    for (const f of files) {
+      if (PROFILE_FILE.test(f.name)) kept.push(f);
+      else message('profile-messages', 'error', t('notProfile') + f.name);
+    }
+    if (!kept.length) return null;
+    const note = message('profile-messages', 'info', t('importing') + kept.map((f) => f.name).join(', '));
+    const lines = await storeImports(kept);
+    note.remove();
+    if (!lines) { message('profile-messages', 'info', t('noAnswer')); return null; }
+    for (const l of lines) message('profile-messages', l.ok ? 'ok' : 'error', l.text);
+    return lines;
+  }
+  const profileInput = document.getElementById('profile-file');
+  document.getElementById('profile-import').onclick = () => profileInput.click();
+  profileInput.onchange = async () => {
+    const files = await Promise.all([...profileInput.files].map(async (f) => ({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) })));
+    profileInput.value = '';
+    await importProfiles(files);
+  };
+  document.getElementById('profile-url-go').onclick = async () => {
+    const url = document.getElementById('profile-url').value.trim();
+    if (!url) return;
+    const note = message('profile-messages', 'info', t('downloading') + ' ' + url);
+    try { const file = await download(url, 'profile'); note.remove(); await importProfiles([file]); }
+    catch (e) { note.remove(); message('profile-messages', 'error', e.message); }
+  };
+
+  // Drop anywhere on the page: a ROM is played (or imported when the ROM dialogue is open), a
+  // profile or 3dSen data imported.
   window.addEventListener('dragover', (e) => { e.preventDefault(); document.body.classList.add('dragging'); });
   window.addEventListener('dragleave', (e) => { if (!e.relatedTarget) document.body.classList.remove('dragging'); });
-  window.addEventListener('drop', (e) => {
+  window.addEventListener('drop', async (e) => {
     e.preventDefault();
     document.body.classList.remove('dragging');
-    const file = e.dataTransfer && e.dataTransfer.files[0];
-    if (file && typeof FS !== 'undefined') importRom(file);
+    if (typeof FS === 'undefined') return;
+    const files = [...((e.dataTransfer && e.dataTransfer.files) || [])];
+    const profiles = files.filter((f) => PROFILE_FILE.test(f.name));
+    const roms = files.filter((f) => !PROFILE_FILE.test(f.name));
+    if (profiles.length) {
+      if (!dialogs.profile.classList.contains('shown')) { clearMessages('profile-messages'); showDialog('profile'); }
+      const read = await Promise.all(profiles.map(async (f) => ({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) })));
+      await importProfiles(read);
+    }
+    if (!roms.length) return;
+    if (roms.length === 1 && !dialogs.rom.classList.contains('shown') && !profiles.length) {
+      try { play(await readRom(roms[0])); } catch (err) { alertBox(err.message); }
+      return;
+    }
+    if (!dialogs.rom.classList.contains('shown')) showDialog('rom');
+    for (const f of roms) {
+      try { await readRom(f); message('rom-messages', 'ok', t('romImported') + f.name); }
+      catch (err) { message('rom-messages', 'error', err.message); }
+    }
+    fillRoms();
   });
+
+  // --- Storage. ---
+  const CATEGORIES = [
+    { key: 'roms', dir: 'roms', reload: false },
+    { key: 'saves', dir: 'saves', reload: false },
+    { key: 'battery', dir: 'battery', reload: false },
+    { key: 'profiles', dir: 'profiles', reload: true },
+    { key: 'tiles', dir: 'tiles', reload: false },
+    { key: 'covers', dir: 'covers', reload: true },
+    { key: 'movies', dir: 'movies', reload: false },
+    { key: 'logs', dir: 'logs', reload: false },
+    { key: 'settings', dir: null, reload: true },
+  ];
+  // The category of a path of the user data folder.
+  function categoryOf(path) {
+    const relative = path.slice(DATA.length + 1);
+    const top = relative.split('/')[0];
+    const known = CATEGORIES.find((c) => c.dir === top);
+    if (known) return known.key;
+    return relative.includes('/') ? 'other' : 'settings';
+  }
+  function measure() {
+    const sizes = {};
+    for (const c of [...CATEGORIES.map((c) => c.key), 'other']) sizes[c] = { bytes: 0, files: 0 };
+    walk(DATA, (path, bytes) => { const s = sizes[categoryOf(path)]; s.bytes += bytes; s.files++; });
+    return sizes;
+  }
+  // Clears a category: the files of its folder, or the settings files of the root. The ROMs and
+  // the profiles take the demo's marker with them, so the program installs FlappyZaxNes again.
+  function clearCategory(key) {
+    const shipped = new Set(BUNDLED.map((r) => r.file.toLowerCase()));
+    walk(DATA, (path) => {
+      if (categoryOf(path) !== key) return;
+      if (key === 'roms' && shipped.has(path.split('/').pop().toLowerCase())) return;
+      try { FS.unlink(path); } catch (e) {}
+    });
+    if (key === 'profiles' && exists(DEMO_MARKER)) FS.unlink(DEMO_MARKER);
+  }
+  async function fillStorage() {
+    const sizes = measure();
+    const total = Object.values(sizes).reduce((sum, s) => sum + s.bytes, 0);
+    let summary = t('storageUsed') + size(total);
+    const persist = document.getElementById('storage-persist');
+    const persistRow = document.getElementById('storage-persist-row');
+    if (navigator.storage && navigator.storage.estimate) {
+      try { const estimate = await navigator.storage.estimate(); if (estimate.quota) summary += t('storageQuota') + size(estimate.quota) + '.'; } catch (e) {}
+    }
+    document.getElementById('storage-summary').textContent = summary;
+    let persisted = false;
+    try { persisted = navigator.storage && navigator.storage.persisted ? await navigator.storage.persisted() : false; } catch (e) {}
+    persist.textContent = persisted ? t('persistOn') : t('persistOff');
+    persistRow.style.display = persisted || !(navigator.storage && navigator.storage.persist) ? 'none' : '';
+
+    const table = document.getElementById('storage-categories');
+    table.replaceChildren();
+    for (const key of [...CATEGORIES.map((c) => c.key), 'other']) {
+      const s = sizes[key];
+      if (key === 'other' && !s.files) continue;
+      const row = table.insertRow();
+      row.insertCell().textContent = t('cat_' + key);
+      const count = row.insertCell(); count.className = 'size'; count.textContent = s.files + t('files');
+      const bytes = row.insertCell(); bytes.className = 'size'; bytes.textContent = size(s.bytes);
+      const act = row.insertCell(); act.className = 'act';
+      if (s.files) {
+        const b = document.createElement('button');
+        b.className = 'btn small danger'; b.textContent = t('clear');
+        b.onclick = () => {
+          if (!confirm(t('confirmClear', t('cat_' + key)))) return;
+          clearCategory(key);
+          message('storage-messages', 'ok', t('cleared') + t('cat_' + key));
+          const category = CATEGORIES.find((c) => c.key === key);
+          if (category && category.reload) {
+            message('storage-messages', 'info', t('reloading'));
+            saveThen(() => location.reload());
+          } else { save(); fillStorage(); }
+        };
+        act.appendChild(b);
+      }
+    }
+
+    const roms = document.getElementById('storage-roms');
+    roms.replaceChildren();
+    for (const file of userRoms()) {
+      const row = roms.insertRow();
+      const name = row.insertCell(); name.className = 'name'; name.textContent = file;
+      const bytes = row.insertCell(); bytes.className = 'size';
+      try { bytes.textContent = size(FS.stat(ROMS + '/' + file).size); } catch (e) {}
+      const act = row.insertCell(); act.className = 'act';
+      const rename = document.createElement('button');
+      rename.className = 'btn small'; rename.textContent = t('rename');
+      rename.onclick = () => renameRom(file);
+      const remove = document.createElement('button');
+      remove.className = 'btn small danger'; remove.textContent = t('remove');
+      remove.onclick = () => removeRom(file);
+      act.append(rename, ' ', remove);
+    }
+    if (!roms.rows.length) { const row = roms.insertRow(); const c = row.insertCell(); c.className = 'empty'; c.textContent = t('romNone'); }
+  }
+  // The files that belong to a ROM: its states and their pictures, its cartridge saves and its
+  // movies, all named `<ROM name without extension>.<something>` (user_data_paths.rs).
+  function companions(file) {
+    const stem = file.replace(/\.[^.]*$/, '');
+    const found = [];
+    for (const dir of ['saves', 'battery', 'movies']) {
+      for (const name of list(DATA + '/' + dir)) {
+        if (name.startsWith(stem + '.')) found.push({ dir, name, rest: name.slice(stem.length) });
+      }
+    }
+    return { stem, found };
+  }
+  function renameRom(file) {
+    const extension = (file.match(/\.[^.]*$/) || [''])[0];
+    let wanted = prompt(t('renamePrompt', file), file.replace(/\.[^.]*$/, ''));
+    if (wanted === null) return;
+    wanted = safeName(wanted);
+    if (!wanted) { message('storage-messages', 'error', t('badName') + file); return; }
+    if (!ROM_FILE.test(wanted)) wanted += extension;
+    if (wanted === file) return;
+    if (exists(ROMS + '/' + wanted)) { message('storage-messages', 'error', t('exists') + wanted); return; }
+    const { found } = companions(file);
+    const newStem = wanted.replace(/\.[^.]*$/, '');
+    FS.rename(ROMS + '/' + file, ROMS + '/' + wanted);
+    for (const c of found) {
+      const target = DATA + '/' + c.dir + '/' + newStem + c.rest;
+      if (!exists(target)) FS.rename(DATA + '/' + c.dir + '/' + c.name, target);
+    }
+    message('storage-messages', 'ok', t('renamed') + file + ' → ' + wanted);
+    save();
+    fillStorage();
+  }
+  function removeRom(file) {
+    if (!confirm(t('confirmRemove', file))) return;
+    const { found } = companions(file);
+    try { FS.unlink(ROMS + '/' + file); } catch (e) {}
+    for (const c of found) { try { FS.unlink(DATA + '/' + c.dir + '/' + c.name); } catch (e) {} }
+    message('storage-messages', 'ok', t('removed') + file);
+    save();
+    fillStorage();
+  }
+  document.getElementById('storage-persist-go').onclick = async () => {
+    let granted = false;
+    try { granted = await navigator.storage.persist(); } catch (e) {}
+    if (!granted) message('storage-messages', 'info', t('persistRefused'));
+    fillStorage();
+  };
+  document.getElementById('storage-all').onclick = () => {
+    if (!confirm(t('confirmAll'))) return;
+    for (const name of list(DATA)) removeTree(DATA + '/' + name);
+    message('storage-messages', 'info', t('reloading'));
+    saveThen(() => location.reload());
+  };
 
   // The program's keys are the program's: Ctrl+O must not open the browser's own file dialogue,
   // Ctrl+S save the page, Tab move the focus, F1 open the help... (the program still gets them).
   window.addEventListener('keydown', (e) => {
-    if (dialog.classList.contains('shown')) return;
+    if (anyDialog()) return;
     // Tab and F1 open the console interface's menu: not the browser's focus move or help.
     const programKey = e.key === 'Tab' || /^F([1-9]|10)$/.test(e.key);
     if (programKey || ((e.ctrlKey || e.metaKey) && /^[a-z,]$/i.test(e.key))) {
@@ -168,40 +700,77 @@
     }
   }, true);
 
-  // The program asks for the dialogue by creating OPEN_REQUEST.
+  // The program asks for a dialogue by writing its name in OPEN_REQUEST; it reports the imports.
   function pollRequests() {
     if (exists(OPEN_REQUEST)) {
-      try { FS.unlink(OPEN_REQUEST); } catch (e) {}
-      openDialog();
+      let wanted = 'rom';
+      try { wanted = FS.readFile(OPEN_REQUEST, { encoding: 'utf8' }).trim() || 'rom'; FS.unlink(OPEN_REQUEST); } catch (e) {}
+      if (wanted === 'profile') clearMessages('profile-messages');
+      showDialog(dialogs[wanted] ? wanted : 'rom');
     }
-    // The page's own button only while no game is on the screen.
+    takeImportResult();
+    // The page's own buttons only while no game is on the screen.
     let state = '';
     try { state = FS.readFile(STATE, { encoding: 'utf8' }); } catch (e) {}
     document.body.classList.toggle('playing', state === 'playing');
   }
 
+  // --- The address: ?import=<URL> (repeatable) imports 3D profiles or 3dSen data first;
+  // ?profile=<identifier, title or URL> is the profile to play with; ?play=<URL or bundled
+  // name> the ROM. ---
+  async function startFromAddress() {
+    const imports = addressValues('import');
+    let profile = addressValues('profile')[0] || null;
+    const remotes = [...imports];
+    if (profile && /^https?:\/\//i.test(profile)) { remotes.push(profile); profile = null; }
+    if (remotes.length) {
+      status.textContent = t('downloading');
+      const files = [];
+      for (const url of remotes) {
+        try { files.push(await download(url, 'profile')); } catch (e) { alertBox(e.message); }
+      }
+      if (files.length) {
+        const lines = (await storeImports(files)) || [];
+        for (const l of lines) if (!l.ok) alertBox(l.text);
+        // The profile given by its URL: the one that file became.
+        const last = lines.length === files.length ? lines[lines.length - 1] : null;
+        if (!profile && addressValues('profile')[0] && last && last.id) profile = last.id;
+      }
+      status.textContent = '';
+    }
+    wantedProfile = profile;
+    const wanted = addressValues('play')[0] || '';
+    if (/^https?:\/\//i.test(wanted)) {
+      status.textContent = t('downloading');
+      try { const { name, bytes } = await download(wanted, 'rom'); status.textContent = ''; play(storeRom(name, bytes)); }
+      catch (e) { status.textContent = ''; alertBox(e.message); }
+      return;
+    }
+    // ?play=flappy (the README's link): straight into a bundled ROM, once the program has
+    // installed it.
+    const rom = wanted && BUNDLED.find((r) => r.title.toLowerCase().includes(wanted.toLowerCase()));
+    const mine = !rom && wanted && userRoms().find((f) => f.toLowerCase().includes(wanted.toLowerCase()));
+    const path = rom ? ROMS + '/' + rom.file : mine ? ROMS + '/' + mine : null;
+    if (!path) { wantedProfile = null; return; }
+    const tryOpen = (left) => {
+      if (exists(path)) play(path);
+      else if (left > 0) setTimeout(() => tryOpen(left - 1), 250);
+    };
+    setTimeout(() => tryOpen(40), 300);
+  }
+
   var Module = {
     canvas,
     arguments: [],
-    print: (t) => console.log(t),
-    printErr: (t) => console.warn(t),
-    setStatus: (t) => { status.textContent = t; },
+    print: (text) => console.log(text),
+    printErr: (text) => console.warn(text),
+    setStatus: (text) => { status.textContent = text; },
     onRuntimeInitialized: () => {
       status.textContent = '';
+      applyLanguage();
       canvas.focus();
       setInterval(pollRequests, 200);
-      // ?play=flappy (the README's link): straight into a bundled ROM, once the program has
-      // installed it.
-      const wanted = (new URLSearchParams(location.search).get('play') || '').toLowerCase();
-      const rom = wanted && BUNDLED.find((r) => r.title.toLowerCase().includes(wanted));
-      if (rom) {
-        const path = ROMS + '/' + rom.file;
-        const tryOpen = (left) => {
-          if (exists(path)) { FS.mkdirTree('/zaxnes-web'); FS.writeFile(OPEN_ANSWER, path); }
-          else if (left > 0) setTimeout(() => tryOpen(left - 1), 250);
-        };
-        setTimeout(() => tryOpen(40), 300);
-      }
+      startFromAddress();
     },
     preRun: [() => {
       // Debugging aid: ?env=NAME=value (repeatable) sets environment variables of the program.
@@ -217,6 +786,19 @@
         if (err) console.warn('Zaxnes: reading IndexedDB failed', err);
         removeRunDependency('zaxnes-idbfs');
       });
+      // The interface's face (Roboto, Apache-2.0, as on Android): the program looks for the
+      // system's faces and a page has none, so they are put where Android keeps them. Without
+      // them the program falls back to its built-in face.
+      FS.mkdirTree('/system/fonts');
+      for (const face of ['Roboto-Regular.ttf', 'Roboto-Bold.ttf']) {
+        const dependency = 'zaxnes-font-' + face;
+        addRunDependency(dependency);
+        fetch('fonts/' + face)
+          .then((response) => (response.ok ? response.arrayBuffer() : Promise.reject(response.status)))
+          .then((data) => FS.writeFile('/system/fonts/' + face, new Uint8Array(data)))
+          .catch((err) => console.warn('Zaxnes: font ' + face + ' not loaded', err))
+          .finally(() => removeRunDependency(dependency));
+      }
     }],
   };
   window.addEventListener('error', (e) => { status.textContent = 'Erreur : ' + e.message; });
