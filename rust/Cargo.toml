@@ -52,3 +52,5 @@ opt-level = 2
 # vendor/librashader-runtime-wgpu/README.md.
 [patch.crates-io]
 librashader-runtime-wgpu = { path = "vendor/librashader-runtime-wgpu" }
+# The 7z decoder without wasm-bindgen on Emscripten (vendor/sevenz-rust2/ZAXNES-PATCH.md).
+sevenz-rust2 = { path = "vendor/sevenz-rust2" }

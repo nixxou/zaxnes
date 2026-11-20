@@ -1916,8 +1916,6 @@ dependencies = [
 [[package]]
 name = "sevenz-rust2"
 version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5e465701779cbc6d0d10cf907f175035cfdd50b8d3cb628d7f1f435ef02972f"
 dependencies = [
  "crc32fast",
  "js-sys",
