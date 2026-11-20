@@ -335,6 +335,9 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     rom_crcs: std::cell::RefCell<crate::persistence::rom_crc_cache::RomCrcCache>,
     /// What the study of each ROM file found: whether a widescreen hack fits it.
     hack_compat: std::cell::RefCell<crate::persistence::hack_compat_cache::HackCompatCache>,
+    /// The content of an archive read as it was opened (its profile imported then), kept for the
+    /// launch that follows so that it is not decompressed twice: its full path and what it held.
+    packed_content: Option<(std::path::PathBuf, crate::emulation::rom_file::GameContent)>,
     /// The Zapper.
     pub zapper: ZapperState,
     /// RetroAchievements (Rust-only, owner request), softcore.
@@ -496,6 +499,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             slot_caches: SlotCaches::default(),
             rom_crcs: std::cell::RefCell::new(rom_crcs),
             hack_compat: std::cell::RefCell::new(hack_compat),
+            packed_content: None,
             zapper: ZapperState::new(),
             achievements: AchievementSystem::new(&format!("Zaxnes/{}", env!("CARGO_PKG_VERSION")))
                 .with_cache(achievement_cache),

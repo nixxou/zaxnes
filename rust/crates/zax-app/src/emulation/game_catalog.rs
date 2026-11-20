@@ -99,6 +99,13 @@ pub trait GameCatalog {
     /// has nothing to forget.
     fn forget_profile(&mut self, _game_id: &str) {}
 
+    /// Imports the profile `bytes` (a `.3dn` called `name`) that came in a game's archive,
+    /// without a dialogue, replacing the profile of the same identifier: the entry it is now,
+    /// `None` when it was refused. A catalogue without files imports nothing.
+    fn import_packed_profile(&mut self, _name: &str, _bytes: &[u8]) -> Option<String> {
+        None
+    }
+
     /// Builds again the profile file of `game_id` from its project of the editor mode
     /// (`editor_mode.rs`), before a script reload reads it: `None` when it has no project, else
     /// whether the build went through. A catalogue without files has no project.

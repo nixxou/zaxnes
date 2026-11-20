@@ -75,7 +75,7 @@ fn the_native_dialog_replaces_the_browser_and_its_answer_is_used() {
     let request = test.requests.try_recv().expect("the picker was asked");
     assert!(!request.folder);
     assert_eq!(
-        ["nes", "unf", "unif", "studybox", "fds", "qd", "zip"],
+        ["nes", "unf", "unif", "studybox", "fds", "qd", "zip", "7z"],
         request.filters[0].extensions[..]
     );
     assert!(request

@@ -468,6 +468,39 @@ impl GameCatalog for LibraryGameCatalog {
         self.profiles.remove(game_id);
     }
 
+    fn import_packed_profile(&mut self, name: &str, bytes: &[u8]) -> Option<String> {
+        if !self.paths.is_writable {
+            return None;
+        }
+        // The import reads a file: the profile waits beside the launch requests, under its own
+        // name, until it is imported.
+        let folder = self.paths.root.join(crate::launch_request::FOLDER);
+        std::fs::create_dir_all(&folder).ok()?;
+        let source = folder.join(name);
+        std::fs::write(&source, bytes).ok()?;
+        let plan = self.inspect_profile_import(&source);
+        // The same profile already imported: nothing is written again.
+        let same = plan.outcome == ProfileImportOutcome::Replaced
+            && std::fs::read(&plan.destination).is_ok_and(|kept| kept == bytes);
+        let id = match plan.outcome {
+            ProfileImportOutcome::Rejected => None,
+            ProfileImportOutcome::AlreadyBuiltIn => Some(plan.id.clone()),
+            _ if same => Some(plan.id.clone()),
+            _ => {
+                let result = self.apply_profile_import(&plan);
+                result.profile.map(|profile| profile.id)
+            }
+        };
+        let _ = std::fs::remove_file(&source);
+        if id.is_none() {
+            (self.log)(&format!(
+                "the profile {name} of the archive was refused: {}",
+                plan.message
+            ));
+        }
+        id.filter(|id| self.library.find(id).is_some())
+    }
+
     fn profile_file(&self, game_id: &str) -> Option<std::path::PathBuf> {
         let entry = self.library.find(game_id)?;
         let path = entry.profile_path();

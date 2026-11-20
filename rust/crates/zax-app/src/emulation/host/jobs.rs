@@ -7,7 +7,7 @@ use std::path::Path;
 use zax_core_api::{EngineKind, NesRegion};
 use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::state_codec;
-use zax_nes::NesCore;
+use zax_nes::{builtin_patches, NesCore};
 use zax_settings::catalogue::SettingId;
 use zax_settings::values::SettingValue;
 
@@ -168,13 +168,32 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             self.notifications.show_error(INVALID_ROM_MESSAGE);
             return;
         };
-        let rom = match rom_file::read(Path::new(&rom_path)) {
-            Ok(rom) => rom,
-            Err(message) => {
-                self.notifications.show_error(&message);
-                return;
-            }
+        let content = match self.take_packed_content(&rom_path) {
+            Some(content) => content,
+            None => match rom_file::read_content(Path::new(&rom_path)) {
+                Ok(content) => content,
+                Err(message) => {
+                    self.notifications.show_error(&message);
+                    return;
+                }
+            },
         };
+        // A hack pack in the game's archive takes the catalogue's place for it; any other game
+        // goes back to the catalogue's packs.
+        match &content.pack {
+            Some(pack) => {
+                match builtin_patches::set_packed_pack(&pack.name, &pack.bytes, &content.rom.image)
+                {
+                    Ok(patch) => self.log(&format!("{}: the archive's pack {}", patch, pack.name)),
+                    Err(message) => {
+                        self.notifications.show_error(&message);
+                        self.log(&message);
+                    }
+                }
+            }
+            None => builtin_patches::clear_packed_pack(),
+        }
+        let rom = content.rom;
         // REQ-LOOP-018: the content is checked by a throw-away core, so a bad file never
         // disturbs the game in progress.
         let mut probe = NesCore::new();
@@ -207,6 +226,26 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         if self.loading || rom_path.is_empty() {
             return;
         }
+        // An archive is read now, once: a profile in it wins over the one chosen for the ROM
+        // (owner request), and the launch takes what was read.
+        if rom_file::is_archive(Path::new(rom_path)) {
+            let content = match rom_file::read_content(Path::new(rom_path)) {
+                Ok(content) => content,
+                Err(message) => {
+                    self.notifications.show_error(&message);
+                    return;
+                }
+            };
+            let packed = content.profile.as_ref().and_then(|profile| {
+                self.games
+                    .import_packed_profile(&profile.name, &profile.bytes)
+            });
+            self.packed_content = Some((full_path(rom_path), content));
+            if let Some(game_id) = packed {
+                self.launch_rom_with_profile(rom_path, &game_id);
+                return;
+            }
+        }
         // A profile that has since been removed falls back to the chooser rather than to an
         // error, which is also what REQ-UI-201 describes for a file never started.
         let chosen = self
@@ -218,6 +257,15 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         match target {
             Some(game_id) => self.launch_rom_with_profile(rom_path, &game_id),
             None => self.request_ui(Command::ChooseProfile, &CommandArgs::of_text(rom_path)),
+        }
+    }
+
+    /// What the archive at `rom_path` held when it was opened, if it was the last one opened.
+    fn take_packed_content(&mut self, rom_path: &str) -> Option<rom_file::GameContent> {
+        let wanted = full_path(rom_path);
+        match self.packed_content.take() {
+            Some((path, content)) if path == wanted => Some(content),
+            _ => None,
         }
     }
 
@@ -1235,4 +1283,9 @@ fn engine_of_core_id(core_id: &str) -> Option<zax_core_api::EngineKind> {
     zax_core_api::EngineKind::ALL
         .into_iter()
         .find(|&engine| zax_core_api::state_core_name(engine) == core_id)
+}
+
+/// `path` made absolute, as the library keeps the ROMs' paths.
+fn full_path(path: &str) -> std::path::PathBuf {
+    std::path::absolute(path).unwrap_or_else(|_| std::path::PathBuf::from(path))
 }

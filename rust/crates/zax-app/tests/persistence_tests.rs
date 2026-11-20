@@ -376,7 +376,7 @@ fn req_loop_023_archive_failures_report_the_exact_messages() {
         UNCOMPRESSION_FAILED_MESSAGE,
         rom_file::read(&empty).unwrap_err()
     );
-    // Q-028: no 7-Zip decoder is available, so such a file is refused cleanly.
+    // A damaged 7z (owner request: 7z archives are read) is refused cleanly.
     let seven = root.path().join("game.7z");
     std::fs::write(&seven, [0x37, 0x7A]).unwrap();
     assert_eq!(
