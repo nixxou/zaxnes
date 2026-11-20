@@ -1254,7 +1254,7 @@ impl HandheldUi {
         // The menu is a panel in the middle, so the game stays visible around it.
         let panel_width = (size[0] - 4.0 * metrics.padding).min(metrics.font * 24.0);
         let left = (size[0] - panel_width) * 0.5;
-        let rows: f32 = self
+        let heights: Vec<f32> = self
             .overlay
             .items()
             .iter()
@@ -1268,7 +1268,19 @@ impl HandheldUi {
                     panel_width,
                 ))
             })
-            .sum();
+            .collect();
+        // Taller than the screen (owner request): the rows scroll with the selection, as the
+        // lists do, an arrow saying more rows are above or below.
+        let room = (size[1] - metrics.hint_band() - metrics.title_band() - metrics.padding * 2.0)
+            .max(metrics.row);
+        let (first, last) = overlay_window(
+            &heights,
+            self.overlay.selected_index(),
+            self.overlay_first.get(),
+            room,
+        );
+        self.overlay_first.set(first);
+        let rows: f32 = heights[first..last].iter().sum();
         let panel_height = metrics.title_band() + rows + metrics.padding;
         let top = ((size[1] - metrics.hint_band() - panel_height) * 0.5).max(0.0);
         painter
@@ -1277,7 +1289,35 @@ impl HandheldUi {
             .filled(true)
             .rounding(metrics.padding)
             .build();
-        self.draw_overlay_rows(&painter, frame, left, top, panel_width);
+        self.draw_overlay_rows(&painter, frame, (left, top, panel_width), (first, last));
+        // Triangles drawn, not glyphs: the interface's face may lack them.
+        let half = (metrics.font * 0.3).round();
+        let x = left + panel_width - metrics.padding * 1.5 - half;
+        let y = top + metrics.title_band() * 0.5;
+        if first > 0 {
+            painter
+                .list
+                .add_triangle(
+                    [x - half, y - half * 0.3],
+                    [x + half, y - half * 0.3],
+                    [x, y - half * 1.5],
+                    DIM,
+                )
+                .filled(true)
+                .build();
+        }
+        if last < heights.len() {
+            painter
+                .list
+                .add_triangle(
+                    [x - half, y + half * 0.3],
+                    [x + half, y + half * 0.3],
+                    [x, y + half * 1.5],
+                    DIM,
+                )
+                .filled(true)
+                .build();
+        }
         painter.hints(layout::hints(Screen::Overlay));
     }
 
@@ -1285,9 +1325,8 @@ impl HandheldUi {
         &self,
         painter: &Painter<'_>,
         frame: &UiFrame<'_>,
-        left: f32,
-        top: f32,
-        width: f32,
+        (left, top, width): (f32, f32, f32),
+        (first, last): (usize, usize),
     ) {
         let metrics = &self.metrics;
         {
@@ -1300,7 +1339,14 @@ impl HandheldUi {
             );
         }
         let mut row_top = top + metrics.title_band();
-        for (index, item) in self.overlay.items().iter().enumerate() {
+        for (index, item) in self
+            .overlay
+            .items()
+            .iter()
+            .enumerate()
+            .take(last)
+            .skip(first)
+        {
             let selected = index == self.overlay.selected_index();
             let value = self.overlay_value(*item, frame);
             // Owner request: a value that does not fit beside its label goes under it.
@@ -1992,4 +2038,53 @@ fn zaxnes_row_text(row: GameRow, model: &zax_settings::model::SettingsModel) -> 
         ">".to_owned()
     };
     (label, value)
+}
+
+/// The rows `first..last` of a menu whose rows are `heights` tall that fit in `room`: from
+/// `previous` (the first row shown before), moved only as far as the `selected` row needs; all
+/// of them when they fit.
+fn overlay_window(heights: &[f32], selected: usize, previous: usize, room: f32) -> (usize, usize) {
+    let total = heights.len();
+    if total == 0 || heights.iter().sum::<f32>() <= room {
+        return (0, total);
+    }
+    let selected = selected.min(total - 1);
+    // The end of the rows from `first` that fit (one at least).
+    let fit = |first: usize| {
+        let mut used = 0.0;
+        let mut last = first;
+        while last < total && (last == first || used + heights[last] <= room) {
+            used += heights[last];
+            last += 1;
+        }
+        last
+    };
+    let mut first = previous.min(selected);
+    while fit(first) <= selected {
+        first += 1;
+    }
+    // No empty room at the bottom while rows wait above.
+    while first > 0 && fit(first - 1) >= total {
+        first -= 1;
+    }
+    (first, fit(first))
+}
+
+#[cfg(test)]
+mod overlay_window_tests {
+    use super::overlay_window;
+
+    #[test]
+    fn the_menu_scrolls_only_when_it_does_not_fit() {
+        let rows = [1.0; 10];
+        assert_eq!((0, 10), overlay_window(&rows, 9, 0, 10.0));
+        assert_eq!((0, 4), overlay_window(&rows, 0, 0, 4.0));
+        assert_eq!((0, 4), overlay_window(&rows, 3, 0, 4.0));
+        assert_eq!((1, 5), overlay_window(&rows, 4, 0, 4.0));
+        // Going back up keeps the window until the selection leaves it.
+        assert_eq!((1, 5), overlay_window(&rows, 2, 1, 4.0));
+        assert_eq!((0, 4), overlay_window(&rows, 0, 1, 4.0));
+        // Wrapping round to the last row shows the end.
+        assert_eq!((6, 10), overlay_window(&rows, 9, 0, 4.0));
+    }
 }

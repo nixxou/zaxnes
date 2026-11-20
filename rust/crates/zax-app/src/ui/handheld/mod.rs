@@ -195,6 +195,9 @@ pub struct HandheldUi {
     /// go (known once drawn).
     list_scroll: f32,
     list_scroll_max: Cell<f32>,
+    /// The first row of the in-game menu shown when it is taller than the screen (owner
+    /// request: a small window, or a page under its browser's bars, scrolls it).
+    overlay_first: Cell<usize>,
     /// The grid of a game's achievements, while it shows, and the screen it goes back to.
     grid: Option<(achievement_grid::AchievementGridModel, Screen)>,
 }
@@ -291,6 +294,7 @@ impl HandheldUi {
             keyboard: None,
             list_scroll: 0.0,
             list_scroll_max: Cell::new(0.0),
+            overlay_first: Cell::new(0),
             grid: None,
         };
         ui.refresh_roms(host);
