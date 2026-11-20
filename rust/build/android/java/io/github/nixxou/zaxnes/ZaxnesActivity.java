@@ -93,7 +93,11 @@ public class ZaxnesActivity extends SDLActivity {
                     && displayName(uri).toLowerCase(java.util.Locale.ROOT).endsWith(".bundle")) {
                 File root = getExternalFilesDir(null);
                 if (root != null) {
-                    copyContent(uri, new File(root, "import"));
+                    String copied = copyContent(uri, new File(root, "import"));
+                    // Opened again: imported again, its marker of the last import removed.
+                    if (copied != null) {
+                        new File(copied + ".done").delete();
+                    }
                 }
                 return;
             }

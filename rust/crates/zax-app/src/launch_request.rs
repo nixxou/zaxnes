@@ -18,51 +18,10 @@ pub const FOLDER: &str = "launch";
 /// The request's file in [`FOLDER`].
 pub const FILE: &str = "request";
 
-/// The folder of the user data where 3dSen bundles wait to be imported: the Android activity
-/// copies a `.bundle` opened with or shared to Zaxnes there, and one can be copied there from a
-/// computer.
-pub const IMPORT_FOLDER: &str = "import";
-
-/// The 3dSen bundles waiting in the user data folder `root`, by name.
-#[must_use]
-pub fn waiting_bundles(root: &Path) -> Vec<PathBuf> {
-    let Ok(listing) = std::fs::read_dir(root.join(IMPORT_FOLDER)) else {
-        return Vec::new();
-    };
-    let mut bundles: Vec<PathBuf> = listing
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.is_file()
-                && path
-                    .extension()
-                    .is_some_and(|extension| extension.eq_ignore_ascii_case("bundle"))
-        })
-        .collect();
-    bundles.sort();
-    bundles
-}
-
-/// The 3D profiles (`.3dn`, `.3dh`) waiting in the user data folder `root` beside the bundles
-/// (the web page puts those the player imports there), by name.
-#[must_use]
-pub fn waiting_profiles(root: &Path) -> Vec<PathBuf> {
-    let Ok(listing) = std::fs::read_dir(root.join(IMPORT_FOLDER)) else {
-        return Vec::new();
-    };
-    let mut profiles: Vec<PathBuf> = listing
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.is_file()
-                && path.extension().is_some_and(|extension| {
-                    extension.eq_ignore_ascii_case("3dn") || extension.eq_ignore_ascii_case("3dh")
-                })
-        })
-        .collect();
-    profiles.sort();
-    profiles
-}
+/// The folder of the user data where what is to be imported waits (see
+/// `zax_profiles::import::folder`): the Android activity copies a `.bundle` opened with or
+/// shared to Zaxnes there, and one can be put there by hand.
+pub const IMPORT_FOLDER: &str = zax_profiles::import::folder::FOLDER;
 
 /// A game asked by another application.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,21 +82,6 @@ mod tests {
         );
         assert_eq!(parse("return=1\n"), None);
         assert_eq!(parse("rom=\n"), None);
-    }
-
-    #[test]
-    fn the_waiting_bundles_are_the_bundle_files_of_the_import_folder() {
-        let root = std::env::temp_dir().join(format!("zaxnes-import-{}", std::process::id()));
-        let folder = root.join(IMPORT_FOLDER);
-        std::fs::create_dir_all(&folder).unwrap_or_default();
-        for name in ["b.bundle", "a.BUNDLE", "c.bundle.part", "notes.txt"] {
-            std::fs::write(folder.join(name), b"x").unwrap_or_default();
-        }
-        assert_eq!(
-            waiting_bundles(&root),
-            vec![folder.join("a.BUNDLE"), folder.join("b.bundle")]
-        );
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

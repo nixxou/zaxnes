@@ -818,9 +818,10 @@ fn a_game_a_frontend_asks_for_plays_and_quitting_goes_back_to_it() {
 }
 
 /// A 3dSen bundle opened with or shared to Zaxnes on Android (the activity copies it into the
-/// import folder) is imported by the console interface, then removed.
+/// import folder) is imported by the application's loop, then marked done (owner request,
+/// 2026-11-20).
 #[test]
-fn a_bundle_in_the_import_folder_is_imported_and_removed() {
+fn a_bundle_in_the_import_folder_is_imported_and_marked_done() {
     use zax_profiles::import::{UnityCompression, BUNDLE_EXTENSION, BUNDLE_PREFIX};
     let (mut harness, mut handheld) = start(&[], &["Game.nes"]);
     let mut profile = zax_profiles::profile::GameProfile::create_empty();
@@ -844,11 +845,19 @@ fn a_bundle_in_the_import_folder_is_imported_and_removed() {
     std::fs::create_dir_all(&folder).unwrap();
     let file = folder.join(format!("{BUNDLE_PREFIX}feedface{BUNDLE_EXTENSION}"));
     std::fs::write(&file, bundle).unwrap();
+    assert_eq!(1, zax_app::import_folder::process(&mut harness.host));
+    // Done once: the next look imports nothing.
+    assert_eq!(0, zax_app::import_folder::process(&mut harness.host));
     press(&mut harness, &mut handheld, &[]);
     assert!(harness
         .paths
         .profiles_directory
         .join("Pinball.3dn")
         .is_file());
-    assert!(!file.exists());
+    // The bundle stays, marked imported (owner request, 2026-11-20): not imported again.
+    assert!(file.exists());
+    assert!(std::fs::read_to_string(folder.join(format!("{BUNDLE_PREFIX}feedface{BUNDLE_EXTENSION}.done")))
+        .unwrap()
+        .starts_with("ok"));
+    assert!(folder.join("README.txt").is_file());
 }

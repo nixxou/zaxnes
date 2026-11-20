@@ -791,6 +791,11 @@ impl ZaxUi {
         self.import_profile(host, path);
     }
 
+    /// Profiles joined the library (the import folder): the chooser shows them.
+    pub fn profiles_imported(&mut self, host: &AppHost) {
+        self.rebuild_chooser(host);
+    }
+
     fn rebuild_chooser(&mut self, host: &AppHost) {
         let rom = self.chooser.rom_path.clone();
         self.chooser = ProfileChooserModel::new(host.games().library());

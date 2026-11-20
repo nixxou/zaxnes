@@ -631,6 +631,14 @@ impl ImguiFrontend {
         }
     }
 
+    /// Profiles joined the library (the import folder): the lists show them.
+    pub fn profiles_imported(&mut self, host: &AppHost) {
+        if let Some(handheld) = &mut self.handheld {
+            handheld.refresh_roms(host);
+        }
+        self.ui.profiles_imported(host);
+    }
+
     /// Whether a game is on the screen, not a menu: the touch pad is shown only then.
     #[must_use]
     pub fn game_on_screen(&self) -> bool {

@@ -2,6 +2,7 @@
 //! reader with LZ4 decompression, and the writer of the `.3dn` files.
 
 mod asset_reader;
+pub mod folder;
 mod bundle;
 mod importer;
 mod installation;

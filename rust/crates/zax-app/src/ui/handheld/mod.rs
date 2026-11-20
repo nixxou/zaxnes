@@ -25,7 +25,6 @@ pub mod profile_list;
 pub mod rom_list;
 pub mod states;
 
-use zax_profiles::catalogue::ProfileImportOutcome;
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 
@@ -868,7 +867,6 @@ impl HandheldUi {
             return;
         }
         self.launch_wait = LAUNCH_CHECK_SECONDS;
-        self.import_waiting_bundles(host);
         let Some(request) = crate::launch_request::take(&host.paths().root) else {
             return;
         };
@@ -890,79 +888,6 @@ impl HandheldUi {
         }
         if matches!(self.screen, Screen::Overlay | Screen::States) {
             self.screen = Screen::InGame;
-        }
-    }
-
-    /// The 3dSen bundles waiting in the user data's import folder (opened with or shared to
-    /// Zaxnes on Android, or copied there): imported with the same importer as the desktop's
-    /// (3dSen 1.x to 2.2), then removed, a message saying what came of it. Not during a game.
-    fn import_waiting_bundles(&mut self, host: &mut AppHost) {
-        if matches!(self.screen, Screen::InGame) {
-            return;
-        }
-        let root = host.paths().root.clone();
-        let bundles = crate::launch_request::waiting_bundles(&root);
-        let profiles = crate::launch_request::waiting_profiles(&root);
-        if bundles.is_empty() && profiles.is_empty() {
-            return;
-        }
-        let mut imported = 0;
-        // What came of each file, for the web page's dialogue.
-        let mut results: Vec<crate::web_bridge::ImportResult> = Vec::new();
-        let mut result = |ok: bool, id: Option<String>, text: String| {
-            results.push(crate::web_bridge::ImportResult { ok, id, text });
-        };
-        for bundle in bundles {
-            let name = file_name_of(&bundle);
-            let report = host.games_mut().import_from_three_d_sen(&bundle);
-            crate::app_log::line(&report.message);
-            match report.summary {
-                Some(summary) => {
-                    imported += summary.imported;
-                    let text = crate::ui::notifications::three_d_sen_summary(
-                        summary.imported,
-                        summary.already_present,
-                        summary.failed,
-                    );
-                    host.notifications.show_normal(&text);
-                    result(summary.failed == 0, None, format!("{name}: {text}"));
-                }
-                None => {
-                    host.notifications.show_error(&report.message);
-                    result(false, None, format!("{name}: {}", report.message));
-                }
-            }
-            let _ = std::fs::remove_file(&bundle);
-        }
-        // A profile the page imported replaces the one of the same identifier: the player chose
-        // it, there is no dialogue to ask in.
-        for profile in profiles {
-            let name = file_name_of(&profile);
-            let done = host.games_mut().import_profile(&profile);
-            match (done.outcome, done.profile) {
-                (
-                    ProfileImportOutcome::Added | ProfileImportOutcome::Replaced,
-                    Some(imported_profile),
-                ) => {
-                    imported += 1;
-                    let text = format!("{name}: {}", imported_profile.title);
-                    crate::app_log::line(&format!("profile imported: {text}"));
-                    result(true, Some(imported_profile.id), text);
-                }
-                (ProfileImportOutcome::AlreadyBuiltIn, _) => {
-                    result(true, None, format!("{name}: {}", done.message));
-                }
-                _ => {
-                    crate::app_log::line(&format!("profile refused: {name}: {}", done.message));
-                    result(false, None, format!("{name}: {}", done.message));
-                }
-            }
-            let _ = std::fs::remove_file(&profile);
-        }
-        drop(result);
-        crate::web_bridge::report_import(&results);
-        if imported > 0 {
-            self.refresh_roms(host);
         }
     }
 
@@ -1844,9 +1769,3 @@ fn apply_camera(preset: CameraPreset, host: &mut AppHost) {
     }
 }
 
-/// The file name of `path`, for a message.
-fn file_name_of(path: &std::path::Path) -> String {
-    path.file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default()
-}

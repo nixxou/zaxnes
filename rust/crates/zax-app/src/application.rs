@@ -255,6 +255,8 @@ struct Running {
     cursor: CursorAutoHide,
     state: RunState,
     last: Instant,
+    /// When the import folder was last looked at (`import_folder.rs`), once a second.
+    import_checked: Option<Instant>,
     /// The frame profiler (`ui.profiler`, or `ZAXNES_PROFILE=1`) and the clock of the loop's
     /// stages.
     profiler: Option<FrameProfiler>,
@@ -466,6 +468,7 @@ impl Running {
             cursor: CursorAutoHide::new(),
             state: RunState::new(renderer_name, version),
             last: Instant::now(),
+            import_checked: None,
             profiler: profiling.then(|| FrameProfiler::new(Instant::now())),
             clock: StageClock::new(profiling),
             rate_count: (0, 0),
@@ -516,6 +519,25 @@ impl Running {
         }
     }
 
+    /// The import folder (owner request, 2026-11-20): what waits there is imported, once a
+    /// second and never while a game is on the screen; the lists then show the new profiles.
+    fn import_waiting_files(&mut self) {
+        if self.ui.game_on_screen() && self.host.current_game_id().is_some() {
+            return;
+        }
+        let now = Instant::now();
+        if self
+            .import_checked
+            .is_some_and(|checked| now.duration_since(checked).as_secs_f32() < 1.0)
+        {
+            return;
+        }
+        self.import_checked = Some(now);
+        if crate::import_folder::process(&mut self.host) > 0 {
+            self.ui.profiles_imported(&self.host);
+        }
+    }
+
     #[allow(clippy::too_many_lines)] // One host frame, its steps in their order.
     fn frame(&mut self) -> Result<bool, String> {
         self.follow_the_profiler_setting();
@@ -538,6 +560,7 @@ impl Running {
             }
         }
         crate::web_bridge::report_playing(self.ui.game_on_screen());
+        self.import_waiting_files();
         let frame_begin = self.clock.start();
         let busy_begin = Instant::now();
         let mark = self.clock.start();
