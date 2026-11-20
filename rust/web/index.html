@@ -292,6 +292,19 @@
         if (err) console.warn('Zaxnes: reading IndexedDB failed', err);
         removeRunDependency('zaxnes-idbfs');
       });
+      // The interface's face (Roboto, Apache-2.0, as on Android): the program looks for the
+      // system's faces and a page has none, so they are put where Android keeps them. Without
+      // them the program falls back to its built-in face.
+      FS.mkdirTree('/system/fonts');
+      for (const face of ['Roboto-Regular.ttf', 'Roboto-Bold.ttf']) {
+        const dependency = 'zaxnes-font-' + face;
+        addRunDependency(dependency);
+        fetch('fonts/' + face)
+          .then((response) => (response.ok ? response.arrayBuffer() : Promise.reject(response.status)))
+          .then((data) => FS.writeFile('/system/fonts/' + face, new Uint8Array(data)))
+          .catch((err) => console.warn('Zaxnes: font ' + face + ' not loaded', err))
+          .finally(() => removeRunDependency(dependency));
+      }
     }],
   };
   window.addEventListener('error', (e) => { status.textContent = 'Erreur : ' + e.message; });

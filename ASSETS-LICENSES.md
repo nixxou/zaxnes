@@ -20,6 +20,7 @@ cubemap, ni modèle, ni son, ni police (REQ-PUB-002).
 | Nuanciers, shaders GLSL, géométrie des tuiles | **Écrits pour ce projet** | GPL-3.0 (ce projet) |
 | Palette NES | Donnée technique publique (documentation NES), reprise dans la spécification | donnée de fait, non protégeable |
 | Clé d'encodage des plans de tuiles (`.3dn`) | Donnée d'interopérabilité, constante numérique — `rust/crates/zax-profiles/src/wire/cipher.rs` (REQ-PUB-007) | donnée d'interopérabilité |
+| Police Roboto de la version web (`rust/web/fonts/Roboto-Regular.ttf`, `Roboto-Bold.ttf`) | **Google**, Roboto 2.138 (googlefonts/roboto-2), livrée **seulement avec la version web** : une page n'a pas accès aux polices du système, la page la place là où Android garde la sienne. Texte de la licence : `rust/web/fonts/LICENSE-Roboto.txt` | Apache-2.0 |
 
 Aucun fichier `.bytes`, `.3dn`, `.png`, `.jpg`, `.obj`, `.wav`, `.ogg`, `.mp3`, `.ttf`, `.otf`
 ou `.ico` n'est présent, ni dans le dépôt, ni dans la version publiée, **à une exception
