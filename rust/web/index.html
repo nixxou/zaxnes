@@ -103,7 +103,7 @@
     </div>
     <div class="messages" id="profile-messages"></div>
     <div class="row"><span class="grow"></span><button class="btn" data-close data-t="close"></button></div>
-    <input type="file" id="profile-file" accept=".3dn,.3dh,.bundle" multiple hidden>
+    <input type="file" id="profile-file" accept=".3dn,.3dh,.bundle,.zip,.7z" multiple hidden>
   </div>
 </div>
 
@@ -141,7 +141,11 @@
   const BUNDLED = [{ title: 'FlappyZaxNes', file: 'FlappyZaxNes.nes', noteKey: 'demo' }];
   const DEMO_MARKER = DATA + '/demo-game.txt';
   const ROM_FILE = /\.(nes|fds|unf|unif|zip|7z)$/i;
-  const PROFILE_FILE = /\.(3dn|3dh|bundle)$/i;
+  // What the profile import takes: profiles, 3dSen's bundle, or an archive holding it (the
+  // program looks for the bundle inside, rust/crates/zax-profiles/src/import/source.rs).
+  const PROFILE_FILE = /\.(3dn|3dh|bundle|zip|7z)$/i;
+  // Dropped anywhere, a zip or a 7z is a ROM; in the profile dialogue, a 3dSen archive.
+  const PROFILE_ONLY_FILE = /\.(3dn|3dh|bundle)$/i;
 
   // --- Language: the program's (ui.language of its settings), else the browser's. ---
   const TEXT = {
@@ -155,8 +159,8 @@
       notRom: 'Ce fichier n’est pas une ROM reconnue : ', romImported: 'ROM importée : ',
       downloading: 'Téléchargement…', cors: 'Fichier inaccessible : le site qui l’héberge ne permet pas à une autre page de le télécharger (CORS), ou l’adresse ne répond pas. ',
       notFound: 'Fichier introuvable ', tooBig: 'Ce fichier n’a pas la taille d’une ROM : ',
-      profileTitle: 'Importer un profil 3D', profileText: 'Profils 3D (.3dn, .3dh) et données de 3dSen (.bundle) : ils rejoignent vos profils, celui d’un même identifiant est remplacé.',
-      profileDrop: 'Déposez un fichier ici (.3dn, .3dh, .bundle)', profileImport: 'Importer…',
+      profileTitle: 'Importer un profil 3D', profileText: 'Profils 3D (.3dn, .3dh), fichier de profils de 3dSen (.bundle), ou une archive .zip / .7z qui le contient (même tout un dossier de 3dSen) : ils rejoignent vos profils, celui d’un même identifiant est remplacé.',
+      profileDrop: 'Déposez un fichier ici (.3dn, .3dh, .bundle, .zip, .7z)', profileImport: 'Importer…',
       notProfile: 'Ce fichier n’est ni un profil 3D ni des données 3dSen : ', importing: 'Import en cours : ',
       noAnswer: 'Le programme n’a pas répondu : l’import se fera à la prochaine ouverture de la liste des jeux.',
       storageTitle: 'Stockage du navigateur', storageCategories: 'Données', storageRoms: 'Vos ROMs',
@@ -183,8 +187,8 @@
       notRom: 'This file is not a known ROM: ', romImported: 'ROM imported: ',
       downloading: 'Downloading…', cors: 'File out of reach: the site hosting it does not let another page download it (CORS), or the address does not answer. ',
       notFound: 'File not found ', tooBig: 'This file does not have the size of a ROM: ',
-      profileTitle: 'Import a 3D profile', profileText: '3D profiles (.3dn, .3dh) and 3dSen data (.bundle): they join your profiles, one of the same identifier is replaced.',
-      profileDrop: 'Drop a file here (.3dn, .3dh, .bundle)', profileImport: 'Import…',
+      profileTitle: 'Import a 3D profile', profileText: '3D profiles (.3dn, .3dh), 3dSen’s profiles file (.bundle), or a .zip / .7z archive holding it (even a whole 3dSen folder): they join your profiles, one of the same identifier is replaced.',
+      profileDrop: 'Drop a file here (.3dn, .3dh, .bundle, .zip, .7z)', profileImport: 'Import…',
       notProfile: 'This file is neither a 3D profile nor 3dSen data: ', importing: 'Importing: ',
       noAnswer: 'The program did not answer: the import will happen when the list of games next opens.',
       storageTitle: 'Browser storage', storageCategories: 'Data', storageRoms: 'Your ROMs',
@@ -455,9 +459,18 @@
   // --- 3D profiles and 3dSen data: put in the import folder; the program imports them and
   // answers in IMPORT_RESULT (a line per file: ok|<id>|<text> or error||<text>). ---
   let importWaiters = [];
+  // The files the page put there: once imported, they and their .done marker go (the browser's
+  // storage is not kept full of them).
+  let pageImports = [];
   function storeImports(files) {
     FS.mkdirTree(IMPORT);
-    for (const { name, bytes } of files) FS.writeFile(IMPORT + '/' + safeName(name), bytes);
+    for (const { name, bytes } of files) {
+      const path = IMPORT + '/' + safeName(name);
+      // Put again: imported again.
+      try { FS.unlink(path + '.done'); } catch (e) {}
+      FS.writeFile(path, bytes);
+      pageImports.push(path);
+    }
     return new Promise((resolve) => {
       const waiter = { resolve, timer: setTimeout(() => {
         importWaiters = importWaiters.filter((w) => w !== waiter);
@@ -474,6 +487,11 @@
       const [kind, id, ...rest] = line.split('|');
       return { ok: kind === 'ok', id: id || null, text: rest.join('|') };
     });
+    for (const path of pageImports) {
+      if (!exists(path + '.done')) continue;
+      try { FS.unlink(path); FS.unlink(path + '.done'); } catch (e) {}
+    }
+    pageImports = pageImports.filter((path) => exists(path));
     const waiters = importWaiters;
     importWaiters = [];
     for (const w of waiters) { clearTimeout(w.timer); w.resolve(lines); }
@@ -518,8 +536,9 @@
     document.body.classList.remove('dragging');
     if (typeof FS === 'undefined') return;
     const files = [...((e.dataTransfer && e.dataTransfer.files) || [])];
-    const profiles = files.filter((f) => PROFILE_FILE.test(f.name));
-    const roms = files.filter((f) => !PROFILE_FILE.test(f.name));
+    const asProfile = dialogs.profile.classList.contains('shown') ? PROFILE_FILE : PROFILE_ONLY_FILE;
+    const profiles = files.filter((f) => asProfile.test(f.name));
+    const roms = files.filter((f) => !asProfile.test(f.name));
     if (profiles.length) {
       if (!dialogs.profile.classList.contains('shown')) { clearMessages('profile-messages'); showDialog('profile'); }
       const read = await Promise.all(profiles.map(async (f) => ({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) })));
