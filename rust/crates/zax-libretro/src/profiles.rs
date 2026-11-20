@@ -16,6 +16,56 @@ const BUNDLED: &[(&str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/bundled-pr
 /// The folder of the system folder the profiles are read from.
 pub const FOLDER: &str = "Zaxnes/profiles";
 
+/// The folder of the system folder where what is to be imported waits (owner request,
+/// 2026-11-20): a 3dSen bundle, an archive holding one, or `.3dn` and `.3dh` profiles.
+pub const IMPORT_FOLDER: &str = "Zaxnes/import";
+
+/// Imports what waits in `system`'s import folder into its profile folder, each file then
+/// marked with a `.done` beside it (as the application's import folder); what came of each,
+/// for the log. Creates the folder and its README when they are missing.
+#[must_use]
+pub fn import_waiting(system: &Path) -> Vec<(bool, String)> {
+    use zax_profiles::catalogue::PhysicalProfileFileSystem;
+    use zax_profiles::import::folder::{self, WaitingKind};
+    use zax_profiles::import::ThreeDSenImporter;
+
+    let source = system.join(IMPORT_FOLDER);
+    let destination = system.join(FOLDER);
+    folder::prepare(&source);
+    let mut results = Vec::new();
+    for (path, kind) in folder::waiting(&source) {
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let (ok, text) = match kind {
+            WaitingKind::ThreeDSen => {
+                let files = PhysicalProfileFileSystem;
+                match ThreeDSenImporter::new(&files, &destination, None).import_from(&path) {
+                    Ok(summary) => (summary.failed == 0, summary.message()),
+                    Err(error) => (false, error.to_string()),
+                }
+            }
+            // A profile is copied as it is, after a check that it decodes.
+            WaitingKind::Profile => match std::fs::read(&path) {
+                Ok(bytes) if format::load(&bytes, None, Some(&name)).is_ok() => {
+                    let copied = std::fs::create_dir_all(&destination)
+                        .and_then(|()| std::fs::write(destination.join(&name), &bytes));
+                    match copied {
+                        Ok(()) => (true, "profile copied".to_owned()),
+                        Err(error) => (false, error.to_string()),
+                    }
+                }
+                Ok(_) => (false, "not a usable profile".to_owned()),
+                Err(error) => (false, error.to_string()),
+            },
+        };
+        folder::mark_done(&path, &format!("{}: {text}", if ok { "ok" } else { "error" }));
+        results.push((ok, format!("{name}: {text}")));
+    }
+    results
+}
+
 /// A name cut at its first tag and kept to its letters and digits, lower case: "Super Mario
 /// Bros. 3 (USA)" and "`super_mario_bros_3`" meet at "supermariobros3".
 #[must_use]
@@ -106,6 +156,26 @@ pub fn find_titled(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_import_folder_copies_a_profile_and_marks_what_it_did() {
+        let system = std::env::temp_dir().join(format!("zax-libretro-import-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&system);
+        let folder = system.join(IMPORT_FOLDER);
+        std::fs::create_dir_all(&folder).unwrap();
+        let (_, profile) = BUNDLED[0];
+        std::fs::write(folder.join("Mine.3dn"), profile).unwrap();
+        std::fs::write(folder.join("broken.bundle"), b"not a bundle").unwrap();
+        let results = import_waiting(&system);
+        assert_eq!(2, results.len(), "{results:?}");
+        assert_eq!(profile, std::fs::read(system.join(FOLDER).join("Mine.3dn")).unwrap());
+        assert!(results.iter().any(|(ok, text)| !ok && text.starts_with("broken.bundle")));
+        assert!(folder.join("Mine.3dn.done").is_file() && folder.join("broken.bundle.done").is_file());
+        assert!(folder.join("README.txt").is_file());
+        // Done once.
+        assert!(import_waiting(&system).is_empty());
+        let _ = std::fs::remove_dir_all(&system);
+    }
 
     #[test]
     fn a_title_suits_the_roms_that_carry_it() {

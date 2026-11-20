@@ -27,6 +27,11 @@ and the renderer of the application. The profiles are looked for in this order:
 - the `.3dn` files of `<RetroArch system folder>/Zaxnes/profiles` (your profiles, imported from
   3dSen by the Zaxnes application for instance).
 
+The folder `<RetroArch system folder>/Zaxnes/import` imports by itself, when a game loads: put
+there 3dSen's `defaultprofiles_assets_all_*.bundle`, a `.zip` or `.7z` holding it (or a whole
+3dSen folder), or `.3dn`/`.3dh` profiles. Their profiles go to `Zaxnes/profiles`, and each file
+gets a `.done` beside it so that it is imported once (its `README.txt` says the same).
+
 A profile suits a ROM whose file name is its title, or starts with it, as in the application's
 ROM list. A game without one plays in 2D, as does every game with the renderer option on "2D
 only".

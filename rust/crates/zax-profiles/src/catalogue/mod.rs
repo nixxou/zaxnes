@@ -3,12 +3,14 @@
 
 pub mod built_in;
 mod filesystem;
+mod physical;
 mod folders;
 mod game_identity;
 mod profile_catalogue;
 mod user_folder;
 
 pub use filesystem::{ProfileFileSystem, UserDataLayout};
+pub use physical::PhysicalProfileFileSystem;
 pub use folders::ProfileFolders;
 pub use game_identity::{normalised_name, GameIdentity, ProfileGeneration};
 pub use profile_catalogue::{
