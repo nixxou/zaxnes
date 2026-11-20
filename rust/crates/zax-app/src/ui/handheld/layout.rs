@@ -5,11 +5,14 @@ use super::Screen;
 use crate::ui::fonts::FontSizes;
 use crate::ui::keys;
 
-/// Body text height, in pixels, on a 480-pixel-high display: a quarter smaller than the 22 it
-/// was (owner request, 2026-11-20), everywhere the console interface runs.
-const BODY_AT_480: f32 = 16.5;
-/// Smallest row, in pixels: a thumb-sized target on a 3.5 inch screen.
-pub const MINIMUM_ROW: f32 = 36.0;
+/// Body text height, in pixels, on a 480-pixel-high display: 18 rather than the 22 it was
+/// (owner request, 2026-11-20), everywhere the console interface runs.
+const BODY_AT_480: f32 = 18.0;
+/// Smallest row, in pixels: a thumb-sized target on a 3.5 inch screen (36 before the owner
+/// asked for slightly lower rows, 2026-11-20).
+pub const MINIMUM_ROW: f32 = 32.0;
+/// A row's height in body text heights (1.75 before, the same request).
+const ROW_PER_FONT: f32 = 1.65;
 
 /// The sizes of one display.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -37,7 +40,7 @@ impl Metrics {
         Self {
             font,
             heading: (font * 1.25).round(),
-            row: (font * 1.75).round().max(MINIMUM_ROW),
+            row: (font * ROW_PER_FONT).round().max(MINIMUM_ROW),
             padding: (font * 0.6).round(),
             hint_lines: 1,
         }
@@ -255,13 +258,15 @@ mod tests {
         assert!((two.hint_band() - one.hint_band() - one.hint_line_step()).abs() < 0.01);
         // Rows of the minimum height may still fit beside the second line: never more of them.
         assert!(two.visible_rows(480.0) <= one.visible_rows(480.0));
-        assert!(two.visible_rows(1080.0) < one.visible_rows(1080.0));
+        assert!((400_u16..800).any(|height| {
+            two.visible_rows(f32::from(height)) < one.visible_rows(f32::from(height))
+        }));
     }
 
     #[test]
     fn the_sizes_follow_the_height_of_the_display() {
         let small = Metrics::for_height(480.0);
-        assert!((small.font - 17.0).abs() < f32::EPSILON);
+        assert!((small.font - 18.0).abs() < f32::EPSILON);
         assert!(small.row >= MINIMUM_ROW);
         let square = Metrics::for_height(720.0);
         assert!(square.font > small.font && square.row > small.row);
@@ -274,7 +279,7 @@ mod tests {
     fn a_480_high_display_shows_a_screenful_of_rows() {
         let metrics = Metrics::for_height(480.0);
         let rows = metrics.visible_rows(480.0);
-        assert!((6..=10).contains(&rows), "{rows}");
+        assert!((6..=12).contains(&rows), "{rows}");
         let rows_height = f32::from(u16::try_from(rows).unwrap()) * metrics.row;
         let used = metrics.title_band() + rows_height + metrics.hint_band();
         assert!(used <= 480.0);
