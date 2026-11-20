@@ -67,6 +67,15 @@
   @keyframes busy { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
   .final { margin-top: 10px; font-weight: 600; }
   .final.ok { color: #9fe0ad; } .final.error { color: #ffb3ad; }
+  /* The game pages (owner request): a list of a page's games, downloaded when played. */
+  details.library { margin: 6px 0; border: 1px solid #3a3e4a; border-radius: 6px; background: #20232c; }
+  details.library summary { padding: 9px 12px; cursor: pointer; display: flex; gap: 8px; align-items: center; }
+  details.library summary .grow { flex: 1; word-break: break-all; }
+  details.library .inner { padding: 0 10px 10px; }
+  details.library input.filter { width: 100%; box-sizing: border-box; margin: 4px 0; padding: 7px 9px; border-radius: 6px;
+    border: 1px solid #3a3e4a; background: #12141a; color: #eee; font: inherit; }
+  details.library .games { max-height: 320px; overflow: auto; }
+  details.library .rom small.got { color: #7bd88f; }
 </style>
 </head>
 <body>
@@ -85,6 +94,13 @@
     <div id="bundled"></div>
     <h3 data-t="romMine"></h3>
     <div id="mine"></div>
+    <h3 data-t="libraries"></h3>
+    <p data-t="librariesText"></p>
+    <div class="row">
+      <input class="url" id="library-url" type="url" placeholder="https://…">
+      <button class="btn" id="library-add" data-t="libraryAdd"></button>
+    </div>
+    <div id="libraries"></div>
     <h3 data-t="romComputer"></h3>
     <div class="drop" data-t="romDrop"></div>
     <div class="row">
@@ -207,7 +223,12 @@
       stepDownload: 'Téléchargement', stepRead: 'Lecture et décompression', stepImport: 'Import des profils',
       importedN: '{0} profil(s) importé(s).', importedNone: 'Aucun nouveau profil : ils étaient déjà là.',
       romReady: 'ROM prête : ', failed: 'Échec : ',
-      cached: 'déjà téléchargé', importCached: 'Déjà importé depuis cette adresse, profils inchangés : rien à retélécharger.',
+      cached: 'déjà téléchargé',
+      libraries: 'Depuis une page de jeux', librariesText: 'L’adresse d’une page qui liste des jeux (archive.org, un dossier Google Drive…) : ses jeux s’affichent ici, chacun téléchargé seulement quand on le lance.',
+      libraryAdd: 'Ajouter', libraryReading: 'Lecture de la page', libraryFound: '{0} jeu(x) trouvé(s).', libraryNone: 'Aucun lien vers un jeu sur cette page.',
+      libraryFilter: 'Chercher un jeu…', libraryMore: '{0} autre(s) : affinez la recherche.', libraryRemove: 'Retirer', libraryRefresh: 'Relire',
+      driveKey: 'Un dossier Google Drive ne peut être lu par une autre page que par l’API de Google Drive, qui demande une clé d’API (paramètre ?drivekey=).',
+      gotLocal: 'téléchargé', importCached: 'Déjà importé depuis cette adresse, profils inchangés : rien à retélécharger.',
     },
     en: {
       barRom: 'Open a ROM…', barProfile: '3D profiles…', barStorage: 'Storage…',
@@ -240,7 +261,12 @@
       stepDownload: 'Downloading', stepRead: 'Reading and unpacking', stepImport: 'Importing the profiles',
       importedN: '{0} profile(s) imported.', importedNone: 'No new profile: they were there already.',
       romReady: 'ROM ready: ', failed: 'Failed: ',
-      cached: 'downloaded already', importCached: 'Imported from this address already, profiles unchanged: nothing to download again.',
+      cached: 'downloaded already',
+      libraries: 'From a page of games', librariesText: 'The address of a page listing games (archive.org, a Google Drive folder…): its games show here, each downloaded only when it is played.',
+      libraryAdd: 'Add', libraryReading: 'Reading the page', libraryFound: '{0} game(s) found.', libraryNone: 'No link to a game on this page.',
+      libraryFilter: 'Search a game…', libraryMore: '{0} more: narrow the search.', libraryRemove: 'Remove', libraryRefresh: 'Read again',
+      driveKey: 'A Google Drive folder can be read by another page only through the Google Drive API, which needs an API key (parameter ?drivekey=).',
+      gotLocal: 'downloaded', importCached: 'Imported from this address already, profiles unchanged: nothing to download again.',
     },
   };
   let lang = (navigator.language || 'en').toLowerCase().startsWith('fr') ? 'fr' : 'en';
@@ -322,7 +348,7 @@
   function showDialog(name) {
     applyLanguage();
     for (const [key, d] of Object.entries(dialogs)) d.classList.toggle('shown', key === name);
-    if (name === 'rom') fillRoms();
+    if (name === 'rom') { fillRoms(); fillLibraries(); }
     if (name === 'storage') fillStorage();
     const first = dialogs[name].querySelector('.btn.main') || dialogs[name].querySelector('[data-close]');
     if (first) first.focus();
@@ -553,7 +579,7 @@
     while ((found = pattern.exec(search))) {
       let raw = search.slice(found.index + found[0].length);
       if (/^https?:\/\//i.test(raw)) {
-        const next = raw.search(/&(play|profile|import|env)=/);
+        const next = raw.search(/&(play|profile|import|library|drivekey|env)=/);
         values.push(next < 0 ? raw : raw.slice(0, next));
       } else {
         const end = raw.search(/[&#]/);
@@ -599,6 +625,149 @@
     for (const name of list(PROFILES)) sizes[name] = fileSize(PROFILES + '/' + name);
     return sizes;
   }
+
+  // --- Pages of games (owner request): a page's links to games, kept in the user data, each
+  // game downloaded when it is played (then kept, as the ROMs of ?play=). ---
+  const LIBRARIES = DATA + '/web-libraries.json';
+  const GAME_LINK = /\.(nes|zip|7z|fds|unf|unif)$/i;
+  function libraries() {
+    try { return JSON.parse(FS.readFile(LIBRARIES, { encoding: 'utf8' })) || []; } catch (e) { return []; }
+  }
+  function saveLibraries(all) { try { FS.writeFile(LIBRARIES, JSON.stringify(all)); save(); } catch (e) {} }
+  // The Drive API key: ?drivekey=, kept once given.
+  function driveKey() {
+    const given = addressValues('drivekey')[0];
+    if (given) { try { FS.writeFile(DATA + '/web-drive-key.txt', given); } catch (e) {} return given; }
+    try { return FS.readFile(DATA + '/web-drive-key.txt', { encoding: 'utf8' }).trim() || null; } catch (e) { return null; }
+  }
+  // The games of the page at `url`: [{ name, url }].
+  async function readLibrary(url) {
+    const folder = /drive\.google\.com\/drive\/(?:u\/\d+\/)?folders\/([A-Za-z0-9_-]+)/.exec(url);
+    if (folder) return readDriveFolder(folder[1]);
+    let response;
+    try { response = await fetch(url); } catch (e) { throw new Error(t('cors') + url); }
+    if (!response.ok) throw new Error(t('notFound') + '(' + response.status + ') : ' + url);
+    const page = new DOMParser().parseFromString(await response.text(), 'text/html');
+    const base = response.url || url;
+    const seen = new Set();
+    const games = [];
+    for (const link of page.querySelectorAll('a[href]')) {
+      let target;
+      try { target = new URL(link.getAttribute('href'), base); } catch (e) { continue; }
+      if (!/^https?:$/.test(target.protocol)) continue;
+      // The file's name: the end of its path, or a file= of its query (archive.org's viewer).
+      let name = target.pathname.split('/').pop() || '';
+      const file = target.searchParams.get('file');
+      if (file && GAME_LINK.test(file)) name = file.split('/').pop();
+      try { name = decodeURIComponent(name); } catch (e) { /* kept as it is */ }
+      name = name.split('/').pop();
+      if (!GAME_LINK.test(name) || seen.has(target.href)) continue;
+      seen.add(target.href);
+      games.push({ name, url: target.href });
+    }
+    return games;
+  }
+  // A Google Drive folder, through the Drive API (its folder pages cannot be read from another
+  // page); the files themselves download from drive.usercontent.google.com, which allows it.
+  async function readDriveFolder(id) {
+    const key = driveKey();
+    if (!key) throw new Error(t('driveKey'));
+    const games = [];
+    let pageToken = '';
+    do {
+      const api = 'https://www.googleapis.com/drive/v3/files?pageSize=1000&fields=nextPageToken,files(id,name)'
+        + '&q=' + encodeURIComponent("'" + id + "' in parents and trashed=false")
+        + '&key=' + encodeURIComponent(key) + (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
+      const response = await fetch(api);
+      if (!response.ok) throw new Error('Google Drive (' + response.status + ')');
+      const data = await response.json();
+      for (const f of data.files || []) {
+        if (GAME_LINK.test(f.name)) {
+          games.push({ name: f.name, url: 'https://drive.usercontent.google.com/download?id=' + f.id + '&export=download' });
+        }
+      }
+      pageToken = data.nextPageToken || '';
+    } while (pageToken);
+    return games;
+  }
+  async function addLibrary(url, quiet) {
+    const win = quiet ? null : progressWindow(t('libraries'));
+    const step = win && win.step(t('libraryReading'));
+    try {
+      const games = await readLibrary(url);
+      if (!games.length) throw new Error(t('libraryNone'));
+      const all = libraries().filter((l) => l.url !== url);
+      let title = url;
+      try { const u = new URL(url); title = u.hostname + decodeURIComponent(u.pathname + u.search).slice(0, 80); } catch (e) {}
+      all.unshift({ url, title, games, at: Date.now() });
+      saveLibraries(all);
+      if (step) { step.detail(games.length + ''); step.done(); win.finish(true, t('libraryFound', games.length)); }
+      fillLibraries(url);
+      return games;
+    } catch (e) {
+      if (step) { step.fail(); win.finish(false, e.message); } else alertBox(e.message);
+      return null;
+    }
+  }
+  // A game of a page: played from the copy downloaded before, else downloaded now.
+  async function playFromLibrary(game) {
+    const cached = cachedRom(game.url);
+    if (cached) { play(cached); return; }
+    const win = progressWindow(t('progressRom'));
+    try {
+      const { bytes } = await downloadStep(win, game.url, 'rom');
+      win.close();
+      const path = storeRom(game.name, bytes);
+      rememberDownload(game.url, { kind: 'rom', path, size: bytes.length });
+      play(path);
+    } catch (e) { win.finish(false, e.message); }
+  }
+  function fillLibraries(open) {
+    const box = document.getElementById('libraries');
+    box.replaceChildren();
+    for (const library of libraries()) {
+      const details = document.createElement('details');
+      details.className = 'library';
+      details.open = library.url === open;
+      const summary = document.createElement('summary');
+      const label = document.createElement('span'); label.className = 'grow';
+      label.textContent = library.title + ' (' + library.games.length + ')';
+      const refresh = document.createElement('button'); refresh.className = 'btn small'; refresh.textContent = t('libraryRefresh');
+      refresh.onclick = (e) => { e.preventDefault(); addLibrary(library.url); };
+      const remove = document.createElement('button'); remove.className = 'btn small danger'; remove.textContent = t('libraryRemove');
+      remove.onclick = (e) => { e.preventDefault(); saveLibraries(libraries().filter((l) => l.url !== library.url)); fillLibraries(); };
+      summary.append(label, refresh, remove);
+      const inner = document.createElement('div'); inner.className = 'inner';
+      const filter = document.createElement('input'); filter.className = 'filter'; filter.placeholder = t('libraryFilter');
+      const games = document.createElement('div'); games.className = 'games';
+      // The first 300 matches drawn: a page may list thousands.
+      const draw = () => {
+        const words = filter.value.toLowerCase().split(/\s+/).filter(Boolean);
+        const matches = library.games.filter((g) => words.every((w) => g.name.toLowerCase().includes(w)));
+        games.replaceChildren();
+        for (const game of matches.slice(0, 300)) {
+          const button = romButton(game.name.replace(GAME_LINK, ''), null, cachedRom(game.url) ? t('gotLocal') : '');
+          const got = button.querySelector('small'); if (got) got.className = 'got';
+          button.onclick = () => playFromLibrary(game);
+          games.appendChild(button);
+        }
+        if (matches.length > 300) {
+          const more = document.createElement('div'); more.className = 'empty'; more.textContent = t('libraryMore', matches.length - 300);
+          games.appendChild(more);
+        }
+      };
+      filter.oninput = draw;
+      details.ontoggle = () => { if (details.open && !games.childElementCount) draw(); };
+      if (details.open) draw();
+      inner.append(filter, games);
+      details.append(summary, inner);
+      box.appendChild(details);
+    }
+  }
+  document.getElementById('library-add').onclick = () => {
+    const url = document.getElementById('library-url').value.trim();
+    if (url) addLibrary(url);
+  };
 
   // --- 3D profiles and 3dSen data: put in the import folder; the program imports them and
   // answers in IMPORT_RESULT (a line per file: ok|<id>|<text> or error||<text>). ---
@@ -913,6 +1082,12 @@
   // ?profile=<identifier, title or URL> is the profile to play with; ?play=<URL or bundled
   // name> the ROM. ---
   async function startFromAddress() {
+    const library = addressValues('library')[0];
+    if (library && /^https?:\/\//i.test(library)) {
+      if (!libraries().some((l) => l.url === library)) await addLibrary(library, true);
+      showDialog('rom');
+      fillLibraries(library);
+    }
     const imports = addressValues('import');
     let profile = addressValues('profile')[0] || null;
     const remotes = [...imports];
