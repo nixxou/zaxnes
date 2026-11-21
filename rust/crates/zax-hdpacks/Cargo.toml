@@ -12,5 +12,10 @@ publish.workspace = true
 zax-core-api = { path = "../zax-core-api" }
 png = "0.17"
 
+[dev-dependencies]
+# The `hd_shot` example plays a ROM headless.
+zax-nes = { path = "../zax-nes" }
+zax-engine3d = { path = "../zax-engine3d" }
+
 [lints]
 workspace = true

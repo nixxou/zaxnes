@@ -27,10 +27,12 @@ Owner request (2026-11-21): play Mesen HD packs. Branch `feat/hd-pack` from dev,
 
 ## Status
 
-- [ ] crate: loader (tiles, conditions, backgrounds, options), compositor, tests
-- [ ] discovery (folders, zips, ROM archive) with the name tolerance
-- [ ] settings: 2D, 3D, per game
-- [ ] 2D: HD picture uploaded instead of the NES picture (GL and wgpu)
+- [x] crate: loader (tiles, conditions, backgrounds, options), compositor, tests
+- [x] discovery (folders, zips, ROM archive) with the name tolerance
+- [x] settings: 2D, 3D, per game (handheld game options, Display page)
+- [x] 2D: HD picture uploaded instead of the NES picture (GL and wgpu); checked headless with
+      `cargo run --release -p zax-hdpacks --example hd_shot` on Castlevania and the workshop's
+      exported pack (poc-hdpack/userdata-test/HdPacks)
 - [ ] 3D: design to decide (HD textures on the flat tiles?)
 
 ## Not supported yet (and why)

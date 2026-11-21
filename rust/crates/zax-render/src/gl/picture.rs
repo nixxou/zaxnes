@@ -53,9 +53,14 @@ impl NesPictureTexture {
         colours: crate::scene::PictureColours<'_>,
         height: usize,
     ) -> Result<Option<Texture>, GlError> {
-        let Some(size) = crate::interop::picture_size(indices.len(), height) else {
+        let Some(base) = crate::interop::picture_size(indices.len(), height) else {
             return Ok(None);
         };
+        // Lot HD-PACK: the pack's picture, larger, in place of the palette's colours.
+        let hd = colours
+            .hd
+            .and_then(|hd| hd.size_for(base).map(|size| (hd, size)));
+        let size = hd.map_or(base, |(_, size)| size);
         if size != self.size {
             // Another size: a new texture of the right size.
             if let Some(handle) = self.handle.take() {
@@ -64,7 +69,16 @@ impl NesPictureTexture {
             self.size = size;
         }
         self.pixels.resize(size.0 * size.1 * 4, 0);
+        if let Some((hd, _)) = hd {
+            self.pixels.copy_from_slice(hd.rgba);
+        } else {
+            self.colour_pixels(indices, colours);
+        }
+        self.send(size)
+    }
 
+    /// The palette's colours of `indices` (with `colours`) into `pixels`.
+    fn colour_pixels(&mut self, indices: &[u8], colours: crate::scene::PictureColours<'_>) {
         // AMD-050 REQ-SCN-076: a pixel whose opacity bit is 0 — the universal backdrop for want
         // of an opaque pixel (REQ-CORE-049) — gets alpha 0, which `scene.frag` already rejects
         // in the opaque pass, with no sorting, no separate depth pass and no alpha blending.
@@ -99,7 +113,10 @@ impl NesPictureTexture {
                 pixel[..3].copy_from_slice(&[color.r, color.g, color.b]);
             }
         }
+    }
 
+    /// Sends `pixels` (`size`) to the texture, made the first time.
+    fn send(&mut self, size: (usize, usize)) -> Result<Option<Texture>, GlError> {
         let gl = &self.gl;
         #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // At most 1280.
         let (width, height) = (size.0 as i32, size.1 as i32);

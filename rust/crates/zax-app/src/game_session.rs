@@ -303,6 +303,8 @@ pub struct GameSession {
     started: bool,
     aimed: Option<ZapperPosition>,
     batch_records: Vec<TileRecord>,
+    /// The PPU palette of the frame whose records are in `batch_records` (lot HD-PACK).
+    batch_palette: [u8; 32],
     pipeline: FramePipeline,
     /// `video.widescreen_strict_edges`: whether the engine is told where each band of a
     /// widescreen frame stops being drawn, so that a shape cut there stays unfinished.
@@ -525,6 +527,7 @@ impl GameSession {
             started: false,
             aimed: None,
             batch_records: Vec::new(),
+            batch_palette: [0; 32],
             strict_wide_edges: false,
             overscan: crate::overscan::Overscan::default(),
             movie: None,
@@ -1656,6 +1659,7 @@ impl GameSession {
         let batch = self.core.frame_batch();
         self.batch_records.clear();
         self.batch_records.extend_from_slice(batch.records);
+        self.batch_palette = batch.palette;
         let captured = (
             (batch.palette, batch.margin_palette),
             batch.mask_x,
@@ -1861,6 +1865,20 @@ impl GameSession {
         let height = self.copy_nes_picture(destination);
         self.core.split_steady_sprites(destination, overlay);
         height
+    }
+
+    /// Lot HD-PACK: the tile records of the picture [`GameSession::copy_nes_picture`] copies,
+    /// into `records`, and its PPU palette.
+    pub fn copy_picture_records(&self, records: &mut Vec<TileRecord>) -> [u8; 32] {
+        records.clear();
+        if self.shows_kept_picture() {
+            records.extend_from_slice(&self.batch_records);
+            self.batch_palette
+        } else {
+            let batch = self.core.frame_batch();
+            records.extend_from_slice(batch.records);
+            batch.palette
+        }
     }
 
     /// The colour emphasis of the picture [`GameSession::copy_nes_picture`] copies, into

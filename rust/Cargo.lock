@@ -2908,6 +2908,8 @@ version = "0.6.1"
 dependencies = [
  "png 0.17.16",
  "zax-core-api",
+ "zax-engine3d",
+ "zax-nes",
 ]
 
 [[package]]

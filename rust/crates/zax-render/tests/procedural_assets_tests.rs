@@ -219,6 +219,7 @@ fn render(
         nes_picture_height: 0,
         nes_picture_emphasis: &[],
         nes_picture_rgb: &[],
+        nes_picture_hd: None,
     };
     gl.render(renderer, &scene, &frame)
 }
