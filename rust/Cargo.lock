@@ -2838,6 +2838,7 @@ dependencies = [
  "zax-core-api",
  "zax-engine3d",
  "zax-fceux",
+ "zax-hdpacks",
  "zax-nes",
  "zax-neshawk",
  "zax-platform",
@@ -2899,6 +2900,14 @@ dependencies = [
  "zax-scripting",
  "zax-settings",
  "zip",
+]
+
+[[package]]
+name = "zax-hdpacks"
+version = "0.6.1"
+dependencies = [
+ "png 0.17.16",
+ "zax-core-api",
 ]
 
 [[package]]

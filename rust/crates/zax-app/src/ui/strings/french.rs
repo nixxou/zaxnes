@@ -531,6 +531,8 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.video.nes_palette", "Palette de couleurs NES"),
     ("setting.video.composite_signal", "Signal composite"),
     ("setting.video.emphasis_3d", "Accentuation des couleurs en 3D"),
+    ("setting.video.hd_pack_2d", "Pack HD en 2D"),
+    ("setting.video.hd_pack_3d", "Pack HD en 3D"),
     ("setting.emu.builtin_patches", "Patchs de ROM intégrés (au prochain chargement)"),
     ("setting.emu.tv_mode", "Région vidéo"),
     ("setting.emu.core", "Cœur d'émulation"),

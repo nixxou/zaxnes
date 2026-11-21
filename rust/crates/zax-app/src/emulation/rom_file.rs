@@ -291,6 +291,62 @@ impl<R: Read + Seek> Archive<R> {
     }
 }
 
+/// Lot HD-PACK: the files of the Mesen HD pack in the archive at `path` (a `.zip` or `.7z`, or a
+/// file whose first bytes say it is one): the `hires.txt` nearest the archive's root and the
+/// pictures and text beside it or below, by their names in the archive. `None` when the archive
+/// holds no `hires.txt`.
+///
+/// # Errors
+/// The archive cannot be opened or decoded.
+pub fn read_hd_pack_files(path: &Path) -> Result<Option<Vec<(String, Vec<u8>)>>, String> {
+    let extension = path
+        .extension()
+        .map(|extension| extension.to_string_lossy().to_lowercase());
+    match extension.as_deref() {
+        Some("zip") => hd_pack_files(Archive::zip(open(path)?)?),
+        Some("7z") => hd_pack_files(Archive::seven_zip(open(path)?)?),
+        _ => {
+            let mut head = [0u8; 6];
+            let mut file = open(path)?;
+            let read = file.read(&mut head).map_err(|error| error.to_string())?;
+            let head = &head[..read];
+            if head.starts_with(ZIP_MAGIC) {
+                hd_pack_files(Archive::zip(open(path)?)?)
+            } else if head.starts_with(SEVEN_ZIP_MAGIC) {
+                hd_pack_files(Archive::seven_zip(open(path)?)?)
+            } else {
+                Ok(None)
+            }
+        }
+    }
+}
+
+fn hd_pack_files<R: Read + Seek>(
+    mut archive: Archive<R>,
+) -> Result<Option<Vec<(String, Vec<u8>)>>, String> {
+    let names = archive.names();
+    let lower = |name: &str| name.replace('\\', "/").to_lowercase();
+    let Some(root) = names
+        .iter()
+        .map(|name| lower(name))
+        .filter(|name| name == "hires.txt" || name.ends_with("/hires.txt"))
+        .min_by_key(|name| (name.matches('/').count(), name.clone()))
+    else {
+        return Ok(None);
+    };
+    let prefix = root.trim_end_matches("hires.txt").to_owned();
+    // The text and pictures; the sounds of a pack are not played.
+    let wanted: Vec<&str> = names
+        .iter()
+        .filter(|name| {
+            let name = lower(name);
+            name.starts_with(&prefix) && [".txt", ".png"].iter().any(|kind| name.ends_with(kind))
+        })
+        .map(String::as_str)
+        .collect();
+    archive.read(&wanted).map(Some)
+}
+
 /// The base name of an archive entry (after its last folder).
 fn base_name(name: &str) -> &str {
     name.rsplit(['/', '\\']).next().unwrap_or(name)

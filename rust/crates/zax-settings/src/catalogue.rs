@@ -240,6 +240,10 @@ setting_ids! {
     VideoNesPalette => "video.nes_palette",
     VideoCompositeSignal => "video.composite_signal",
     VideoEmphasis3d => "video.emphasis_3d",
+    // Lot HD-PACK (owner request, 2026-11-21): a Mesen HD pack found for the game is drawn in 2D
+    // and/or in 3D; both are options of a game too.
+    VideoHdPack2d => "video.hd_pack_2d",
+    VideoHdPack3d => "video.hd_pack_3d",
     VideoSignalKind => "video.signal_kind",
     VideoTvModel => "video.tv_model",
     VideoDecoderSharpness => "video.decoder_sharpness",

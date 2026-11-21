@@ -73,11 +73,14 @@ pub const GAME_ADVANCED_HUB: [OptionRow; 4] = [
 
 /// *Advanced options › Display* of a game: the two rows that left the main screen, and the two
 /// of RO-2 that belong to the picture as it reaches the screen.
-pub const GAME_DISPLAY_ROWS: [OptionRow; 4] = [
+pub const GAME_DISPLAY_ROWS: [OptionRow; 6] = [
     OptionRow::ShowFps,
     OptionRow::Profiler,
     OptionRow::Setting(SettingId::VideoAntiAlias),
     OptionRow::Setting(SettingId::VideoMaxQueuedFrames),
+    // Lot HD-PACK (owner request): the game's Mesen HD pack, in 2D and in 3D.
+    OptionRow::Setting(SettingId::VideoHdPack2d),
+    OptionRow::Setting(SettingId::VideoHdPack3d),
 ];
 
 /// *Advanced options › 3D rendering* of a game: the visual style, then its two pages.
@@ -239,6 +242,8 @@ const fn one_setting(id: SettingId) -> &'static [SettingId] {
         // takes run-ahead 2, smooth with the latency of 1).
         SettingId::EmuSmoothScrollAhead => &[SettingId::EmuSmoothScrollAhead],
         SettingId::VideoAntiAlias => &[SettingId::VideoAntiAlias],
+        SettingId::VideoHdPack2d => &[SettingId::VideoHdPack2d],
+        SettingId::VideoHdPack3d => &[SettingId::VideoHdPack3d],
         SettingId::VideoMaxQueuedFrames => &[SettingId::VideoMaxQueuedFrames],
         SettingId::RenderVisualStyle => &[SettingId::RenderVisualStyle],
         SettingId::RenderStyleVoxelGrid => &[SettingId::RenderStyleVoxelGrid],

@@ -18,6 +18,7 @@ pub mod frame_rate_counter;
 pub mod game_session;
 pub mod graphics;
 pub mod handheld_mode;
+pub mod hd_pack;
 pub mod head_on_pull;
 pub mod import_folder;
 pub mod input;

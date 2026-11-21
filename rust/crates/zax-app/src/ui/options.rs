@@ -222,6 +222,9 @@ const NES_PICTURE: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::VideoNesPalette),
     LayoutEntry::Row(SettingId::VideoCompositeSignal),
     LayoutEntry::Row(SettingId::VideoEmphasis3d),
+    // Lot HD-PACK: the Mesen HD pack of the game, in 2D and in 3D.
+    LayoutEntry::Row(SettingId::VideoHdPack2d),
+    LayoutEntry::Row(SettingId::VideoHdPack3d),
     // Lot REWRITE-UI: the signal options.
     LayoutEntry::Row(SettingId::VideoSignalKind),
     LayoutEntry::Row(SettingId::VideoTvModel),
