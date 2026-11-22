@@ -258,6 +258,8 @@ Every [release](../../releases) has one package per platform:
 | `Zaxnes-<version>-linux-x64.tar.gz` | Linux (needs SDL2, `libsdl2-2.0-0` on Debian/Ubuntu) |
 | `Zaxnes-<version>-portmaster-aarch64.zip` | PortMaster handhelds: unzip into the `ports` folder of the SD card |
 | `Zaxnes-<version>-android-arm64.apk` | Android 7.0 or later, 64-bit ARM (tablets and handhelds): install the APK |
+| `Zaxnes-<version>-libretro-win-x64.zip` | RetroArch on Windows: the libretro core; `zaxnes_libretro.dll` goes in RetroArch's `cores` folder, `zaxnes_libretro.info` in its `info` folder (see [`rust/crates/zax-libretro/README.md`](rust/crates/zax-libretro/README.md)) |
+| `Zaxnes-<version>-libretro-linux-x64.zip` | RetroArch on Linux: the same core, `zaxnes_libretro.so` |
 
 **The only game included is FlappyZaxNes**, with its 3D profile (see above); the 3D profiles made
 for Zaxnes come with every package. For any other game you need your own, legally owned ROMs.
