@@ -33,9 +33,9 @@ Notes for the NES:
 
 | Step | What | State |
 |---|---|---|
-| 1 | `zax-cheats` crate, no engine dependency: code parsing (Game Genie 6/8, PAR, raw with compare), encoding back, a cheat list type | |
-| 2 | RAM search in `zax-cheats`: snapshot of `$0000-$07FF` and `$6000-$7FFF` through a read closure, filters (known value, unknown value relative to the last snapshot, by delta), sizes 1/2 bytes, BCD, candidate list, "add as cheat" | |
-| 3 | Importers: Mesen JSON (BeesNES / Mesen), libretro `.cht`, FCEUX `.cht`, Nestopia XML | |
+| 1 | `zax-cheats` crate, no engine dependency: code parsing (Game Genie 6/8, PAR, raw with compare), encoding back, a cheat list type | done |
+| 2 | RAM search in `zax-cheats`: snapshot of `$0000-$07FF` and `$6000-$7FFF` through a read closure, filters (known value, unknown value relative to the last snapshot, by delta), sizes 1/2 bytes, BCD, candidate list, "add as cheat" | done (no "add as cheat" yet, it is UI) |
+| 3 | Importers: Mesen JSON (BeesNES / Mesen), libretro `.cht`, FCEUX `.cht`, Nestopia XML | Mesen JSON, libretro, FCEUX done; Nestopia XML to do. FCEUX's layout from memory (its `cheat.cpp` is not in the tree): check against FCEUX before relying on it |
 | 4 | Engines: RAM cheats through `Engine::write_memory` after each frame (all engines); Game Genie on Zaxnes's CPU read path (one flag tested only above `$8000`, off unless a code is on), FCEUX through its own cheat API, NesHawk through its bus poke | |
 | 5 | Application: cheats per game saved beside the other per-game data, Cheats window (list, add, enable), Search window, libretro `retro_cheat_set` | |
 | 6 | Database: decide what to ship (see 3.) | |
@@ -50,3 +50,8 @@ Notes for the NES:
 ## 4. Progress
 
 - 2026-11-24: worktree created; survey above; target dirs of every worktree cleaned (35 GB free on G:).
+- 2026-11-24: steps 1-3 in `rust/crates/zax-cheats` (10 unit tests, clippy clean). The ignored test
+  `tests/mesen_database.rs` read BeesNES's whole database (`ZAXNES_CHEAT_DB=<extracted Cheats.zip>`):
+  1958 files, 45 616 cheats read, 70 skipped (notes without a code, `??` templates, 2 type errors in
+  the data). It found Mesen's `AAAA:VV:CC` form and one file with an invalid JSON escape, both
+  handled. Next: step 4, the engines.

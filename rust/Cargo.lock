@@ -2849,6 +2849,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "zax-cheats"
+version = "0.6.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "zax-core-api"
 version = "0.6.1"
 dependencies = [
