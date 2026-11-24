@@ -1641,6 +1641,20 @@ fn emulation_pause_3d(out: &mut Vec<SettingDescriptor>) {
             .with_label(label),
         );
     }
+    // Lot SBS (owner request): how far apart the two eyes of the 3D are, 1 being the strength
+    // validated on still frames (about 2° each side of the camera).
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoSbs3dStrength,
+            SettingKind::Float,
+            SettingValue::Float(1.0),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_domain(Domain::range(0.25, 3.0))
+        .with_label("Side by side 3D strength"),
+    );
 }
 
 fn conversion(out: &mut Vec<SettingDescriptor>) {

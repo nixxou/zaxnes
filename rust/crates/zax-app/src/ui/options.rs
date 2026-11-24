@@ -205,6 +205,7 @@ const DISPLAY: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::VideoAntiAlias),
     // Lot SBS: the picture for a 3D television, video glasses or a headset.
     LayoutEntry::Row(SettingId::VideoSbs3d),
+    LayoutEntry::Row(SettingId::VideoSbs3dStrength),
     LayoutEntry::Row(SettingId::VideoSbsFamicom3d),
     LayoutEntry::Group(OptionsGroup::Performance),
     LayoutEntry::Row(SettingId::VideoSkipFrame),
@@ -648,6 +649,10 @@ pub fn inert_reason(id: SettingId, model: &SettingsModel) -> Option<&'static str
         // is 0 for every item, so the pixel-shadow displacement inside that branch never runs.
         SettingId::RenderStylePixelShadow if !model.get(SettingId::RenderShadow).as_bool() => {
             keys::HINT_NEEDS_SHADOWS
+        }
+        // Lot SBS: `application.rs` reads the strength only while the 3D is drawn side by side.
+        SettingId::VideoSbs3dStrength if model.get(SettingId::VideoSbs3d).as_int() == 0 => {
+            "hint.needs_sbs_3d"
         }
         // AMD-055 REQ-SCN-079: `ao.thickness` is greyed while the MSVO mode is rendered as Depth
         // (REQ-SCN-083's declared fallback **(D)**, `zax_render::style::MSVO_PORTED`).

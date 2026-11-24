@@ -448,6 +448,10 @@ pub struct SceneRenderer {
     plan: FramePlan<GpuMesh, Texture>,
     passes: Passes,
     last_view: CameraView,
+    /// Lot SBS: the shadow volume the left eye's render filled the map for; the right eye's render
+    /// of the same frame draws with that map instead of filling it again (the light does not
+    /// depend on the eye).
+    stereo_volume: Option<ShadowVolume>,
     /// Whether the opaque bucket and the tiles of each transparent object are reordered by draw
     /// state (`FramePlan::lay_out_instances`).
     group_opaque: bool,
@@ -575,6 +579,7 @@ impl SceneRenderer {
             picture_bands: None,
             plan: FramePlan::default(),
             last_view: CameraView::default(),
+            stereo_volume: None,
             group_opaque: false,
             timer: None,
             textures,
@@ -683,7 +688,10 @@ impl SceneRenderer {
             scene.framed_view(scene.camera.build_view(scene.view_clipping(), aspect))
         }
         .stereo_eye(scene.stereo_eye);
-        self.last_view = view;
+        // Lot SBS: the Zapper aims through the left eye (or the single view), not the right one.
+        if scene.stereo_eye <= 0.0 {
+            self.last_view = view;
+        }
 
         let started = std::time::Instant::now();
         let mut residency = GlResidency {
@@ -742,7 +750,14 @@ impl SceneRenderer {
             self.passes.statistics.gpu_time = timer.collect(&self.gl);
             timer.begin(&self.gl);
         }
-        let volume = self.render_shadow_map(scene, &view)?;
+        let volume = match self.stereo_volume.filter(|_| scene.stereo_eye > 0.0) {
+            Some(kept) => kept,
+            None => {
+                let volume = self.render_shadow_map(scene, &view)?;
+                self.stereo_volume = (scene.stereo_eye < 0.0).then_some(volume);
+                volume
+            }
+        };
         self.render_scene(target, scene, frame, &view, &volume)?;
         if let Some(timer) = &mut self.timer {
             timer.end(&self.gl);

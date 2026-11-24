@@ -191,6 +191,7 @@ setting_ids! {
     // by two eyes, and the two pictures of a Famicom 3D System game.
     VideoSbs3d => "video.sbs_3d",
     VideoSbsFamicom3d => "video.sbs_famicom_3d",
+    VideoSbs3dStrength => "video.sbs_3d_strength",
     VideoDynamicResolution => "video.dynamic_resolution",
     VideoShaderResolution => "video.shader_resolution",
     VideoBackend => "video.backend",

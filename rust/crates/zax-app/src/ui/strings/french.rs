@@ -489,6 +489,8 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.video.half_rate_3d", "3D à 30 i/s (jeu à pleine vitesse)"),
     ("setting.video.sbs_3d", "3D côte à côte (SBS)"),
     ("setting.video.sbs_famicom_3d", "Famicom 3D System côte à côte (SBS)"),
+    ("setting.video.sbs_3d_strength", "Intensité de la 3D côte à côte"),
+    ("hint.needs_sbs_3d", "(sans effet : la 3D côte à côte est désactivée)"),
     ("setting.video.dynamic_resolution", "Résolution automatique"),
     ("setting.video.shader_resolution", "Résolution du shader"),
     (
@@ -888,6 +890,12 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (
         "detail.video.sbs_3d",
         "Montre la scène 3D une fois par œil, côte à côte, pour une télévision 3D, des lunettes          vidéo ou un casque. Half SBS tasse chaque œil dans la moitié de la largeur (une          télévision 3D en mode SBS étire chaque moitié) ; Full SBS garde chaque œil en pleine          résolution, une moitié de fenêtre chacun. Les deux yeux sont deux caméras un peu          écartées qui se rejoignent sur l'écran du jeu : ce qu'un profil met devant sort, ce          qu'il met derrière s'enfonce. L'image 2D d'un jeu est alors montrée dans les deux          moitiés. Coûte environ deux fois le dessin de la scène. Par défaut : désactivé.",
+    ),
+    (
+        "detail.video.sbs_3d_strength",
+        "L'écart entre les deux yeux de la 3D côte à côte : plus de relief, mais plus fatigant \
+         au-delà de 1,5. 1 correspond à environ 2 degrés de chaque côté de la caméra. Par \
+         défaut : 1.",
     ),
     (
         "detail.video.sbs_famicom_3d",

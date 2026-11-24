@@ -761,6 +761,8 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.video.half_rate_3d", "3D at 30 fps (game at full speed)"),
     ("setting.video.sbs_3d", "Side by side 3D"),
     ("setting.video.sbs_famicom_3d", "Side by side Famicom 3D System"),
+    ("setting.video.sbs_3d_strength", "Side by side 3D strength"),
+    ("hint.needs_sbs_3d", "(no effect: the side by side 3D is off)"),
     ("setting.video.dynamic_resolution", "Automatic resolution"),
     ("setting.video.shader_resolution", "Shader resolution"),
     (
@@ -945,6 +947,11 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         "detail.video.sbs_3d",
         "Shows the 3D scene once for each eye, side by side, for a 3D television, video glasses or          a headset. Half SBS squeezes each eye into half the width (a 3D television in its SBS mode          stretches each half back); Full SBS keeps each eye at full resolution, half the window          each. The two eyes are two cameras a little apart that meet at the game's screen: what a          profile puts in front comes out, what it puts behind goes in. The 2D picture of a game is          then shown in both halves. Costs about twice the drawing of the scene. Default: off.",
+    ),
+    (
+        "detail.video.sbs_3d_strength",
+        "How far apart the two eyes of the side by side 3D are: more relief, but harder on the \
+         eyes beyond 1.5. 1 is about 2 degrees each side of the camera. Default: 1.",
     ),
     (
         "detail.video.sbs_famicom_3d",

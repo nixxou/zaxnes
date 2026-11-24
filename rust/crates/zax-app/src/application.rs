@@ -1676,6 +1676,11 @@ impl Running {
         });
         self.clock.stop(Stage::Ui, mark);
         let stereo_layout = self.stereo_layout();
+        let strength = self
+            .host
+            .settings()
+            .get(SettingId::VideoSbs3dStrength)
+            .as_float();
         // The scene as the frame drawn now left it; the conversion thread changes the live one.
         let scene = self.host.scene().clone();
         let Some(DeferredParts {
@@ -1744,6 +1749,7 @@ impl Running {
                     graphics,
                     (view, right_view.as_ref()),
                     &scene,
+                    sbs_strength(strength),
                     &frame,
                     shadow_reported,
                     clock,
@@ -3315,6 +3321,7 @@ fn render_scene(
     clock: &mut StageClock,
 ) -> Result<(), String> {
     let layout = sbs_layout(host, state);
+    let host_strength = host.settings().get(SettingId::VideoSbs3dStrength).as_float();
     let (mut session, scene, view) = host.session_scene_and_view();
     let view = view.ok_or("the host has no view of the game")?;
     state.right_rendered = false;
@@ -3406,6 +3413,7 @@ fn render_scene(
         graphics,
         (view, state.right_view.as_ref()),
         scene,
+        sbs_strength(host_strength),
         &frame,
         &mut state.shadow_map_reported,
         clock,
@@ -3417,6 +3425,11 @@ fn render_scene(
 /// Lot SBS: how far each eye of the 3D scene is from the camera, a fraction of its distance to
 /// the point it looks at (about 2° each side, the strength the owner validated on still frames).
 const EYE_FRACTION: f32 = 0.035;
+
+/// Lot SBS: the eyes' distance for `video.sbs_3d_strength`.
+fn sbs_strength(strength: f32) -> f32 {
+    EYE_FRACTION * strength.clamp(0.0, 4.0)
+}
 
 /// Lot SBS: the side-by-side layout of this frame: the Famicom 3D System setting while such a
 /// game shows its two pictures in 2D, the 3D one for every other frame (the 2D picture of any
@@ -3437,6 +3450,7 @@ fn draw_eyes(
     graphics: &mut Graphics,
     (left, right): (&SceneView, Option<&SceneView>),
     scene: &SceneState,
+    eye_fraction: f32,
     frame: &SceneFrame<'_>,
     shadow_map_reported: &mut bool,
     clock: &mut StageClock,
@@ -3445,9 +3459,9 @@ fn draw_eyes(
         return draw_scene(graphics, left, scene, frame, shadow_map_reported, clock);
     };
     let mut eye = scene.clone();
-    eye.stereo_eye = -EYE_FRACTION;
+    eye.stereo_eye = -eye_fraction;
     draw_scene(graphics, left, &eye, frame, shadow_map_reported, clock)?;
-    eye.stereo_eye = EYE_FRACTION;
+    eye.stereo_eye = eye_fraction;
     draw_scene(graphics, right, &eye, frame, shadow_map_reported, clock)
 }
 

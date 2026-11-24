@@ -214,6 +214,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "video.rf_ghost",
             "video.rf_noise",
             "video.sbs_3d",
+            "video.sbs_3d_strength",
             "video.sbs_famicom_3d",
             "video.shader_resolution",
             "video.signal_kind",
