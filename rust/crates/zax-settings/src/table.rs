@@ -1616,6 +1616,25 @@ fn emulation_pause_3d(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("3D at half the refresh rate"),
     );
+    // Rust-only (owner request, lot SBS): the picture of each eye side by side, for a 3D
+    // television (Half SBS, each eye squeezed into half the width) or video glasses and headsets
+    // (Full SBS, each eye at full resolution). Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoStereoOutput,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Off"),
+            opt(1, "Half SBS"),
+            opt(2, "Full SBS"),
+        ]))
+        .with_label("Stereo output"),
+    );
 }
 
 fn conversion(out: &mut Vec<SettingDescriptor>) {

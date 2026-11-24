@@ -215,6 +215,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "video.rf_noise",
             "video.shader_resolution",
             "video.signal_kind",
+            "video.stereo_output",
             "video.tv_brightness",
             "video.tv_contrast",
             "video.tv_hue",

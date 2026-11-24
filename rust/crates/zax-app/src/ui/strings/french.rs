@@ -487,6 +487,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.pause_3d_in_2d", "3D en pause en 2D"),
     ("setting.emu.catch_up_last_3d", "Rattrapage : 3D de l'image affichée seulement"),
     ("setting.video.half_rate_3d", "3D à 30 i/s (jeu à pleine vitesse)"),
+    ("setting.video.stereo_output", "Sortie stéréo"),
     ("setting.video.dynamic_resolution", "Résolution automatique"),
     ("setting.video.shader_resolution", "Résolution du shader"),
     (
@@ -791,6 +792,8 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.ui.language", "Langue"),
     // ----------------------------------- labels of the enumerated values
     ("option.Off", "Désactivée"),
+    ("option.Half SBS", "Half SBS (TV 3D)"),
+    ("option.Full SBS", "Full SBS (lunettes, casque)"),
     ("option.Auto", "Auto"),
     ("option.Light", "Légère"),
     ("option.Strong", "Forte"),
