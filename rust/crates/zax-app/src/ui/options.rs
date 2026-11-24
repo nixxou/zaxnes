@@ -203,6 +203,8 @@ const DISPLAY: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::VideoDynamicResolution),
     LayoutEntry::Row(SettingId::VideoShaderResolution),
     LayoutEntry::Row(SettingId::VideoAntiAlias),
+    // Lot SBS: the picture for a 3D television, video glasses or a headset.
+    LayoutEntry::Row(SettingId::VideoStereoOutput),
     LayoutEntry::Group(OptionsGroup::Performance),
     LayoutEntry::Row(SettingId::VideoSkipFrame),
     LayoutEntry::Row(SettingId::EmuCatchUp),
