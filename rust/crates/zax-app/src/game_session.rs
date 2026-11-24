@@ -1727,6 +1727,11 @@ impl GameSession {
         (mask_x, mask_y): (i32, i32),
         (margin, visible_rows, margin_y): (i32, zax_core_api::VisibleRows, i32),
     ) {
+        // Lot F3D: a 3D System game opened flat turns to 3D while it alternates its eyes. Decided
+        // before the skip below: a flat game's 3D is paused, so its frames never get further.
+        if self.flat_by_default {
+            self.engine.two_dimensional_mode = !self.stereo.active();
+        }
         if (self.paused_3d || self.catching_up) && self.pipeline.ahead_allowed {
             // Kept for when the 3D comes back; the scripts' clock goes on.
             self.skipped_batch = Some((
@@ -1751,10 +1756,7 @@ impl GameSession {
         let counter = self.frame_counter;
         let mut records = std::mem::take(&mut self.batch_records);
         // Lot F3D: a Famicom 3D System game in the default 3D shows its left fields only, each
-        // given the depth its two eyes disagree by. Opened flat, it turns to 3D while it does.
-        if self.flat_by_default {
-            self.engine.two_dimensional_mode = !self.stereo.active();
-        }
+        // given the depth its two eyes disagree by.
         let depth = if self.profile_free && !self.engine.two_dimensional_mode {
             self.stereo.depth_field()
         } else {
