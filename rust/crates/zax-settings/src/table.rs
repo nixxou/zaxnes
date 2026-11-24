@@ -2895,11 +2895,10 @@ fn video_nes_palette(out: &mut Vec<SettingDescriptor>) {
 }
 
 /// Lot HD-PACK (owner request, 2026-11-21): the Mesen HD pack found for the game, in the 2D
-/// picture (on by default: a pack is only there because the player put it there) and on the 3D
-/// scene (off by default). Not exposed to Lua.
+/// picture and on the 3D scene; both off by default (owner, 2026-11-24). Not exposed to Lua.
 fn video_hd_pack(out: &mut Vec<SettingDescriptor>) {
     for (id, default, label) in [
-        (SettingId::VideoHdPack2d, true, "HD pack in 2D"),
+        (SettingId::VideoHdPack2d, false, "HD pack in 2D"),
         (SettingId::VideoHdPack3d, false, "HD pack in 3D"),
     ] {
         out.push(
