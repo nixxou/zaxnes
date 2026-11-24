@@ -580,10 +580,20 @@ impl WgpuDisplay {
             right
         };
         wanted.as_ref()?;
-        let (width, height) = (
-            layer.columns.map_or(layer.texture.width(), |(_, width)| width).max(1),
-            layer.height.max(1),
-        );
+        // The eye's picture keeps the scene picture's proportions at the layer's height: a whole
+        // 16:9 picture in Half SBS, which the compositor then squeezes into its half (a bezel
+        // preset draws its television for the picture the eye really gets), half the width in
+        // Full SBS.
+        let height = layer.height.max(1);
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss
+        )] // Window sizes.
+        let width = ((height as f32 * layer.texture.width() as f32
+            / layer.texture.height().max(1) as f32)
+            .round() as u32)
+            .max(1);
         let fits = self.eye_targets[index].as_ref().is_some_and(|(texture, _)| {
             (texture.width(), texture.height()) == (width, height)
                 && texture.format() == self.config.format
