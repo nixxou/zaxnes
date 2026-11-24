@@ -540,6 +540,15 @@ impl EngineHandle {
         self.zaxnes().map(NesCore::expansion_output)
     }
 
+    /// The plain colour indices of Zaxnes's picture of the frame just run, for the relief of a
+    /// Famicom 3D System game (lot F3D); `out` is left empty on another engine.
+    pub fn stereo_picture_into(&self, out: &mut Vec<u8>) {
+        match self.zaxnes() {
+            Some(core) => core.pixel_frame_indices_into(out),
+            None => out.clear(),
+        }
+    }
+
     /// The frame's experimental smooth-scrolling shift; `None` on an engine that has none.
     #[must_use]
     pub fn picture_shift(&self) -> Option<(f32, i32, i32)> {

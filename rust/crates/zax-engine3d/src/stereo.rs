@@ -7,9 +7,10 @@
 //! module measures the disparity on the tile records and gives each shape the depth a player
 //! with the glasses perceives:
 //!
-//! * the background, per band of 8 lines (the core records one background row per band), from
-//!   the shift of its tiles between a right field and the left fields around it;
-//! * the sprites, per OAM slot, the same way.
+//! * the background, per line of the picture, from the shift that best lines up the line of a
+//!   right field with the same line of the left fields around it (the games scroll the floor
+//!   line by line; the tile records keep one position per band of 8 lines, too coarse);
+//! * the sprites, per OAM slot, from the tile records.
 //!
 //! Two left fields are used, the one before the right field and the one after: the scrolling
 //! between two fields adds the same shift to both comparisons with opposite signs, so their mean
@@ -27,6 +28,7 @@ use std::collections::VecDeque;
 use zax_core_api::TileRecord;
 
 use crate::frame::ConversionFrame;
+use crate::grid;
 use crate::settings::ConversionSettings;
 
 /// How many alternating fields in a row make a game a 3D System one (a tenth of a second).
@@ -35,52 +37,91 @@ const ACTIVE_AFTER: u32 = 6;
 const MAX_SHIFT: i32 = 24;
 /// The fields kept: the newest and the three before it.
 const KEPT: usize = 4;
+/// The default camera's target on the screen plane, in scene coordinates (Y up): `T'` of
+/// `render --explain`.
+const AXIS_X: f32 = 124.0;
+const AXIS_Y: f32 = 124.0;
 
-/// Where the picture is watched from, for the perceived depth.
+/// Where the picture is watched from, for the perceived depth, and where the scene is looked at
+/// from, to keep it in place on the screen. Lengths in NES pixels of the picture.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Viewing {
-    /// Distance from the eyes to the screen, in millimetres.
-    pub distance_mm: f32,
-    /// Width of the 256 NES pixels on that screen, in millimetres.
-    pub picture_width_mm: f32,
-    /// Distance between the two eyes, in millimetres.
-    pub eyes_mm: f32,
+    /// Distance from the player's eyes to the screen.
+    pub viewer: f32,
+    /// Distance between the two eyes.
+    pub eyes: f32,
+    /// Distance from the default camera to the screen plane: every shape is enlarged by
+    /// `(camera + z) / camera` about the camera's axis, so that seen from there it covers the
+    /// screen exactly as the flat picture does, whatever its depth.
+    pub camera: f32,
 }
 
+/// NES pixels per millimetre of a 27 cm wide picture (a small CRT television).
+const PIXELS_PER_MM: f32 = 256.0 / 270.0;
+/// Distance from the default camera to the screen plane (`render --explain`: `d 189.65`).
+pub const DEFAULT_CAMERA: f32 = 189.65;
+
 impl Default for Viewing {
-    /// A small CRT television (27 cm of picture) watched from 1.5 m.
+    /// The player sits where the default camera is: the relief a player with the glasses sees
+    /// from there, and the default view shows the picture as it is.
     fn default() -> Self {
         Self {
-            distance_mm: 1500.0,
-            picture_width_mm: 270.0,
-            eyes_mm: 65.0,
+            viewer: DEFAULT_CAMERA,
+            eyes: 65.0 * PIXELS_PER_MM,
+            camera: DEFAULT_CAMERA,
         }
     }
 }
 
 impl Viewing {
+    /// A small television watched from 1.5 m: the full depth of the glasses, deeper than the
+    /// default camera's place gives.
+    #[must_use]
+    pub fn television() -> Self {
+        Self {
+            viewer: 1500.0 * PIXELS_PER_MM,
+            ..Self::default()
+        }
+    }
+
     /// The depth behind the screen (negative: in front), in NES pixels, that a disparity of
-    /// `disparity` NES pixels is seen at: `z = D·p / (e − p)`, `p` the disparity on the screen.
+    /// `disparity` NES pixels is seen at: `z = D·p / (e − p)`.
     #[must_use]
     pub fn perceived(&self, disparity: f32) -> f32 {
-        let mm_per_pixel = self.picture_width_mm / 256.0;
-        let p = (disparity * mm_per_pixel).clamp(-self.eyes_mm * 4.0, self.eyes_mm * 0.9);
-        self.distance_mm * p / (self.eyes_mm - p) / mm_per_pixel
+        let p = disparity.clamp(-self.eyes * 4.0, self.eyes * 0.9);
+        self.viewer * p / (self.eyes - p)
     }
 }
 
-/// One field: which eye it was for and its tile records.
+/// One field: which eye it was for, its tile records and its picture (NES colour indices, 256 x
+/// 240, kept only while the eyes alternate).
 #[derive(Debug, Clone, Default)]
 struct Field {
     right: bool,
     records: Vec<TileRecord>,
+    picture: Vec<u8>,
 }
 
-/// The disparity measured on a right field: per background band and per sprite slot, in NES
-/// pixels, positive behind the screen.
+/// Picture size.
+const WIDTH: usize = 256;
+const HEIGHT: usize = 240;
+/// The same, signed, for the sprite boxes that reach past it.
+const WIDTH_I: i32 = 256;
+const HEIGHT_I: i32 = 240;
+/// The columns compared, clear of the sides a shift brings in.
+const COMPARED: std::ops::Range<usize> = 24..232;
+/// A line counts as measured when the best shift beats the worst by this many pixels and by four
+/// times over: enough texture to be scenery, not a lone sprite on a plain sky.
+const TEXTURE: u32 = 16;
+/// The two comparisons of a line differ by twice the scrolling; more than this, one of them
+/// matched something else (a shot crossing the line).
+const MAX_SCROLL_GAP: i32 = 12;
+
+/// The disparity measured on a right field: per line and per sprite slot, in NES pixels,
+/// positive behind the screen.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DepthField {
-    /// `(top line of the band, disparity)`, by increasing line, measured bands only.
+    /// `(line, disparity)` of the measured lines, by increasing line.
     pub bands: Vec<(i32, f32)>,
     /// `(OAM slot, disparity)`.
     pub sprites: Vec<(i32, f32)>,
@@ -90,11 +131,12 @@ impl DepthField {
     /// The disparity at screen line `y`: interpolated between the measured bands, the nearest one
     /// beyond them; 0 when no band was measured.
     #[must_use]
+    #[allow(clippy::cast_precision_loss)] // Screen lines, below 256.
     pub fn at_line(&self, y: f32) -> f32 {
         let Some(&(first_y, first)) = self.bands.first() else {
             return 0.0;
         };
-        let centre = |top: i32| top as f32 + 4.0;
+        let centre = |line: i32| line as f32 + 0.5;
         if y <= centre(first_y) {
             return first;
         }
@@ -133,8 +175,14 @@ impl StereoTracker {
     }
 
     /// Records the field the core just ran: `outputs` the OUT0-OUT2 lines at its end (`None` on an
-    /// engine that does not report them), `records` its tiles.
-    pub fn push(&mut self, outputs: Option<u8>, records: &[TileRecord]) {
+    /// engine that does not report them), `records` its tiles; `picture` copies its picture into
+    /// the buffer it is given, and is called only while the eyes alternate.
+    pub fn push(
+        &mut self,
+        outputs: Option<u8>,
+        records: &[TileRecord],
+        picture: impl FnOnce(&mut Vec<u8>),
+    ) {
         let Some(outputs) = outputs else {
             self.clear();
             return;
@@ -154,6 +202,12 @@ impl StereoTracker {
         field.right = right;
         field.records.clear();
         field.records.extend_from_slice(records);
+        if self.alternations > 0 {
+            picture(&mut field.picture);
+            mask_sprites(&mut field.picture, records);
+        } else {
+            field.picture.clear();
+        }
         self.fields.push_back(field);
     }
 
@@ -186,95 +240,100 @@ impl StereoTracker {
         let at = (1..fields.len().saturating_sub(1))
             .rev()
             .find(|&i| fields[i].right && !fields[i - 1].right && !fields[i + 1].right)?;
-        let (before, right, after) = (
-            &fields[at - 1].records,
-            &fields[at].records,
-            &fields[at + 1].records,
-        );
+        let (before, right, after) = (fields[at - 1], fields[at], fields[at + 1]);
+        let full = |field: &Field| field.picture.len() == WIDTH * HEIGHT;
+        if !(full(before) && full(right) && full(after)) {
+            return None;
+        }
         Some(DepthField {
-            bands: band_disparities(before, right, after),
-            sprites: sprite_disparities(before, right, after),
+            bands: line_disparities(&before.picture, &right.picture, &after.picture),
+            sprites: sprite_disparities(&before.records, &right.records, &after.records),
         })
     }
-}
-
-/// Whether every pixel of the tile has the same colour: such a tile matches anywhere.
-const fn uniform(record: &TileRecord) -> bool {
-    (record.plane0 == 0 || record.plane0 == u64::MAX)
-        && (record.plane1 == 0 || record.plane1 == u64::MAX)
 }
 
 const fn same_tile(a: &TileRecord, b: &TileRecord) -> bool {
     a.plane0 == b.plane0 && a.plane1 == b.plane1 && a.palette == b.palette
 }
 
-/// The shift `x_left − x_right` most of the band's tiles agree on, with how many agree; `None`
-/// when fewer than three textured tiles do.
-fn band_shift(left: &[&TileRecord], right: &[&TileRecord]) -> Option<i32> {
-    let mut votes = [0u32; (2 * MAX_SHIFT + 1) as usize];
-    for r in right.iter().filter(|record| !uniform(record)) {
-        for l in left.iter().filter(|candidate| same_tile(candidate, r)) {
-            let shift = i32::from(l.x) - i32::from(r.x);
-            if shift.abs() <= MAX_SHIFT {
-                votes[(shift + MAX_SHIFT) as usize] += 1;
+/// Pixels under a sprite in the copied picture: they match anything, so that the lines measure
+/// the scenery alone (the sprites have their own measure).
+const MASKED: u8 = 0xFF;
+
+/// Marks the 8 x 8 box of every sprite record of `records` as [`MASKED`] in `picture`.
+fn mask_sprites(picture: &mut [u8], records: &[TileRecord]) {
+    if picture.len() != WIDTH * HEIGHT {
+        return;
+    }
+    for record in records.iter().filter(|record| !record.background) {
+        let (x0, y0) = (i32::from(record.x), i32::from(record.y));
+        for y in y0.max(0)..(y0 + 8).min(HEIGHT_I) {
+            for x in x0.max(0)..(x0 + 8).min(WIDTH_I) {
+                #[allow(clippy::cast_sign_loss)] // Clamped to the picture above.
+                let index = y as usize * WIDTH + x as usize;
+                picture[index] = MASKED;
             }
         }
     }
-    let (best, &count) = votes
-        .iter()
-        .enumerate()
-        .max_by_key(|(index, count)| (**count, -(*index as i32 - MAX_SHIFT).abs()))?;
-    (count >= 3).then(|| best as i32 - MAX_SHIFT)
 }
 
-/// The background tiles of `records` in the band starting at line `y`.
-fn band<'a>(records: &'a [TileRecord], y: i16) -> Vec<&'a TileRecord> {
-    records
-        .iter()
-        .filter(|record| record.background && record.y == y)
-        .collect()
+/// The shift `s` that best lines up line `y` of `right` with `left` (`left[x + s] = right[x]`), or
+/// `None` for a line without texture.
+fn line_shift(left: &[u8], right: &[u8], line: usize) -> Option<i32> {
+    let row = line * WIDTH..(line + 1) * WIDTH;
+    let (left, right) = (&left[row.clone()], &right[row]);
+    let (mut best, mut best_shift, mut worst) = (u32::MAX, 0i32, 0u32);
+    for shift in -MAX_SHIFT..=MAX_SHIFT {
+        let mismatches = COMPARED
+            .map(|x| {
+                let (seen_left, seen_right) =
+                    (left[x.wrapping_add_signed(shift as isize)], right[x]);
+                u32::from(seen_left != seen_right && seen_left != MASKED && seen_right != MASKED)
+            })
+            .sum::<u32>();
+        if mismatches < best || (mismatches == best && shift.abs() < best_shift.abs()) {
+            best = mismatches;
+            best_shift = shift;
+        }
+        worst = worst.max(mismatches);
+    }
+    (worst - best >= TEXTURE && best.saturating_mul(4) <= worst && best_shift.abs() < MAX_SHIFT)
+        .then_some(best_shift)
 }
 
-fn band_disparities(
-    before: &[TileRecord],
-    right: &[TileRecord],
-    after: &[TileRecord],
-) -> Vec<(i32, f32)> {
-    let mut lines: Vec<i16> = right.iter().filter(|r| r.background).map(|r| r.y).collect();
-    lines.sort_unstable();
-    lines.dedup();
-    let mut bands: Vec<(i32, f32)> = lines
-        .into_iter()
+fn line_disparities(before: &[u8], right: &[u8], after: &[u8]) -> Vec<(i32, f32)> {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // 240 lines.
+    let lines: Vec<(i32, f32)> = (0..HEIGHT)
         .filter_map(|y| {
-            let r = band(right, y);
-            let shift_before = band_shift(&band(before, y), &r)?;
-            let shift_after = band_shift(&band(after, y), &r)?;
+            let shift_before = line_shift(before, right, y)?;
+            let shift_after = line_shift(after, right, y)?;
+            if (shift_before - shift_after).abs() > MAX_SCROLL_GAP {
+                return None;
+            }
             // x_left − x_right = −d ∓ m: the mean of the two cancels the scrolling m.
             #[allow(clippy::cast_precision_loss)] // Shifts of a few pixels.
-            Some((i32::from(y), -(shift_before + shift_after) as f32 / 2.0))
+            Some((y as i32, -(shift_before + shift_after) as f32 / 2.0))
         })
         .collect();
-    // A band far from its measured neighbours is a false match (a repeating pattern): drop it.
-    let kept: Vec<(i32, f32)> = bands
+    // A line far from its measured neighbours is a false match (a repeating pattern): drop it.
+    lines
         .iter()
         .enumerate()
-        .filter(|(i, (_, d))| {
-            let mut near: Vec<f32> = bands
+        .filter(|(i, (line, d))| {
+            let mut near: Vec<f32> = lines
                 .iter()
                 .enumerate()
-                .filter(|(j, _)| j != i && j.abs_diff(*i) <= 3)
-                .map(|(_, band)| band.1)
+                .filter(|(j, (other, _))| j != i && (other - line).abs() <= 6)
+                .map(|(_, other)| other.1)
                 .collect();
-            if near.len() < 2 {
+            if near.len() < 3 {
                 return true;
             }
             near.sort_by(f32::total_cmp);
             (d - near[near.len() / 2]).abs() <= 2.5
         })
-        .map(|(_, band)| *band)
-        .collect();
-    bands = kept;
-    bands
+        .map(|(_, line)| *line)
+        .collect()
 }
 
 fn sprite_disparities(
@@ -315,7 +374,7 @@ pub fn apply(
             shape.pixel_start().y as f32,
             (shape.pixel_end().y + 1) as f32,
         );
-        let middle = (top + bottom) / 2.0;
+        let middle = f32::midpoint(top, bottom);
         // One sample per tile: its centre line and the depth there.
         let samples: Vec<(f32, f32)> = frame
             .shape_tiles(shape_id)
@@ -345,16 +404,26 @@ pub fn apply(
         } else {
             0.0
         };
-        // z at the shape's middle line, where the rotation pivots.
+        // z at the shape's middle line, where the rotation pivots, and the enlargement that keeps
+        // the shape where the flat picture has it, seen from the camera.
         let at_middle = mean_z - slope * mean_y;
+        let enlargement = ((viewing.camera + at_middle) / viewing.camera).max(0.05);
+        let centre_x = (shape.pixel_start().x + shape.pixel_end().x + 1) as f32 / 2.0;
+        let centre_y = grid::SCENE_HEIGHT as f32 - middle;
         let instance = frame.instance_mut(id);
+        instance.offset.x += (centre_x - AXIS_X) * (enlargement - 1.0);
+        instance.offset.y += (centre_y - AXIS_Y) * (enlargement - 1.0);
         instance.offset.z += at_middle;
+        instance.scale.x *= enlargement;
         if slope != 0.0 && instance.rotation.x == 0.0 {
-            // Scene Y grows upwards, screen y downwards: dz/dY = −slope. Rotation about X by θ
-            // after a Y stretch of 1/cos θ moves a point at height Y to z = Y·tan θ.
-            let angle = (-slope).atan().clamp(-1.4, 1.4);
+            // Scene Y grows upwards, screen y downwards: dz/dY = −slope. A point at height Y must
+            // go to (k·Y, −slope·Y): a stretch s then a rotation θ about X give (s·cos θ·Y,
+            // s·sin θ·Y), so tan θ = −slope / k and s = √(k² + slope²).
+            let angle = (-slope / enlargement).atan().clamp(-1.4, 1.4);
             instance.rotation.x = angle.to_degrees();
-            instance.scale.y /= angle.cos();
+            instance.scale.y *= enlargement.hypot(slope);
+        } else {
+            instance.scale.y *= enlargement;
         }
     }
     frame.calculate_positions(settings);
@@ -368,20 +437,31 @@ mod tests {
         TileRecord::new(pattern, 0, x, y, index, false, false, false, 1, background)
     }
 
-    /// A band of three textured tiles at `y`, shifted by `shift`, and one sprite in slot 5.
-    fn field(shift: i16, sprite_shift: i16) -> Vec<TileRecord> {
-        vec![
-            tile(16 + shift, 100, 0x0102_0304_0506_0708, true, 0),
-            tile(24 + shift, 100, 0x1112_1314_1516_1718, true, 0),
-            tile(32 + shift, 100, 0x2122_2324_2526_2728, true, 0),
-            tile(64 + sprite_shift, 60, 0x3132_3334_3536_3738, false, 5),
-        ]
+    /// One sprite in slot 5 at `64 + x`.
+    fn records(x: i16) -> Vec<TileRecord> {
+        vec![tile(64 + x, 60, 0x3132_3334_3536_3738, false, 5)]
     }
 
-    fn tracker(fields: &[(bool, Vec<TileRecord>)]) -> StereoTracker {
+    /// A picture whose line 100 carries a pseudo-random pattern moved right by `shift`, the rest
+    /// plain.
+    fn picture(shift: i32) -> Vec<u8> {
+        let mut picture = vec![0x21u8; WIDTH * HEIGHT];
+        for x in 0..WIDTH {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+            let source = (x as i32 - shift).rem_euclid(WIDTH as i32) as u32;
+            #[allow(clippy::cast_possible_truncation)]
+            let colour = ((source.wrapping_mul(2_654_435_761) >> 13) & 7) as u8;
+            picture[100 * WIDTH + x] = colour;
+        }
+        picture
+    }
+
+    fn tracker(fields: &[(bool, i32, i16)]) -> StereoTracker {
         let mut tracker = StereoTracker::default();
-        for (right, records) in fields {
-            tracker.push(Some(if *right { 2 } else { 0 }), records);
+        for &(right, shift, sprite) in fields {
+            tracker.push(Some(if right { 2 } else { 0 }), &records(sprite), |out| {
+                *out = picture(shift);
+            });
         }
         tracker
     }
@@ -390,57 +470,56 @@ mod tests {
     fn inactive_until_the_eyes_alternate() {
         let mut tracker = StereoTracker::default();
         for _ in 0..10 {
-            tracker.push(Some(0), &field(0, 0));
+            tracker.push(Some(0), &records(0), |_| {
+                panic!("no picture is copied while the eyes do not alternate");
+            });
         }
         assert!(!tracker.active());
         assert!(tracker.depth_field().is_none());
-        tracker.push(None, &field(0, 0));
+        tracker.push(None, &records(0), |_| {});
         assert!(!tracker.active());
     }
 
     #[test]
     fn the_scrolling_cancels_and_the_disparity_stays() {
-        // Disparity 4 behind the screen (right eye 2 px right of the scene, left eye 2 px left),
-        // and the scene scrolls 3 px to the right every field.
-        let mut fields = Vec::new();
-        for t in 0..10i16 {
-            let right = t % 2 == 1;
-            let eye = if right { 2 } else { -2 };
-            fields.push((right, field(3 * t + eye, 3 * t - eye)));
-        }
+        // Line 100 is 4 behind the screen (right eye 2 px right, left eye 2 px left), the sprite
+        // 4 in front, and everything scrolls 3 px to the right every field.
+        let fields: Vec<(bool, i32, i16)> = (0..10i16)
+            .map(|t| {
+                let right = t % 2 == 1;
+                let eye = if right { 2 } else { -2 };
+                (right, i32::from(3 * t + eye), 3 * t - eye)
+            })
+            .collect();
         let tracker = tracker(&fields);
         assert!(tracker.active());
         let depth = tracker
             .depth_field()
             .expect("a right field between two left ones");
         assert_eq!(depth.bands, vec![(100, 4.0)]);
-        // The sprite is in front: the left eye sees it 2 px right, the right eye 2 px left.
         assert_eq!(depth.sprite(5), Some(-4.0));
         assert!(tracker.left_records().is_some());
     }
 
     #[test]
     fn the_perceived_depth_grows_with_the_distance() {
-        let viewing = Viewing::default();
-        assert!((viewing.perceived(0.0)).abs() < 1e-6);
-        let seven = viewing.perceived(7.0);
+        let camera = Viewing::default();
+        assert!((camera.perceived(0.0)).abs() < 1e-6);
+        let television = Viewing::television();
+        let seven = television.perceived(7.0);
         assert!((175.0..190.0).contains(&seven), "{seven}");
-        assert!(viewing.perceived(-4.0) < 0.0);
-        let near = Viewing {
-            distance_mm: 600.0,
-            ..viewing
-        };
-        assert!(near.perceived(7.0) < seven);
+        assert!(television.perceived(-4.0) < 0.0);
+        assert!(camera.perceived(7.0) < seven / 5.0);
     }
 
     #[test]
-    fn the_depth_is_interpolated_between_bands() {
+    fn the_depth_is_interpolated_between_lines() {
         let field = DepthField {
-            bands: vec![(100, 2.0), (116, 6.0)],
+            bands: vec![(100, 2.0), (120, 6.0)],
             sprites: Vec::new(),
         };
         assert!((field.at_line(50.0) - 2.0).abs() < 1e-6);
-        assert!((field.at_line(112.0) - 4.0).abs() < 1e-6);
+        assert!((field.at_line(110.5) - 4.0).abs() < 1e-6);
         assert!((field.at_line(200.0) - 6.0).abs() < 1e-6);
     }
 }
