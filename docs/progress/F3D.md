@@ -57,12 +57,26 @@ so the bit at the end of a core frame belongs to that frame's picture.
   `dev`).
 - Cost: only while a 3D System game alternates the eyes (otherwise a 3-bit store per `$4016`
   write and one comparison per frame). Cosmic Epsilon, 1200 frames: about 0.75 ms per frame
-  before the per-field cache.
+  before the per-field cache, 0.3-0.6 ms after (noisy, desktop).
+- `zax-app` with `bundled`: 73 suites ok; `req_pub_002` fails only because the lot's target dir
+  `wt-f3d/target-f3d` sits inside the worktree (the asset scan finds its `.obj`). Use a target
+  dir outside the worktree for the full run.
+- App smoke test (`--profile "3D par défaut" --smoke-emulated`) on Cosmic Epsilon: runs.
+- Scale: the TV preset (1.5 m) puts the city about 500 px deep, out of frame as soon as the
+  camera turns; the default is the viewer at the camera's place (city 66 px, horizon 28 px).
+
+## Proposal (2026-11-24)
+
+Shown to the owner as a page (renders before/after from the harness, demo folder
+`demo-f3d`, next to the worktrees). Decisions asked: default scale (camera place recommended), an option in
+the menus (on/off + scale), one eye in the 2D picture of a game in 3D mode, leave the game's own
+3D switch to the player, handheld measure and merge on the owner's word.
 
 ## Open points (for the proposal)
 
 - Options: on/off, and the viewer's distance (camera place / television).
 - The 2D picture of a game in 3D mode still alternates the eyes (double image): show one eye.
-- The games' 3D modes are turned on in their own menus (as on the console); not yet found in
-  Cosmic Epsilon's menus (the test pokes `$6E`).
+- The games' 3D modes are turned on in their own pause menus, as on the console: in both
+  *Cosmic Epsilon* (`$A969`, toggles `$6E`) and *JJ* (`$89C8`, increments `$2A`), START pauses,
+  SELECT switches the 3D, START resumes. The harness runs poke the switch instead.
 - Hand-held cost to measure (Retroid / RG40XXV).
