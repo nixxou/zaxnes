@@ -1891,6 +1891,13 @@ impl GameSession {
         }
     }
 
+    /// Lot SBS: which eye the field the core just ran is for, while a Famicom 3D System game
+    /// alternates its eyes: `Some(true)` for the right one; `None` for every other game.
+    #[must_use]
+    pub fn stereo_eye(&self) -> Option<bool> {
+        self.stereo.newest_eye()
+    }
+
     /// [`GameSession::copy_nes_picture`] with the sprites the experimental smooth scrolling draws
     /// apart moved to `overlay` ([`NesCore::split_steady_sprites`]; empty without them).
     pub fn copy_nes_picture_layers(

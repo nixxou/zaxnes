@@ -50,7 +50,7 @@ use crate::emulation::video_pacing::{VideoPacing, VideoPacingRequest};
 use crate::frame_profiler::{self, FrameProfiler, Stage, StageClock, Thread};
 use crate::frame_rate_counter::FrameRateCounter;
 use crate::game_session::GameSession;
-use crate::graphics::{Backend, Graphics, SceneView};
+use crate::graphics::{Backend, Graphics, SceneView, StereoLayout, StereoPicture};
 use crate::input::cursor_auto_hide::CursorAutoHide;
 use crate::input::input_action::to_camera_actions;
 use crate::input::{routing, DesktopInputSource, DeviceRefs, InputSnapshot};
@@ -1012,12 +1012,23 @@ impl Running {
 
     /// Sizes the view for the window and decides whether the render-skip rule keeps the
     /// previous image.
+    /// Lot SBS: the layout `video.stereo_output` asks for.
+    fn stereo_layout(&self) -> StereoLayout {
+        StereoLayout::from_setting(self.host.settings().get(SettingId::VideoStereoOutput).as_int())
+    }
+
     fn plan_view(&mut self, emulated: u32, width: i32, height: i32) -> Result<ViewPlan, String> {
         let below_chrome = (height - to_i32_f(self.ui.chrome_height())).max(1);
         // Portrait on a touch screen (owner request): the game takes the top of the screen at
         // 4:3, the whole width, and the touch pad the band left under it.
         let (view_height, view_bottom) = portrait_view(width, below_chrome);
         self.host.set_widescreen_held_off(view_bottom > 0);
+        // Lot SBS: in Full SBS each eye has half the window's width, at its own aspect.
+        let width = if self.stereo_layout() == StereoLayout::Full {
+            (width / 2).max(1)
+        } else {
+            width
+        };
         self.state.view_size = (width.max(1), view_height);
         let automatic = self.resolution.active;
         let factor = if automatic {
@@ -1664,6 +1675,7 @@ impl Running {
             ui.build(frame, sizes, debug);
         });
         self.clock.stop(Stage::Ui, mark);
+        let stereo_layout = self.stereo_layout();
         // The scene as the frame drawn now left it; the conversion thread changes the live one.
         let scene = self.host.scene().clone();
         let Some(DeferredParts {
@@ -1679,6 +1691,10 @@ impl Running {
                 &mut self.ui,
                 (width, height),
                 (view_height, view_bottom),
+                StereoPicture {
+                    layout: StereoLayout::Off,
+                    right: None,
+                },
             );
             return Ok(Duration::ZERO);
         };
@@ -1699,6 +1715,11 @@ impl Running {
             &self.pipeline.displayed,
         );
         let shadow_reported = &mut self.state.shadow_map_reported;
+        // Lot SBS: the 3D scene is not drawn per eye yet: the same picture in both halves.
+        let stereo = StereoPicture {
+            layout: stereo_layout,
+            right: None,
+        };
         let (converted, wait, drawn) = std::thread::scope(|threads| {
             let conversion = convert.then(|| {
                 threads.spawn(move || {
@@ -1726,6 +1747,7 @@ impl Running {
                 ui,
                 (width, height),
                 (view_height, view_bottom),
+                stereo,
             );
             clock.stop(Stage::Ui, mark);
             let waiting = Instant::now();
@@ -1779,12 +1801,21 @@ impl Running {
         self.with_ui_frame(real, |ui, frame, sizes, debug| {
             ui.build(frame, sizes, debug);
         });
+        let stereo = StereoPicture {
+            layout: self.stereo_layout(),
+            right: self
+                .state
+                .right_view
+                .as_ref()
+                .filter(|_| self.state.right_rendered),
+        };
         self.graphics.draw_window(
             &mut self.window,
             self.host.view(),
             &mut self.ui,
             (width, height),
             (view_height, view_bottom),
+            stereo,
         );
         let shot = self.ui.advance_shots();
         if let Some(path) = shot.capture {
@@ -2361,6 +2392,35 @@ struct RunState {
     last_swap: Option<Instant>,
     /// How long the last frame's scene and draw took (`emu.late_present`'s margin).
     last_render: Duration,
+    /// Lot SBS: the last 2D picture of each eye of a Famicom 3D System game (left, right), both
+    /// `None` for every other game.
+    eyes: [Option<EyePicture>; 2],
+    /// Lot SBS: the picture of the right eye, made the first time one is drawn.
+    right_view: Option<SceneView>,
+    /// Whether `right_view` holds this frame's right eye.
+    right_rendered: bool,
+}
+
+/// Lot SBS: the 2D picture of one eye, as `RunState` keeps the displayed one.
+#[derive(Debug, Default)]
+struct EyePicture {
+    picture: Vec<u8>,
+    height: usize,
+    emphasis: Vec<u8>,
+    rgb: Vec<u8>,
+}
+
+impl EyePicture {
+    /// The frame that shows this picture.
+    fn frame(&self) -> SceneFrame<'_> {
+        SceneFrame {
+            draw_list: None,
+            nes_picture: &self.picture,
+            nes_picture_height: self.height,
+            nes_picture_emphasis: &self.emphasis,
+            nes_picture_rgb: &self.rgb,
+        }
+    }
 }
 
 impl RunState {
@@ -2391,6 +2451,9 @@ impl RunState {
             close_requested: false,
             last_swap: None,
             last_render: Duration::ZERO,
+            eyes: [None, None],
+            right_view: None,
+            right_rendered: false,
         }
     }
 }
@@ -3188,7 +3251,20 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
             in_force.crop()[2],
             in_force.crop()[3],
         );
+        // Lot SBS: a Famicom 3D System game's picture is kept for its eye: the faithful
+        // picture of each eye, as the glasses showed them.
+        match session.stereo_eye() {
+            Some(right) => {
+                let eye = state.eyes[usize::from(right)].get_or_insert_with(EyePicture::default);
+                eye.picture.clone_from(&state.picture);
+                eye.height = state.picture_height;
+                eye.emphasis.clone_from(&state.picture_emphasis);
+                eye.rgb.clone_from(&state.picture_rgb);
+            }
+            None => state.eyes = [None, None],
+        }
     } else {
+        state.eyes = [None, None];
         // The 3D scene framed on the game's picture for a slang preset leaves the same sides
         // out: the overscan's in Resize, none in Fit (the cut sides show the scene there).
         #[allow(clippy::cast_possible_truncation)] // A margin of 0..=128.
@@ -3224,8 +3300,45 @@ fn render_scene(
     state: &mut RunState,
     clock: &mut StageClock,
 ) -> Result<(), String> {
+    let layout = StereoLayout::from_setting(
+        host.settings()
+            .get(SettingId::VideoStereoOutput)
+            .as_int(),
+    );
     let (mut session, scene, view) = host.session_scene_and_view();
     let view = view.ok_or("the host has no view of the game")?;
+    state.right_rendered = false;
+    // Lot SBS: a Famicom 3D System game in 2D shows the picture of each eye, faithfully: the
+    // left one alone without a stereo output (no more flicker between the eyes), each in its
+    // half with one.
+    if let (true, [Some(left), Some(right)]) = (scene.two_dimensional_mode, &state.eyes) {
+        draw_scene(
+            graphics,
+            view,
+            scene,
+            &left.frame(),
+            &mut state.shadow_map_reported,
+            clock,
+        )?;
+        if layout != StereoLayout::Off {
+            let size = view.size();
+            if state.right_view.as_ref().map(SceneView::size) != Some(size) {
+                state.right_view = graphics.new_view(size.0, size.1);
+            }
+            if let Some(right_view) = state.right_view.as_ref() {
+                draw_scene(
+                    graphics,
+                    right_view,
+                    scene,
+                    &right.frame(),
+                    &mut state.shadow_map_reported,
+                    clock,
+                )?;
+                state.right_rendered = true;
+            }
+        }
+        return Ok(());
+    }
     // AMD-051 REQ-E3D-646: the objects the last build found waiting, handed to the shared line
     // budget before the new list is built — the list is borrowed for the whole of this frame's
     // drawing, so a diagnostic found during a build is logged on the frame after it. An ordinary

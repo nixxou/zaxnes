@@ -278,6 +278,15 @@ impl StereoTracker {
         self.alternations >= ACTIVE_AFTER
     }
 
+    /// Which eye the newest field is for, while active: `Some(true)` for the right one.
+    #[must_use]
+    pub fn newest_eye(&self) -> Option<bool> {
+        if !self.active() {
+            return None;
+        }
+        self.fields.back().map(|field| field.right)
+    }
+
     /// The tile records of the newest left field, while active.
     #[must_use]
     pub fn left_records(&self) -> Option<&[TileRecord]> {

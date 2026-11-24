@@ -406,6 +406,12 @@ impl SceneCamera {
         flat.local_camera = false;
         flat.angles = tilt;
         (flat.target, flat.distance) = self.picture_framing(clipping);
+        // A view narrower than the picture (an eye of Full SBS, lot SBS) steps back until the
+        // picture's width fits too; any wider view is framed on the height alone, as before.
+        let rect = VisibleRect::from_clipping(clipping);
+        let half_angle = self.fov * std::f32::consts::PI / 180.0 / 2.0;
+        let width_fit = (rect.max_x - rect.min_x).max(1.0) / 2.0 / (half_angle.tan() * aspect);
+        flat.distance = flat.distance.max(width_fit);
         flat.build_view(Vec4F::new(0.0, 0.0, 0.0, 0.0), aspect)
     }
 

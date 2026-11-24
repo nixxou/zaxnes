@@ -101,6 +101,13 @@ impl OffscreenFramebuffer {
     /// `window_height` pixels `bottom` pixels above the window's bottom (the touch pad's band in
     /// portrait), filtered bilinearly (REQ-SCN-063).
     pub fn blit_to_default_framebuffer(&self, window_width: i32, window_height: i32, bottom: i32) {
+        self.blit_into_window(0, bottom, window_width, window_height);
+    }
+
+    /// Copies the buffer onto the rectangle of the default framebuffer whose bottom-left corner
+    /// is `(x, bottom)`, stretched to `width` x `height` (lot SBS: one eye in each half).
+    pub fn blit_into_window(&self, x: i32, bottom: i32, width: i32, height: i32) {
+        let (x, bottom) = (x.max(0), bottom.max(0));
         // SAFETY: plain GL calls on the context this buffer was created with, which is current
         // on the calling thread (the application is single-threaded).
         unsafe {
@@ -112,10 +119,10 @@ impl OffscreenFramebuffer {
                 0,
                 self.width,
                 self.height,
-                0,
-                bottom.max(0),
-                window_width.max(1),
-                bottom.max(0) + window_height.max(1),
+                x,
+                bottom,
+                x + width.max(1),
+                bottom + height.max(1),
                 glow::COLOR_BUFFER_BIT,
                 glow::LINEAR,
             );
