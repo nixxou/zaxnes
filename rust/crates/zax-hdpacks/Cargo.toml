@@ -12,6 +12,10 @@ publish.workspace = true
 zax-core-api = { path = "../zax-core-api" }
 png = "0.17"
 
+# The rows of the HD frame drawn over the cores (already in the lock).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = "1"
+
 [dev-dependencies]
 # The `hd_shot` example plays a ROM headless.
 zax-nes = { path = "../zax-nes" }

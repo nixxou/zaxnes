@@ -260,7 +260,7 @@ impl HdPackState {
                             "Zaxnes: HD pack {} (x{}, {} pictures, {} tiles).",
                             loaded.source,
                             loaded.pack.scale,
-                            loaded.pack.images.len(),
+                            loaded.pack.pictures.len(),
                             loaded.pack.rules.len()
                         ));
                         self.pack = Some(Arc::new(loaded));

@@ -19,6 +19,7 @@ fn main() {
         eprintln!("cannot read {}", args[1]);
         return;
     };
+    let started = std::time::Instant::now();
     let pack = match zax_hdpacks::pack::load(&FolderFiles(Path::new(&args[2]).to_path_buf())) {
         Ok(pack) => pack,
         Err(error) => {
@@ -26,6 +27,21 @@ fn main() {
             return;
         }
     };
+    println!(
+        "pack read in {:?}: {} pictures, {} tile keys, {} conditions, {} backgrounds, {} additions, {} skipped",
+        started.elapsed(),
+        pack.pictures.len(),
+        pack.rules.len(),
+        pack.conditions.len(),
+        pack.backgrounds.len(),
+        pack.additions.len(),
+        pack.skipped
+    );
+    if std::env::var_os("HD_SHOT_DECODE_ALL").is_some() {
+        let started = std::time::Instant::now();
+        let bytes: usize = pack.pictures.iter().map(|p| p.get().data.len()).sum();
+        println!("all pictures decoded in {:?}: {} MB", started.elapsed(), bytes / 1_000_000);
+    }
     let frames: u64 = args[4].parse().unwrap_or(600);
     let starts: Vec<u64> = args[5..].iter().filter_map(|a| a.parse().ok()).collect();
     let mut core = zax_nes::NesCore::new();
@@ -60,7 +76,12 @@ fn main() {
         memory: &memory,
     };
     let mut out = Vec::new();
+    let started = std::time::Instant::now();
     compose(&pack, &ChrIndex::default(), &input, &mut out);
+    println!("first frame composed in {:?}", started.elapsed());
+    let started = std::time::Instant::now();
+    compose(&pack, &ChrIndex::default(), &input, &mut out);
+    println!("again in {:?}", started.elapsed());
     let scale = pack.scale;
     #[allow(clippy::cast_possible_truncation)]
     let shot = Rgba {
