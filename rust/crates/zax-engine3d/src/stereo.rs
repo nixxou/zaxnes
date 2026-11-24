@@ -222,6 +222,8 @@ pub struct StereoTracker {
     measured: Option<(u64, DepthField)>,
     /// The disparity of each row last shown, and the serial of the measure it last took in.
     rows: Option<(u64, Vec<f32>)>,
+    /// Lot SBS: the eye of the newest field [`StereoTracker::note_eye`] saw.
+    last_eye: Option<bool>,
 }
 
 impl StereoTracker {
@@ -231,6 +233,24 @@ impl StereoTracker {
         self.alternations = 0;
         self.measured = None;
         self.rows = None;
+        self.last_eye = None;
+    }
+
+    /// Lot SBS: records only which eye the field the core just ran is for (`outputs` the OUT0-OUT2
+    /// lines at its end, `None` on an engine that does not report them): a three-bit test and a
+    /// counter, nothing copied, for every game.
+    pub fn note_eye(&mut self, outputs: Option<u8>) {
+        let Some(outputs) = outputs else {
+            self.clear();
+            return;
+        };
+        let right = outputs & 0x02 != 0;
+        self.alternations = if self.last_eye.is_some_and(|last| last != right) {
+            self.alternations.saturating_add(1)
+        } else {
+            0
+        };
+        self.last_eye = Some(right);
     }
 
     /// Records the field the core just ran: `outputs` the OUT0-OUT2 lines at its end (`None` on an
@@ -284,7 +304,8 @@ impl StereoTracker {
         if !self.active() {
             return None;
         }
-        self.fields.back().map(|field| field.right)
+        self.last_eye
+            .or_else(|| self.fields.back().map(|field| field.right))
     }
 
     /// The tile records of the newest left field, while active.

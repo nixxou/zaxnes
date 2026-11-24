@@ -105,6 +105,10 @@ const PAGES: [Page; 8] = [
             Simple::Row(SettingId::VideoSkipFrame),
             Simple::Row(SettingId::VideoBackend),
             Simple::Shaders,
+            // Lot SBS (owner request): the side by side outputs, without the advanced mode.
+            Simple::Row(SettingId::VideoSbs3d),
+            Simple::Row(SettingId::VideoSbs3dStrength),
+            Simple::Row(SettingId::VideoSbsFamicom3d),
         ],
         advanced: Advanced::Tabs(&[OptionsTab::Display]),
     },

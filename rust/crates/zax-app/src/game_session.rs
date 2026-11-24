@@ -1661,11 +1661,7 @@ impl GameSession {
         let batch = self.core.frame_batch();
         self.batch_records.clear();
         self.batch_records.extend_from_slice(batch.records);
-        self.stereo.push(
-            self.core.expansion_output(),
-            &self.batch_records,
-            |picture| self.core.stereo_picture_into(picture),
-        );
+        self.stereo.note_eye(self.core.expansion_output());
         let captured = (
             (batch.palette, batch.margin_palette),
             batch.mask_x,

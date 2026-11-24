@@ -899,7 +899,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ),
     (
         "detail.video.sbs_famicom_3d",
-        "Pour les jeux Famicom 3D System (JJ, Cosmic Epsilon, Attack Animal Gakuen…) joués en 2D          avec leur mode 3D activé : l'image propre à chaque œil, telle que le jeu la dessinait          pour ses lunettes, côte à côte (Half SBS ou Full SBS comme pour la 3D). Désactivé, seule          l'image de l'œil gauche est montrée. Par défaut : désactivé.",
+        "Pour les jeux Famicom 3D System (JJ, Cosmic Epsilon, Attack Animal Gakuen…) joués en 2D          avec leur mode 3D activé : l'image propre à chaque œil, telle que le jeu la dessinait          pour ses lunettes, côte à côte (Half SBS ou Full SBS comme pour la 3D). Désactivé, seule          l'image de l'œil gauche est montrée. Par défaut : Half SBS (il n'agit qu'une fois le mode 3D du jeu activé).",
     ),
     (
         "detail.video.anti_alias",
