@@ -80,3 +80,14 @@ the menus (on/off + scale), one eye in the 2D picture of a game in 3D mode, leav
   *Cosmic Epsilon* (`$A969`, toggles `$6E`) and *JJ* (`$89C8`, increments `$2A`), START pauses,
   SELECT switches the 3D, START resumes. The harness runs poke the switch instead.
 - Hand-held cost to measure (Retroid / RG40XXV).
+
+## Owner test 2026-11-24 evening: JJ looks worse in 3D than in 2D
+
+- The owner's captures were *JJ*, played in the app (START, SELECT, START in its pause menu).
+- Reproduced in the harness: `--press 600-604:start,750-754:start,900-904:start,1300-1304:start,1340-1344:select,1380-1384:start,1600-1795:right --run 1797` with `ZAXNES_DEFAULT_3D=1`, angles 25,30.
+  - Before this run, the four starts put the game in play with `$EF = $FF`.
+- The measure is right. While playing, the right eye's sky is the left eye's shifted 19-20 px, with an exact match. The floor goes from about 18 px at the horizon to 0 at the bottom. The 0-1.5 px of the first notes was measured on the title or demo, not in play.
+- The rendering is wrong. `apply` moves each shape as one rigid block: one depth, one tilt, one enlargement taken at its middle line. The checkerboard's large greedy shapes then get different tilts and widths, so the floor breaks into steps. A slanted floor needs a trapezoid, which a rigid instance transform cannot give.
+- The fix that works is per vertex. A "stereo bend" applied last in the vertex shaders, like `space_bend`: z(y) from a per-line table, and x/y enlarged by (c + z)/c about the camera axis.
+  - It applies to the background instances only; sprites keep their own measured offset.
+  - It needs a uniform table (240 floats) and a per-instance flag, in the GL and wgpu scene and shadow programs.
