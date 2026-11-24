@@ -311,6 +311,9 @@ pub struct GameSession {
     /// Whether the profile has no pattern: the default 3D (or the 2D Mode), the only case the
     /// relief is given in, a profile placing its shapes itself.
     profile_free: bool,
+    /// Lot F3D: the empty profile was opened flat ("2D Mode"); a Famicom 3D System game that
+    /// alternates its eyes is then shown in 3D all the same, and flat again when it stops.
+    flat_by_default: bool,
     /// `video.widescreen_strict_edges`: whether the engine is told where each band of a
     /// widescreen frame stops being drawn, so that a shape cut there stays unfinished.
     strict_wide_edges: bool,
@@ -545,7 +548,9 @@ impl GameSession {
             stereo: StereoTracker::default(),
             profile_free: profile.permanent_patterns.is_empty()
                 && profile.temporary_patterns.is_empty(),
+            flat_by_default: false,
         };
+        session.flat_by_default = session.profile_free && session.engine.two_dimensional_mode;
         session.pipeline.ahead_allowed = scripts_leave_the_core_alone(profile);
         session.core_follows_the_inputs = session.pipeline.ahead_allowed;
         // Q-103: the guard-rail is decided here, once, and nothing of it reaches the frame loop.
@@ -1746,7 +1751,10 @@ impl GameSession {
         let counter = self.frame_counter;
         let mut records = std::mem::take(&mut self.batch_records);
         // Lot F3D: a Famicom 3D System game in the default 3D shows its left fields only, each
-        // given the depth its two eyes disagree by.
+        // given the depth its two eyes disagree by. Opened flat, it turns to 3D while it does.
+        if self.flat_by_default {
+            self.engine.two_dimensional_mode = !self.stereo.active();
+        }
         let depth = if self.profile_free && !self.engine.two_dimensional_mode {
             self.stereo.depth_field()
         } else {
