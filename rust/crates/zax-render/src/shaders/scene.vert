@@ -21,6 +21,44 @@ layout(std140) uniform ZaxInstances
 uniform float uNormalSign;
 uniform mat4 uViewProjection;
 
+// Lot F3D: the relief of a Famicom 3D System game's background (`StereoUniform`). x of the head
+// is 1 while there is one, yz the default camera's axis on the screen plane, w the camera's
+// distance; the 60 vec4 hold the depth of the 240 rows. Only the tiles whose placement has
+// deformTile.w = 1 move.
+uniform vec4 uStereoHead;
+uniform vec4 uStereoDepth[60];
+
+float zaxStereoRow(int row)
+{
+    return uStereoDepth[row / 4][row % 4];
+}
+
+// Moves `scene` to the depth of its row, enlarged about the camera's axis so that seen from the
+// default camera it stays where the flat picture has it, and transports `normal` with it (the
+// cofactor matrix of the Jacobian, rows r0 to r2).
+void zaxStereo(inout vec3 scene, inout vec3 normal)
+{
+    // Row coordinate: row i is centred on u = i (scene Y = 248 - i - 0.5).
+    float u = clamp(247.5 - scene.y, 0.0, 239.0);
+    int row = int(floor(u));
+    int next = min(row + 1, 239);
+    float d0 = zaxStereoRow(row);
+    float d1 = zaxStereoRow(next);
+    float z = mix(d0, d1, u - float(row));
+    float slope = d1 - d0;
+    float camera = uStereoHead.w;
+    vec2 axis = uStereoHead.yz;
+    float e = (camera + z) / camera;
+    // dz/dY = -slope, de/dY = -slope / camera.
+    float de = -slope / camera;
+    vec3 r0 = vec3(e, (scene.x - axis.x) * de, 0.0);
+    vec3 r1 = vec3(0.0, e + (scene.y - axis.y) * de, 0.0);
+    vec3 r2 = vec3(0.0, -slope, 1.0);
+    normal = vec3(dot(cross(r1, r2), normal), dot(cross(r2, r0), normal),
+        dot(cross(r0, r1), normal));
+    scene = vec3(axis + (scene.xy - axis) * e, scene.z + z);
+}
+
 // AMD-057 / REQ-SCN-065: how far a lateral wall of a tile box is pushed away from the eye, in
 // clip units already scaled by the projection (`geometry::wall_clip_bias`). 0 for a draw whose
 // normals are not axis aligned (MARCHING) and for the passes that need no such nudge.
@@ -103,6 +141,16 @@ void main()
         uInstances[index].normal[2].xyz);
     vNormal = uNormalSign * (normalMatrix * aNormal);
     vUv = aUv;
+
+    // Lot F3D: after vScene, which the clipping of REQ-SCN-036 reads where the flat picture has
+    // the tile. Such a tile neither casts nor receives a shadow (`DrawItem::stereo`): the shadow
+    // map and its lookup know only flat positions.
+    if (uStereoHead.x != 0.0 && uInstances[index].deformTile.w != 0.0)
+    {
+        vec3 moved = scene.xyz;
+        zaxStereo(moved, vNormal);
+        scene.xyz = moved;
+    }
 
 #if defined(ZAX_VOXEL_GRID) || defined(ZAX_PIXEL_SHADOW)
     // The untouched attributes: aPosition is the voxel-grid position of REQ-E3D-504 and aNormal

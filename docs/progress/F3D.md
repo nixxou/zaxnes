@@ -91,3 +91,12 @@ the menus (on/off + scale), one eye in the 2D picture of a game in 3D mode, leav
 - The fix that works is per vertex. A "stereo bend" applied last in the vertex shaders, like `space_bend`: z(y) from a per-line table, and x/y enlarged by (c + z)/c about the camera axis.
   - It applies to the background instances only; sprites keep their own measured offset.
   - It needs a uniform table (240 floats) and a per-instance flag, in the GL and wgpu scene and shadow programs.
+- Done 2026-11-24 evening, with the owner's go:
+  - The background is moved vertex by vertex. `StereoRelief` gives the depth of each of the 240 rows: a median over ±6 lines, then blended at 0.35 into the rows already shown so the floor does not shiver. The frame carries it, and so does the draw list.
+  - The renderer sends it as `uStereoHead` and `uStereoDepth[60]` on GL, and as `stereo_head` and `stereo` in the wgpu frame block (`FRAME_BYTES` 304 → 1280).
+  - The flag is `deform_tile.w` of each placement: a background tile in the scene, not the HUD.
+  - The scene shaders (`zaxStereo`, `zax_stereo`) move the vertex and carry the normal through the cofactor matrix. `vScene` stays flat for the clipping.
+  - `apply` now moves the sprites only.
+  - Such a background tile neither casts nor receives a shadow: the shadow map and its lookup work on flat positions. The sprites keep their shadows.
+  - Checked: JJ and Cosmic Epsilon from 3 angles, GL and wgpu dx12 (the harness `--features wgpu`). Tests: `zax-engine3d` and `zax-render` (37 suites) pass. Target dir `G:\3DSen\tgt-f3d`, outside the worktree.
+- Seen on the way: the default 3D floor of JJ is jagged even without the relief. The tile records hold one scroll per 8-line band, and JJ scrolls its floor line by line. This is a general limit of the default 3D on raster floors, not something this lot introduced.

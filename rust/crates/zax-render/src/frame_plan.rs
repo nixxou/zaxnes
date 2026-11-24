@@ -31,7 +31,13 @@ use crate::shadow_volume::ShadowVolume;
 /// that the layout code is compiled for each backend with the write inlined.
 pub trait Placement: Copy {
     /// Appends the placement of an item from its model matrix and deformation.
-    fn write(self, data: &mut Vec<u8>, model: &Mat4, deform: Option<&DeformParameters>);
+    fn write(
+        self,
+        data: &mut Vec<u8>,
+        model: &Mat4,
+        deform: Option<&DeformParameters>,
+        stereo: bool,
+    );
 }
 
 /// The std140 `ZaxInstance` of the GL scene shader: the model matrix, the three columns of the
@@ -41,8 +47,14 @@ pub struct Std140Placement;
 
 impl Placement for Std140Placement {
     #[inline]
-    fn write(self, data: &mut Vec<u8>, model: &Mat4, deform: Option<&DeformParameters>) {
-        push_std140_placement(data, model, deform);
+    fn write(
+        self,
+        data: &mut Vec<u8>,
+        model: &Mat4,
+        deform: Option<&DeformParameters>,
+        stereo: bool,
+    ) {
+        push_std140_placement(data, model, deform, stereo);
     }
 }
 
@@ -124,6 +136,9 @@ pub struct DrawItem<M, T> {
     pub receive_shadow: bool,
     pub clip: bool,
     pub deform: Option<DeformParameters>,
+    /// Lot F3D: a background tile of a Famicom 3D System game, which the scene shader moves
+    /// vertex by vertex by the relief of its line ([`SceneConstants::stereo`]).
+    pub stereo: bool,
     /// The shape instance the tile belongs to (SPEC-04B REQ-E3D-641), the object the depth pass
     /// and the sort of AMD-012 work on. `None` for the backdrop and the 2D-mode quad, which are
     /// single objects anyway.
@@ -150,6 +165,7 @@ impl<M, T> DrawItem<M, T> {
             receive_shadow: false,
             clip: false,
             deform: None,
+            stereo: false,
             instance: None,
             bounds_min: bounds.0,
             bounds_max: bounds.1,
@@ -352,8 +368,15 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
                 .three_d_shift
                 .as_ref()
                 .filter(|_| !scene.two_dimensional_mode);
+            let relief = list.stereo_relief().is_some();
             for tile in list.tiles() {
-                self.collect_tile(residency, tile, &hud_matrix, &occlusion, &clip_rect, shift)?;
+                self.collect_tile(
+                    residency,
+                    tile,
+                    (&hud_matrix, &occlusion, &clip_rect),
+                    shift,
+                    relief,
+                )?;
             }
         }
 
@@ -472,10 +495,9 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
         &mut self,
         residency: &mut R,
         tile: &DrawTile,
-        hud_matrix: &Mat4,
-        occlusion: &Occlusion,
-        clip_rect: &geometry::VisibleRect,
+        (hud_matrix, occlusion, clip_rect): (&Mat4, &Occlusion, &geometry::VisibleRect),
         shift: Option<&ThreeDShift>,
+        relief: bool,
     ) -> Result<(), R::Error> {
         let Some(mesh) = tile.mesh.as_ref().filter(|mesh| !mesh.is_empty()) else {
             return Ok(());
@@ -542,6 +564,7 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
             Vector2::new(texture.width() as f32, texture.height() as f32)
         });
 
+        let stereo = relief && !tile.sprite && !hud;
         let item = DrawItem {
             mesh: resident,
             model,
@@ -562,19 +585,26 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
             // AMD-021 R2-010 (REQ-SCN-032 "should" becomes "must not"): a tile rendered in
             // transparency — the FPV occluder of REQ-SCN-022 included — and a HUD tile receive
             // no shadow at all, whatever the flags of their motif and of their layer.
-            receive_shadow: tile.receive_shadow && !hud && material != MaterialClass::Transparent,
+            // Lot F3D: nor a tile the stereo relief moves, whose shadow lookup would read its
+            // flat position.
+            receive_shadow: tile.receive_shadow
+                && !hud
+                && !stereo
+                && material != MaterialClass::Transparent,
             // A tile wholly inside the clip rectangle is drawn without the clip test, which could
             // not discard any of its fragments: the scene shader then has a variant that never
             // discards, which a tiled GPU draws faster.
             clip: !hud && (tile.deform.is_some() || !inside_clip(clip_rect, mesh, &model)),
             deform: tile.deform,
+            stereo,
             instance: Some(tile.instance),
             bounds_min: mesh.bounds_min(),
             bounds_max: mesh.bounds_max(),
         };
 
-        // A tile only casts while it is rendered opaque (REQ-SCN-032, REQ-SCN-040).
-        if tile.cast_shadow && !occluder {
+        // A tile only casts while it is rendered opaque (REQ-SCN-032, REQ-SCN-040). Lot F3D: nor
+        // a tile the stereo relief moves, which the shadow pass would draw flat.
+        if tile.cast_shadow && !occluder && !stereo {
             self.lists.casters.push(item);
         }
 
@@ -720,7 +750,7 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
                 let offset = instance_data.len().next_multiple_of(alignment);
                 instance_data.resize(offset, 0);
                 for item in &lists.opaque[first..index] {
-                    placement.write(instance_data, &item.model, item.deform.as_ref());
+                    placement.write(instance_data, &item.model, item.deform.as_ref(), item.stereo);
                 }
                 floor_runs.push(InstanceRun {
                     first,
@@ -875,7 +905,7 @@ impl<M: Copy + Eq, T> FramePlan<M, T> {
             let offset = data.len().next_multiple_of(alignment);
             data.resize(offset, 0);
             for item in &casters[first..last] {
-                placement.write(data, &item.model, item.deform.as_ref());
+                placement.write(data, &item.model, item.deform.as_ref(), item.stereo);
             }
             runs.push(InstanceRun {
                 first,
@@ -919,9 +949,58 @@ pub struct SceneConstants {
     /// The scene scale of REQ-SCN-002 is 1 outside virtual reality, which Zaxnes has none of, so
     /// the two coincide and one uniform serves both. Uploaded only while the grid variant draws.
     pub voxel_cell: f32,
+    /// Lot F3D: the relief of a Famicom 3D System game's background, as the scene shaders read
+    /// it (`uStereoHead`, `uStereoDepth`); [`StereoUniform::OFF`] for every other frame.
+    pub stereo: StereoUniform,
+}
+
+/// Lot F3D: the per-line relief the scene shaders give the tiles flagged `stereo`: `head` is
+/// (on, axis x, axis y, camera distance), `depths` the depth behind the screen of each of the 240
+/// rows (`zax_engine3d::stereo::StereoRelief`).
+#[derive(Debug, Clone, Copy)]
+pub struct StereoUniform {
+    pub head: [f32; 4],
+    pub depths: [f32; 240],
+}
+
+impl StereoUniform {
+    /// No relief: the shaders leave every vertex where it is.
+    pub const OFF: Self = Self {
+        head: [0.0; 4],
+        depths: [0.0; 240],
+    };
+
+    /// The uniform of `relief`, or [`Self::OFF`].
+    #[must_use]
+    pub fn of(relief: Option<&zax_engine3d::stereo::StereoRelief>) -> Self {
+        let Some(relief) = relief else {
+            return Self::OFF;
+        };
+        let mut depths = [0.0; 240];
+        for (slot, depth) in depths.iter_mut().zip(&relief.depths) {
+            *slot = *depth;
+        }
+        Self {
+            head: [1.0, relief.axis_x, relief.axis_y, relief.camera],
+            depths,
+        }
+    }
+
+    /// Whether any vertex moves.
+    #[must_use]
+    pub fn is_on(&self) -> bool {
+        self.head[0] != 0.0
+    }
 }
 
 impl SceneConstants {
+    /// The same constants with the stereo relief of the displayed frame (lot F3D).
+    #[must_use]
+    pub fn with_stereo(mut self, frame: &SceneFrame<'_>) -> Self {
+        self.stereo = StereoUniform::of(frame.draw_list.and_then(|list| list.stereo_relief()));
+        self
+    }
+
     /// The constants of a frame of `scene` seen through `view`, with the shadow `volume` drawn
     /// into a map of `shadow_map_size` texels.
     #[must_use]
@@ -961,6 +1040,7 @@ impl SceneConstants {
             light_direction: scene.light.direction,
             hud_light_direction: view.hud_light_direction(scene.light.direction),
             eye: view.eye,
+            stereo: StereoUniform::OFF,
         }
     }
 }
@@ -1169,7 +1249,7 @@ fn add_runs<M, T>(
         data.resize(offset, 0);
         for &position in &order[first..last] {
             let item = &items[position as usize];
-            placement.write(data, &item.model, item.deform.as_ref());
+            placement.write(data, &item.model, item.deform.as_ref(), item.stereo);
         }
         runs.push(InstanceRun {
             first: order[first] as usize,
@@ -1182,8 +1262,14 @@ fn add_runs<M, T>(
 
 /// Appends one placement in the std140 layout of `ZaxInstance`: the model matrix as it was
 /// uploaded to `uModel` (column by column), the three columns of the normal matrix, then the
-/// deformation's tile position (zero without deformation).
-fn push_std140_placement(data: &mut Vec<u8>, model: &Mat4, deform: Option<&DeformParameters>) {
+/// deformation's tile position (zero without deformation), its `w` 1 for a tile the stereo
+/// relief moves (lot F3D).
+fn push_std140_placement(
+    data: &mut Vec<u8>,
+    model: &Mat4,
+    deform: Option<&DeformParameters>,
+    stereo: bool,
+) {
     for cell in interop::to_numerics(model).to_cells() {
         data.extend_from_slice(&cell.to_ne_bytes());
     }
@@ -1196,10 +1282,11 @@ fn push_std140_placement(data: &mut Vec<u8>, model: &Mat4, deform: Option<&Defor
         [m[2], m[5], m[8]],
         [tile.x, tile.y, tile.z],
     ];
-    for row in rows {
+    for (index, row) in rows.into_iter().enumerate() {
         for cell in row {
             data.extend_from_slice(&cell.to_ne_bytes());
         }
-        data.extend_from_slice(&0.0f32.to_ne_bytes());
+        let w = if index == 3 && stereo { 1.0f32 } else { 0.0 };
+        data.extend_from_slice(&w.to_ne_bytes());
     }
 }

@@ -1381,7 +1381,8 @@ impl SceneRenderer {
         }
 
         let mut common = CommonUniforms {
-            constants: SceneConstants::new(scene, view, volume, self.shadow_map.size()),
+            constants: SceneConstants::new(scene, view, volume, self.shadow_map.size())
+                .with_stereo(frame),
             textures: &mut self.textures,
             linear_palette: self.linear_palette.texture(),
             shadow_texture: self.shadow_map.depth_texture(),
@@ -1831,6 +1832,16 @@ impl CommonUniforms<'_> {
         }
 
         program.set_matrix4("uViewProjection", &constants.view_projection);
+        // Lot F3D: the relief of a Famicom 3D System game's background rows. The head alone
+        // when off, which the uniform cache uploads once.
+        let head = constants.stereo.head;
+        program.set_vec4(
+            "uStereoHead",
+            Vector4::new(head[0], head[1], head[2], head[3]),
+        );
+        if constants.stereo.is_on() {
+            program.set_vec4_array("uStereoDepth", &constants.stereo.depths);
+        }
         program.set_f32("uTime", constants.time);
         program.set_f32("uAmbient", constants.ambient);
         program.set_f32("uShadowStrength", constants.shadow_strength);

@@ -839,6 +839,9 @@ pub struct ConversionFrame {
     background_tile_count: usize,
     background_pixel_count: i32,
     script_error_count: usize,
+    /// Lot F3D: the relief of a Famicom 3D System game's background, which the renderer gives
+    /// its vertices; `None` for every other frame.
+    stereo_relief: Option<crate::stereo::StereoRelief>,
 }
 
 impl Default for ConversionFrame {
@@ -883,6 +886,7 @@ impl ConversionFrame {
             background_tile_count: 0,
             background_pixel_count: 0,
             script_error_count: 0,
+            stereo_relief: None,
         }
     }
 
@@ -1152,6 +1156,17 @@ impl ConversionFrame {
             .map(|id| self.tile(id))
     }
 
+    /// Lot F3D: sets the relief of the background (see [`crate::stereo::StereoRelief`]).
+    pub fn set_stereo_relief(&mut self, relief: Option<crate::stereo::StereoRelief>) {
+        self.stereo_relief = relief;
+    }
+
+    /// Lot F3D: the relief of the background, when the frame has one.
+    #[must_use]
+    pub const fn stereo_relief(&self) -> Option<&crate::stereo::StereoRelief> {
+        self.stereo_relief.as_ref()
+    }
+
     /// Empties the frame: no shape, no tile, counter 0 (REQ-E3D-281).
     pub fn clear(&mut self) {
         self.begin_batch(0, Cell::default(), 0);
@@ -1174,6 +1189,7 @@ impl ConversionFrame {
         self.background_tile_count = 0;
         self.background_pixel_count = 0;
         self.script_error_count = 0;
+        self.stereo_relief = None;
         self.counter = counter;
         self.mask = mask;
         self.margin = margin;

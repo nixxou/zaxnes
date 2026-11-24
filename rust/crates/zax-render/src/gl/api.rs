@@ -341,6 +341,12 @@ impl Gl {
         unsafe { self.context.uniform_3_f32(Some(&location), x, y, z) }
     }
 
+    pub fn uniform_vec4_array(&self, location: UniformLocation, values: &[f32]) {
+        // SAFETY: renderer contract; the location belongs to the program in use and the slice
+        // holds whole vec4 elements.
+        unsafe { self.context.uniform_4_f32_slice(Some(&location), values) }
+    }
+
     pub fn uniform_vec4(&self, location: UniformLocation, x: f32, y: f32, z: f32, w: f32) {
         // SAFETY: renderer contract; the location belongs to the program in use.
         unsafe { self.context.uniform_4_f32(Some(&location), x, y, z, w) }

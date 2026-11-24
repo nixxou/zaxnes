@@ -791,18 +791,16 @@ impl Host {
             engine.convert(&batch, counter);
         });
         if let Some(depth) = &depth {
-            let (frame, settings) = self.engine.converting_frame_and_settings_mut();
-            zax_engine3d::stereo::apply(
-                frame,
-                settings,
-                depth,
-                // `ZAXNES_F3D_TV`: the depth a player sees from 1.5 m of a small television.
-                &if std::env::var_os("ZAXNES_F3D_TV").is_some() {
-                    zax_engine3d::stereo::Viewing::television()
-                } else {
-                    zax_engine3d::stereo::Viewing::default()
-                },
-            );
+            // `ZAXNES_F3D_TV`: the depth a player sees from 1.5 m of a small television.
+            let viewing = if std::env::var_os("ZAXNES_F3D_TV").is_some() {
+                zax_engine3d::stereo::Viewing::television()
+            } else {
+                zax_engine3d::stereo::Viewing::default()
+            };
+            if let Some(relief) = self.stereo.relief(&viewing) {
+                let (frame, settings) = self.engine.converting_frame_and_settings_mut();
+                zax_engine3d::stereo::apply(frame, settings, depth, relief, &viewing);
+            }
         }
         self.engine.publish();
         self.sync_settings(scene);

@@ -1794,8 +1794,11 @@ impl GameSession {
             engine.convert(&batch, counter);
         });
         if let Some(depth) = &depth {
-            let (frame, settings) = self.engine.converting_frame_and_settings_mut();
-            stereo::apply(frame, settings, depth, &Viewing::default());
+            let viewing = Viewing::default();
+            if let Some(relief) = self.stereo.relief(&viewing) {
+                let (frame, settings) = self.engine.converting_frame_and_settings_mut();
+                stereo::apply(frame, settings, depth, relief, &viewing);
+            }
         }
         if let Some(started) = started {
             // The frame hooks are timed inside the conversion and counted apart.

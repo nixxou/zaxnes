@@ -16,9 +16,12 @@
 //! between two fields adds the same shift to both comparisons with opposite signs, so their mean
 //! is the disparity alone (*JJ* scrolls its floor 3 to 6 pixels a field, more than its relief).
 //!
-//! A background shape spans several bands: its depths are fitted with a plane `z = a + c·y`,
-//! applied as an offset `a` and a rotation about X with the matching `1 / cos` stretch in Y, which
-//! together are the shear `z += c·y` — the shape keeps its place on the screen and lies down.
+//! The background is not moved shape by shape: a shape of the floor spans many lines whose
+//! depths differ, and a rigid shape cannot follow them (its edges break into steps). The frame
+//! carries a [`StereoRelief`] instead, the perceived depth of every line of the picture, and the
+//! renderer moves each vertex of a background tile by the depth of its own line, enlarged about
+//! the default camera's axis so that seen from there it stays where the flat picture has it. The
+//! sprites, small and at one depth each, are moved as whole shapes here.
 //!
 //! The displayed fields are the left ones only: converting both would make the scene jump sideways
 //! by the disparity every frame.
@@ -39,8 +42,8 @@ const MAX_SHIFT: i32 = 24;
 const KEPT: usize = 4;
 /// The default camera's target on the screen plane, in scene coordinates (Y up): `T'` of
 /// `render --explain`.
-const AXIS_X: f32 = 124.0;
-const AXIS_Y: f32 = 124.0;
+pub const AXIS_X: f32 = 124.0;
+pub const AXIS_Y: f32 = 124.0;
 
 /// Where the picture is watched from, for the perceived depth, and where the scene is looked at
 /// from, to keep it in place on the screen. Lengths in NES pixels of the picture.
@@ -162,6 +165,52 @@ impl DepthField {
     }
 }
 
+/// The perceived depth of every line of the picture, which the renderer gives each vertex of a
+/// background tile (`scene.vert`, `scene.wgsl`): the vertex at scene height `Y` is on the row
+/// coordinate `u = SCENE_HEIGHT − Y − 0.5` (row `i` centred on `u = i`), goes `z(u)` deeper and
+/// is enlarged by `(camera + z) / camera` about `(axis_x, axis_y)`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StereoRelief {
+    /// Depth behind the screen of each of the 240 rows, in scene units (NES pixels).
+    pub depths: Vec<f32>,
+    /// The default camera's axis on the screen plane, scene coordinates.
+    pub axis_x: f32,
+    pub axis_y: f32,
+    /// Distance from the default camera to the screen plane.
+    pub camera: f32,
+}
+
+/// Lines either side of a row whose measures are pooled (median) before the interpolation:
+/// a floor line alone can match a repeating pattern a few pixels off.
+const RELIEF_SPREAD: i32 = 6;
+/// Weight of a new measure against the rows already shown: the measures of consecutive right
+/// fields differ by a pixel or two, which would make the floor shiver.
+const RELIEF_BLEND: f32 = 0.35;
+
+/// The disparity of each row from the measured bands: each band replaced by the median of the
+/// bands within [`RELIEF_SPREAD`] lines, then interpolated row by row.
+#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+fn row_disparities(field: &DepthField) -> Vec<f32> {
+    let pooled = DepthField {
+        bands: field
+            .bands
+            .iter()
+            .map(|&(line, _)| {
+                let mut near: Vec<f32> = field
+                    .bands
+                    .iter()
+                    .filter(|(other, _)| (other - line).abs() <= RELIEF_SPREAD)
+                    .map(|band| band.1)
+                    .collect();
+                near.sort_by(f32::total_cmp);
+                (line, near[near.len() / 2])
+            })
+            .collect(),
+        sprites: Vec::new(),
+    };
+    (0..HEIGHT).map(|row| pooled.at_line(row as f32 + 0.5)).collect()
+}
+
 /// The fields of the game in play and whether it is a 3D System one.
 #[derive(Debug, Clone, Default)]
 pub struct StereoTracker {
@@ -171,6 +220,8 @@ pub struct StereoTracker {
     /// The last measure and the serial of the right field it was taken on: a right field is
     /// measured once, when the left field after it arrives.
     measured: Option<(u64, DepthField)>,
+    /// The disparity of each row last shown, and the serial of the measure it last took in.
+    rows: Option<(u64, Vec<f32>)>,
 }
 
 impl StereoTracker {
@@ -179,6 +230,7 @@ impl StereoTracker {
         self.fields.clear();
         self.alternations = 0;
         self.measured = None;
+        self.rows = None;
     }
 
     /// Records the field the core just ran: `outputs` the OUT0-OUT2 lines at its end (`None` on an
@@ -265,6 +317,31 @@ impl StereoTracker {
         };
         self.measured = Some((right.serial, depth.clone()));
         Some(depth)
+    }
+
+    /// The relief of the background seen from `viewing`, while active: the rows of the newest
+    /// measure blended into the rows already shown, so the floor does not shiver from one
+    /// measure to the next.
+    pub fn relief(&mut self, viewing: &Viewing) -> Option<StereoRelief> {
+        let depth = self.depth_field()?;
+        let serial = self.measured.as_ref().map_or(0, |(serial, _)| *serial);
+        let rows = match self.rows.take() {
+            Some((seen, rows)) if seen == serial => rows,
+            Some((_, old)) => row_disparities(&depth)
+                .iter()
+                .zip(&old)
+                .map(|(new, old)| old + (new - old) * RELIEF_BLEND)
+                .collect(),
+            None => row_disparities(&depth),
+        };
+        let relief = StereoRelief {
+            depths: rows.iter().map(|&d| viewing.perceived(d)).collect(),
+            axis_x: AXIS_X,
+            axis_y: AXIS_Y,
+            camera: viewing.camera,
+        };
+        self.rows = Some((serial, rows));
+        Some(relief)
     }
 }
 
@@ -375,17 +452,23 @@ fn sprite_disparities(
         .collect()
 }
 
-/// Gives every shape of `frame` the depth of `field` as seen from `viewing`.
+/// Gives the sprite shapes of `frame` the depth of `field` as seen from `viewing`, and hands the
+/// background's `relief` to the renderer, which moves it vertex by vertex.
 #[allow(clippy::cast_precision_loss)] // Screen coordinates.
 pub fn apply(
     frame: &mut ConversionFrame,
     settings: &ConversionSettings,
     field: &DepthField,
+    relief: StereoRelief,
     viewing: &Viewing,
 ) {
+    frame.set_stereo_relief(Some(relief));
     for id in frame.instances().to_vec() {
         let shape_id = frame.instance(id).shape();
         let shape = frame.shape(shape_id);
+        if shape.background() {
+            continue;
+        }
         let (top, bottom) = (
             shape.pixel_start().y as f32,
             (shape.pixel_end().y + 1) as f32,
@@ -537,6 +620,37 @@ mod tests {
         assert!((175.0..190.0).contains(&seven), "{seven}");
         assert!(television.perceived(-4.0) < 0.0);
         assert!(camera.perceived(7.0) < seven / 5.0);
+    }
+
+    #[test]
+    fn the_relief_pools_the_lines_and_blends_the_measures() {
+        // A floor from 20 at line 100 to 0 at line 200, one line far off (a repeating pattern).
+        let mut bands: Vec<(i32, f32)> = (100..=200)
+            .map(|line| (line, (200 - line) as f32 / 5.0))
+            .collect();
+        bands[50].1 = 19.0;
+        let field = DepthField {
+            bands,
+            sprites: Vec::new(),
+        };
+        let rows = row_disparities(&field);
+        assert_eq!(rows.len(), HEIGHT);
+        assert!((rows[150] - 10.0).abs() < 0.5, "{}", rows[150]);
+        // The median at the edge only sees one side of it.
+        assert!((rows[0] - 20.0).abs() < 1.0, "{}", rows[0]);
+        assert!(rows.windows(2).skip(100).take(100).all(|w| w[1] <= w[0] + 1e-3));
+
+        let viewing = Viewing::default();
+        let mut tracker = tracker(
+            &(0..10i16)
+                .map(|t| (t % 2 == 1, i32::from(if t % 2 == 1 { 2 } else { -2 }), 0))
+                .collect::<Vec<_>>(),
+        );
+        let relief = tracker.relief(&viewing).expect("active");
+        assert_eq!(relief.depths.len(), HEIGHT);
+        assert!((relief.depths[100] - viewing.perceived(4.0)).abs() < 1e-3);
+        // The same measure again changes nothing.
+        assert_eq!(tracker.relief(&viewing), Some(relief));
     }
 
     #[test]
