@@ -487,7 +487,8 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.pause_3d_in_2d", "3D en pause en 2D"),
     ("setting.emu.catch_up_last_3d", "Rattrapage : 3D de l'image affichée seulement"),
     ("setting.video.half_rate_3d", "3D à 30 i/s (jeu à pleine vitesse)"),
-    ("setting.video.stereo_output", "Sortie stéréo"),
+    ("setting.video.sbs_3d", "3D côte à côte (SBS)"),
+    ("setting.video.sbs_famicom_3d", "Famicom 3D System côte à côte (SBS)"),
     ("setting.video.dynamic_resolution", "Résolution automatique"),
     ("setting.video.shader_resolution", "Résolution du shader"),
     (
@@ -883,6 +884,14 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
          redevient nette ailleurs. Nécessite la méthode Render Tex, le moteur OpenGL et un budget \
          d'image connu, c'est-à-dire la synchronisation verticale ou un plafond de cadence. \
          Par défaut : désactivée, sur les deux plates-formes.",
+    ),
+    (
+        "detail.video.sbs_3d",
+        "Montre la scène 3D une fois par œil, côte à côte, pour une télévision 3D, des lunettes          vidéo ou un casque. Half SBS tasse chaque œil dans la moitié de la largeur (une          télévision 3D en mode SBS étire chaque moitié) ; Full SBS garde chaque œil en pleine          résolution, une moitié de fenêtre chacun. Les deux yeux sont deux caméras un peu          écartées qui se rejoignent sur l'écran du jeu : ce qu'un profil met devant sort, ce          qu'il met derrière s'enfonce. L'image 2D d'un jeu est alors montrée dans les deux          moitiés. Coûte environ deux fois le dessin de la scène. Par défaut : désactivé.",
+    ),
+    (
+        "detail.video.sbs_famicom_3d",
+        "Pour les jeux Famicom 3D System (JJ, Cosmic Epsilon, Attack Animal Gakuen…) joués en 2D          avec leur mode 3D activé : l'image propre à chaque œil, telle que le jeu la dessinait          pour ses lunettes, côte à côte (Half SBS ou Full SBS comme pour la 3D). Désactivé, seule          l'image de l'œil gauche est montrée. Par défaut : désactivé.",
     ),
     (
         "detail.video.anti_alias",

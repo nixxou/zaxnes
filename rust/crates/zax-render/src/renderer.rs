@@ -681,7 +681,8 @@ impl SceneRenderer {
             )
         } else {
             scene.framed_view(scene.camera.build_view(scene.view_clipping(), aspect))
-        };
+        }
+        .stereo_eye(scene.stereo_eye);
         self.last_view = view;
 
         let started = std::time::Instant::now();

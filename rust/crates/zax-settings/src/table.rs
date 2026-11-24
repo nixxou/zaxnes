@@ -1618,23 +1618,29 @@ fn emulation_pause_3d(out: &mut Vec<SettingDescriptor>) {
     );
     // Rust-only (owner request, lot SBS): the picture of each eye side by side, for a 3D
     // television (Half SBS, each eye squeezed into half the width) or video glasses and headsets
-    // (Full SBS, each eye at full resolution). Not exposed to Lua.
-    out.push(
-        SettingDescriptor::new(
-            SettingId::VideoStereoOutput,
-            SettingKind::Enum,
-            SettingValue::Enum(0),
-            SettingScope::User,
-            SettingEffect::Immediate,
-            SettingTheme::Video,
-        )
-        .with_domain(Domain::choice(vec![
-            opt(0, "Off"),
-            opt(1, "Half SBS"),
-            opt(2, "Full SBS"),
-        ]))
-        .with_label("Stereo output"),
-    );
+    // (Full SBS, each eye at full resolution). Two settings: the 3D scene seen by two cameras,
+    // and the two pictures a Famicom 3D System game draws for its glasses. Not exposed to Lua.
+    for (id, label) in [
+        (SettingId::VideoSbs3d, "Side by side 3D"),
+        (SettingId::VideoSbsFamicom3d, "Side by side Famicom 3D System"),
+    ] {
+        out.push(
+            SettingDescriptor::new(
+                id,
+                SettingKind::Enum,
+                SettingValue::Enum(0),
+                SettingScope::User,
+                SettingEffect::Immediate,
+                SettingTheme::Video,
+            )
+            .with_domain(Domain::choice(vec![
+                opt(0, "Off"),
+                opt(1, "Half SBS"),
+                opt(2, "Full SBS"),
+            ]))
+            .with_label(label),
+        );
+    }
 }
 
 fn conversion(out: &mut Vec<SettingDescriptor>) {

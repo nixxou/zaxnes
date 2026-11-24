@@ -104,6 +104,8 @@ ui.roms_folder
 ui.show_fps
 ui.sort_option
 video.anti_alias
+video.sbs_3d
+video.sbs_famicom_3d
 video.backend [wgpu]
 video.dynamic_resolution
 video.shader_resolution

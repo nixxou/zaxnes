@@ -1010,13 +1010,13 @@ impl Running {
         }
     }
 
-    /// Sizes the view for the window and decides whether the render-skip rule keeps the
-    /// previous image.
-    /// Lot SBS: the layout `video.stereo_output` asks for.
+    /// Lot SBS: the side-by-side layout of this frame ([`sbs_layout`]).
     fn stereo_layout(&self) -> StereoLayout {
-        StereoLayout::from_setting(self.host.settings().get(SettingId::VideoStereoOutput).as_int())
+        sbs_layout(&self.host, &self.state)
     }
 
+    /// Sizes the view for the window and decides whether the render-skip rule keeps the
+    /// previous image.
     fn plan_view(&mut self, emulated: u32, width: i32, height: i32) -> Result<ViewPlan, String> {
         let below_chrome = (height - to_i32_f(self.ui.chrome_height())).max(1);
         // Portrait on a touch screen (owner request): the game takes the top of the screen at
@@ -1699,6 +1699,13 @@ impl Running {
             return Ok(Duration::ZERO);
         };
         let view = view.ok_or("the host has no view of the game")?;
+        // Lot SBS: the right eye's picture, made (again) at the main picture's size.
+        let mut right_view = std::mem::take(&mut self.state.right_view);
+        if stereo_layout == StereoLayout::Off {
+            right_view = None;
+        } else if right_view.as_ref().map(SceneView::size) != Some(view.size()) {
+            right_view = self.graphics.new_view(view.size().0, view.size().1);
+        }
         if std::mem::take(&mut self.pipeline.list_waiting) {
             session.exchange_draw_list(&mut self.pipeline.displayed);
         }
@@ -1715,11 +1722,6 @@ impl Running {
             &self.pipeline.displayed,
         );
         let shadow_reported = &mut self.state.shadow_map_reported;
-        // Lot SBS: the 3D scene is not drawn per eye yet: the same picture in both halves.
-        let stereo = StereoPicture {
-            layout: stereo_layout,
-            right: None,
-        };
         let (converted, wait, drawn) = std::thread::scope(|threads| {
             let conversion = convert.then(|| {
                 threads.spawn(move || {
@@ -1738,7 +1740,14 @@ impl Running {
                     nes_picture_emphasis: &[],
                     nes_picture_rgb: &[],
                 };
-                draw_scene(graphics, view, &scene, &frame, shadow_reported, clock)
+                draw_eyes(
+                    graphics,
+                    (view, right_view.as_ref()),
+                    &scene,
+                    &frame,
+                    shadow_reported,
+                    clock,
+                )
             };
             let mark = clock.start();
             graphics.draw_window(
@@ -1747,7 +1756,10 @@ impl Running {
                 ui,
                 (width, height),
                 (view_height, view_bottom),
-                stereo,
+                StereoPicture {
+                    layout: stereo_layout,
+                    right: right_view.as_ref(),
+                },
             );
             clock.stop(Stage::Ui, mark);
             let waiting = Instant::now();
@@ -1758,6 +1770,8 @@ impl Running {
             });
             (converted, waiting.elapsed(), drawn)
         });
+        self.state.right_rendered = right_view.is_some() && !skip;
+        self.state.right_view = right_view;
         drawn?;
         self.clock.merge(&converting.take());
         self.clock.add(Stage::Wait, wait);
@@ -3300,11 +3314,7 @@ fn render_scene(
     state: &mut RunState,
     clock: &mut StageClock,
 ) -> Result<(), String> {
-    let layout = StereoLayout::from_setting(
-        host.settings()
-            .get(SettingId::VideoStereoOutput)
-            .as_int(),
-    );
+    let layout = sbs_layout(host, state);
     let (mut session, scene, view) = host.session_scene_and_view();
     let view = view.ok_or("the host has no view of the game")?;
     state.right_rendered = false;
@@ -3377,14 +3387,68 @@ fn render_scene(
             &state.picture_rgb
         },
     };
-    draw_scene(
+    if layout == StereoLayout::Off || scene.two_dimensional_mode {
+        return draw_scene(
+            graphics,
+            view,
+            scene,
+            &frame,
+            &mut state.shadow_map_reported,
+            clock,
+        );
+    }
+    // Lot SBS: the 3D scene seen by two eyes.
+    let size = view.size();
+    if state.right_view.as_ref().map(SceneView::size) != Some(size) {
+        state.right_view = graphics.new_view(size.0, size.1);
+    }
+    draw_eyes(
         graphics,
-        view,
+        (view, state.right_view.as_ref()),
         scene,
         &frame,
         &mut state.shadow_map_reported,
         clock,
-    )
+    )?;
+    state.right_rendered = state.right_view.is_some();
+    Ok(())
+}
+
+/// Lot SBS: how far each eye of the 3D scene is from the camera, a fraction of its distance to
+/// the point it looks at (about 2° each side, the strength the owner validated on still frames).
+const EYE_FRACTION: f32 = 0.035;
+
+/// Lot SBS: the side-by-side layout of this frame: the Famicom 3D System setting while such a
+/// game shows its two pictures in 2D, the 3D one for every other frame (the 2D picture of any
+/// other game is then shown in both halves, so a television left in SBS keeps its layout).
+fn sbs_layout(host: &AppHost, state: &RunState) -> StereoLayout {
+    let famicom = host.showing_two_dimensional() && state.eyes.iter().all(Option::is_some);
+    let id = if famicom {
+        SettingId::VideoSbsFamicom3d
+    } else {
+        SettingId::VideoSbs3d
+    };
+    StereoLayout::from_setting(host.settings().get(id).as_int())
+}
+
+/// Lot SBS: `frame` drawn into `left` for the left eye and into `right` for the right one, or
+/// into `left` alone as the single view when there is no right picture.
+fn draw_eyes(
+    graphics: &mut Graphics,
+    (left, right): (&SceneView, Option<&SceneView>),
+    scene: &SceneState,
+    frame: &SceneFrame<'_>,
+    shadow_map_reported: &mut bool,
+    clock: &mut StageClock,
+) -> Result<(), String> {
+    let Some(right) = right else {
+        return draw_scene(graphics, left, scene, frame, shadow_map_reported, clock);
+    };
+    let mut eye = scene.clone();
+    eye.stereo_eye = -EYE_FRACTION;
+    draw_scene(graphics, left, &eye, frame, shadow_map_reported, clock)?;
+    eye.stereo_eye = EYE_FRACTION;
+    draw_scene(graphics, right, &eye, frame, shadow_map_reported, clock)
 }
 
 /// Renders `frame` with `scene` into `view`, timing the collection and the passes.

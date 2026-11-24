@@ -149,6 +149,26 @@ impl CameraView {
         self
     }
 
+    /// Lot SBS: the view of one eye of a stereo pair. The eye moves `fraction` of the displayed
+    /// distance along the camera's right axis (negative: the left eye), looking the same way, and
+    /// the projection is shifted so that the two eyes converge at that distance: what lies there
+    /// is where the single view has it, nearer comes out of the screen, farther goes behind it.
+    #[must_use]
+    pub fn stereo_eye(mut self, fraction: f32) -> Self {
+        if fraction == 0.0 {
+            return self;
+        }
+        let convergence = self.distance.max(1.0);
+        let offset = fraction * convergence;
+        self.eye = self.eye + (self.right * offset);
+        self.view = look_at(self.eye, self.forward, self.up);
+        // A point straight ahead at the convergence distance is `-offset` to the side of the moved
+        // eye; the shift brings it back to the centre of the picture (row-vector convention: the
+        // third row's x is the off-centre term of the frustum).
+        self.projection.m31 -= self.projection.m11 * offset / convergence;
+        self
+    }
+
     /// The combined view-projection matrix, OpenGL frame.
     #[must_use]
     pub fn view_projection(&self) -> Matrix4x4 {

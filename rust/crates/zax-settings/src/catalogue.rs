@@ -187,8 +187,10 @@ setting_ids! {
     EmuPause3dIn2d => "emu.pause_3d_in_2d",
     EmuCatchUpLast3d => "emu.catch_up_last_3d",
     VideoHalfRate3d => "video.half_rate_3d",
-    // Lot SBS: the picture for a 3D television, video glasses or a headset.
-    VideoStereoOutput => "video.stereo_output",
+    // Lot SBS: the picture for a 3D television, video glasses or a headset: the 3D scene seen
+    // by two eyes, and the two pictures of a Famicom 3D System game.
+    VideoSbs3d => "video.sbs_3d",
+    VideoSbsFamicom3d => "video.sbs_famicom_3d",
     VideoDynamicResolution => "video.dynamic_resolution",
     VideoShaderResolution => "video.shader_resolution",
     VideoBackend => "video.backend",
