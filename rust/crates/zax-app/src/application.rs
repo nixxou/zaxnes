@@ -1709,7 +1709,7 @@ impl Running {
         if stereo_layout == StereoLayout::Off {
             right_view = None;
         } else if right_view.as_ref().map(SceneView::size) != Some(view.size()) {
-            right_view = self.graphics.new_view(view.size().0, view.size().1);
+            right_view = self.graphics.new_view(view, view.size().0, view.size().1);
         }
         if std::mem::take(&mut self.pipeline.list_waiting) {
             session.exchange_draw_list(&mut self.pipeline.displayed);
@@ -3340,7 +3340,7 @@ fn render_scene(
         if layout != StereoLayout::Off {
             let size = view.size();
             if state.right_view.as_ref().map(SceneView::size) != Some(size) {
-                state.right_view = graphics.new_view(size.0, size.1);
+                state.right_view = graphics.new_view(view, size.0, size.1);
             }
             if let Some(right_view) = state.right_view.as_ref() {
                 draw_scene(
@@ -3407,7 +3407,7 @@ fn render_scene(
     // Lot SBS: the 3D scene seen by two eyes.
     let size = view.size();
     if state.right_view.as_ref().map(SceneView::size) != Some(size) {
-        state.right_view = graphics.new_view(size.0, size.1);
+        state.right_view = graphics.new_view(view, size.0, size.1);
     }
     draw_eyes(
         graphics,

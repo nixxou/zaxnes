@@ -105,6 +105,27 @@ pub struct StereoPicture<'a> {
     pub right: Option<&'a SceneView>,
 }
 
+/// The layer of the wgpu window that shows `view`, `height` pixels high, `bottom` above the
+/// window's bottom, over `columns` of the window (lot SBS; `None` for the whole width).
+#[cfg(feature = "wgpu")]
+fn scene_layer(
+    view: Option<&SceneView>,
+    height: u32,
+    bottom: u32,
+    columns: Option<(u32, u32)>,
+) -> Option<zax_platform::wgpu_display::SceneLayer<'_>> {
+    match view {
+        Some(SceneView::Wgpu(view)) => Some(zax_platform::wgpu_display::SceneLayer {
+            view: &view.view,
+            texture: &view.texture,
+            height,
+            bottom,
+            columns,
+        }),
+        _ => None,
+    }
+}
+
 /// The picture of the scene: the host's view of the game.
 pub enum SceneView {
     Gl(OffscreenFramebuffer),
@@ -371,16 +392,23 @@ impl Graphics {
         }
     }
 
-    /// Lot SBS: a second picture of the scene, `width` x `height`, for the right eye. `None` on
-    /// the wgpu renderer, which shows the same picture in both halves for now.
+    /// Lot SBS: a second picture of the scene like `like`, `width` x `height`, for the right
+    /// eye; `None` when it cannot be made.
     #[must_use]
-    pub fn new_view(&self, width: i32, height: i32) -> Option<SceneView> {
-        match self {
-            Self::Gl { gl, .. } => OffscreenFramebuffer::new(Rc::clone(gl), width, height)
+    pub fn new_view(&self, like: &SceneView, width: i32, height: i32) -> Option<SceneView> {
+        match (self, like) {
+            (Self::Gl { gl, .. }, _) => OffscreenFramebuffer::new(Rc::clone(gl), width, height)
                 .ok()
                 .map(SceneView::Gl),
             #[cfg(feature = "wgpu")]
-            Self::Wgpu(_) => None,
+            (Self::Wgpu(_), SceneView::Wgpu(like)) => Some(SceneView::Wgpu(WgpuView::new(
+                &like.device,
+                &like.queue,
+                width,
+                height,
+            ))),
+            #[cfg(feature = "wgpu")]
+            (Self::Wgpu(_), _) => None,
         }
     }
 
@@ -459,18 +487,22 @@ impl Graphics {
             }
             #[cfg(feature = "wgpu")]
             Self::Wgpu(_) => {
-                let layer = match view {
-                    Some(SceneView::Wgpu(view)) => Some(zax_platform::wgpu_display::SceneLayer {
-                        view: &view.view,
-                        texture: &view.texture,
-                        height: size(view_height),
-                        bottom: u32::try_from(view_bottom).unwrap_or(0),
-                    }),
-                    _ => None,
+                let (layer_height, bottom) =
+                    (size(view_height), u32::try_from(view_bottom).unwrap_or(0));
+                let layer = |view, columns| scene_layer(view, layer_height, bottom, columns);
+                // Lot SBS: the left eye in the left half, the right eye in the right one.
+                let (left, right) = if stereo.layout == StereoLayout::Off {
+                    (layer(view, None), None)
+                } else {
+                    let half = size(width) / 2;
+                    (
+                        layer(view, Some((0, half))),
+                        layer(stereo.right.or(view), Some((half, size(width) - half))),
+                    )
                 };
                 if let Some(display) = window.wgpu_mut() {
                     display.update_pictures(&ui.take_picture_updates());
-                    display.draw((size(width), size(height)), layer, Some(ui.draw_data()));
+                    display.draw_eyes((size(width), size(height)), left, right, Some(ui.draw_data()));
                 }
             }
         }

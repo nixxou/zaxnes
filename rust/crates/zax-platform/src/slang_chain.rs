@@ -281,6 +281,18 @@ impl SlangShaders {
         self.dropped.take().or_else(|| self.poll())
     }
 
+    /// Lot SBS: the preset asked for, which the second eye's chain asks for too.
+    #[must_use]
+    pub const fn wanted(&self) -> Option<&ShaderRequest> {
+        self.wanted.as_ref()
+    }
+
+    /// Lot SBS: the frame count the shaders read, which the second eye's chain reads too.
+    #[must_use]
+    pub const fn frame(&self) -> usize {
+        self.frame
+    }
+
     /// The width over the height of the rectangle the preset draws in (see
     /// [`ShaderRequest::picture_aspect`]).
     #[must_use]
