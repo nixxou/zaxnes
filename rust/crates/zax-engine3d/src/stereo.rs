@@ -97,6 +97,8 @@ impl Viewing {
 /// 240, kept only while the eyes alternate).
 #[derive(Debug, Clone, Default)]
 struct Field {
+    /// Counts the fields pushed, to know when the measure has to be taken again.
+    serial: u64,
     right: bool,
     records: Vec<TileRecord>,
     picture: Vec<u8>,
@@ -165,6 +167,10 @@ impl DepthField {
 pub struct StereoTracker {
     fields: VecDeque<Field>,
     alternations: u32,
+    pushed: u64,
+    /// The last measure and the serial of the right field it was taken on: a right field is
+    /// measured once, when the left field after it arrives.
+    measured: Option<(u64, DepthField)>,
 }
 
 impl StereoTracker {
@@ -172,6 +178,7 @@ impl StereoTracker {
     pub fn clear(&mut self) {
         self.fields.clear();
         self.alternations = 0;
+        self.measured = None;
     }
 
     /// Records the field the core just ran: `outputs` the OUT0-OUT2 lines at its end (`None` on an
@@ -199,6 +206,8 @@ impl StereoTracker {
         } else {
             Field::default()
         };
+        self.pushed += 1;
+        field.serial = self.pushed;
         field.right = right;
         field.records.clear();
         field.records.extend_from_slice(records);
@@ -232,7 +241,7 @@ impl StereoTracker {
 
     /// The disparity of the newest right field that has a left field on each side, while active.
     #[must_use]
-    pub fn depth_field(&self) -> Option<DepthField> {
+    pub fn depth_field(&mut self) -> Option<DepthField> {
         if !self.active() {
             return None;
         }
@@ -241,14 +250,21 @@ impl StereoTracker {
             .rev()
             .find(|&i| fields[i].right && !fields[i - 1].right && !fields[i + 1].right)?;
         let (before, right, after) = (fields[at - 1], fields[at], fields[at + 1]);
+        if let Some((serial, depth)) = &self.measured {
+            if *serial == right.serial {
+                return Some(depth.clone());
+            }
+        }
         let full = |field: &Field| field.picture.len() == WIDTH * HEIGHT;
         if !(full(before) && full(right) && full(after)) {
             return None;
         }
-        Some(DepthField {
+        let depth = DepthField {
             bands: line_disparities(&before.picture, &right.picture, &after.picture),
             sprites: sprite_disparities(&before.records, &right.records, &after.records),
-        })
+        };
+        self.measured = Some((right.serial, depth.clone()));
+        Some(depth)
     }
 }
 
@@ -456,6 +472,17 @@ mod tests {
         picture
     }
 
+    #[test]
+    fn a_right_field_is_measured_once() {
+        let fields: Vec<(bool, i32, i16)> =
+            (0..9i16).map(|t| (t % 2 == 1, i32::from(t), t)).collect();
+        let mut tracker = tracker(&fields);
+        let first = tracker.depth_field();
+        assert!(first.is_some());
+        assert_eq!(tracker.measured.as_ref().map(|m| m.0), Some(8));
+        assert_eq!(tracker.depth_field(), first);
+    }
+
     fn tracker(fields: &[(bool, i32, i16)]) -> StereoTracker {
         let mut tracker = StereoTracker::default();
         for &(right, shift, sprite) in fields {
@@ -491,7 +518,7 @@ mod tests {
                 (right, i32::from(3 * t + eye), 3 * t - eye)
             })
             .collect();
-        let tracker = tracker(&fields);
+        let mut tracker = tracker(&fields);
         assert!(tracker.active());
         let depth = tracker
             .depth_field()
