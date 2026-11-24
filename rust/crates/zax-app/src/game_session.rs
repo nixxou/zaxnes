@@ -22,6 +22,7 @@ use zax_engine3d::engine::ConversionEngine;
 use zax_engine3d::error::EngineError;
 use zax_engine3d::palette::Rgb24;
 use zax_engine3d::settings::RenderAlgorithm;
+use zax_engine3d::stereo::{self, StereoTracker, Viewing};
 use zax_engine3d::vectors::Vec3;
 use zax_nes::movie::{Movie, MovieRun};
 use zax_nes::{NesBus, NesCore, ZapperPosition};
@@ -304,6 +305,12 @@ pub struct GameSession {
     aimed: Option<ZapperPosition>,
     batch_records: Vec<TileRecord>,
     pipeline: FramePipeline,
+    /// Lot F3D: the last fields of the game and the eye each was for, to give a Famicom 3D
+    /// System game its relief in the default 3D.
+    stereo: StereoTracker,
+    /// Whether the profile has no pattern: the default 3D (or the 2D Mode), the only case the
+    /// relief is given in, a profile placing its shapes itself.
+    profile_free: bool,
     /// `video.widescreen_strict_edges`: whether the engine is told where each band of a
     /// widescreen frame stops being drawn, so that a shape cut there stays unfinished.
     strict_wide_edges: bool,
@@ -535,6 +542,9 @@ impl GameSession {
             run_ahead_held_at_zero: false,
             core_follows_the_inputs: false,
             pipeline: FramePipeline::default(),
+            stereo: StereoTracker::default(),
+            profile_free: profile.permanent_patterns.is_empty()
+                && profile.temporary_patterns.is_empty(),
         };
         session.pipeline.ahead_allowed = scripts_leave_the_core_alone(profile);
         session.core_follows_the_inputs = session.pipeline.ahead_allowed;
@@ -1656,6 +1666,8 @@ impl GameSession {
         let batch = self.core.frame_batch();
         self.batch_records.clear();
         self.batch_records.extend_from_slice(batch.records);
+        self.stereo
+            .push(self.core.expansion_output(), &self.batch_records);
         let captured = (
             (batch.palette, batch.margin_palette),
             batch.mask_x,
@@ -1730,6 +1742,19 @@ impl GameSession {
         };
         let counter = self.frame_counter;
         let mut records = std::mem::take(&mut self.batch_records);
+        // Lot F3D: a Famicom 3D System game in the default 3D shows its left fields only, each
+        // given the depth its two eyes disagree by.
+        let depth = if self.profile_free && !self.engine.two_dimensional_mode {
+            self.stereo.depth_field()
+        } else {
+            None
+        };
+        if depth.is_some() {
+            if let Some(left) = self.stereo.left_records() {
+                records.clear();
+                records.extend_from_slice(left);
+            }
+        }
         let overscan = self.overscan.in_force(margin);
         if !overscan.is_none() {
             // A tile half or more in a cut side is not shown.
@@ -1755,6 +1780,10 @@ impl GameSession {
         self.scripted(scene, |engine| {
             engine.convert(&batch, counter);
         });
+        if let Some(depth) = &depth {
+            let (frame, settings) = self.engine.converting_frame_and_settings_mut();
+            stereo::apply(frame, settings, depth, &Viewing::default());
+        }
         if let Some(started) = started {
             // The frame hooks are timed inside the conversion and counted apart.
             let hooks = self.engine.last_hook_time().unwrap_or_default();

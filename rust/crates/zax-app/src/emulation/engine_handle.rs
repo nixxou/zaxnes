@@ -533,6 +533,13 @@ impl EngineHandle {
         self.zaxnes().map_or(0, NesCore::video_phase)
     }
 
+    /// The OUT0-OUT2 lines of the last `$4016` write ([`NesCore::expansion_output`]); `None` on an
+    /// engine that does not report them.
+    #[must_use]
+    pub fn expansion_output(&self) -> Option<u8> {
+        self.zaxnes().map(NesCore::expansion_output)
+    }
+
     /// The frame's experimental smooth-scrolling shift; `None` on an engine that has none.
     #[must_use]
     pub fn picture_shift(&self) -> Option<(f32, i32, i32)> {

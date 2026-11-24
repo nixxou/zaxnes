@@ -2626,6 +2626,15 @@ impl NesCore {
         self.bus.ppu().wide().host_margin()
     }
 
+    /// The OUT0-OUT2 lines of the last `$4016` write (bits 0-2). At the end of a frame, OUT1 is
+    /// the Famicom 3D System's shutter for the picture just drawn: the games write it during the
+    /// vertical blank that starts the frame, before the picture (checked on *Cosmic Epsilon* and
+    /// *JJ*, lot F3D).
+    #[must_use]
+    pub const fn expansion_output(&self) -> u8 {
+        self.bus.input().outputs()
+    }
+
     /// The 256 x 240 image of the frame just run: the NES colour index of REQ-CORE-048 in bits
     /// 0-5 and the opacity bit of AMD-050 REQ-CORE-049 in bit 6
     /// (`zax_nes::ppu::PIXEL_COLOR`, `OPAQUE_PIXEL`).
