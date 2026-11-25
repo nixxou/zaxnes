@@ -146,7 +146,8 @@ def main() -> None:
     index = os.path.join(ROOT, "profiles", "index.csv")
     with open(index, encoding="utf-8", newline="") as file:
         for record in csv.DictReader(line for line in file if not line.startswith("#")):
-            profiles[record["game"]] = record["profile"]
+            # The file name only: the app finds the profile by name, wherever it is built in from.
+            profiles[record["game"]] = os.path.basename(record["profile"])
             if not os.path.isfile(os.path.join(ROOT, "profiles", record["profile"])):
                 sys.exit(f"profiles/index.csv: no file {record['profile']}")
     games_with_rows = {row["game"] for row in rows.values()}

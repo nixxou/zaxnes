@@ -1,5 +1,6 @@
 # ROM images the Hackset does not know (tools/extra_rom.py), put in the game database.
 data_crc,game,name,data_md5,file_crc32
+08270EB8,FlappyZaxNes,FlappyZaxNes,a8a2c151e508191c95d0d2cb800808e7,EF551466
 331BCC87,Chase,Chase,3b4e6e9907514b8d7cbe28af1c13ce88,B887529D
 6AA4574C,Zooming Secretary,Zooming Secretary (World) (v1.02) (Aftermarket) (Unl),bed0f7b12673dd762eed665c5c61927b,9E74DDB9
 81B76AE6,Depths,ld44.latest,d75f997a8c082d6bd3971d53737e6ecf,D842CA33

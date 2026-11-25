@@ -244,7 +244,8 @@ mod tests {
             assert!(
                 crate::bundled_profiles::PROFILES
                     .iter()
-                    .any(|(name, _)| *name == game.profile),
+                    .any(|(name, _)| *name == game.profile)
+                    || game.profile == crate::demo_game::PROFILE_NAME,
                 "{} is not built in",
                 game.profile
             );
@@ -269,6 +270,8 @@ mod tests {
         assert_eq!(vec!["Chase"], profile_names(0x331B_CC87));
         assert_eq!(vec!["zooming_secretary"], profile_names(0x6AA4_574C));
         assert_eq!(vec!["Depths"], profile_names(0x81B7_6AE6));
+        // The demo game, whose built-in profile is in crates/zax-app/demo.
+        assert_eq!(vec!["flappyzaxnes"], profile_names(0x0827_0EB8));
     }
 
     /// Every ROM a feature table names by data CRC is in the database, so that the list can show
@@ -295,9 +298,11 @@ mod tests {
 
     #[test]
     fn the_retroachievements_list_is_sorted_and_found() {
-        assert!(tables::RA_GAMES
-            .windows(2)
-            .all(|pair| pair[0].md5 < pair[1].md5));
+        assert!(
+            tables::RA_GAMES
+                .windows(2)
+                .all(|pair| pair[0].md5 < pair[1].md5)
+        );
         for game in tables::RA_GAMES {
             assert_eq!(Some(game), ra_game(game.md5));
         }
@@ -306,9 +311,11 @@ mod tests {
 
     #[test]
     fn the_indexes_are_sorted_and_hold_every_image() {
-        assert!(roms()
-            .windows(2)
-            .all(|pair| pair[0].data_crc < pair[1].data_crc));
+        assert!(
+            roms()
+                .windows(2)
+                .all(|pair| pair[0].data_crc < pair[1].data_crc)
+        );
         assert!(games().windows(2).all(|pair| pair[0].id < pair[1].id));
         assert_eq!(roms().len(), tables::BY_GAME.len());
         for (key, index) in tables::BY_GAME {

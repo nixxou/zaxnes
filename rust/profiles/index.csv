@@ -1,5 +1,7 @@
 # The 3D profile built in for each game (rust/profiles), by the game id of the database
-# (the Hackset metadata file name). tools/gamedb_build.py checks every .3dn has a line.
+# (the Hackset metadata file name), relative to this folder (the demo game's is in
+# crates/zax-app/demo). tools/gamedb_build.py checks every .3dn here has a line.
 profile,game
 Faxanadu.3dn,Faxanadu
 Metal Force.3dn,Metal Force
+../crates/zax-app/demo/flappyzaxnes.3dn,FlappyZaxNes
