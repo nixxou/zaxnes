@@ -336,6 +336,8 @@ pub const PENS_VIEW_3DSEN: &str = "pens.view_3dsen";
 pub const PENS_VIEW_HANDHELD: &str = "pens.view_handheld";
 
 // ------------------------------------------------------- profile chooser
+/// The entry without a profile: the default 3D, started on the NES picture (owner request).
+pub const PROFILE_NONE: &str = "profile.none";
 pub const PROFILE_TWO_DIMENSIONAL: &str = "profile.two_dimensional";
 pub const PROFILE_SOURCE_TWO_DIMENSIONAL: &str = "profile.source.two_dimensional";
 pub const PROFILE_SOURCE_DEFAULT_THREE_D: &str = "profile.source.default_3d";
@@ -828,6 +830,7 @@ pub const PUBLISHED: &[&str] = &[
     PENS_VIEW_ZAXNES,
     PENS_VIEW_3DSEN,
     PENS_VIEW_HANDHELD,
+    PROFILE_NONE,
     PROFILE_TWO_DIMENSIONAL,
     PROFILE_SOURCE_TWO_DIMENSIONAL,
     PROFILE_SOURCE_DEFAULT_THREE_D,

@@ -158,6 +158,14 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         if self.loading {
             return;
         }
+        // The "2D Mode" entry is retired (owner request): a game with no profile starts in 2D
+        // anyway, so an old choice of it plays as "No profile".
+        let retired = self
+            .games
+            .two_dimensional_mode_id()
+            .filter(|id| id == game_id)
+            .and(self.games.default_three_dimensional_id());
+        let game_id = retired.as_deref().unwrap_or(game_id);
         let Some(game) = self.games.resolve(game_id) else {
             self.notifications.show_error(GAME_MISSING_MESSAGE);
             return;
@@ -295,6 +303,13 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     }
 
     /// Whether `game_id` is the 2D Mode or the default 3D entry.
+    /// A game without a profile starts on the NES picture, its default 3D one switch away; a
+    /// game with a profile starts in 3D (owner request).
+    fn choose_starting_view(&mut self, game_id: &str) {
+        self.two_dimensional_view =
+            self.games.default_three_dimensional_id().as_deref() == Some(game_id);
+    }
+
     fn is_generic_entry(&self, game_id: &str) -> bool {
         self.games.two_dimensional_mode_id().as_deref() == Some(game_id)
             || self.games.default_three_dimensional_id().as_deref() == Some(game_id)
@@ -808,6 +823,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 if let Some(session) = self.session.as_mut() {
                     session.start(&mut self.settings, &mut self.scene);
                 }
+                self.choose_starting_view(&game.id);
                 self.current_game = Some(game);
                 // Nothing per-game is remembered about the camera (REQ-PERS-031): a launch always
                 // starts from the default view.

@@ -73,9 +73,15 @@ impl ProfileChooserModel {
         let mut all: Vec<ProfileChoice> = library
             .sorted(option)
             .into_iter()
+            // "2D Mode" is retired (owner request): "No profile" starts in 2D already.
+            .filter(|entry| !entry.is_2d_mode())
             .map(|entry| ProfileChoice {
                 id: entry.id().to_owned(),
-                title: entry.display_title().to_owned(),
+                title: if entry.is_default_three_dimensional() {
+                    strings::get(keys::PROFILE_NONE)
+                } else {
+                    entry.display_title().to_owned()
+                },
                 source: entry.source(),
                 is_two_dimensional: entry.is_2d_mode(),
                 is_default_three_d: entry.is_default_three_dimensional(),

@@ -194,7 +194,8 @@ impl GameCatalog for FakeCatalog {
             title: entry.title.clone(),
             profile: Arc::clone(&entry.profile),
             is_2d_mode: entry.is_2d_mode,
-            is_default_three_dimensional: false,
+            is_default_three_dimensional: self.default_three_dimensional_id.as_deref()
+                == Some(game_id),
             tiles: entry.tiles.clone(),
         })
     }

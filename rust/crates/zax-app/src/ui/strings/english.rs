@@ -263,7 +263,8 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     // ---------------------------------------------------- profile chooser
     (keys::PROFILE_TWO_DIMENSIONAL, "2D Mode"),
     (keys::PROFILE_SOURCE_TWO_DIMENSIONAL, "no 3D conversion"),
-    (keys::PROFILE_SOURCE_DEFAULT_THREE_D, "default 3D geometry"),
+    (keys::PROFILE_SOURCE_DEFAULT_THREE_D, "default 3D, starts in 2D"),
+    (keys::PROFILE_NONE, "No profile"),
     (keys::PROFILE_SOURCE_BUILT_IN, "built-in profile"),
     (keys::PROFILE_SOURCE_PROGRAM_FOLDER, "profile from the program folder"),
     (keys::PROFILE_SOURCE_USER, "user profile"),

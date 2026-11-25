@@ -58,11 +58,14 @@ fn req_ui_201_the_first_open_asks_for_a_profile_and_the_second_does_not() {
     assert_eq!(Some(rom.as_str()), harness.ui.chooser.rom_path.as_deref());
     assert!(harness.host.current_game_id().is_none());
 
-    // The chooser offers the catalogue, the user profiles and "2D Mode", first.
-    assert_eq!(
-        text::two_dimensional_mode(),
-        harness.ui.chooser.all()[0].title
-    );
+    // The chooser offers the catalogue and the user profiles; "2D Mode" is retired (a game
+    // without a profile starts in 2D).
+    assert!(harness
+        .ui
+        .chooser
+        .all()
+        .iter()
+        .all(|choice| choice.title != text::two_dimensional_mode()));
     assert!(harness
         .ui
         .chooser
@@ -99,7 +102,7 @@ fn req_ui_201_the_chooser_searches_by_title() {
     assert_eq!(vec!["Batman"], titles);
 
     chooser.set_search("");
-    assert_eq!(4, chooser.filtered().count());
+    assert_eq!(3, chooser.filtered().count());
 }
 
 #[test]

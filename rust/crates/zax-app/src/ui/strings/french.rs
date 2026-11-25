@@ -215,7 +215,8 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     // ---------------------------------------------------- profile chooser
     (keys::PROFILE_TWO_DIMENSIONAL, "2D Mode"),
     (keys::PROFILE_SOURCE_TWO_DIMENSIONAL, "sans conversion 3D"),
-    (keys::PROFILE_SOURCE_DEFAULT_THREE_D, "géométrie 3D par défaut"),
+    (keys::PROFILE_SOURCE_DEFAULT_THREE_D, "3D par défaut, démarre en 2D"),
+    (keys::PROFILE_NONE, "Aucun profil"),
     (keys::PROFILE_SOURCE_BUILT_IN, "profil intégré"),
     (keys::PROFILE_SOURCE_PROGRAM_FOLDER, "profil du dossier du programme"),
     (keys::PROFILE_SOURCE_USER, "profil utilisateur"),

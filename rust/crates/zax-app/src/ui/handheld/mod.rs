@@ -456,7 +456,10 @@ impl HandheldUi {
             return;
         }
         let mut entries: Vec<RomEntry> = self.roms.entries_mut().to_vec();
-        for entry in entries.iter_mut().filter(|entry| hashed.contains(&entry.path)) {
+        for entry in entries
+            .iter_mut()
+            .filter(|entry| hashed.contains(&entry.path))
+        {
             entry.crc = host.known_rom_crc(&entry.path);
             entry.profile = self.profile_of(host, entry);
             Self::find_widescreen(host, entry);
@@ -516,6 +519,15 @@ impl HandheldUi {
             .settings_store()
             .and_then(|store| store.games().profile_for(&path).map(str::to_owned))
             .filter(|id| host.games().exists(id));
+        // A remembered "2D Mode", retired, reads as "No profile" (owner request).
+        let retired = host.games().two_dimensional_mode_id();
+        let remembered = remembered.map(|id| {
+            if retired.as_deref() == Some(id.as_str()) {
+                host.games().default_three_dimensional_id().unwrap_or(id)
+            } else {
+                id
+            }
+        });
         let known = remembered
             .or_else(|| host.games().game_for_rom(&path))
             .or_else(|| {
@@ -846,7 +858,9 @@ impl HandheldUi {
         {
             return;
         }
-        let picture = (saved_at != 0).then(|| state_picture(host, &slot)).flatten();
+        let picture = (saved_at != 0)
+            .then(|| state_picture(host, &slot))
+            .flatten();
         self.shown_picture = Some((slot, saved_at, picture.is_some()));
         self.pictures.push(PictureUpdate {
             id: STATE_PICTURE_ID,
@@ -949,6 +963,7 @@ impl HandheldUi {
         let profile = self
             .profile_of(host, &entry)
             .map(|profile| profile.id)
+            .or_else(|| host.games().default_three_dimensional_id())
             .or_else(|| host.games().two_dimensional_mode_id());
         let rom = entry.path.to_string_lossy();
         match profile {
@@ -1132,11 +1147,12 @@ impl HandheldUi {
         match &command {
             RomListCommand::Play(path) => {
                 if let Some((url, entry)) = remote(path) {
-                    // As for a ROM of the folder: its profile, else "2D Mode".
+                    // As for a ROM of the folder: its profile, else "No profile".
                     let profile = entry
                         .profile
                         .as_ref()
                         .map(|profile| profile.id.clone())
+                        .or_else(|| host.games().default_three_dimensional_id())
                         .or_else(|| host.games().two_dimensional_mode_id());
                     crate::web_bridge::request_remote_game(&url, &entry.name, profile.as_deref());
                     return;
@@ -1164,6 +1180,7 @@ impl HandheldUi {
                     .find(|entry| entry.path == path)
                     .and_then(|entry| entry.profile.as_ref())
                     .map(|profile| profile.id.clone())
+                    .or_else(|| host.games().default_three_dimensional_id())
                     .or_else(|| host.games().two_dimensional_mode_id());
                 let rom = path.to_string_lossy();
                 match profile {
