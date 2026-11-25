@@ -338,6 +338,10 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     rom_crcs: std::cell::RefCell<crate::persistence::rom_crc_cache::RomCrcCache>,
     /// The ROM files being hashed in the background for the list (lot GAMEHASH).
     rom_hasher: std::cell::RefCell<crate::persistence::rom_hasher::RomHasher>,
+    /// When the ROM hashes of the background were first kept without the cache being written
+    /// since, in host seconds: the file is written every two seconds while files
+    /// are being hashed, and once at the end.
+    rom_crcs_unsaved_since: std::cell::Cell<Option<f64>>,
     /// What the study of each ROM file found: whether a widescreen hack fits it.
     hack_compat: std::cell::RefCell<crate::persistence::hack_compat_cache::HackCompatCache>,
     /// The content of an archive read as it was opened (its profile imported then), kept for the
@@ -508,6 +512,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             slot_caches: SlotCaches::default(),
             rom_crcs: std::cell::RefCell::new(rom_crcs),
             rom_hasher: std::cell::RefCell::default(),
+            rom_crcs_unsaved_since: std::cell::Cell::new(None),
             hack_compat: std::cell::RefCell::new(hack_compat),
             packed_content: None,
             zapper: ZapperState::new(),

@@ -13,6 +13,10 @@ use super::{EmulationHost, GameView};
 use crate::emulation::game_catalog::GameCatalog;
 use crate::persistence::hack_compat_cache::Certificate;
 
+/// How often, in seconds, the cache of the ROM hashes is written while files are being hashed in
+/// the background.
+const ROM_CRCS_WRITE_INTERVAL: f64 = 2.0;
+
 impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// The CRC-32 of the data of the ROM in `path` (iNES header excluded), read from the file
     /// only when the cache has not seen it as it is; none when it cannot be read.
@@ -55,6 +59,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     pub fn take_rom_hashes(&self) -> Vec<std::path::PathBuf> {
         let done = self.rom_hasher.borrow_mut().poll();
         if done.is_empty() {
+            self.write_rom_crcs_in_batches(false);
             return Vec::new();
         }
         let mut learned = Vec::new();
@@ -67,10 +72,28 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 }
             }
         }
-        if !learned.is_empty() {
+        self.write_rom_crcs_in_batches(!learned.is_empty());
+        learned
+    }
+
+    /// The cache of the background hashes, written in batches: a folder of thousands of ROMs
+    /// would otherwise rewrite the whole file on the interface's thread at every frame that
+    /// brings a result. Written every [`ROM_CRCS_WRITE_INTERVAL`] seconds while hashing, and as
+    /// soon as the hashing is over.
+    fn write_rom_crcs_in_batches(&self, learned: bool) {
+        let since = match self.rom_crcs_unsaved_since.get() {
+            Some(since) => since,
+            None if learned => {
+                self.rom_crcs_unsaved_since.set(Some(self.elapsed));
+                self.elapsed
+            }
+            None => return,
+        };
+        let busy = self.rom_hasher.borrow().is_busy();
+        if !busy || self.elapsed - since >= ROM_CRCS_WRITE_INTERVAL {
+            self.rom_crcs_unsaved_since.set(None);
             self.save_rom_crcs();
         }
-        learned
     }
 
     /// Writes the cache of the ROM CRCs when it learned something.

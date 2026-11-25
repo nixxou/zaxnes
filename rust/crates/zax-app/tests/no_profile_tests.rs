@@ -2,6 +2,8 @@
 //! one switch away; a game with a profile starts in 3D; the retired "2D Mode" plays as "No
 //! profile".
 
+#![allow(clippy::expect_used, clippy::unwrap_used)] // test code
+
 mod common;
 mod ui_harness;
 
