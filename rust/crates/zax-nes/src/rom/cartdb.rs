@@ -13,7 +13,10 @@
 //! with the database's entry, which is then a different cartridge with a colliding CRC or a
 //! trimmed dump.
 
+use std::sync::OnceLock;
+
 use super::InesHeader;
+use crate::builtin_patches::crc32;
 use crate::{NametableMirroring, NesRegion};
 
 /// The generated table, one cartridge per line, sorted by CRC.
@@ -50,18 +53,112 @@ pub struct CartEntry {
     pub chip: &'static str,
 }
 
-/// The entry of the cartridge whose ROM data has CRC-32 `crc`.
+/// The CRC of each line of [`TABLE`] and the line, sorted by CRC: built once, at the first lookup.
+fn index() -> &'static [(u32, &'static str)] {
+    static INDEX: OnceLock<Vec<(u32, &'static str)>> = OnceLock::new();
+    INDEX.get_or_init(|| {
+        let mut lines: Vec<(u32, &'static str)> = TABLE
+            .lines()
+            .filter(|line| !line.starts_with('#') && !line.is_empty())
+            .filter_map(|line| Some((u32::from_str_radix(line.get(..8)?, 16).ok()?, line)))
+            .collect();
+        lines.sort_unstable_by_key(|(crc, _)| *crc);
+        lines
+    })
+}
+
+/// The entry of the cartridge whose key in the database is `crc`.
 #[must_use]
 pub fn lookup(crc: u32) -> Option<CartEntry> {
-    let key = format!("{crc:08X}");
-    let lines: Vec<&'static str> = TABLE
-        .lines()
-        .filter(|line| !line.starts_with('#') && !line.is_empty())
-        .collect();
-    let index = lines
-        .binary_search_by(|line| line.get(..8).unwrap_or("").cmp(key.as_str()))
-        .ok()?;
-    parse(lines.get(index)?)
+    let lines = index();
+    let at = lines.binary_search_by_key(&crc, |(key, _)| *key).ok()?;
+    parse(lines[at].1)
+}
+
+/// The entry of the cartridge in `image`, whose data CRC (`builtin_patches::data_crc`, computed
+/// once by the caller) is `data_crc`.
+///
+/// Mesen's database keys a cartridge by the CRC the NES 2.0 database gives (everything after the
+/// header, a trainer included, at the dump's real sizes), while its own loader and Zaxnes leave
+/// the trainer out. So three keys are tried, the last two only when the first misses: the data
+/// CRC (overdumps included, which Mesen's loader misses), the trainer followed by the data (the
+/// 616 trainer lines Mesen itself can never find), then everything after the trainer up to the
+/// end of the file (Mesen's own key: a PlayChoice-10 image whose header does not declare its
+/// INST-ROM, a header smaller than the dump). Both are combined from `data_crc`: only the trainer
+/// or the bytes past the data are read again.
+#[must_use]
+pub fn lookup_image(image: &[u8], data_crc: u32) -> Option<CartEntry> {
+    if let Some(entry) = lookup(data_crc) {
+        return Some(entry);
+    }
+    let (start, end) = crate::builtin_patches::data_bounds(image);
+    let data_len = end - start;
+    if start >= HEADER_SIZE + TRAINER_SIZE && image.starts_with(b"NES") {
+        let trainer = crc32(&image[HEADER_SIZE..HEADER_SIZE + TRAINER_SIZE]);
+        if let Some(entry) = lookup(crc32_combine(trainer, data_crc, data_len)) {
+            return Some(entry);
+        }
+    }
+    if end < image.len() {
+        let tail = &image[end..];
+        return lookup(crc32_combine(data_crc, crc32(tail), tail.len()));
+    }
+    None
+}
+
+const HEADER_SIZE: usize = 16;
+const TRAINER_SIZE: usize = 512;
+
+/// The CRC-32 of `a` followed by `b`, from the CRC of each and the length of `b` (zlib's
+/// `crc32_combine`): `b` need not be read again.
+fn crc32_combine(crc_a: u32, crc_b: u32, len_b: usize) -> u32 {
+    fn times(matrix: &[u32; 32], mut vector: u32) -> u32 {
+        let mut sum = 0;
+        let mut row = 0;
+        while vector != 0 {
+            if vector & 1 != 0 {
+                sum ^= matrix[row];
+            }
+            vector >>= 1;
+            row += 1;
+        }
+        sum
+    }
+    fn square(matrix: &[u32; 32]) -> [u32; 32] {
+        std::array::from_fn(|n| times(matrix, matrix[n]))
+    }
+    if len_b == 0 {
+        return crc_a;
+    }
+    // The operator of one zero bit, then of two and four (zlib's odd / even).
+    let mut odd = [0u32; 32];
+    odd[0] = 0xEDB8_8320;
+    for (n, row) in odd.iter_mut().enumerate().skip(1) {
+        *row = 1 << (n - 1);
+    }
+    let mut even = square(&odd);
+    odd = square(&even);
+    let mut crc = crc_a;
+    let mut len = len_b;
+    loop {
+        even = square(&odd);
+        if len & 1 != 0 {
+            crc = times(&even, crc);
+        }
+        len >>= 1;
+        if len == 0 {
+            break;
+        }
+        odd = square(&even);
+        if len & 1 != 0 {
+            crc = times(&odd, crc);
+        }
+        len >>= 1;
+        if len == 0 {
+            break;
+        }
+    }
+    crc ^ crc_b
 }
 
 fn parse(line: &'static str) -> Option<CartEntry> {
@@ -125,15 +222,15 @@ pub struct Correction {
     pub changes: Vec<String>,
 }
 
-/// The header the database gives for a dump whose header is `header` and whose data has CRC-32
-/// `crc`; `None` when the header is NES 2.0, the dump is unknown, its sizes disagree with the
+/// The header the database gives for the dump `image`, whose header is `header` and whose data
+/// has CRC-32 `crc` ([`lookup_image`]); `None` when the header is NES 2.0, the dump is unknown, its sizes disagree with the
 /// entry, or the entry changes nothing.
 #[must_use]
-pub fn corrected_header(header: &InesHeader, crc: u32) -> Option<Correction> {
+pub fn corrected_header(header: &InesHeader, image: &[u8], crc: u32) -> Option<Correction> {
     if header.is_nes20 {
         return None;
     }
-    let entry = lookup(crc)?;
+    let entry = lookup_image(image, crc)?;
     if entry.prg_kib * 1024 != header.prg_rom_size || entry.chr_kib * 1024 != header.chr_rom_size {
         return None;
     }
@@ -292,6 +389,30 @@ mod tests {
     }
 
     #[test]
+    fn a_combined_crc_is_the_crc_of_the_concatenation() {
+        let bytes: Vec<u8> = (0..5000u32)
+            .map(|n| (n * 7 + n / 13).to_le_bytes()[0])
+            .collect();
+        for cut in [0, 1, 512, 4999, 5000] {
+            let (a, b) = bytes.split_at(cut);
+            assert_eq!(
+                crc32(&bytes),
+                crc32_combine(crc32(a), crc32(b), b.len()),
+                "{cut}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_index_holds_every_line() {
+        let lines = TABLE
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.is_empty())
+            .count();
+        assert_eq!(lines, index().len());
+    }
+
+    #[test]
     fn the_chip_gives_the_submapper() {
         let mut entry = lookup(0x0013_88B3).unwrap();
         assert_eq!(0, entry.submapper());
@@ -315,7 +436,7 @@ mod tests {
 
     #[test]
     fn super_mario_bros_3_japan_is_an_mmc3a() {
-        let correction = corrected_header(&ines1(16, 16, 4), 0xE7DD_FEE3).unwrap();
+        let correction = corrected_header(&ines1(16, 16, 4), &[], 0xE7DD_FEE3).unwrap();
         assert_eq!(
             (4, 4, true),
             (
@@ -329,23 +450,23 @@ mod tests {
     #[test]
     fn an_undocumented_mapper_mismatch_is_left_alone() {
         // The iam8bit Mega Man 2: mapper 2 in its header, 30 in the database.
-        assert!(corrected_header(&ines1(16, 0, 2), 0x891C_14BC).is_none());
+        assert!(corrected_header(&ines1(16, 0, 2), &[], 0x891C_14BC).is_none());
     }
 
     /// MAPPERS-N: the two mislabellings nesdev documents are corrected on an exact match.
     #[test]
     fn a_documented_mislabelling_takes_the_database_mapper() {
         // Dragon Ball Z Gaiden: 199 in its header, an FK23C (176.2) in the database.
-        let correction = corrected_header(&ines1(32, 32, 199), 0xED48_1B7C).unwrap();
+        let correction = corrected_header(&ines1(32, 32, 199), &[], 0xED48_1B7C).unwrap();
         assert_eq!(
             (176, 2),
             (correction.header.mapper, correction.header.submapper)
         );
         assert!(correction.changes[0].starts_with("mapper 199 -> 176"));
         // A 74 header on an FK23C game with CHR-RAM, and on a 195 game.
-        let correction = corrected_header(&ines1(32, 0, 74), 0xBFF7_C60C).unwrap();
+        let correction = corrected_header(&ines1(32, 0, 74), &[], 0xBFF7_C60C).unwrap();
         assert_eq!(176, correction.header.mapper);
-        let correction = corrected_header(&ines1(32, 32, 74), 0xD945_5D72).unwrap();
+        let correction = corrected_header(&ines1(32, 32, 74), &[], 0xD945_5D72).unwrap();
         assert_eq!(195, correction.header.mapper);
     }
 
@@ -353,7 +474,7 @@ mod tests {
     fn a_nes_2_0_header_is_kept() {
         let mut header = ines1(16, 16, 4);
         header.is_nes20 = true;
-        assert!(corrected_header(&header, 0xE7DD_FEE3).is_none());
+        assert!(corrected_header(&header, &[], 0xE7DD_FEE3).is_none());
     }
 
     /// MAPPERS-N: the database writes *Battle Rush*'s external 24C01 as `b128`; the correction
@@ -363,7 +484,7 @@ mod tests {
     fn the_datach_external_eeprom_reaches_byte_10() {
         let mut header = ines1(16, 0, 157);
         header.has_battery = true;
-        let correction = corrected_header(&header, 0x983D_8175).unwrap();
+        let correction = corrected_header(&header, &[], 0x983D_8175).unwrap();
         assert_eq!(
             (true, 0x10),
             (correction.header.is_nes20, correction.header.byte10)

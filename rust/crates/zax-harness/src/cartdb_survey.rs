@@ -7,7 +7,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use zax_nes::builtin_patches::data_crc;
-use zax_nes::rom::cartdb::{corrected_header, lookup};
+use zax_nes::rom::cartdb::{corrected_header, lookup_image};
 use zax_nes::rom::InesHeader;
 
 use crate::HarnessError;
@@ -41,7 +41,7 @@ pub fn command(args: &[String]) -> Result<(), HarnessError> {
             .unwrap_or(path)
             .display()
             .to_string();
-        let entry = lookup(crc);
+        let entry = lookup_image(&image, crc);
         if entry.is_some() {
             known += 1;
         } else {
@@ -50,7 +50,7 @@ pub fn command(args: &[String]) -> Result<(), HarnessError> {
         if header.is_nes20 {
             nes20 += 1;
         }
-        if let Some(correction) = corrected_header(&header, crc) {
+        if let Some(correction) = corrected_header(&header, &image, crc) {
             changed += 1;
             let _ = writeln!(
                 text,

@@ -2661,7 +2661,8 @@ pub fn rom_data(image: &[u8]) -> &[u8] {
 
 /// Where the data of `image` starts and ends: after the header and a trainer, up to the sizes
 /// the header gives (iNES, or NES 2.0 with its high bits); a whole headerless image.
-fn data_bounds(image: &[u8]) -> (usize, usize) {
+#[must_use]
+pub fn data_bounds(image: &[u8]) -> (usize, usize) {
     if !image.starts_with(b"NES\x1A") || image.len() <= HEADER_SIZE {
         return (0, image.len());
     }

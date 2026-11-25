@@ -739,7 +739,7 @@ impl NesCore {
         // RAM, the battery, the region), from the cartridge database, before the board is built
         // from the header. A NES 2.0 header is never touched.
         let note = if self.cartridge_db {
-            match crate::rom::cartdb::corrected_header(rom.header(), crc) {
+            match crate::rom::cartdb::corrected_header(rom.header(), image, crc) {
                 Some(correction) => {
                     rom.take_database_header(correction.header);
                     let fixed = format!("cartridge database: {}", correction.changes.join("; "));

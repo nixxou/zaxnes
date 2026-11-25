@@ -2126,3 +2126,20 @@ enforce CHR-RAM write-protection" for them and must give them 8 KiB of PRG-RAM. 
 build keeps MR-15-1 for the K-1029 and lifts it for an image declaring battery RAM or NES 2.0
 PRG-RAM (cartridge database included), which is not a K-1029. Bao Xiao San Guo (`CE102393`,
 8 KiB battery RAM in the database) writes its CHR in mode 0 and now shows its logo.
+
+### J39. Cartridge database keys of dumps with a trainer, a PlayChoice INST-ROM or a short header
+Mesen's `MesenNesDB.txt` keys a cartridge by the NES 2.0 database's `rom` CRC: everything after
+the header at the dump's real sizes, a trainer included. Mesen's own loader looks up the CRC from
+the end of the trainer to the end of the file (`iNesLoader.cpp`), Zaxnes the CRC of the PRG and
+CHR at the header's sizes (`data_crc`). Measured over the Hackset's 34 116 iNES files: on
+overdumps `data_crc` finds 1 364 dumps Mesen's key misses, Mesen's key 10 that `data_crc` misses
+(PlayChoice-10 images whose iNES 1.0 header does not declare the 8 224 bytes of INST-ROM and
+PROM, headers smaller than the dump); on dumps with a trainer, neither finds anything (Mesen's
+generator kept the trainer its loader drops: 616 lines dead in Mesen too) and the trainer-included
+CRC finds 87. `cartdb::lookup_image` now tries `data_crc`, then the trainer followed by the data,
+then the bytes from the end of the trainer to the end of the file; the last two are combined from
+`data_crc` (zlib's `crc32_combine`), so the data are hashed once. The CSV stays Mesen's raw
+output. Checked with `cartdb-survey` on four Hackset dumps (1942 overdump, Captain Skyhawk PC10,
+Abadox and Airwolf `[p1]` with a trainer): 1 known before, 4 after. A dump whose header is
+smaller than the database's sizes is found but still not corrected (`corrected_header` keeps the
+header's sizes); not decided.
