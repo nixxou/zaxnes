@@ -147,8 +147,8 @@ fn gamedb() -> std::io::Result<()> {
     let mut code = String::from("pub static GAMES: &[Game] = &[\n");
     let mut last_game: Option<&str> = None;
     for row in &games {
-        let [id, profile] = row.as_slice() else {
-            return Err(bad(format!("gamedb_games.csv: 2 fields expected: {row:?}")));
+        let [id, profile, threedsen] = row.as_slice() else {
+            return Err(bad(format!("gamedb_games.csv: 3 fields expected: {row:?}")));
         };
         if last_game.is_some_and(|last| id.as_str() <= last) {
             return Err(bad(format!(
@@ -156,7 +156,11 @@ fn gamedb() -> std::io::Result<()> {
             )));
         }
         last_game = Some(id);
-        let _ = writeln!(code, "    Game {{ id: {id:?}, profile: {profile:?} }},");
+        let _ = writeln!(
+            code,
+            "    Game {{ id: {id:?}, profile: {profile:?}, threedsen_profiles: &[{}] }},",
+            names_list(threedsen)
+        );
     }
     code.push_str("];\n\npub static ROMS: &[Rom] = &[\n");
     let mut last_crc: Option<u32> = None;
@@ -164,8 +168,8 @@ fn gamedb() -> std::io::Result<()> {
     let mut by_no_intro = Vec::new();
     let mut by_file = Vec::new();
     for (index, row) in roms.iter().enumerate() {
-        let [crc, game, name, region, md5, files] = row.as_slice() else {
-            return Err(bad(format!("gamedb_roms.csv: 6 fields expected: {row:?}")));
+        let [crc, game, name, region, md5, files, threedsen] = row.as_slice() else {
+            return Err(bad(format!("gamedb_roms.csv: 7 fields expected: {row:?}")));
         };
         let crc = u32::from_str_radix(crc, 16).map_err(|_| bad(format!("bad CRC {crc}")))?;
         if last_crc.is_some_and(|last| crc <= last) {
@@ -198,10 +202,12 @@ fn gamedb() -> std::io::Result<()> {
         let _ = writeln!(
             code,
             "    Rom {{ data_crc: 0x{:04X}_{:04X}, game: {game:?}, no_intro_name: {name:?}, \
-             region: {region:?}, data_md5: {md5:?}, file_crc32s: &[{}] }},",
+             region: {region:?}, data_md5: {md5:?}, file_crc32s: &[{}], threedsen_profiles: \
+             &[{}] }},",
             crc >> 16,
             crc & 0xFFFF,
-            file_crcs.join(", ")
+            file_crcs.join(", "),
+            names_list(threedsen)
         );
     }
     code.push_str("];\n");
@@ -227,6 +233,16 @@ fn gamedb() -> std::io::Result<()> {
     }
     code.push_str("];\n");
     std::fs::write(environment("OUT_DIR")?.join("gamedb-tables.rs"), code)
+}
+
+/// The `|`-separated names of `field` as the items of a Rust `&[&str]`.
+fn names_list(field: &str) -> String {
+    field
+        .split('|')
+        .filter(|name| !name.is_empty())
+        .map(|name| format!("{name:?}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Appends `RA_GAMES` to `code`: RetroAchievements' games by MD5 from `source`

@@ -561,16 +561,20 @@ impl GameCatalog for LibraryGameCatalog {
             .map(|entry| entry.id().to_owned())
     }
 
-    fn game_for_profile_file(&self, file_name: &str) -> Option<String> {
+    fn game_for_profile_name(&self, name: &str) -> Option<String> {
+        let wanted = crate::gamedb::normalise(name);
+        if wanted.is_empty() {
+            return None;
+        }
         self.library
             .entries()
             .iter()
             .find(|entry| {
                 entry
                     .profile_path()
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.eq_ignore_ascii_case(file_name))
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .is_some_and(|stem| crate::gamedb::normalise(stem) == wanted)
             })
             .map(|entry| entry.id().to_owned())
     }

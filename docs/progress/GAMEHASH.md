@@ -61,3 +61,10 @@ ROMs fall back to the name rules of before.
   had them before); `widescreen_other` could use the game id (`gamedb::roms_of_game`) instead of
   the name; the archive listing (`roms_in_file`) is not used by the list yet; the 3D profile order
   was not tried in the running app.
+- 3dSen profiles by name (owner, 2026-11-25): `profiles/3dsen_names.csv` (102 names of the 3dSen
+  2.2 import: the 101 of 2.1 + Chase; prefilled by `tools/threedsen_names.py`, 91 matched, fixed by
+  hand: Batman, Battle Kid, DQ3, Mega Man 1, Rockman 3, the three Tetris). Column
+  `3dsen_profiles` on games, and on ROMs only for a profile made for some images (8 ROMs: the three
+  Tetris profiles, Rockman 3 Japan). Order: ROM's own 3dSen profile > game's built-in > game's
+  3dSen > name rule. Only file names are compared (`GameCatalog::game_for_profile_name`), never a
+  profile's content.

@@ -491,8 +491,9 @@ impl HandheldUi {
     }
 
     /// The profile a game plays with: the one remembered for the file, the one that owns the
-    /// file, the built-in one the game database gives its data CRC (lot GAMEHASH), or else one
-    /// that carries the game's name.
+    /// file, the one the game database gives its data CRC (lot GAMEHASH: made for this image,
+    /// else its game's built-in one, else its game's 3dSen one), or else one that carries the
+    /// game's name.
     fn profile_of(&self, host: &AppHost, entry: &RomEntry) -> Option<ProfileMatch> {
         let path = entry.path.to_string_lossy();
         let remembered = host
@@ -502,8 +503,8 @@ impl HandheldUi {
         let known = remembered
             .or_else(|| host.games().game_for_rom(&path))
             .or_else(|| {
-                let file = crate::gamedb::profile_of(entry.crc?)?;
-                host.games().game_for_profile_file(file)
+                host.games()
+                    .game_for_profile_names(&crate::gamedb::profile_names(entry.crc?))
             });
         let choice = known
             .and_then(|id| self.library.iter().find(|choice| choice.id == id))

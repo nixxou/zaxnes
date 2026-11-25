@@ -27,6 +27,9 @@ pub struct Rom {
     pub data_md5: &'static str,
     /// The CRC-32 of whole files known to hold the image (header included), as an archive lists.
     pub file_crc32s: &'static [u32],
+    /// The names of the 3dSen profiles made for this image only (a hack, one version of a game
+    /// whose versions differ), before the game's (`profiles/3dsen_names.csv`). Usually empty.
+    pub threedsen_profiles: &'static [&'static str],
 }
 
 /// One game.
@@ -36,6 +39,9 @@ pub struct Game {
     pub id: &'static str,
     /// The file name of its built-in 3D profile (`rust/profiles`), empty for none.
     pub profile: &'static str,
+    /// The names of its 3dSen profiles (the file name of a 3dSen profile without its extension,
+    /// as 3dSen ships it; `profiles/3dsen_names.csv`), in that file's order.
+    pub threedsen_profiles: &'static [&'static str],
 }
 
 /// A game RetroAchievements has achievements for (`data/ra_games.csv`, `tools/ra_game_list.py`),
@@ -100,6 +106,28 @@ pub fn game_of(data_crc: u32) -> Option<&'static Game> {
 #[must_use]
 pub fn profile_of(data_crc: u32) -> Option<&'static str> {
     Some(game_of(data_crc)?.profile).filter(|profile| !profile.is_empty())
+}
+
+/// The 3D profiles that suit the ROM image of data CRC `data_crc`, best first, by profile name
+/// (a file name without its extension): the 3dSen profiles made for this image only, then its
+/// game's built-in profile, then its game's 3dSen profiles. Empty for an unknown image: the list
+/// then keeps its name rule.
+#[must_use]
+pub fn profile_names(data_crc: u32) -> Vec<&'static str> {
+    let Some(rom) = rom(data_crc) else {
+        return Vec::new();
+    };
+    let mut names: Vec<&'static str> = rom.threedsen_profiles.to_vec();
+    if let Some(game) = game(rom.game) {
+        if let Some(stem) = std::path::Path::new(game.profile)
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+        {
+            names.push(stem);
+        }
+        names.extend_from_slice(game.threedsen_profiles);
+    }
+    names
 }
 
 /// The rows of a sorted `(key, rom index)` index whose key is `key`.
@@ -211,6 +239,7 @@ mod tests {
         let faxanadu = roms_of_game("Faxanadu").next().unwrap();
         assert_eq!(Some("Faxanadu.3dn"), profile_of(faxanadu.data_crc));
         assert_eq!(None, profile_of(BLASTER_MASTER_USA));
+        assert_eq!(vec!["Faxanadu"], profile_names(faxanadu.data_crc));
         for game in games().iter().filter(|game| !game.profile.is_empty()) {
             assert!(
                 crate::bundled_profiles::PROFILES
@@ -220,6 +249,21 @@ mod tests {
                 game.profile
             );
         }
+    }
+
+    #[test]
+    fn a_3dsen_profile_goes_with_its_game_or_only_with_its_images() {
+        assert_eq!(
+            vec!["Blaster Master (U)"],
+            profile_names(BLASTER_MASTER_USA)
+        );
+        // The game Tetris has three 3dSen profiles, each for some of its images only.
+        let tengen = roms_named("Tetris (USA) (Tengen) (Unl)").next().unwrap();
+        assert_eq!(vec!["Tetris-Tengen"], profile_names(tengen.data_crc));
+        let nintendo = roms_named("Tetris (USA)").next().unwrap();
+        assert_eq!(vec!["Tetris-Nintendo"], profile_names(nintendo.data_crc));
+        assert_eq!(0, game("Tetris").unwrap().threedsen_profiles.len());
+        assert_eq!(0, profile_names(0xFFFF_FFF1).len());
     }
 
     /// Every ROM a feature table names by data CRC is in the database, so that the list can show

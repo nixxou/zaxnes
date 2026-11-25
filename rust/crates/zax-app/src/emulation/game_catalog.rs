@@ -66,12 +66,21 @@ pub trait GameCatalog {
     /// The game whose ROM is `rom_path`.
     fn game_for_rom(&self, rom_path: &str) -> Option<String>;
 
-    /// The game whose profile is the file called `file_name` (`Faxanadu.3dn`, compared without
-    /// regard to case): how a built-in profile the game database names is found once installed
-    /// (lot GAMEHASH). None when no profile has that name.
-    fn game_for_profile_file(&self, file_name: &str) -> Option<String> {
-        let _ = file_name;
+    /// The game whose profile file is called `name` without its extension (`Faxanadu`,
+    /// `Blaster Master (U)`), compared by letters and digits in lowercase: how a profile the game
+    /// database names, built in or imported from 3dSen, is found (lot GAMEHASH). Only the file
+    /// name is looked at, never the profile's content. None when no profile has that name.
+    fn game_for_profile_name(&self, name: &str) -> Option<String> {
+        let _ = name;
         None
+    }
+
+    /// The first of `names` ([`crate::gamedb::profile_names`], best first) that a profile of the
+    /// library has, as that profile's game.
+    fn game_for_profile_names(&self, names: &[&str]) -> Option<String> {
+        names
+            .iter()
+            .find_map(|name| self.game_for_profile_name(name))
     }
 
     /// The "2D Mode" entry.

@@ -271,12 +271,13 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
     }
 
-    /// The built-in 3D profile the game database gives the ROM at `rom_path` (through its data
-    /// CRC, taken once per file), when it is installed (lot GAMEHASH).
+    /// The 3D profile the game database gives the ROM at `rom_path` (through its data CRC, taken
+    /// once per file), when the library has it (lot GAMEHASH): one made for this image, else its
+    /// game's built-in one, else its game's 3dSen one.
     pub fn database_profile(&self, rom_path: &str) -> Option<String> {
         let crc = self.rom_data_crc(Path::new(rom_path))?;
         self.games
-            .game_for_profile_file(crate::gamedb::profile_of(crc)?)
+            .game_for_profile_names(&crate::gamedb::profile_names(crc))
     }
 
     /// Launches `rom_path` on the library entry `game_id`.
