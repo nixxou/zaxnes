@@ -223,6 +223,17 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// Opens a ROM file: with the profile chosen for it, the library entry that owns it, or
     /// else the profile chooser of the interface (REQ-UI-201, Q-036).
     pub(super) fn open_rom(&mut self, rom_path: &str) {
+        self.open_rom_asking(rom_path, true);
+    }
+
+    /// Opens a ROM given on the command line (lot LAUNCH-OUTSIDE, owner request): as
+    /// [`EmulationHost::open_rom`], but it never asks for a profile; without one remembered, owning
+    /// the ROM or given by the game database, the game plays in the default 3D, else in 2D.
+    pub fn open_rom_from_command_line(&mut self, rom_path: &str) {
+        self.open_rom_asking(rom_path, false);
+    }
+
+    fn open_rom_asking(&mut self, rom_path: &str, ask: bool) {
         if self.loading || rom_path.is_empty() {
             return;
         }
@@ -256,6 +267,15 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let target = chosen
             .or_else(|| self.games.game_for_rom(rom_path))
             .or_else(|| self.database_profile(rom_path));
+        let target = target.or_else(|| {
+            (!ask)
+                .then(|| {
+                    self.games
+                        .default_three_dimensional_id()
+                        .or_else(|| self.games.two_dimensional_mode_id())
+                })
+                .flatten()
+        });
         match target {
             Some(game_id) => self.launch_rom_with_profile(rom_path, &game_id),
             None => self.request_ui(Command::ChooseProfile, &CommandArgs::of_text(rom_path)),

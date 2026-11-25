@@ -2697,7 +2697,8 @@ fn start_game_from_command_line(
             return;
         }
     }
-    host.enqueue(Command::OpenRom, CommandArgs::of_text(&full));
+    // Owner request: a ROM given on the command line plays at once, never through the chooser.
+    host.open_rom_from_command_line(&full);
 }
 
 fn handle_camera_input(

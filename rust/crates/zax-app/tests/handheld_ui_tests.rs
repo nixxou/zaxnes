@@ -961,3 +961,23 @@ fn an_archive_of_several_games_lists_them_and_each_plays_on_its_own() {
     assert!(harness.paths.slot_state_file("Two", "auto").is_file());
     assert!(!harness.paths.slot_state_file("One", "auto").exists());
 }
+
+/// Owner request (lot LAUNCH-OUTSIDE): a ROM of the command line without a known profile plays
+/// at once in the default 3D; the profile chooser never shows.
+#[test]
+fn a_rom_of_the_command_line_plays_without_the_profile_chooser() {
+    use zax_app::emulation::game_catalog::GameCatalog as _;
+    let (mut harness, _handheld) = start(&[], &[]);
+    let far = harness.root.path().join("Unknown.nes");
+    std::fs::write(&far, SyntheticRom::counter()).unwrap();
+    let far = far.to_string_lossy().into_owned();
+    harness.host.open_rom_from_command_line(&far);
+    harness.settle();
+    let wanted = harness
+        .host
+        .games()
+        .default_three_dimensional_id()
+        .or_else(|| harness.host.games().two_dimensional_mode_id());
+    assert!(wanted.is_some());
+    assert_eq!(wanted.as_deref(), harness.host.current_game_id());
+}
