@@ -14,6 +14,8 @@ use std::path::{Path, PathBuf};
 
 use zip::ZipArchive;
 
+mod extras;
+
 /// Notification text of a damaged zip.
 pub const CORRUPTED_ZIP_MESSAGE: &str = "Corrupted zip file";
 /// Notification text of an archive that cannot be extracted.
@@ -386,26 +388,14 @@ fn base_name(name: &str) -> &str {
 }
 
 /// The game of the archive at `path`, with its profile and its pack: its entry `wanted` when one
-/// is asked for (lot LAUNCH-OUTSIDE), which takes the profile and the pack named as it only and
-/// gives the game the entry's name, else its first game.
+/// is asked for (lot LAUNCH-OUTSIDE), which gives the game the entry's name, else its first game.
+/// The profile and the pack are the ones [`extras::choose`] gives the game.
 fn read_archive<R: Read + Seek>(
     path: &Path,
     mut archive: Archive<R>,
     wanted: Option<&str>,
 ) -> Result<GameContent, String> {
     let names = archive.names();
-    let wanted_stem = wanted.map(|entry| stem_of(base_name(entry)).to_lowercase());
-    let first_of = |kind: &str| {
-        names
-            .iter()
-            .filter(|name| {
-                wanted_stem
-                    .as_ref()
-                    .is_none_or(|stem| stem_of(base_name(name)).to_lowercase() == *stem)
-            })
-            .find(|name| extension_of(name) == kind)
-            .cloned()
-    };
     if let Some(entry) = wanted {
         if !names.iter().any(|name| name == entry) {
             return Err(UNCOMPRESSION_FAILED_MESSAGE.to_owned());
@@ -427,12 +417,16 @@ fn read_archive<R: Read + Seek>(
         })
         .cloned()
         .ok_or_else(|| UNCOMPRESSION_FAILED_MESSAGE.to_owned())?;
-    let profile = first_of(PROFILE_EXTENSION);
-    let pack = first_of(PACK_EXTENSION);
-    let to_read: Vec<&str> = [Some(&game), profile.as_ref(), pack.as_ref()]
-        .into_iter()
-        .flatten()
-        .map(String::as_str)
+    // The profiles and packs are read with the game, in the same pass (a solid 7z decodes in
+    // order), and chosen once its region is known (owner request, `extras`).
+    let extras: Vec<&String> = names
+        .iter()
+        .filter(|name| {
+            [PROFILE_EXTENSION, PACK_EXTENSION].contains(&extension_of(name).as_str())
+        })
+        .collect();
+    let to_read: Vec<&str> = std::iter::once(game.as_str())
+        .chain(extras.iter().map(|name| name.as_str()))
         .collect();
     let mut files = archive.read(&to_read)?;
     let mut take = |name: &str| {
@@ -445,6 +439,22 @@ fn read_archive<R: Read + Seek>(
     if bytes.is_empty() {
         return Err(UNCOMPRESSION_FAILED_MESSAGE.to_owned());
     }
+    let games: Vec<&str> = names
+        .iter()
+        .filter(|name| GAME_EXTENSIONS.contains(&extension_of(name).as_str()))
+        .map(String::as_str)
+        .collect();
+    let traits = extras::RomTraits::of(&bytes);
+    let choose = |kind: &str| {
+        let candidates: Vec<&str> = extras
+            .iter()
+            .filter(|name| extension_of(name) == kind)
+            .map(|name| name.as_str())
+            .collect();
+        extras::choose(&candidates, &game, &games, &traits).map(str::to_owned)
+    };
+    let profile = choose(PROFILE_EXTENSION);
+    let pack = choose(PACK_EXTENSION);
     let mut packed = |name: Option<String>| {
         name.and_then(|name| {
             take(&name).map(|bytes| PackedFile {
