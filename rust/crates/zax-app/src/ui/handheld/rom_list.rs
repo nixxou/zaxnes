@@ -52,6 +52,14 @@ pub struct RomEntry {
     /// The address of a game of a page of games (web build), not downloaded yet: playing it
     /// downloads it (owner request, 2026-11-20).
     pub remote: Option<String>,
+    /// The kind of archive the row's file is, `ZIP` or `7Z`, shown as a badge; none for a file of
+    /// a game.
+    pub archive: Option<&'static str>,
+    /// The number of games of the row's archive when it holds several: the row is a folder of
+    /// them, which opens on its list (owner request).
+    pub archive_games: usize,
+    /// Whether this row heads the list of an archive's games and goes back to the folder.
+    pub close_archive: bool,
 }
 
 impl RomEntry {
@@ -61,6 +69,7 @@ impl RomEntry {
         let name = path
             .file_stem()
             .map_or_else(String::new, |stem| stem.to_string_lossy().into_owned());
+        let archive = archive_kind(&path);
         Self {
             path,
             name,
@@ -74,6 +83,9 @@ impl RomEntry {
             resume: false,
             back_to_library: false,
             remote: None,
+            archive,
+            archive_games: 0,
+            close_archive: false,
         }
     }
 
@@ -98,6 +110,23 @@ impl RomEntry {
         }
     }
 
+    /// The row heading the games of the archive `archive`: its name, and B or A on it goes back
+    /// to the folder.
+    #[must_use]
+    pub fn close_archive_row(archive: &Path) -> Self {
+        Self {
+            close_archive: true,
+            archive: None,
+            ..Self::new(archive.to_path_buf())
+        }
+    }
+
+    /// Whether the row is an archive of several games, which opens on its list.
+    #[must_use]
+    pub const fn is_folder(&self) -> bool {
+        self.archive_games > 1 && !self.close_archive
+    }
+
     /// The "Back to library" row of lot LAUNCH-OUTSIDE.
     #[must_use]
     pub fn library_row() -> Self {
@@ -110,7 +139,7 @@ impl RomEntry {
     /// Whether the row is a game's, not the Resume or the "Back to library" row.
     #[must_use]
     pub const fn is_game(&self) -> bool {
-        !self.resume && !self.back_to_library
+        !self.resume && !self.back_to_library && !self.close_archive && !self.is_folder()
     }
 
     /// The title of its 3D profile, when it has one (not the "2D Mode" entry).
@@ -155,6 +184,25 @@ pub enum RomListCommand {
     ResumeLast,
     /// Leave the files of the command line for the ROM folder (lot LAUNCH-OUTSIDE).
     BackToLibrary,
+    /// Show the games of the archive (a folder row).
+    OpenArchive(PathBuf),
+    /// Back from the games of an archive to its folder (its heading row, or B).
+    CloseArchive,
+}
+
+/// `ZIP` or `7Z` for an archive's path, by its extension.
+fn archive_kind(path: &Path) -> Option<&'static str> {
+    if !crate::emulation::rom_file::is_archive(path) {
+        return None;
+    }
+    let extension = path
+        .extension()
+        .map(|extension| extension.to_string_lossy().to_lowercase());
+    Some(if extension.as_deref() == Some("7z") {
+        "7Z"
+    } else {
+        "ZIP"
+    })
 }
 
 /// The folder the paths of the remote rows are under; nothing is ever written there.
@@ -302,6 +350,13 @@ impl RomListModel {
         }
     }
 
+    /// Selects the row `index`, when the list has it.
+    pub fn select_index(&mut self, index: usize) {
+        if index < self.entries.len() {
+            self.selected = index;
+        }
+    }
+
     /// Moves the selection by `delta` rows, wrapping round the ends.
     pub fn move_by(&mut self, delta: isize) {
         let count = self.entries.len();
@@ -330,6 +385,14 @@ impl RomListModel {
                     .map(|entry| RomListCommand::ChooseProfile(entry.path.clone()));
             }
             PadButton::Y => return Some(RomListCommand::Options),
+            // Back from the games of an archive, which its heading row says.
+            PadButton::B => {
+                return self
+                    .entries
+                    .first()
+                    .filter(|entry| entry.close_archive)
+                    .map(|_| RomListCommand::CloseArchive);
+            }
             // L1 the widescreen, R1 the hacks; Start plays, as A does (owner request).
             PadButton::L1 => {
                 return self
@@ -367,6 +430,10 @@ fn activate(entry: &RomEntry) -> RomListCommand {
         RomListCommand::ResumeLast
     } else if entry.back_to_library {
         RomListCommand::BackToLibrary
+    } else if entry.close_archive {
+        RomListCommand::CloseArchive
+    } else if entry.is_folder() {
+        RomListCommand::OpenArchive(entry.path.clone())
     } else {
         RomListCommand::Play(entry.path.clone())
     }

@@ -1002,3 +1002,92 @@ fn a_rom_of_the_command_line_plays_without_the_profile_chooser() {
         .and_then(|store| store.games().profile_for(&far).map(str::to_owned));
     assert_eq!(None, remembered);
 }
+
+/// Writes a zip at `path` holding `files` (name, bytes).
+fn write_zip(path: &std::path::Path, files: &[(&str, &[u8])]) {
+    use std::io::Write as _;
+    let mut zip = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+    for (name, bytes) in files {
+        zip.start_file(*name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(bytes).unwrap();
+    }
+    zip.finish().unwrap();
+}
+
+/// Frames until the background has listed and hashed what the list asked for.
+fn wait_for_the_hashes(harness: &mut UiHarness, handheld: &mut HandheldUi) {
+    for _ in 0..300 {
+        press(harness, handheld, &[]);
+        if handheld
+            .roms()
+            .entries()
+            .iter()
+            .all(|entry| entry.archive.is_none() || entry.archive_games > 1 || entry.crc.is_some())
+        {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+/// Owner request: an archive of several games is a folder row under the archive's name, which
+/// opens on its games and goes back to its row; an archive of one game is a game's row with its
+/// badge; an archive with no game leaves the list.
+#[test]
+fn an_archive_of_several_games_is_a_folder_and_back_returns_to_its_row() {
+    let (mut harness, mut handheld) = start(&[], &["Alpha.nes", "Zeta.nes"]);
+    let folder = harness.root.path().join("roms");
+    let game = SyntheticRom::counter();
+    let mut other = game.clone();
+    if let Some(last) = other.last_mut() {
+        *last ^= 0xFF;
+    }
+    write_zip(
+        &folder.join("Compilation.zip"),
+        &[("One.nes", &game), ("Two.nes", &other)],
+    );
+    write_zip(&folder.join("Single.zip"), &[("Single.nes", &game)]);
+    write_zip(&folder.join("Empty.zip"), &[("readme.txt", b"no game")]);
+    handheld.refresh_roms(&harness.host);
+    wait_for_the_hashes(&mut harness, &mut handheld);
+
+    let rows: Vec<(String, usize, Option<&str>)> = handheld
+        .roms()
+        .entries()
+        .iter()
+        .map(|entry| (entry.name.clone(), entry.archive_games, entry.archive))
+        .collect();
+    assert_eq!(
+        vec![
+            ("Alpha".to_owned(), 0, None),
+            ("Compilation".to_owned(), 2, Some("ZIP")),
+            ("Single".to_owned(), 1, Some("ZIP")),
+            ("Zeta".to_owned(), 0, None),
+        ],
+        rows
+    );
+
+    // The folder row opens on its games, the first one selected under the row going back.
+    tap(&mut harness, &mut handheld, PadButton::Down);
+    tap(&mut harness, &mut handheld, PadButton::A);
+    let names: Vec<&str> = handheld
+        .roms()
+        .entries()
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    assert_eq!(["Compilation", "One", "Two"], names.as_slice());
+    assert!(handheld.roms().entries()[0].close_archive);
+    assert_eq!(1, handheld.roms().selected());
+
+    // B goes back to the folder, on the archive's row.
+    tap(&mut harness, &mut handheld, PadButton::B);
+    assert_eq!(
+        Some("Compilation"),
+        handheld
+            .roms()
+            .selected_entry()
+            .map(|entry| entry.name.as_str())
+    );
+}

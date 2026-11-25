@@ -148,6 +148,9 @@ pub struct HandheldUi {
     /// Whether "Back to library" was chosen (lot LAUNCH-OUTSIDE): the list shows the ROM folder,
     /// not the files of the command line.
     library_chosen: bool,
+    /// The archive of several games whose list is shown (owner request): its games under a row
+    /// that goes back to the folder, on the archive's row.
+    opened_archive: Option<PathBuf>,
     metrics: Metrics,
     heading_font: Option<imgui::FontId>,
     effects: Vec<UiEffect>,
@@ -271,6 +274,7 @@ impl HandheldUi {
             launch_wait: 0.0,
             return_on_quit: None,
             library_chosen: false,
+            opened_archive: None,
             metrics: Metrics::for_height(height),
             heading_font: None,
             effects: Vec::new(),
@@ -396,7 +400,15 @@ impl HandheldUi {
         // until it is chosen.
         let outside = !self.library_chosen && !host.outside_library_roms().is_empty();
         // Web build: the games of the pages of games, downloaded when played (owner request).
-        let mut entries = if outside {
+        let mut entries = if let Some(archive) = &self.opened_archive {
+            host.known_archive_games(archive)
+                .unwrap_or_default()
+                .iter()
+                .map(|entry| {
+                    RomEntry::new(crate::emulation::rom_file::member_path(archive, entry))
+                })
+                .collect()
+        } else if outside {
             host.outside_library_roms()
                 .iter()
                 .map(|rom| RomEntry::new(PathBuf::from(rom)))
@@ -412,7 +424,22 @@ impl HandheldUi {
         global.clear_session_layer();
         global.clear_game_values();
         let global_on = global.get(SettingId::VideoWidescreen).as_int() != 0;
-        for entry in &mut entries {
+        // An archive the background listed: none of its games, out of the list; several, a
+        // folder of them (owner request). Not listed yet, a row like a game's meanwhile.
+        entries.retain_mut(|entry| {
+            if entry.archive.is_none() {
+                return true;
+            }
+            match host.known_archive_games(&entry.path) {
+                Some(games) if games.is_empty() => false,
+                Some(games) => {
+                    entry.archive_games = games.len();
+                    true
+                }
+                None => true,
+            }
+        });
+        for entry in entries.iter_mut().filter(|entry| entry.is_game()) {
             entry.crc = host.known_rom_crc(&entry.path);
             entry.profile = self.profile_of(host, entry);
             if entry.remote.is_some() {
@@ -431,7 +458,9 @@ impl HandheldUi {
         }
         // REQ-LOOP-076: the Resume entry heads the enumeration of the games, the library's only
         // (lot LAUNCH-OUTSIDE): over the command line's files, "Back to library" heads instead.
-        if outside {
+        if let Some(archive) = &self.opened_archive {
+            entries.insert(0, RomEntry::close_archive_row(archive));
+        } else if outside {
             entries.insert(0, RomEntry::library_row());
         } else if let Some(game) = host.resume_game_title() {
             entries.insert(0, RomEntry::resume_row(&game));
@@ -453,6 +482,14 @@ impl HandheldUi {
     fn take_rom_hashes(&mut self, host: &AppHost) {
         let hashed = host.take_rom_hashes();
         if hashed.is_empty() {
+            return;
+        }
+        // An archive listed: the list is made again, its row becoming a folder or leaving it.
+        if hashed.iter().any(|path| {
+            crate::emulation::rom_file::is_archive(path)
+                && self.roms.entries().iter().any(|entry| entry.path == *path)
+        }) {
+            self.refresh_roms(host);
             return;
         }
         let mut entries: Vec<RomEntry> = self.roms.entries_mut().to_vec();
@@ -1180,7 +1217,9 @@ impl HandheldUi {
             RomListCommand::ChooseProfile(_)
             | RomListCommand::Options
             | RomListCommand::ResumeLast
-            | RomListCommand::BackToLibrary => {}
+            | RomListCommand::BackToLibrary
+            | RomListCommand::OpenArchive(_)
+            | RomListCommand::CloseArchive => {}
             RomListCommand::GameOptions(path)
             | RomListCommand::Widescreen(path)
             | RomListCommand::Hacks(path)
@@ -1251,6 +1290,26 @@ impl HandheldUi {
             RomListCommand::BackToLibrary => {
                 self.library_chosen = true;
                 self.refresh_roms(host);
+            }
+            RomListCommand::OpenArchive(path) => self.open_archive(Some(path), host),
+            RomListCommand::CloseArchive => self.open_archive(None, host),
+        }
+    }
+
+    /// The list of the games of the archive `archive`, on its first game; none goes back to the
+    /// folder, on the archive's row (owner request).
+    fn open_archive(&mut self, archive: Option<PathBuf>, host: &AppHost) {
+        match archive {
+            Some(path) => {
+                self.opened_archive = Some(path);
+                self.refresh_roms(host);
+                self.roms.select_index(1);
+            }
+            None => {
+                if let Some(archive) = self.opened_archive.take() {
+                    self.refresh_roms(host);
+                    self.roms.select_path(&archive);
+                }
             }
         }
     }

@@ -830,6 +830,12 @@ impl HandheldUi {
             if entry.remote.is_some() {
                 badges.push(("[web]", DIM));
             }
+            // A game in an archive, or an archive of several (owner request).
+            match entry.archive {
+                Some("7Z") => badges.push(("[7Z]", DIM)),
+                Some(_) => badges.push(("[ZIP]", DIM)),
+                None => {}
+            }
             if entry.widescreen || entry.widescreen_other.is_some() {
                 // Grey while off, coloured once on, red for a version of the game the hack is
                 // not made for (owner request).
@@ -855,7 +861,18 @@ impl HandheldUi {
                 badges.push(("[RA]", UNSTUDIED));
             }
             let label = home_row_label(entry);
-            if entry.back_to_library {
+            // An archive of several games: how many, where a game's profile goes.
+            let tag = if entry.is_folder() {
+                let count = entry.archive_games.to_string();
+                (
+                    strings::format(&strings::get(keys::HANDHELD_ARCHIVE_GAMES), &[&count]),
+                    DIM,
+                )
+            } else {
+                tag
+            };
+            let colour = if entry.is_folder() { DIM } else { colour };
+            if entry.back_to_library || entry.close_archive {
                 painter.row(slot, selected, &label, ("", DIM));
             } else if badges.is_empty() {
                 painter.row(slot, selected, &label, (&tag.0, colour));
@@ -1550,16 +1567,15 @@ impl HandheldUi {
             let (name, date) = label.split_once(" — ").unwrap_or((label.as_str(), ""));
             // The engine that made the state, when it is not Zaxnes or the game runs on another;
             // red when it is not the engine in play, whose state it cannot load.
-            let (date, colour) =
-                match menu_bar::slot_engine_note(frame.host, &slot) {
-                    Some(menu_bar::EngineNote::Shown(note)) => (format!("{date} · {note}"), colour),
-                    Some(menu_bar::EngineNote::Refused(_)) => {
-                        let engine = frame.host.slot_engine(&slot);
-                        let name = engine.map_or("?", zax_core_api::EngineKind::display_name);
-                        (format!("{date} · {name}"), WARNING)
-                    }
-                    None => (date.to_owned(), colour),
-                };
+            let (date, colour) = match menu_bar::slot_engine_note(frame.host, &slot) {
+                Some(menu_bar::EngineNote::Shown(note)) => (format!("{date} · {note}"), colour),
+                Some(menu_bar::EngineNote::Refused(_)) => {
+                    let engine = frame.host.slot_engine(&slot);
+                    let name = engine.map_or("?", zax_core_api::EngineKind::display_name);
+                    (format!("{date} · {name}"), WARNING)
+                }
+                None => (date.to_owned(), colour),
+            };
             painter.row_to(
                 row,
                 (index == states.selected_index(), accent),
@@ -1727,6 +1743,8 @@ impl HandheldUi {
 fn home_row_label(entry: &RomEntry) -> String {
     if entry.back_to_library {
         strings::get(keys::HANDHELD_BACK_TO_LIBRARY)
+    } else if entry.close_archive {
+        format!("< {}", entry.name)
     } else if entry.resume {
         format!(
             "{} — {}",

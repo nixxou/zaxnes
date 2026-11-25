@@ -426,6 +426,7 @@ pub const HANDHELD_HINT_FAVORITE: &str = "handheld.hint.favorite";
 pub const HANDHELD_HINT_RESET_ALL: &str = "handheld.hint.reset_all";
 pub const SHORTCUT_HOME: &str = "shortcut.home";
 pub const SHORTCUT_KEYPAD_5: &str = "shortcut.keypad_5";
+pub const HANDHELD_ARCHIVE_GAMES: &str = "handheld.archive_games";
 pub const SHORTCUT_KEYPAD_ADD: &str = "shortcut.keypad_add";
 pub const SHORTCUT_KEYPAD_SUBTRACT: &str = "shortcut.keypad_subtract";
 pub const SHORTCUT_ESCAPE: &str = "shortcut.escape";
@@ -918,6 +919,7 @@ pub const PUBLISHED: &[&str] = &[
     HANDHELD_HINT_RESET_ALL,
     SHORTCUT_HOME,
     SHORTCUT_KEYPAD_5,
+    HANDHELD_ARCHIVE_GAMES,
     SHORTCUT_KEYPAD_ADD,
     SHORTCUT_KEYPAD_SUBTRACT,
     SHORTCUT_ESCAPE,

@@ -1730,6 +1730,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::HANDHELD_HINT_HACKS, "WideScreen & Hacks"),
     (keys::SHORTCUT_HOME, "Home"),
     (keys::SHORTCUT_KEYPAD_5, "Keypad 5"),
+    (keys::HANDHELD_ARCHIVE_GAMES, "{0} games"),
     (keys::SHORTCUT_KEYPAD_ADD, "Keypad +"),
     (keys::SHORTCUT_KEYPAD_SUBTRACT, "Keypad -"),
     (keys::SHORTCUT_ESCAPE, "Esc"),

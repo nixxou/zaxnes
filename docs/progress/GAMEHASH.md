@@ -113,3 +113,16 @@ LAUNCH-OUTSIDE done (2026-11-25), each step with tests, full zax-app suite green
   the command line launches nothing and lists them; the desktop then opens on the console list.
 - Not done: names from gamedb (No-Intro by file CRC) for archive entries; the desktop window
   library (menu bar) shows nothing of this; not tried in the running app.
+
+## Archives in the ROM folder (owner request, 2026-11-25, branch feat/keys)
+
+- The background lists each `.zip` / `.7z`: its games and the CRC-32 its directory keeps. A game
+  the game database knows by that CRC (one image, MD5 known) is not decompressed; the others are
+  read in one pass. Listings are kept in `rom_crc.json` (`archives`, stamped by the archive).
+- One game: a game's row with a `[ZIP]` / `[7Z]` badge, hashed under the archive's path. Several:
+  a folder row under the archive's name, "N jeux" on the right; A opens its games under a
+  "< name" row, B or that row goes back to the archive's row. No game: out of the list.
+- Profiles and packs of an archive (`rom_file/extras.rs`): a file named as a game goes with it
+  only and first; region/timing tags (usa, europe, japan, world, ntsc, pal, whole words) restrict
+  a file to the games that have them (regions from the game database, timing from the header);
+  generic files last. HD packs in archives: not read (HD packs are not in this branch).
