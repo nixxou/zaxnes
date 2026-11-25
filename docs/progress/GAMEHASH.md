@@ -68,3 +68,10 @@ ROMs fall back to the name rules of before.
   Tetris profiles, Rockman 3 Japan). Order: ROM's own 3dSen profile > game's built-in > game's
   3dSen > name rule. Only file names are compared (`GameCatalog::game_for_profile_name`), never a
   profile's content.
+- Correction (owner doubted the "absent from the Hackset" list, rightly): searching every image name
+  of the Hackset, not only the game file names, finds Antarctic Adventure (Kekkyoku Nankyoku
+  Daibouken), Kage (Yami no Shigotonin Kage, game Blue Shadow), Super Bat Puncher, Hudson's
+  Adventure Island (Adventure Island Classic). Only 7 names stay without a game, all homebrews or
+  tests: Chase, Depths, empty, flappy_fpv, flappy_tpv, FlappyPuzzle, zooming_secretary. Rockman 3
+  is now on its game, like every other profile named after one region: only the three Tetris
+  profiles are restricted to images.
