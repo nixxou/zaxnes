@@ -13,14 +13,12 @@
 //! with the database's entry, which is then a different cartridge with a colliding CRC or a
 //! trimmed dump.
 
-use std::sync::OnceLock;
-
 use super::InesHeader;
 use crate::builtin_patches::crc32;
 use crate::{NametableMirroring, NesRegion};
 
-/// The generated table, one cartridge per line, sorted by CRC.
-const TABLE: &str = include_str!("../../data/cartdb.csv");
+/// The cartridges of `data/cartdb.csv` by CRC, sorted by `build.rs`.
+static TABLE: &[(u32, CartEntry)] = include!(concat!(env!("OUT_DIR"), "/cartdb_table.rs"));
 
 /// One cartridge of the database.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,26 +51,11 @@ pub struct CartEntry {
     pub chip: &'static str,
 }
 
-/// The CRC of each line of [`TABLE`] and the line, sorted by CRC: built once, at the first lookup.
-fn index() -> &'static [(u32, &'static str)] {
-    static INDEX: OnceLock<Vec<(u32, &'static str)>> = OnceLock::new();
-    INDEX.get_or_init(|| {
-        let mut lines: Vec<(u32, &'static str)> = TABLE
-            .lines()
-            .filter(|line| !line.starts_with('#') && !line.is_empty())
-            .filter_map(|line| Some((u32::from_str_radix(line.get(..8)?, 16).ok()?, line)))
-            .collect();
-        lines.sort_unstable_by_key(|(crc, _)| *crc);
-        lines
-    })
-}
-
 /// The entry of the cartridge whose key in the database is `crc`.
 #[must_use]
 pub fn lookup(crc: u32) -> Option<CartEntry> {
-    let lines = index();
-    let at = lines.binary_search_by_key(&crc, |(key, _)| *key).ok()?;
-    parse(lines[at].1)
+    let at = TABLE.binary_search_by_key(&crc, |(key, _)| *key).ok()?;
+    Some(TABLE[at].1.clone())
 }
 
 /// The entry of the cartridge in `image`, whose data CRC (`builtin_patches::data_crc`, computed
@@ -159,29 +142,6 @@ fn crc32_combine(crc_a: u32, crc_b: u32, len_b: usize) -> u32 {
         }
     }
     crc ^ crc_b
-}
-
-fn parse(line: &'static str) -> Option<CartEntry> {
-    let f: Vec<&'static str> = line.split(',').collect();
-    let number = |i: usize| f.get(i).and_then(|v| v.parse::<usize>().ok()).unwrap_or(0);
-    Some(CartEntry {
-        system: f.get(1)?,
-        mapper: f.get(2)?.parse().ok()?,
-        submapper: f.get(3).and_then(|v| v.parse().ok()),
-        prg_kib: number(4),
-        chr_kib: number(5),
-        chr_ram_kib: number(6),
-        work_ram_kib: number(7),
-        save_ram_kib: number(8),
-        save_eeprom_bytes: f
-            .get(8)
-            .and_then(|v| v.strip_prefix('b'))
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0),
-        battery: f.get(9).is_some_and(|v| *v == "1"),
-        mirroring: f.get(10).and_then(|v| v.chars().next()).unwrap_or('h'),
-        chip: f.get(11).copied().unwrap_or(""),
-    })
 }
 
 impl CartEntry {
@@ -362,20 +322,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_table_is_sorted_and_parses() {
-        let mut last = String::new();
-        let mut count = 0;
-        for line in TABLE
-            .lines()
-            .filter(|l| !l.starts_with('#') && !l.is_empty())
-        {
-            let crc = line.get(..8).unwrap_or("").to_owned();
-            assert!(crc > last, "not sorted at {line}");
-            assert!(parse(line).is_some(), "{line}");
-            last = crc;
-            count += 1;
-        }
-        assert!(count > 10_000);
+    fn the_table_is_sorted() {
+        assert!(TABLE.windows(2).all(|pair| pair[0].0 < pair[1].0));
+        assert!(TABLE.len() > 10_000);
     }
 
     #[test]
@@ -401,15 +350,6 @@ mod tests {
                 "{cut}"
             );
         }
-    }
-
-    #[test]
-    fn the_index_holds_every_line() {
-        let lines = TABLE
-            .lines()
-            .filter(|l| !l.starts_with('#') && !l.is_empty())
-            .count();
-        assert_eq!(lines, index().len());
     }
 
     #[test]
