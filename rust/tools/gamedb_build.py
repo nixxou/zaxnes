@@ -7,6 +7,7 @@ Sources:
 - the Rust tables that name ROMs by data CRC (`builtin_patches.rs`, `wide_decode/*.rs`,
   `fceux_validated.rs`), so that every ROM Zaxnes has a feature for is in the database, a homebrew
   the Hackset does not know included (its game is the one the table gives);
+- `profiles/extra_roms.csv`, ROM images the Hackset does not know (`tools/extra_rom.py`);
 - `profiles/index.csv`, the 3D profile built in for each game;
 - `profiles/3dsen_names.csv`, the 3dSen profiles of each game by name (`tools/threedsen_names.py`).
 
@@ -116,12 +117,25 @@ def main() -> None:
         if row["no_intro_name"]:
             rows[crc] = row
 
+    # ROM images the Hackset does not know (homebrews), recorded by tools/extra_rom.py.
+    with open(os.path.join(ROOT, "profiles", "extra_roms.csv"), encoding="utf-8", newline="") as file:
+        for record in csv.DictReader(line for line in file if not line.startswith("#")):
+            crc = int(record["data_crc"], 16)
+            if crc in hackset:
+                sys.exit(f"profiles/extra_roms.csv: {record['data_crc']} is in the Hackset already")
+            rows[crc] = {
+                "game": record["game"], "no_intro_name": "", "md5": record["data_md5"].lower(),
+                "files": {record["file_crc32"].upper()}, "games": {record["game"]},
+            }
+
     warnings = []
     for crc, (game, source) in sorted(rust_tables().items()):
         if crc in hackset:
             rows[crc] = hackset[crc]
             if game and game != rows[crc]["game"]:
                 warnings.append(f"{crc:08X}: {source} says '{game}', the Hackset '{rows[crc]['game']}'")
+        elif crc in rows:
+            pass
         elif game:
             rows[crc] = {"game": game, "no_intro_name": "", "md5": "", "files": set(), "games": {game}}
             warnings.append(f"{crc:08X}: not in the Hackset, kept as '{game}' ({source})")

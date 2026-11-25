@@ -1,0 +1,3 @@
+# ROM images the Hackset does not know (tools/extra_rom.py), put in the game database.
+data_crc,game,name,data_md5,file_crc32
+331BCC87,Chase,Chase,3b4e6e9907514b8d7cbe28af1c13ce88,B887529D

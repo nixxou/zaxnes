@@ -75,3 +75,7 @@ ROMs fall back to the name rules of before.
   tests: Chase, Depths, empty, flappy_fpv, flappy_tpv, FlappyPuzzle, zooming_secretary. Rockman 3
   is now on its game, like every other profile named after one region: only the three Tetris
   profiles are restricted to images.
+- Homebrews: `profiles/extra_roms.csv` (`tools/extra_rom.py <rom> <game>`) adds images the Hackset
+  lacks. The 3dSen 2.2 bundle holds one ROM only (Chase, read with Zaxnes's own
+  `read_text_assets`; 103 text assets): Chase `331BCC87` added. Zooming Secretary, Depths and the
+  Flappy profiles ship without a ROM: they need the owner's ROM file to be added the same way.

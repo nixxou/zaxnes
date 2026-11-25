@@ -264,6 +264,9 @@ mod tests {
         assert_eq!(vec!["Tetris-Nintendo"], profile_names(nintendo.data_crc));
         assert_eq!(0, game("Tetris").unwrap().threedsen_profiles.len());
         assert_eq!(0, profile_names(0xFFFF_FFF1).len());
+        // A homebrew the Hackset does not know (profiles/extra_roms.csv): Chase, whose ROM 3dSen
+        // 2.2 carries in its bundle.
+        assert_eq!(vec!["Chase"], profile_names(0x331B_CC87));
     }
 
     /// Every ROM a feature table names by data CRC is in the database, so that the list can show
