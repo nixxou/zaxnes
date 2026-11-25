@@ -502,7 +502,12 @@ impl Graphics {
                 };
                 if let Some(display) = window.wgpu_mut() {
                     display.update_pictures(&ui.take_picture_updates());
-                    display.draw_eyes((size(width), size(height)), left, right, Some(ui.draw_data()));
+                    display.draw_split(
+                        (size(width), size(height)),
+                        (left, right),
+                        Some(ui.draw_data()),
+                        stereo.layout != StereoLayout::Off,
+                    );
                 }
             }
         }

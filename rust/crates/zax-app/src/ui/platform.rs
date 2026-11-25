@@ -47,6 +47,11 @@ pub struct SdlPlatform {
     /// `XInput` pad labels A the bottom button, a handheld the right one) rather than by label.
     positional: bool,
     pad: PadState,
+    /// Lot SBS: 0 for one picture, 1 for Half SBS (the interface at the window's size, squeezed
+    /// into each half), 2 for Full SBS (the interface at half the window's width, in each half).
+    stereo: u8,
+    /// The drawable's width, in pixels, where the pointer's half is found.
+    drawable_width: f32,
 }
 
 impl Default for SdlPlatform {
@@ -66,6 +71,8 @@ impl SdlPlatform {
             feeds_pad: true,
             positional: true,
             pad: PadState::new(),
+            stereo: 0,
+            drawable_width: 0.0,
         }
     }
 
@@ -80,6 +87,8 @@ impl SdlPlatform {
             feeds_pad: false,
             positional: false,
             pad: PadState::new(),
+            stereo: 0,
+            drawable_width: 0.0,
         }
     }
 
@@ -93,6 +102,8 @@ impl SdlPlatform {
             feeds_pad: true,
             positional: false,
             pad: PadState::new(),
+            stereo: 0,
+            drawable_width: 0.0,
         }
     }
 
@@ -135,7 +146,8 @@ impl SdlPlatform {
         }
         match event {
             Event::MouseMotion { x, y, .. } => {
-                io.add_mouse_pos_event([*x as f32 * self.scale[0], *y as f32 * self.scale[1]]);
+                let x = self.eye_x(*x as f32 * self.scale[0]);
+                io.add_mouse_pos_event([x, *y as f32 * self.scale[1]]);
             }
             Event::MouseButtonDown { mouse_btn, .. } => button(io, *mouse_btn, true),
             Event::MouseButtonUp { mouse_btn, .. } => button(io, *mouse_btn, false),
@@ -224,6 +236,26 @@ impl SdlPlatform {
         io.add_key_analog_event(positive, amount > 0.0, amount.max(0.0));
     }
 
+    /// Lot SBS: how the interface is shown (0 one picture, 1 Half SBS, 2 Full SBS).
+    pub const fn set_stereo(&mut self, stereo: u8) {
+        self.stereo = stereo;
+    }
+
+    /// Lot SBS: the interface's x of the pointer at drawable `x`: the place in its half, the
+    /// half stretched back to the whole width in Half SBS.
+    fn eye_x(&self, x: f32) -> f32 {
+        let half = self.drawable_width / 2.0;
+        if self.stereo == 0 || half <= 0.0 {
+            return x;
+        }
+        let within = if x >= half { x - half } else { x };
+        if self.stereo == 1 {
+            within * 2.0
+        } else {
+            within
+        }
+    }
+
     /// Sets the size of the frame to draw and the time since the previous one.
     #[allow(clippy::cast_precision_loss)] // window sizes are far below 2^24
     pub fn prepare_frame(
@@ -233,7 +265,14 @@ impl SdlPlatform {
         drawable: (u32, u32),
         delta_seconds: f32,
     ) {
-        io.display_size = [drawable.0 as f32, drawable.1 as f32];
+        self.drawable_width = drawable.0 as f32;
+        // Lot SBS: in Full SBS each eye has half the width, and the interface with it.
+        let width = if self.stereo == 2 {
+            (drawable.0 / 2).max(1)
+        } else {
+            drawable.0
+        };
+        io.display_size = [width as f32, drawable.1 as f32];
         io.delta_time = delta_seconds.max(1.0e-5);
         if window.0 > 0 && window.1 > 0 {
             self.scale = [

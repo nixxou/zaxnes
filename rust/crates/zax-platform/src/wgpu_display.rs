@@ -369,7 +369,7 @@ impl WgpuDisplay {
         scene: Option<SceneLayer<'_>>,
         interface: Option<&DrawData>,
     ) {
-        self.draw_eyes((width, height), scene, None, interface);
+        self.draw_split((width, height), (scene, None), interface, false);
     }
 
     /// Lot SBS: [`Self::draw`] with the right eye's picture in `right`; each layer then says
@@ -380,6 +380,18 @@ impl WgpuDisplay {
         scene: Option<SceneLayer<'_>>,
         right: Option<SceneLayer<'_>>,
         interface: Option<&DrawData>,
+    ) {
+        self.draw_split((width, height), (scene, right), interface, false);
+    }
+
+    /// Lot SBS: [`Self::draw_eyes`], with the interface drawn once in each half of the window
+    /// when `split_interface` (the side by side outputs).
+    pub fn draw_split(
+        &mut self,
+        (width, height): (u32, u32),
+        (scene, right): (Option<SceneLayer<'_>>, Option<SceneLayer<'_>>),
+        interface: Option<&DrawData>,
+        split_interface: bool,
     ) {
         let (width, height) = (width.max(1), height.max(1));
         if (width, height) != (self.config.width, self.config.height) {
@@ -462,7 +474,16 @@ impl WgpuDisplay {
                     .draw(&self.device, &mut pass, reduced, (width, height));
             }
             if let Some(interface) = interface {
-                self.interface.draw(&mut pass, interface, (width, height));
+                if split_interface {
+                    let half = width / 2;
+                    for columns in [(0, half), (half, width - half)] {
+                        self.interface
+                            .draw(&mut pass, interface, (width, height), Some(columns));
+                    }
+                } else {
+                    self.interface
+                        .draw(&mut pass, interface, (width, height), None);
+                }
             }
         }
         // The shader passes write the window before the window pass loads it.
@@ -1275,13 +1296,35 @@ impl InterfaceRenderer {
         clippy::cast_sign_loss,
         clippy::cast_precision_loss
     )] // Pixel rectangles of a window.
-    fn draw(&self, pass: &mut wgpu::RenderPass<'_>, data: &DrawData, (width, height): (u32, u32)) {
+    /// Draws `data` over the window, or into its columns `(left, width)` (lot SBS: the interface
+    /// of one eye, squeezed when it is wider).
+    #[allow(clippy::cast_precision_loss)] // Window sizes.
+    fn draw(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        data: &DrawData,
+        (width, height): (u32, u32),
+        columns: Option<(u32, u32)>,
+    ) {
         let (Some(group), Some(vertices), Some(indices)) =
             (&self.group, &self.vertices, &self.indices)
         else {
             return;
         };
         let [scale_x, scale_y] = data.framebuffer_scale;
+        let drawn_width = (data.display_size[0] * scale_x).max(1.0);
+        let (column_left, column_width) = columns.unwrap_or((0, width));
+        let squeeze = column_width as f32 / drawn_width;
+        let left_edge = column_left as f32;
+        let right_edge = (column_left + column_width).min(width) as f32;
+        pass.set_viewport(
+            left_edge,
+            0.0,
+            right_edge - left_edge,
+            height as f32,
+            0.0,
+            1.0,
+        );
         let clip_offset = data.display_pos;
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, group, &[]);
@@ -1312,9 +1355,11 @@ impl InterfaceRenderer {
                     pass.set_bind_group(0, texture_group, &[]);
                     bound = id;
                 }
-                let left = ((clip_rect[0] - clip_offset[0]) * scale_x).max(0.0);
+                let left =
+                    ((clip_rect[0] - clip_offset[0]) * scale_x * squeeze + left_edge).max(left_edge);
                 let top = ((clip_rect[1] - clip_offset[1]) * scale_y).max(0.0);
-                let right = ((clip_rect[2] - clip_offset[0]) * scale_x).min(width as f32);
+                let right = ((clip_rect[2] - clip_offset[0]) * scale_x * squeeze + left_edge)
+                    .min(right_edge);
                 let bottom = ((clip_rect[3] - clip_offset[1]) * scale_y).min(height as f32);
                 if right <= left || bottom <= top {
                     continue;
@@ -1336,6 +1381,7 @@ impl InterfaceRenderer {
             index_base += list.idx_buffer().len() as u32;
         }
         pass.set_scissor_rect(0, 0, width, height);
+        pass.set_viewport(0.0, 0.0, width as f32, height as f32, 0.0, 1.0);
     }
 }
 

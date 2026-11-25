@@ -89,6 +89,10 @@ pub struct ImguiFrontend {
     keyboard_pad: KeyboardPad,
     /// The changes of the interface's pictures not handed to the renderer yet.
     pictures: Vec<PictureUpdate>,
+    /// Lot SBS: how the interface is shown (0 one picture, 1 Half SBS, 2 Full SBS).
+    stereo: u8,
+    /// The drawable's width of the last frame built, the window the GL renderer splits.
+    window_width: i32,
     /// The ROM folder of the command line (`--roms`), which wins over the options.
     roms_option: Option<String>,
     /// The ROM folder of the options the ROM list was last given.
@@ -230,6 +234,8 @@ impl ImguiFrontend {
             shots,
             keyboard_pad: KeyboardPad::new(),
             pictures: Vec::new(),
+            stereo: 0,
+            window_width: 0,
             roms_option,
             roms_setting: roms_setting(host),
             touch_pad: None,
@@ -491,6 +497,7 @@ impl ImguiFrontend {
             sizes.drawable,
             frame.real_seconds,
         );
+        self.window_width = i32::try_from(sizes.drawable.0).unwrap_or(i32::MAX);
         // A menu entry clicked last frame.
         self.follow_console_request(frame.host);
         self.follow_roms_folder(frame.host);
@@ -653,10 +660,28 @@ impl ImguiFrontend {
     /// Draws the interface [`ImguiFrontend::build`] built, with the GL renderer (a wgpu window
     /// draws [`ImguiFrontend::draw_data`] itself).
     pub fn render(&mut self) {
+        let stereo = self.stereo;
+        let window_width = self.window_width;
         if let Some(renderer) = &mut self.renderer {
             renderer.update_pictures(&std::mem::take(&mut self.pictures));
-            renderer.render(self.context.render());
+            let data = self.context.render();
+            if stereo == 0 {
+                renderer.render(data);
+            } else {
+                // Lot SBS: the interface in each half.
+                let half = window_width / 2;
+                for columns in [(0, half), (half, window_width - half)] {
+                    renderer.render_in(data, Some(columns));
+                }
+            }
         }
+    }
+
+    /// Lot SBS: how the interface is shown (0 one picture, 1 Half SBS, 2 Full SBS), from the next
+    /// frame [`ImguiFrontend::build`] builds.
+    pub fn set_stereo(&mut self, stereo: u8) {
+        self.stereo = stereo;
+        self.platform.set_stereo(stereo);
     }
 
     /// The changes of the interface's pictures since the last call, for a renderer that is not

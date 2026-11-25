@@ -1018,6 +1018,12 @@ impl Running {
     /// Sizes the view for the window and decides whether the render-skip rule keeps the
     /// previous image.
     fn plan_view(&mut self, emulated: u32, width: i32, height: i32) -> Result<ViewPlan, String> {
+        // Lot SBS: the interface is shown in each half too, for the frame built now.
+        self.ui.set_stereo(match self.stereo_layout() {
+            StereoLayout::Off => 0,
+            StereoLayout::Half => 1,
+            StereoLayout::Full => 2,
+        });
         let below_chrome = (height - to_i32_f(self.ui.chrome_height())).max(1);
         // Portrait on a touch screen (owner request): the game takes the top of the screen at
         // 4:3, the whole width, and the touch pad the band left under it.
