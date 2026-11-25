@@ -1,0 +1,5 @@
+# The 3D profile built in for each game (rust/profiles), by the game id of the database
+# (the Hackset metadata file name). tools/gamedb_build.py checks every .3dn has a line.
+profile,game
+Faxanadu.3dn,Faxanadu
+Metal Force.3dn,Metal Force

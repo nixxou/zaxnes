@@ -26,6 +26,9 @@ fn main() {
     if let Err(error) = bundled_profiles() {
         println!("cargo::error=the bundled 3D profiles: {error}");
     }
+    if let Err(error) = gamedb() {
+        println!("cargo::error=the game database: {error}");
+    }
     if std::env::var_os("CARGO_FEATURE_SHADERS").is_some() {
         if let Err(error) = shader_pack() {
             println!("cargo::error=the slang shader pack: {error}");
@@ -87,6 +90,142 @@ fn bundled_profiles() -> std::io::Result<()> {
     }
     code.push_str("]\n");
     std::fs::write(environment("OUT_DIR")?.join("bundled-profiles.rs"), code)
+}
+
+/// The fields of one CSV line (`tools/gamedb_build.py` writes them with Python's `csv`: a field
+/// with a comma or a quote is quoted, a quote inside doubled).
+fn csv_fields(line: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut field = String::new();
+    let mut quoted = false;
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        match (c, quoted) {
+            ('"', true) if chars.peek() == Some(&'"') => {
+                field.push('"');
+                chars.next();
+            }
+            ('"', _) => quoted = !quoted,
+            (',', false) => fields.push(std::mem::take(&mut field)),
+            _ => field.push(c),
+        }
+    }
+    fields.push(field);
+    fields
+}
+
+/// What a name is compared by: its letters and digits, in lowercase (as
+/// `ui::handheld::rom_list::normalise` and `gamedb::normalise`).
+fn normalise(name: &str) -> String {
+    name.chars()
+        .filter(|character| character.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// The data lines of the CSV `path`, each split in fields.
+fn csv_rows(path: &Path) -> std::io::Result<Vec<Vec<String>>> {
+    println!("cargo:rerun-if-changed={}", path.display());
+    Ok(std::fs::read_to_string(path)?
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(csv_fields)
+        .collect())
+}
+
+/// Writes `gamedb-tables.rs` from `data/gamedb_roms.csv` and `data/gamedb_games.csv`
+/// (`tools/gamedb_build.py`): the ROMs sorted by data CRC, the games sorted by id, and the indexes
+/// by game, by No-Intro name and by whole-file CRC (see `src/gamedb.rs`). A malformed, unsorted or
+/// repeated line, or a ROM of an unknown game, fails the build.
+fn gamedb() -> std::io::Result<()> {
+    use std::fmt::Write as _;
+    let bad = |what: String| std::io::Error::other(what);
+    let data = environment("CARGO_MANIFEST_DIR")?.join("data");
+    let roms = csv_rows(&data.join("gamedb_roms.csv"))?;
+    let games = csv_rows(&data.join("gamedb_games.csv"))?;
+
+    let mut code = String::from("pub static GAMES: &[Game] = &[\n");
+    let mut last_game: Option<&str> = None;
+    for row in &games {
+        let [id, profile] = row.as_slice() else {
+            return Err(bad(format!("gamedb_games.csv: 2 fields expected: {row:?}")));
+        };
+        if last_game.is_some_and(|last| id.as_str() <= last) {
+            return Err(bad(format!(
+                "gamedb_games.csv: not sorted, or repeated: {id}"
+            )));
+        }
+        last_game = Some(id);
+        let _ = writeln!(code, "    Game {{ id: {id:?}, profile: {profile:?} }},");
+    }
+    code.push_str("];\n\npub static ROMS: &[Rom] = &[\n");
+    let mut last_crc: Option<u32> = None;
+    let mut by_game = Vec::new();
+    let mut by_no_intro = Vec::new();
+    let mut by_file = Vec::new();
+    for (index, row) in roms.iter().enumerate() {
+        let [crc, game, name, region, md5, files] = row.as_slice() else {
+            return Err(bad(format!("gamedb_roms.csv: 6 fields expected: {row:?}")));
+        };
+        let crc = u32::from_str_radix(crc, 16).map_err(|_| bad(format!("bad CRC {crc}")))?;
+        if last_crc.is_some_and(|last| crc <= last) {
+            return Err(bad(format!(
+                "gamedb_roms.csv: not sorted, or repeated: {crc:08X}"
+            )));
+        }
+        last_crc = Some(crc);
+        if games
+            .binary_search_by(|row| row[0].as_str().cmp(game))
+            .is_err()
+        {
+            return Err(bad(format!(
+                "gamedb_roms.csv: {crc:08X} of an unknown game {game}"
+            )));
+        }
+        if !(md5.is_empty() || md5.len() == 32 && md5.bytes().all(|b| b.is_ascii_hexdigit())) {
+            return Err(bad(format!("gamedb_roms.csv: {crc:08X}: bad MD5 {md5}")));
+        }
+        let mut file_crcs = Vec::new();
+        for file in files.split_whitespace() {
+            let file = u32::from_str_radix(file, 16).map_err(|_| bad(format!("bad CRC {file}")))?;
+            file_crcs.push(format!("0x{:04X}_{:04X}", file >> 16, file & 0xFFFF));
+            by_file.push((file, index));
+        }
+        by_game.push((normalise(game), index));
+        if !name.is_empty() {
+            by_no_intro.push((normalise(name), index));
+        }
+        let _ = writeln!(
+            code,
+            "    Rom {{ data_crc: 0x{:04X}_{:04X}, game: {game:?}, no_intro_name: {name:?}, \
+             region: {region:?}, data_md5: {md5:?}, file_crc32s: &[{}] }},",
+            crc >> 16,
+            crc & 0xFFFF,
+            file_crcs.join(", ")
+        );
+    }
+    code.push_str("];\n");
+    by_game.sort();
+    by_no_intro.sort();
+    by_file.sort_unstable();
+    for (table, index) in [("BY_GAME", &by_game), ("BY_NO_INTRO_NAME", &by_no_intro)] {
+        let _ = writeln!(code, "\npub static {table}: &[(&str, u32)] = &[");
+        for (key, rom) in index {
+            let _ = writeln!(code, "    ({key:?}, {rom}),");
+        }
+        code.push_str("];\n");
+    }
+    code.push_str("\npub static BY_FILE_CRC32: &[(u32, u32)] = &[\n");
+    for (crc, rom) in &by_file {
+        let _ = writeln!(
+            code,
+            "    (0x{:04X}_{:04X}, {rom}),",
+            crc >> 16,
+            crc & 0xFFFF
+        );
+    }
+    code.push_str("];\n");
+    std::fs::write(environment("OUT_DIR")?.join("gamedb-tables.rs"), code)
 }
 
 fn environment(name: &str) -> std::io::Result<PathBuf> {

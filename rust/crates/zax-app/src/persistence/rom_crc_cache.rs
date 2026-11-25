@@ -44,10 +44,11 @@ impl RomHashes {
     /// The MD5 in lowercase hexadecimal, as RetroAchievements writes it.
     #[must_use]
     pub fn data_md5_hex(&self) -> String {
-        self.data_md5
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect()
+        use std::fmt::Write as _;
+        self.data_md5.iter().fold(String::new(), |mut text, byte| {
+            let _ = write!(text, "{byte:02x}");
+            text
+        })
     }
 }
 
