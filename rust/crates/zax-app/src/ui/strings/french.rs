@@ -1625,7 +1625,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HANDHELD_GAMES_TITLE, "Jeux"),
     (keys::HANDHELD_ROMS_EMPTY, "Aucune ROM trouvée. Copiez des fichiers .nes dans {0}"),
     (keys::HANDHELD_TAG_2D, "2D"),
-    (keys::HANDHELD_BACK_TO_LIBRARY, "◀ Retour à la bibliothèque"),
+    (keys::HANDHELD_BACK_TO_LIBRARY, "< Retour à la bibliothèque"),
     (keys::HANDHELD_PROFILE_FOR, "Profil pour {0}"),
     (keys::HANDHELD_HINT_PLAY, "Jouer"),
     (keys::HANDHELD_HINT_PROFILE, "Profil 3D"),
