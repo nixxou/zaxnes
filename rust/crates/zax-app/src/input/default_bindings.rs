@@ -5,6 +5,7 @@ use zax_platform::input::{standard_gamepad, Key, PhysicalControl};
 use super::binding_set::BindingSet;
 use super::binding_target::BindingDeviceKind;
 use super::input_action::InputAction;
+use super::key_layout::{self, KeyLayout};
 
 /// Player one's default keys. `QuickSave` and `QuickLoad` have no default key: the combinations of
 /// REQ-INP-104 are the only default route to the quick slot (SPEC-08 §4.2, §4.3).
@@ -31,6 +32,74 @@ pub const PLAYER_ONE_KEYBOARD: [(InputAction, Key); 20] = [
     (InputAction::COIN_2, Key::Number6),
     (InputAction::SERVICE, Key::Number9),
 ];
+
+/// Player one's default keys of the `RetroArch` layout (lot KEYS, owner request): the pad as in
+/// [`PLAYER_ONE_KEYBOARD`] (owner: the pad does not move), the camera on the keypad (4 and 6
+/// turn, 8 and 2 tilt, 9 and 3 zoom; its 5, a fixed shortcut, is the default view), the rewind on
+/// R and the held fast forward on L as in `RetroArch`. The menu has no key: F1 opens the console
+/// mode, `RetroArch`'s menu, and Escape quits. Without a keypad the fixed keys of
+/// [`crate::input::desktop_input_source`] take the camera: right Control with the arrows, Page Up
+/// and Page Down, Home.
+pub const PLAYER_ONE_KEYBOARD_RETROARCH: [(InputAction, Key); 19] = [
+    (InputAction::LEFT, Key::Left),
+    (InputAction::RIGHT, Key::Right),
+    (InputAction::UP, Key::Up),
+    (InputAction::DOWN, Key::Down),
+    (InputAction::A, Key::X),
+    (InputAction::B, Key::Z),
+    (InputAction::SELECT, Key::Space),
+    (InputAction::START, Key::Enter),
+    (InputAction::ROT_LEFT, Key::Keypad4),
+    (InputAction::ROT_RIGHT, Key::Keypad6),
+    (InputAction::ROT_UP, Key::Keypad8),
+    (InputAction::ROT_DOWN, Key::Keypad2),
+    (InputAction::ZOOM_IN, Key::Keypad9),
+    (InputAction::ZOOM_OUT, Key::Keypad3),
+    (InputAction::ROLL_BACK, Key::R),
+    (InputAction::FAST_FORWARD, Key::L),
+    (InputAction::COIN_1, Key::Number5),
+    (InputAction::COIN_2, Key::Number6),
+    (InputAction::SERVICE, Key::Number9),
+];
+
+/// Player one's default keys in `layout`.
+#[must_use]
+pub fn player_one_keyboard(layout: KeyLayout) -> &'static [(InputAction, Key)] {
+    match layout {
+        KeyLayout::Zaxnes => &PLAYER_ONE_KEYBOARD,
+        KeyLayout::RetroArch => &PLAYER_ONE_KEYBOARD_RETROARCH,
+    }
+}
+
+/// The default key of `action` in `layout`, [`PhysicalControl::NONE`] when it has none.
+fn default_key(layout: KeyLayout, action: InputAction) -> PhysicalControl {
+    player_one_keyboard(layout)
+        .iter()
+        .find(|(candidate, _)| *candidate == action)
+        .map_or(PhysicalControl::NONE, |(_, key)| {
+            PhysicalControl::key(key.code())
+        })
+}
+
+/// Brings player one's keyboard `set` from the defaults of `from` to those of `to` (lot KEYS):
+/// every action still on its default key of `from` takes its default key of `to`; an action
+/// the player bound to a key of their own keeps it. Returns whether anything moved.
+pub fn bring_to_layout(set: &mut BindingSet, from: KeyLayout, to: KeyLayout) -> bool {
+    if from == to {
+        return false;
+    }
+    let mut moved = false;
+    for action in crate::input::input_action::ALL {
+        let old = default_key(from, action);
+        let new = default_key(to, action);
+        if old == new || set.get_action(action) != old {
+            continue;
+        }
+        set.set_action(action, new);
+        moved = true;
+    }
+    moved
+}
 
 /// The defaults of a gamepad that answers to the standard numbering (SPEC-08 §4.3).
 #[must_use]
@@ -107,11 +176,11 @@ pub fn standard_gamepad_set() -> [(InputAction, PhysicalControl); 17] {
     ]
 }
 
-/// Player one's keyboard: the defaults of §4.2.
+/// Player one's keyboard: the defaults of §4.2, those of the layout in force (lot KEYS).
 #[must_use]
 pub fn create_player_one_keyboard() -> BindingSet {
     let mut set = BindingSet::new(BindingDeviceKind::Keyboard);
-    for (action, key) in PLAYER_ONE_KEYBOARD {
+    for &(action, key) in player_one_keyboard(key_layout::layout()) {
         set.set_action(action, PhysicalControl::key(key.code()));
     }
     set

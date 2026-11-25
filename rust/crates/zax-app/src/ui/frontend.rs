@@ -378,7 +378,8 @@ impl ImguiFrontend {
             UiCommand::ToggleDebugOverlay
             | UiCommand::CloseWindows
             | UiCommand::AchievementsAccount
-            | UiCommand::ShowShaders => {}
+            | UiCommand::ShowShaders
+            | UiCommand::EscapeQuit => {}
         }
     }
 
@@ -403,7 +404,12 @@ impl ImguiFrontend {
                 || down(Key::AltRight));
             if !binding_capture_active
                 && plain
-                && pressed.iter().any(|key| matches!(key, Key::F1 | Key::Home))
+                && pressed.iter().any(|key| {
+                    *key == Key::F1
+                        || *key == Key::Home
+                            && super::menu_shortcuts::layout()
+                                == super::menu_shortcuts::KeyLayout::Zaxnes
+                })
             {
                 self.switch_console(host, false, false);
                 return;

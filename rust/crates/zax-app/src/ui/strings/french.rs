@@ -258,6 +258,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("cmd.state.quick_save", "État rapide : sauvegarder"),
     ("cmd.state.quick_load", "État rapide : charger"),
     ("cmd.state.delete_slot", "Supprimer l'état"),
+    ("cmd.state.save_current_slot", "Sauvegarder sur le slot courant"),
+    ("cmd.state.load_current_slot", "Charger le slot courant"),
+    ("cmd.state.previous_slot", "Slot précédent"),
+    ("cmd.state.next_slot", "Slot suivant"),
     ("cmd.emulation.pause_resume", "Pause / Reprise"),
     ("cmd.emulation.pause", "Pause"),
     ("cmd.emulation.resume", "Reprise"),
@@ -560,6 +564,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.cpu_ppu_alignment", "Alignement CPU/PPU"),
     ("setting.emu.cpu_apu_parity", "Parité CPU/APU"),
     ("option.Zaxnes", "Zaxnes"),
+    ("option.RetroArch", "RetroArch"),
     ("option.2A03 netlist", "Netlist du 2A03"),
     ("setting.emu.fidelity_plus", "Fidélité+"),
     ("options.new.to_new", "Nouvelle fenêtre d'options"),
@@ -790,6 +795,8 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.ui.roms_folder", "Dossier des ROM"),
     ("setting.ui.show_fps", "Afficher les FPS"),
     ("setting.ui.sort_option", "Tri de la bibliothèque"),
+    ("setting.ui.key_layout", "Disposition des touches"),
+    ("setting.ui.escape_quits", "Échap deux fois pour quitter"),
     ("setting.ui.language", "Langue"),
     // ----------------------------------- labels of the enumerated values
     ("option.Off", "Désactivée"),
@@ -1563,6 +1570,14 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
          groupe ensuite par titre. Par défaut : A-Z.",
     ),
     (
+        "detail.ui.key_layout",
+        "Les touches qui pilotent le programme. RetroArch : ses touches par défaut partout où          Zaxnes a la même fonction (F1 menu, F2 et F4 sauvegardent et chargent le slot courant,          F6 et F7 le choisissent, L avance rapide, R retour arrière, H reset, F plein écran), la          caméra sur le pavé numérique, ou Ctrl droit avec les flèches, Page préc. et Page suiv.,          Origine. Zaxnes : les touches des versions précédentes (caméra sur F5 à F10, une touche          par slot). Les touches de jeu que vous avez choisies vous-même sont gardées. Par défaut :          RetroArch.",
+    ),
+    (
+        "detail.ui.escape_quits",
+        "Avec la disposition RetroArch, Échap en jeu avertit, et un second Échap dans les deux          secondes quitte le programme. Désactivé, Échap ne fait rien en jeu ; Ctrl+Q quitte          toujours. Par défaut : activé.",
+    ),
+    (
         "detail.ui.show_fps",
         "Affiche un compteur d'images dans un coin de l'image : les images affichées par seconde, \
          c'est-à-dire la cadence de rendu et non la vitesse du jeu. Ne coûte rien de mesurable. \
@@ -1695,6 +1710,16 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HANDHELD_HOLD_FOR_SETTINGS, "A maintenu : réglages"),
     (keys::HANDHELD_HINT_HACKS, "WideScreen & Hacks"),
     (keys::SHORTCUT_HOME, "Origine"),
+    (keys::SHORTCUT_KEYPAD_5, "5 du pavé"),
+    (keys::SHORTCUT_KEYPAD_ADD, "+ du pavé"),
+    (keys::SHORTCUT_KEYPAD_SUBTRACT, "- du pavé"),
+    (keys::SHORTCUT_ESCAPE, "Échap"),
+    (keys::STATE_SLOT_CHOSEN, "Slot {0}"),
+    (keys::STATE_SLOT_CHOSEN_EMPTY, "Slot {0} (vide)"),
+    (keys::STATE_SAVED_TO_SLOT, "Sauvegardé dans le slot {0}"),
+    (keys::STATE_SLOT_LOADED, "Slot {0} chargé"),
+    (keys::STATE_SLOT_EMPTY, "Slot {0} vide"),
+    (keys::ESCAPE_AGAIN_TO_QUIT, "Appuie encore sur Échap pour quitter"),
     (keys::HANDHELD_MENU_SAVE_STATE, "Sauvegarder l'état"),
     (keys::HANDHELD_MENU_LOAD_STATE, "Charger l'état"),
     (keys::HANDHELD_MENU_GAME_SPEED, "Vitesse de jeu"),
@@ -1777,6 +1802,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.achievements.challenges", "Afficher les défis en cours"),
     // --------------------------------------------------------- shaders window
     ("cmd.ui.show_shaders", "Shaders…"),
+    ("cmd.ui.escape_quit", "Échap deux fois pour quitter"),
     ("shaders.title", "Shaders"),
     ("shaders.not_built", "Cette version de Zaxnes n'a pas les shaders slang."),
     ("shaders.pack_missing", "Cette version de Zaxnes a été construite sans son pack de shaders."),

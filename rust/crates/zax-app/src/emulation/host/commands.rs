@@ -53,6 +53,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             }
             Command::QuickSave => self.current_game.is_some() && !stopped && !loading,
             Command::QuickLoad => !loading && self.slots.is_occupied(QUICK_SLOT_ID),
+            Command::SaveCurrentSlot => self.can_save(self.current_slot),
+            // An empty current slot still answers, with its notification.
+            Command::LoadCurrentSlot => !loading && self.current_game.is_some(),
             Command::DeleteSlot => {
                 let slot = args
                     .text
@@ -92,6 +95,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Command::NewLuaProfile | Command::CopyAgentPrompt => self.editor_allows(command),
             Command::SeekMovie => !loading && self.movie_timeline.is_some() && args.number >= 0,
             Command::OpenRecentRom
+            | Command::PreviousSlot
+            | Command::NextSlot
             | Command::Quit
             | Command::SetSpeed
             | Command::SetRegion
@@ -176,6 +181,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::LoadSlot
             | Command::QuickSave
             | Command::QuickLoad
+            | Command::SaveCurrentSlot
+            | Command::LoadCurrentSlot
+            | Command::PreviousSlot
+            | Command::NextSlot
             | Command::DeleteSlot => self.execute_state(command, args),
             Command::PauseResume
             | Command::Pause
@@ -261,10 +270,16 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
 
     fn execute_state(&mut self, command: Command, args: &CommandArgs) {
         match command {
-            Command::SaveSlot => {
-                self.save_to_slot(&numbered_slot_id(args.number), true);
+            Command::SaveSlot => self.save_slot_announced(&numbered_slot_id(args.number)),
+            Command::LoadSlot => self.load_slot_announced(&slot_of(args)),
+            Command::SaveCurrentSlot => {
+                self.save_slot_announced(&numbered_slot_id(self.current_slot));
             }
-            Command::LoadSlot => self.load_slot(&slot_of(args)),
+            Command::LoadCurrentSlot => {
+                self.load_slot_announced(&numbered_slot_id(self.current_slot));
+            }
+            Command::PreviousSlot => self.choose_slot(-1),
+            Command::NextSlot => self.choose_slot(1),
             Command::QuickSave => self.quick_save(),
             Command::QuickLoad => self.quick_load(),
             Command::DeleteSlot => {

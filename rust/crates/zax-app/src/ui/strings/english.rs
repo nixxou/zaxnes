@@ -308,6 +308,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("cmd.state.quick_save", "Quick state: save"),
     ("cmd.state.quick_load", "Quick state: load"),
     ("cmd.state.delete_slot", "Delete the state"),
+    ("cmd.state.save_current_slot", "Save to the current slot"),
+    ("cmd.state.load_current_slot", "Load the current slot"),
+    ("cmd.state.previous_slot", "Previous slot"),
+    ("cmd.state.next_slot", "Next slot"),
     ("cmd.emulation.pause_resume", "Pause / Resume"),
     ("cmd.emulation.pause", "Pause"),
     ("cmd.emulation.resume", "Resume"),
@@ -545,6 +549,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.cpu_ppu_alignment", "CPU/PPU alignment"),
     ("setting.emu.cpu_apu_parity", "CPU/APU parity"),
     ("option.Zaxnes", "Zaxnes"),
+    ("option.RetroArch", "RetroArch"),
     ("option.2A03 netlist", "2A03 netlist"),
     ("setting.emu.fidelity_plus", "Fidelity+"),
     ("options.new.to_new", "New options window"),
@@ -848,6 +853,8 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.ui.editor_mode", "Editor mode (MCP server, pens, editor folder)"),
     ("setting.ui.roms_folder", "ROM folder"),
     ("setting.ui.sort_option", "Library sort order"),
+    ("setting.ui.key_layout", "Keyboard layout"),
+    ("setting.ui.escape_quits", "Esc twice to quit"),
     ("setting.ui.language", "Language"),
     // ----------------------------------- labels of the enumerated values
     ("option.Off", "Off"),
@@ -1587,6 +1594,14 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
          then by title. Default: A-Z.",
     ),
     (
+        "detail.ui.key_layout",
+        "Which keys drive the program. RetroArch: its default keys wherever Zaxnes has the          same function (F1 menu, F2 and F4 save and load the current slot, F6 and F7 choose it,          L fast forward, R rewind, H reset, F full screen), the camera on the keypad, or right          Ctrl with the arrows, Page Up and Page Down, Home. Zaxnes: the keys of the versions          before (camera on F5 to F10, one key per slot). The game's keys you bound yourself are          kept. Default: RetroArch.",
+    ),
+    (
+        "detail.ui.escape_quits",
+        "With the RetroArch layout, Esc in game warns, and a second Esc within two seconds quits          the program. Off, Esc does nothing in game; Ctrl+Q always quits. Default: on.",
+    ),
+    (
         "detail.ui.show_fps",
         "Shows a frame counter in a corner of the picture: the displayed frames per second, which \
          is the render rate and not the speed of the game. Costs nothing worth measuring. \
@@ -1714,6 +1729,16 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::HANDHELD_HOLD_FOR_SETTINGS, "hold A: settings"),
     (keys::HANDHELD_HINT_HACKS, "WideScreen & Hacks"),
     (keys::SHORTCUT_HOME, "Home"),
+    (keys::SHORTCUT_KEYPAD_5, "Keypad 5"),
+    (keys::SHORTCUT_KEYPAD_ADD, "Keypad +"),
+    (keys::SHORTCUT_KEYPAD_SUBTRACT, "Keypad -"),
+    (keys::SHORTCUT_ESCAPE, "Esc"),
+    (keys::STATE_SLOT_CHOSEN, "Slot {0}"),
+    (keys::STATE_SLOT_CHOSEN_EMPTY, "Slot {0} (empty)"),
+    (keys::STATE_SAVED_TO_SLOT, "Saved to slot {0}"),
+    (keys::STATE_SLOT_LOADED, "Slot {0} loaded"),
+    (keys::STATE_SLOT_EMPTY, "Slot {0} is empty"),
+    (keys::ESCAPE_AGAIN_TO_QUIT, "Press Esc again to quit"),
     (keys::HANDHELD_MENU_SAVE_STATE, "Save state"),
     (keys::HANDHELD_MENU_LOAD_STATE, "Load state"),
     (keys::HANDHELD_MENU_GAME_SPEED, "Game speed"),
@@ -1796,6 +1821,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.achievements.challenges", "Show the challenges under way"),
     // --------------------------------------------------------- shaders window
     ("cmd.ui.show_shaders", "Shaders…"),
+    ("cmd.ui.escape_quit", "Esc twice to quit"),
     ("shaders.title", "Shaders"),
     ("shaders.not_built", "This build of Zaxnes has no slang shaders."),
     ("shaders.pack_missing", "This build of Zaxnes was made without its shader pack."),

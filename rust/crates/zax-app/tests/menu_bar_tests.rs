@@ -10,7 +10,8 @@ use std::collections::{HashMap, HashSet};
 use ui_harness::{UiHarness, UiLanguageScope};
 use zax_app::application::AppHost;
 use zax_app::emulation::commands::{Command, CommandArgs};
-use zax_app::input::default_bindings::PLAYER_ONE_KEYBOARD;
+use zax_app::input::default_bindings::player_one_keyboard;
+use zax_app::input::key_layout::KeyLayout;
 use zax_app::persistence::save_slots::EXPOSED_SLOT_COUNT;
 use zax_app::persistence::save_state_file;
 use zax_app::ui::commands::UiCommand;
@@ -292,6 +293,9 @@ fn req_ui_200_the_recent_rom_submenu_lists_the_ten_last_files() {
 #[test]
 fn req_ui_204_the_shortcut_table_resolves_each_combination() {
     use ShortcutCommand::Host;
+    // The table of AMD-013 is the Zaxnes layout's (lot KEYS); `keys_layout_tests` has
+    // RetroArch's.
+    menu_shortcuts::set_layout(KeyLayout::Zaxnes);
     let none = ShortcutModifiers::NONE;
     let control = ShortcutModifiers::CONTROL;
     assert_eq!(Host(Command::PauseResume), single(Key::P, none).0);
@@ -344,14 +348,22 @@ fn req_ui_204_the_shortcut_table_has_no_conflict() {
 fn req_ui_204_no_bare_shortcut_collides_with_a_default_game_key() {
     // Player 2 has no default keyboard binding (REQ-INP-011), so player 1's table is the whole of
     // §4.2.
-    let game_keys: HashSet<i32> = PLAYER_ONE_KEYBOARD
-        .iter()
-        .map(|(_, key)| *key as i32)
-        .collect();
-
-    for key in menu_shortcuts::bare_keys() {
-        assert!(!game_keys.contains(&(key as i32)), "{}", key.name());
+    // Lot KEYS: each layout against its own default keys.
+    for layout in [KeyLayout::Zaxnes, KeyLayout::RetroArch] {
+        menu_shortcuts::set_layout(layout);
+        let game_keys: HashSet<i32> = player_one_keyboard(layout)
+            .iter()
+            .map(|(_, key)| *key as i32)
+            .collect();
+        for key in menu_shortcuts::bare_keys() {
+            assert!(
+                !game_keys.contains(&(key as i32)),
+                "{layout:?}: {}",
+                key.name()
+            );
+        }
     }
+    menu_shortcuts::set_layout(KeyLayout::RetroArch);
 }
 
 #[test]
@@ -469,6 +481,8 @@ fn ro_2_the_retroachievements_account_is_an_entry_of_the_tools_menu() {
 /// for its state screens; the front end takes the request.
 #[test]
 fn the_console_shortcuts_ask_the_front_end() {
+    // Home is the console mode's in the Zaxnes layout only (lot KEYS).
+    menu_shortcuts::set_layout(KeyLayout::Zaxnes);
     let mut harness = UiHarness::new(&["Castle Quest"]);
     for (key, modifiers, expected) in [
         (Key::F1, ShortcutModifiers::NONE, UiCommand::ToggleConsole),

@@ -143,6 +143,8 @@ now — the Lua API dump is unchanged, and so is the settings file.
 | `ui.language` | Interface | Interface | — |
 | `ui.roms_folder` | Interface | Interface | — |
 | `ui.sort_option` | Interface | Interface | — |
+| `ui.key_layout` | Interface | Interface | — |
+| `ui.escape_quits` | Interface | Interface | — |
 | `ui.show_fps` | Interface | Interface | — |
 | `ui.profiler` | Interface | Interface | — |
 | `achievements.enabled` | RetroAchievements | RetroAchievements | — |

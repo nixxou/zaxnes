@@ -814,7 +814,38 @@ impl Running {
         closing
     }
 
+    /// Puts the keyboard layout of the options in force (lot KEYS): the fixed shortcuts follow
+    /// it at once, and player one's keys still on the defaults of the layout they were last
+    /// brought to move to those of this one, once.
+    fn follow_key_layout(&mut self) {
+        use crate::input::key_layout::{self, KeyLayout};
+        let settings = self.host.settings();
+        let layout = KeyLayout::from_value(settings.get(SettingId::UiKeyLayout).as_int());
+        let applied = KeyLayout::from_value(settings.get(SettingId::UiKeyLayoutApplied).as_int());
+        key_layout::set_layout(layout);
+        if applied == layout {
+            return;
+        }
+        // A handheld's keyboard is its pad's; its keys are not the desktop's.
+        if !self.options.handheld {
+            self.source.edit(|bindings, _, _| {
+                crate::input::default_bindings::bring_to_layout(
+                    bindings.keyboard_mut(0),
+                    applied,
+                    layout,
+                )
+            });
+        }
+        self.host.update_settings(|settings| {
+            settings.set(
+                SettingId::UiKeyLayoutApplied,
+                SettingValue::Enum(layout.value()),
+            );
+        });
+    }
+
     fn sample_input(&mut self, real: f32, width: i32, height: i32) -> InputSnapshot {
+        self.follow_key_layout();
         self.source.keyboard_captured_by_ui = self.ui.wants_keyboard();
         self.source.pointer_over_ui = self.ui.wants_pointer();
         #[allow(clippy::cast_precision_loss)] // window sizes are far below 2^24

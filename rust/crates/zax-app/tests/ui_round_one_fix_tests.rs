@@ -17,6 +17,7 @@ use zax_platform::input::Key;
 
 #[test] // REQ-INP-101, REQ-UI-004
 fn req_inp_101_a_menu_press_during_a_load_is_dropped() {
+    zax_app::input::key_layout::set_layout(zax_app::input::key_layout::KeyLayout::Zaxnes);
     let mut harness = UiHarness::new(&["Arkanoid"]);
     let rom = harness.write_rom("game.nes");
     harness
@@ -62,6 +63,9 @@ fn req_ui_004_a_modal_window_takes_the_menu_press_before_the_emulation() {
         harness.tick(1.0 / 60.0);
     }
 
+    // Escape is the menu key of the Zaxnes layout; RetroArch's closes the modal window through
+    // its fixed shortcut (lot KEYS).
+    zax_app::input::key_layout::set_layout(zax_app::input::key_layout::KeyLayout::Zaxnes);
     let mut harness = UiHarness::new(&["Arkanoid"]);
     harness.launch("g0");
     assert_eq!(EmulationState::Running, harness.host.state());

@@ -107,6 +107,11 @@ fn req_ui_205_the_model_enumerates_every_menu_command() {
         ImportThreeDSenSteam,
         ImportThreeDSenBundle,
         ImportThreeDSenArchive,
+        // Lot KEYS: RetroArch's current slot.
+        SaveCurrentSlot,
+        LoadCurrentSlot,
+        PreviousSlot,
+        NextSlot,
     ];
     for command in expected {
         assert!(

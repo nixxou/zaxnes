@@ -298,6 +298,9 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     pub rollback: RollbackHistory,
     /// The last frames one by one, for stepping back (J) and on (K).
     frame_steps: crate::emulation::frame_steps::FrameSteps,
+    /// `RetroArch`'s current slot (lot KEYS): the numbered slot F2 saves and F4 loads, chosen with
+    /// F6 and F7; slot 1 at start.
+    current_slot: i32,
     /// The input of the last tick, which a frame stepped on (K) runs with.
     step_input: (crate::input::InputAction, crate::input::InputAction),
     /// Whether the rollback snapshots are taken (REQ-LOOP-030); off on a handheld (Rust-only,
@@ -490,6 +493,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             stage_clock: StageClock::default(),
             rollback: RollbackHistory::new(),
             frame_steps: crate::emulation::frame_steps::FrameSteps::new(),
+            current_slot: 1,
             step_input: Default::default(),
             rollback_enabled: true,
             separate_core: false,

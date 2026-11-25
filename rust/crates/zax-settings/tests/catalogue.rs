@@ -82,7 +82,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
     // emu.engine: the per-game engine choice of lot FCEUX-23 step 5 (`docs/review/FCEUX-ENGINE.md`
     // §4), which only a build with the `fceux-core` feature offers but every build carries the key
     // of, so a `games.json` crosses between them. emu.cartridge_db and emu.power_on_ram: lot CARTDB.
-    // emu.fast_core: lot FAST-1.
+    // emu.fast_core: lot FAST-1. ui.key_layout, ui.key_layout_applied, ui.escape_quits: lot KEYS.
     assert_eq!(
         additions,
         [
@@ -180,6 +180,9 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "shader.3d_ws.preset",
             // EDITOR-1 (owner request): the editor mode, Zaxnes's own as well.
             "ui.editor_mode",
+            "ui.escape_quits",
+            "ui.key_layout",
+            "ui.key_layout_applied",
             "ui.language",
             // Lot REWRITE-UI: the options' mode and the slider's preset.
             "ui.options_advanced",

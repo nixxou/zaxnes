@@ -2198,6 +2198,52 @@ fn options_mode(out: &mut Vec<SettingDescriptor>) {
     );
 }
 
+/// The keyboard settings of lot KEYS.
+fn keys(out: &mut Vec<SettingDescriptor>) {
+    // Rust-only (lot KEYS, owner request): the keyboard's layout, Zaxnes' keys or RetroArch's
+    // defaults where Zaxnes has the function. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::UiKeyLayout,
+            SettingKind::Enum,
+            SettingValue::Enum(1),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Interface,
+        )
+        .with_domain(Domain::choice(vec![opt(0, "Zaxnes"), opt(1, "RetroArch")]))
+        .with_label("Keyboard layout"),
+    );
+    // The layout the player's keys were last brought to: a set saved under the Zaxnes layout (0,
+    // the keys of every version before lot KEYS) has its default keys moved once to the layout in
+    // force. No interface.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::UiKeyLayoutApplied,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::NoEffect,
+            SettingTheme::Interface,
+        )
+        .with_domain(Domain::choice(vec![opt(0, "Zaxnes"), opt(1, "RetroArch")])),
+    );
+    // Rust-only (lot KEYS, owner request): Escape twice in a row quits (RetroArch layout); off,
+    // Escape does nothing in game. The web page and Android have no such row.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::UiEscapeQuits,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Interface,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Esc twice to quit"),
+    );
+}
+
 fn reimplementation_extras(out: &mut Vec<SettingDescriptor>) {
     // The mute switch of the Audio menu (AMD-010 REQ-UI-200). SPEC-11 has no separate mute setting,
     // so this one forces the effective gain to zero and leaves `audio.volume` alone.
@@ -2264,6 +2310,7 @@ fn reimplementation_extras(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("Show FPS"),
     );
+    keys(out);
     // Rust-only (owner request): the frame profiler, which writes the cost of each stage of the
     // frame to the log every two seconds and next to the FPS counter. Not exposed to Lua.
     out.push(

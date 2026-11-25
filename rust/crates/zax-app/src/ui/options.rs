@@ -361,6 +361,10 @@ const INTERFACE: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::UiLanguage),
     LayoutEntry::Row(SettingId::UiRomsFolder),
     LayoutEntry::Row(SettingId::UiSortOption),
+    // Lot KEYS: the keyboard's layout, and Escape twice to quit (no row on the web page or
+    // Android, where there is no program to quit).
+    LayoutEntry::Row(SettingId::UiKeyLayout),
+    LayoutEntry::Row(SettingId::UiEscapeQuits),
     LayoutEntry::Row(SettingId::UiShowFps),
     LayoutEntry::Row(SettingId::UiProfiler),
     LayoutEntry::Row(SettingId::UiEditorMode),
@@ -453,7 +457,7 @@ pub enum TabEntry {
 /// The settings the window leaves out although they are user settings: the last browsed folder
 /// and the window rectangle are state, and the menu music no longer exists (AMD-024
 /// REQ-PUB-005).
-pub const EXCLUDED: [SettingId; 26] = [
+pub const EXCLUDED: [SettingId; 27] = [
     SettingId::UiLastBrowseDir,
     SettingId::UiWindowRect,
     // Lot REWRITE-UI: the options' own mode and preset, set by the new window and the console.
@@ -488,6 +492,8 @@ pub const EXCLUDED: [SettingId; 26] = [
     // by nothing else. `vr.refresh_rate` needs no line, the Vr theme having no tab.
     SettingId::UiLibraryView,
     SettingId::VideoMsaa20,
+    // Lot KEYS: which layout the keys were brought to, the program's own bookkeeping.
+    SettingId::UiKeyLayoutApplied,
 ];
 
 /// The five curvature settings, in the order AMD-043 §6 and AMD-046 §3 give them: the three
@@ -1040,6 +1046,10 @@ pub fn is_shown(descriptor: &SettingDescriptor) -> bool {
     if EXCLUDED.contains(&id) {
         return false;
     }
+    // Lot KEYS: no program to quit with Escape on the web page nor on Android.
+    if id == SettingId::UiEscapeQuits && !escape_can_quit() {
+        return false;
+    }
     // The graphics API is a choice only where Vulkan and DirectX 12 are built in.
     if id == SettingId::VideoBackend && !cfg!(feature = "wgpu") {
         return false;
@@ -1061,6 +1071,13 @@ pub fn is_shown(descriptor: &SettingDescriptor) -> bool {
     descriptor.scope() == SettingScope::User
         && has_a_tab(descriptor.theme())
         && is_editable(descriptor)
+}
+
+/// Whether Escape may quit here (lot KEYS): not on the web page, whose browser owns Escape and
+/// has no program to quit, nor on Android, which quits with its back button.
+#[must_use]
+pub const fn escape_can_quit() -> bool {
+    !cfg!(any(target_os = "emscripten", target_os = "android"))
 }
 
 /// Whether a setting of `theme` belongs to the window at all.

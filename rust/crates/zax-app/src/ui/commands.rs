@@ -24,6 +24,10 @@ pub const ACHIEVEMENTS_ACCOUNT: &str = "ui.achievements_account";
 /// Opens the shaders window (Rust-only, owner request): the slang preset of each display mode.
 pub const SHOW_SHADERS: &str = "ui.show_shaders";
 
+/// Escape in game (lot KEYS, `RetroArch` layout): the first press warns, a second one close behind
+/// quits, when `ui.escape_quits` is on.
+pub const ESCAPE_QUIT: &str = "ui.escape_quit";
+
 /// A command the interface owns, beside the commands of the host's model (REQ-UI-205).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiCommand {
@@ -41,11 +45,13 @@ pub enum UiCommand {
     AchievementsAccount,
     /// The shaders window.
     ShowShaders,
+    /// Escape twice to quit.
+    EscapeQuit,
 }
 
 impl UiCommand {
     /// Every command of the interface.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::ToggleDebugOverlay,
         Self::CloseWindows,
         Self::ToggleConsole,
@@ -53,6 +59,7 @@ impl UiCommand {
         Self::LoadStates,
         Self::AchievementsAccount,
         Self::ShowShaders,
+        Self::EscapeQuit,
     ];
 
     /// The stable name of the command.
@@ -66,6 +73,7 @@ impl UiCommand {
             Self::LoadStates => LOAD_STATES,
             Self::AchievementsAccount => ACHIEVEMENTS_ACCOUNT,
             Self::ShowShaders => SHOW_SHADERS,
+            Self::EscapeQuit => ESCAPE_QUIT,
         }
     }
 

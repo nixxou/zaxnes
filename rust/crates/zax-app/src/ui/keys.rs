@@ -425,6 +425,16 @@ pub const HANDHELD_HINT_GAME_OPTIONS: &str = "handheld.hint.game_options";
 pub const HANDHELD_HINT_FAVORITE: &str = "handheld.hint.favorite";
 pub const HANDHELD_HINT_RESET_ALL: &str = "handheld.hint.reset_all";
 pub const SHORTCUT_HOME: &str = "shortcut.home";
+pub const SHORTCUT_KEYPAD_5: &str = "shortcut.keypad_5";
+pub const SHORTCUT_KEYPAD_ADD: &str = "shortcut.keypad_add";
+pub const SHORTCUT_KEYPAD_SUBTRACT: &str = "shortcut.keypad_subtract";
+pub const SHORTCUT_ESCAPE: &str = "shortcut.escape";
+pub const STATE_SLOT_CHOSEN: &str = "state.slot_chosen";
+pub const STATE_SLOT_CHOSEN_EMPTY: &str = "state.slot_chosen_empty";
+pub const STATE_SAVED_TO_SLOT: &str = "state.saved_to_slot";
+pub const STATE_SLOT_LOADED: &str = "state.slot_loaded";
+pub const STATE_SLOT_EMPTY: &str = "state.slot_empty";
+pub const ESCAPE_AGAIN_TO_QUIT: &str = "ui.escape_again_to_quit";
 pub const HACKS_TITLE: &str = "hacks.title";
 pub const HACKS_NONE: &str = "hacks.none";
 pub const HACKS_PATCH_NOTE: &str = "hacks.patch_note";
@@ -907,6 +917,16 @@ pub const PUBLISHED: &[&str] = &[
     HANDHELD_HINT_FAVORITE,
     HANDHELD_HINT_RESET_ALL,
     SHORTCUT_HOME,
+    SHORTCUT_KEYPAD_5,
+    SHORTCUT_KEYPAD_ADD,
+    SHORTCUT_KEYPAD_SUBTRACT,
+    SHORTCUT_ESCAPE,
+    STATE_SLOT_CHOSEN,
+    STATE_SLOT_CHOSEN_EMPTY,
+    STATE_SAVED_TO_SLOT,
+    STATE_SLOT_LOADED,
+    STATE_SLOT_EMPTY,
+    ESCAPE_AGAIN_TO_QUIT,
     HACKS_TITLE,
     HACKS_NONE,
     HACKS_PATCH_NOTE,

@@ -273,6 +273,9 @@ setting_ids! {
     InputTouchExtra => "input.touch_extra",
     UiOrientation => "ui.orientation",
     UiSortOption => "ui.sort_option",
+    UiKeyLayout => "ui.key_layout",
+    UiKeyLayoutApplied => "ui.key_layout_applied",
+    UiEscapeQuits => "ui.escape_quits",
     UiLastBrowseDir => "ui.last_browse_dir",
     UiWindowRect => "ui.window_rect",
     // AMD-059 REQ-LUA-116: kept exactly as written; Zaxnes has one library layout.

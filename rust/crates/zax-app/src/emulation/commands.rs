@@ -117,6 +117,11 @@ commands! {
     QuickSave => "state.quick_save", Shortcut::Key("shortcut.quick_save"), false;
     QuickLoad => "state.quick_load", Shortcut::Key("shortcut.quick_load"), false;
     DeleteSlot => "state.delete_slot", Shortcut::None, false;
+    // Lot KEYS: RetroArch's current slot, F2 and F4 save and load it, F6 and F7 choose it.
+    SaveCurrentSlot => "state.save_current_slot", Shortcut::None, false;
+    LoadCurrentSlot => "state.load_current_slot", Shortcut::None, false;
+    PreviousSlot => "state.previous_slot", Shortcut::None, false;
+    NextSlot => "state.next_slot", Shortcut::None, false;
     PauseResume => "emulation.pause_resume", Shortcut::Fixed("P"), true;
     Pause => "emulation.pause", Shortcut::None, false;
     Resume => "emulation.resume", Shortcut::None, false;
@@ -166,7 +171,8 @@ commands! {
     OpenMovie => "tools.open_movie", Shortcut::None, false;
     StopMovie => "tools.stop_movie", Shortcut::None, false;
     SeekMovie => "tools.seek_movie", Shortcut::None, false;
-    ReloadScript => "tools.reload_script", Shortcut::Fixed("F5"), false;
+    // F5 was never a shortcut of it (F5 turns the camera): the menu and the editor reload.
+    ReloadScript => "tools.reload_script", Shortcut::None, false;
     AnnotateMovie => "tools.annotate_movie", Shortcut::Fixed("Ctrl+M"), false;
     ToggleEditorMode => "tools.editor_mode", Shortcut::None, true;
     NewLuaProfile => "tools.new_lua_profile", Shortcut::None, false;

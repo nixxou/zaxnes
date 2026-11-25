@@ -127,6 +127,8 @@ fn ro_1_the_excluded_list_is_unchanged() {
             SettingId::UiOrientation,
             SettingId::UiLibraryView,
             SettingId::VideoMsaa20,
+            // Lot KEYS: the layout the keys were brought to, bookkeeping with no row.
+            SettingId::UiKeyLayoutApplied,
         ],
         options::EXCLUDED
     );

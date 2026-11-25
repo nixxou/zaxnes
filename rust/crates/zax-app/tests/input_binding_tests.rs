@@ -58,6 +58,8 @@ fn device_identity(
 /// player 2 is empty.
 #[test]
 fn req_inp_011_the_default_keyboards_are_the_table_and_an_empty_set() {
+    // SPEC-08 §4.2 is the Zaxnes layout (lot KEYS).
+    zax_app::input::key_layout::set_layout(zax_app::input::key_layout::KeyLayout::Zaxnes);
     let bindings = InputBindings::new();
     let first = bindings.keyboard(0);
 
@@ -770,6 +772,8 @@ fn dec_08_2_capturing_escape_does_not_also_open_the_menu() {
 /// table of §4.3 for a pad.
 #[test]
 fn req_inp_049_a_set_can_be_reset_to_its_defaults() {
+    // SPEC-08 §4.2 is the Zaxnes layout (lot KEYS).
+    zax_app::input::key_layout::set_layout(zax_app::input::key_layout::KeyLayout::Zaxnes);
     let mut bindings = InputBindings::new();
 
     bindings.keyboard_mut(0).clear_all();

@@ -49,6 +49,9 @@ use zax_settings::catalogue::SettingId;
 
 use super::handheld::hacks::HacksModel;
 
+/// How close behind the first press of Escape the second one has to come to quit (lot KEYS).
+const ESCAPE_QUIT_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Space between the notification and the bottom of the window.
 const NOTIFICATION_MARGIN: f32 = 48.0;
 
@@ -144,6 +147,9 @@ pub struct ZaxUi {
     pub force_open_menu: Option<String>,
     /// What a shortcut or a menu entry asked of the console mode, for the front end.
     console_request: Option<UiCommand>,
+    /// When Escape was last pressed in game with nothing to close (lot KEYS): a second press
+    /// within [`ESCAPE_QUIT_WINDOW`] quits.
+    escape_armed: Option<std::time::Instant>,
     /// The capture aid of `--ui-shots`: the options tab to select on the next frame.
     pub force_options_tab: Option<OptionsTab>,
     heading_font: Option<imgui::FontId>,
@@ -208,6 +214,7 @@ impl ZaxUi {
             force_open_menu: None,
             force_options_tab: None,
             console_request: None,
+            escape_armed: None,
             heading_font: None,
             purpose: BrowserPurpose::Rom,
             picker: None,
@@ -477,6 +484,8 @@ impl ZaxUi {
         match command {
             UiCommand::ToggleDebugOverlay => self.state.debug_overlay = !self.state.debug_overlay,
             UiCommand::CloseWindows => self.state.close_all(),
+            // Escape needs the host: [`Self::handle_shortcuts`] takes it.
+            UiCommand::EscapeQuit => {}
             // The console mode belongs to the front end, which takes the request.
             UiCommand::ToggleConsole | UiCommand::SaveStates | UiCommand::LoadStates => {
                 self.console_request = Some(command);
@@ -519,9 +528,41 @@ impl ZaxUi {
                     self.state.options = false;
                 }
                 ShortcutCommand::Host(command) => host.enqueue(command, args),
+                ShortcutCommand::Ui(UiCommand::EscapeQuit) => self.escape_pressed(host),
                 ShortcutCommand::Ui(command) => self.run_ui_command(command),
             }
         }
+    }
+
+    /// Escape in game (lot KEYS, owner request): with `ui.escape_quits` on, the first press
+    /// warns and a second one within [`ESCAPE_QUIT_WINDOW`] quits. A window or a dialogue open
+    /// takes the press for itself; the web page and Android never quit this way.
+    fn escape_pressed(&mut self, host: &mut AppHost) {
+        // A modal window closes as with "Cancel", as the menu key closed it (REQ-UI-004).
+        if host.can_execute(Command::CancelModal, &CommandArgs::default()) && !self.state.dialog {
+            self.escape_armed = None;
+            host.enqueue(Command::CancelModal, CommandArgs::default());
+            return;
+        }
+        if !crate::ui::options::escape_can_quit()
+            || !host.settings().get(SettingId::UiEscapeQuits).as_bool()
+            || self.state.any_window_open()
+            || self.state.dialog
+        {
+            self.escape_armed = None;
+            return;
+        }
+        let now = std::time::Instant::now();
+        if self
+            .escape_armed
+            .is_some_and(|armed| now.duration_since(armed) <= ESCAPE_QUIT_WINDOW)
+        {
+            self.escape_armed = None;
+            host.enqueue(Command::Quit, CommandArgs::default());
+            return;
+        }
+        self.escape_armed = Some(now);
+        host.show_notification(&strings::get(keys::ESCAPE_AGAIN_TO_QUIT), false);
     }
 
     /// The keys that go down now (not yet seen by [`Self::rising_keys`]) with the modifiers of a

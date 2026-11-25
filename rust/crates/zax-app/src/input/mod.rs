@@ -9,6 +9,7 @@ pub mod gamepad_assignment;
 pub mod input_action;
 pub mod input_bindings;
 pub mod input_snapshot;
+pub mod key_layout;
 pub mod libretro_input_map;
 pub mod menu_navigation;
 pub mod press_tracker;

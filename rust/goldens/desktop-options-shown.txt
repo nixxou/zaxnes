@@ -97,7 +97,9 @@ scene.bend_tb
 scene.custom_bg_color
 scene.skybox
 ui.editor_mode
+ui.escape_quits
 ui.fullscreen
+ui.key_layout
 ui.language
 ui.profiler
 ui.roms_folder

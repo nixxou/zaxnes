@@ -12,6 +12,7 @@ use crate::emulation::notification_center::{NotificationSeverity, DEFAULT_SECOND
 use crate::emulation::rollback_history::RollbackSnapshot;
 use crate::persistence::save_slots::{self, is_valid_slot_id, SaveSlotIndex, QUICK_SLOT_ID};
 use crate::persistence::save_state_file::{self, SaveStateContent, SaveStateHeader};
+use crate::ui::{keys, strings};
 use crate::user_data_paths::{remove_file_if_present, rom_file_stem, write_atomic};
 
 impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
@@ -271,6 +272,54 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             self.notifications
                 .show("Quick Load", DEFAULT_SECONDS, NotificationSeverity::Normal);
         }
+    }
+
+    /// A save the player asked for (lot KEYS, owner request): the slot, then its notification.
+    /// The saves the program makes itself (a movie's, the auto save, the resume point) go
+    /// through [`EmulationHost::save_to_slot`] and say nothing.
+    pub(super) fn save_slot_announced(&mut self, slot_id: &str) {
+        if self.save_to_slot(slot_id, true) {
+            let text = strings::format(&strings::get(keys::STATE_SAVED_TO_SLOT), &[slot_id]);
+            self.notifications.show_normal(&text);
+        }
+    }
+
+    /// A load the player asked for (lot KEYS, owner request): the slot, then its notification;
+    /// an empty slot says so. A load waiting on a question (another version of the hack) says
+    /// nothing yet.
+    pub(super) fn load_slot_announced(&mut self, slot_id: &str) {
+        if !self.slots.is_occupied(slot_id) {
+            let text = strings::format(&strings::get(keys::STATE_SLOT_EMPTY), &[slot_id]);
+            self.notifications.show_normal(&text);
+            return;
+        }
+        self.load_slot(slot_id);
+        if self.loading {
+            let text = strings::format(&strings::get(keys::STATE_SLOT_LOADED), &[slot_id]);
+            self.notifications.show_normal(&text);
+        }
+    }
+
+    /// F6 and F7 (lot KEYS): the current slot one down or up, round the ten numbered slots,
+    /// with its notification.
+    pub(super) fn choose_slot(&mut self, step: i32) {
+        let count = i32::try_from(save_slots::EXPOSED_SLOT_COUNT).unwrap_or(10);
+        self.current_slot = (self.current_slot - 1 + step).rem_euclid(count) + 1;
+        let slot_id = save_slots::numbered_slot_id(self.current_slot);
+        let key = if self.slots.is_occupied(&slot_id) {
+            keys::STATE_SLOT_CHOSEN
+        } else {
+            keys::STATE_SLOT_CHOSEN_EMPTY
+        };
+        let text = strings::format(&strings::get(key), &[&slot_id]);
+        self.notifications
+            .show(&text, SHORT_SECONDS, NotificationSeverity::Normal);
+    }
+
+    /// The current slot (lot KEYS), from 1 to 10.
+    #[must_use]
+    pub const fn current_slot(&self) -> i32 {
+        self.current_slot
     }
 
     /// The picture a thumbnail is made of (Q-027): the capture taken at the pause while

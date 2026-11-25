@@ -3,7 +3,7 @@
 
 use zax_platform::input::calibration;
 use zax_platform::input::{
-    GamepadDevice, GamepadHub, KeyboardDevice, PhysicalControl, PointerDevice,
+    GamepadDevice, GamepadHub, Key, KeyboardDevice, PhysicalControl, PointerDevice,
 };
 
 use super::gamepad_assignment::GamepadAssignment;
@@ -231,15 +231,46 @@ impl DesktopInputSource {
     ) -> InputAction {
         let mut mask = InputAction::NONE;
         if let Some(keyboard) = keyboard.filter(|_| !self.keyboard_captured_by_ui) {
+            // Right Control held turns the arrows into the camera's: the game sees none of them.
+            let camera_arrows = player == 0 && keyboard.is_down(Key::ControlRight.code());
             mask |= self.bindings.keyboard(player).sample(|control| {
-                !self.consumed_keys.contains(&control.code) && keyboard_pressed(keyboard, control)
+                !self.consumed_keys.contains(&control.code)
+                    && (!camera_arrows || !is_arrow(control))
+                    && keyboard_pressed(keyboard, control)
             });
+            if player == 0 {
+                mask |= self.fixed_keys(keyboard, camera_arrows);
+            }
         }
         if let Some(pad) = self.pads.device(hub, player) {
             if let Some(set) = self.pads.gamepad_bindings(hub, &mut self.bindings, player) {
                 mask |= set.sample(|control| gamepad_pressed(pad, control));
             }
         }
+        mask
+    }
+
+    /// Player one's fixed keys beside the bindings (lot KEYS, owner request), for a keyboard
+    /// without a keypad: right Control with the arrows turns and tilts the camera, Page Up and
+    /// Page Down zoom, Tab holds the fast forward as `RetroArch`'s L does.
+    fn fixed_keys(&self, keyboard: &dyn KeyboardDevice, camera_arrows: bool) -> InputAction {
+        let down =
+            |key: Key| !self.consumed_keys.contains(&key.code()) && keyboard.is_down(key.code());
+        let mut mask = InputAction::NONE;
+        let mut add = |key: Key, action: InputAction| {
+            if down(key) {
+                mask |= action;
+            }
+        };
+        if camera_arrows {
+            add(Key::Left, InputAction::ROT_LEFT);
+            add(Key::Right, InputAction::ROT_RIGHT);
+            add(Key::Up, InputAction::ROT_UP);
+            add(Key::Down, InputAction::ROT_DOWN);
+        }
+        add(Key::PageUp, InputAction::ZOOM_IN);
+        add(Key::PageDown, InputAction::ZOOM_OUT);
+        add(Key::Tab, InputAction::FAST_FORWARD);
         mask
     }
 
@@ -286,6 +317,14 @@ impl DesktopInputSource {
 #[allow(clippy::float_cmp)] // the C# compares the pointer vectors exactly
 fn pointer_differs(left: [f32; 2], right: [f32; 2]) -> bool {
     left != right
+}
+
+/// Whether `control` is one of the four arrow keys.
+fn is_arrow(control: PhysicalControl) -> bool {
+    control.is_keyboard()
+        && [Key::Left, Key::Right, Key::Up, Key::Down]
+            .iter()
+            .any(|key| key.code() == control.code)
 }
 
 fn keyboard_pressed(keyboard: &dyn KeyboardDevice, control: PhysicalControl) -> bool {

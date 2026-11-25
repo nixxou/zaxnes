@@ -7,6 +7,7 @@ use super::commands::UiCommand;
 use super::keys;
 use super::strings;
 use crate::emulation::commands::{Command, CommandArgs};
+pub use crate::input::key_layout::{layout, set_layout, KeyLayout};
 use crate::persistence::save_slots::EXPOSED_SLOT_COUNT;
 
 /// The modifier keys a shortcut asks for.
@@ -99,6 +100,14 @@ pub const SLOT_KEYS: [Key; EXPOSED_SLOT_COUNT] = [
 /// Every fixed shortcut, with the texts of the language in force.
 #[must_use]
 pub fn all() -> Vec<MenuShortcut> {
+    match layout() {
+        KeyLayout::Zaxnes => zaxnes(),
+        KeyLayout::RetroArch => retroarch(),
+    }
+}
+
+/// The shortcuts of both layouts.
+fn common() -> Vec<MenuShortcut> {
     let shortcut = |key, modifiers, command, text: &str| MenuShortcut {
         key,
         modifiers,
@@ -177,7 +186,144 @@ pub fn all() -> Vec<MenuShortcut> {
             "F12",
         ),
     ];
-    list.extend(console_shortcuts());
+    list.extend([
+        shortcut(
+            Key::F1,
+            ShortcutModifiers::NONE,
+            ShortcutCommand::Ui(UiCommand::ToggleConsole),
+            "F1",
+        ),
+        shortcut(
+            Key::S,
+            ShortcutModifiers::CONTROL,
+            ShortcutCommand::Ui(UiCommand::SaveStates),
+            "Ctrl+S",
+        ),
+        shortcut(
+            Key::L,
+            ShortcutModifiers::CONTROL,
+            ShortcutCommand::Ui(UiCommand::LoadStates),
+            "Ctrl+L",
+        ),
+    ]);
+    list
+}
+
+/// The `RetroArch` layout (lot KEYS): its hotkeys where Zaxnes has the function, the current slot
+/// on F2, F4, F6 and F7 instead of one key per slot, the save state screens on Shift+F2 and
+/// Shift+F4, the camera's default view on Home and the keypad's 5, Escape twice to quit.
+fn retroarch() -> Vec<MenuShortcut> {
+    let shortcut = |key, modifiers, command, text: &str| MenuShortcut {
+        key,
+        modifiers,
+        command,
+        args: CommandArgs::default(),
+        text: text.to_owned(),
+    };
+    let host = ShortcutCommand::Host;
+    let shift = strings::get(keys::SHORTCUT_SHIFT_PREFIX);
+    let mut list = common();
+    list.extend([
+        shortcut(Key::H, ShortcutModifiers::NONE, host(Command::Reset), "H"),
+        shortcut(
+            Key::F,
+            ShortcutModifiers::NONE,
+            host(Command::ToggleFullscreen),
+            "F",
+        ),
+        shortcut(
+            Key::F2,
+            ShortcutModifiers::NONE,
+            host(Command::SaveCurrentSlot),
+            "F2",
+        ),
+        shortcut(
+            Key::F4,
+            ShortcutModifiers::NONE,
+            host(Command::LoadCurrentSlot),
+            "F4",
+        ),
+        shortcut(
+            Key::F6,
+            ShortcutModifiers::NONE,
+            host(Command::PreviousSlot),
+            "F6",
+        ),
+        shortcut(
+            Key::F7,
+            ShortcutModifiers::NONE,
+            host(Command::NextSlot),
+            "F7",
+        ),
+        shortcut(
+            Key::F2,
+            ShortcutModifiers::SHIFT,
+            ShortcutCommand::Ui(UiCommand::SaveStates),
+            &format!("{shift}+F2"),
+        ),
+        shortcut(
+            Key::F4,
+            ShortcutModifiers::SHIFT,
+            ShortcutCommand::Ui(UiCommand::LoadStates),
+            &format!("{shift}+F4"),
+        ),
+        shortcut(
+            Key::Home,
+            ShortcutModifiers::NONE,
+            host(Command::ResetView),
+            &strings::get(keys::SHORTCUT_HOME),
+        ),
+        shortcut(
+            Key::Keypad5,
+            ShortcutModifiers::NONE,
+            host(Command::ResetView),
+            &strings::get(keys::SHORTCUT_KEYPAD_5),
+        ),
+        shortcut(
+            Key::F3,
+            ShortcutModifiers::NONE,
+            host(Command::ToggleFpsCounter),
+            "F3",
+        ),
+        shortcut(
+            Key::F9,
+            ShortcutModifiers::NONE,
+            host(Command::ToggleMute),
+            "F9",
+        ),
+        shortcut(
+            Key::KeypadAdd,
+            ShortcutModifiers::NONE,
+            host(Command::VolumeUp),
+            &strings::get(keys::SHORTCUT_KEYPAD_ADD),
+        ),
+        shortcut(
+            Key::KeypadSubtract,
+            ShortcutModifiers::NONE,
+            host(Command::VolumeDown),
+            &strings::get(keys::SHORTCUT_KEYPAD_SUBTRACT),
+        ),
+        shortcut(
+            Key::Escape,
+            ShortcutModifiers::NONE,
+            ShortcutCommand::Ui(UiCommand::EscapeQuit),
+            &strings::get(keys::SHORTCUT_ESCAPE),
+        ),
+    ]);
+    list
+}
+
+/// The layout Zaxnes always had: one key per slot, Home for the console mode too.
+fn zaxnes() -> Vec<MenuShortcut> {
+    let host = ShortcutCommand::Host;
+    let mut list = common();
+    list.push(MenuShortcut {
+        key: Key::Home,
+        modifiers: ShortcutModifiers::NONE,
+        command: ShortcutCommand::Ui(UiCommand::ToggleConsole),
+        args: CommandArgs::default(),
+        text: strings::get(keys::SHORTCUT_HOME),
+    });
     for (index, key) in SLOT_KEYS.into_iter().enumerate() {
         let slot = i32::try_from(index + 1).unwrap_or(i32::MAX);
         // AMD-013 (Q-030): Ctrl+Fn loads, Shift ("Maj") + Fn saves.
@@ -197,44 +343,6 @@ pub fn all() -> Vec<MenuShortcut> {
         });
     }
     list
-}
-
-/// The shortcuts of the console mode of the desktop (Rust-only, owner request), on keys no
-/// default game binding uses; the slots keep Ctrl+F1 and Shift+F1.
-fn console_shortcuts() -> [MenuShortcut; 4] {
-    let shortcut = |key, modifiers, command, text: String| MenuShortcut {
-        key,
-        modifiers,
-        command: ShortcutCommand::Ui(command),
-        args: CommandArgs::default(),
-        text,
-    };
-    [
-        shortcut(
-            Key::F1,
-            ShortcutModifiers::NONE,
-            UiCommand::ToggleConsole,
-            "F1".to_owned(),
-        ),
-        shortcut(
-            Key::Home,
-            ShortcutModifiers::NONE,
-            UiCommand::ToggleConsole,
-            strings::get(keys::SHORTCUT_HOME),
-        ),
-        shortcut(
-            Key::S,
-            ShortcutModifiers::CONTROL,
-            UiCommand::SaveStates,
-            "Ctrl+S".to_owned(),
-        ),
-        shortcut(
-            Key::L,
-            ShortcutModifiers::CONTROL,
-            UiCommand::LoadStates,
-            "Ctrl+L".to_owned(),
-        ),
-    ]
 }
 
 /// The keys that act without a modifier. REQ-INP-106 lets an implementation add fixed shortcuts
