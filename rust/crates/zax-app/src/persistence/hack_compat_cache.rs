@@ -144,7 +144,7 @@ impl HackCompatCache {
         if let Some(parent) = file.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(file, text)?;
+        crate::user_data_paths::write_atomic(file, text.as_bytes())?;
         self.dirty = false;
         Ok(())
     }
