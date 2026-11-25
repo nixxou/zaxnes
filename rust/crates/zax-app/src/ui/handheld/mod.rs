@@ -400,6 +400,7 @@ impl HandheldUi {
         global.clear_game_values();
         let global_on = global.get(SettingId::VideoWidescreen).as_int() != 0;
         for entry in &mut entries {
+            entry.crc = host.known_rom_crc(&entry.path);
             entry.profile = self.profile_of(host, entry);
             if entry.remote.is_some() {
                 // No file to study nor options of its own yet: its widescreen is the name's.
@@ -419,7 +420,34 @@ impl HandheldUi {
         if let Some(game) = host.resume_game_title() {
             entries.insert(0, RomEntry::resume_row(&game));
         }
+        // Lot GAMEHASH: the files the hash cache has not seen are hashed in the background, once
+        // each, so that the game database can be asked for them (`take_rom_hashes`).
+        host.hash_roms_in_background(
+            entries
+                .iter()
+                .filter(|entry| entry.remote.is_none() && !entry.resume)
+                .map(|entry| entry.path.clone()),
+        );
         self.roms.replace(entries);
+    }
+
+    /// The ROMs hashed in the background since the last frame: their profile and their
+    /// widescreen are found again with their data CRC (lot GAMEHASH). The widescreen stays
+    /// provisional (dark grey, `widescreen_unstudied`) until the ROM is studied.
+    fn take_rom_hashes(&mut self, host: &AppHost) {
+        let hashed = host.take_rom_hashes();
+        if hashed.is_empty() {
+            return;
+        }
+        let mut entries: Vec<RomEntry> = self.roms.entries_mut().to_vec();
+        for entry in entries.iter_mut().filter(|entry| hashed.contains(&entry.path)) {
+            entry.crc = host.known_rom_crc(&entry.path);
+            entry.profile = self.profile_of(host, entry);
+            Self::find_widescreen(host, entry);
+        }
+        for (slot, entry) in self.roms.entries_mut().iter_mut().zip(entries) {
+            *slot = entry;
+        }
     }
 
     /// Whether a widescreen hack fits the game of `entry`, without reading its file (owner
@@ -463,14 +491,20 @@ impl HandheldUi {
     }
 
     /// The profile a game plays with: the one remembered for the file, the one that owns the
-    /// file, or else one that carries the game's name.
+    /// file, the built-in one the game database gives its data CRC (lot GAMEHASH), or else one
+    /// that carries the game's name.
     fn profile_of(&self, host: &AppHost, entry: &RomEntry) -> Option<ProfileMatch> {
         let path = entry.path.to_string_lossy();
         let remembered = host
             .settings_store()
             .and_then(|store| store.games().profile_for(&path).map(str::to_owned))
             .filter(|id| host.games().exists(id));
-        let known = remembered.or_else(|| host.games().game_for_rom(&path));
+        let known = remembered
+            .or_else(|| host.games().game_for_rom(&path))
+            .or_else(|| {
+                let file = crate::gamedb::profile_of(entry.crc?)?;
+                host.games().game_for_profile_file(file)
+            });
         let choice = known
             .and_then(|id| self.library.iter().find(|choice| choice.id == id))
             .or_else(|| {
@@ -528,6 +562,7 @@ impl HandheldUi {
         self.update_flat_view(pad, seconds, frame.host);
         self.update_widescreen_hold(pad, seconds, frame.host);
         self.update_resting_study(seconds, frame.host);
+        self.take_rom_hashes(frame.host);
         if capture_ended {
             return;
         }

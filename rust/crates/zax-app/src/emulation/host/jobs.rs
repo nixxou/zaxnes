@@ -253,7 +253,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             .as_ref()
             .and_then(|store| store.games().profile_for(rom_path).map(str::to_owned))
             .filter(|target| self.games.exists(target));
-        let target = chosen.or_else(|| self.games.game_for_rom(rom_path));
+        let target = chosen
+            .or_else(|| self.games.game_for_rom(rom_path))
+            .or_else(|| self.database_profile(rom_path));
         match target {
             Some(game_id) => self.launch_rom_with_profile(rom_path, &game_id),
             None => self.request_ui(Command::ChooseProfile, &CommandArgs::of_text(rom_path)),
@@ -267,6 +269,14 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Some((path, content)) if path == wanted => Some(content),
             _ => None,
         }
+    }
+
+    /// The built-in 3D profile the game database gives the ROM at `rom_path` (through its data
+    /// CRC, taken once per file), when it is installed (lot GAMEHASH).
+    pub fn database_profile(&self, rom_path: &str) -> Option<String> {
+        let crc = self.rom_data_crc(Path::new(rom_path))?;
+        self.games
+            .game_for_profile_file(crate::gamedb::profile_of(crc)?)
     }
 
     /// Launches `rom_path` on the library entry `game_id`.

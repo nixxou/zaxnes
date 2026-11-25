@@ -561,6 +561,20 @@ impl GameCatalog for LibraryGameCatalog {
             .map(|entry| entry.id().to_owned())
     }
 
+    fn game_for_profile_file(&self, file_name: &str) -> Option<String> {
+        self.library
+            .entries()
+            .iter()
+            .find(|entry| {
+                entry
+                    .profile_path()
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.eq_ignore_ascii_case(file_name))
+            })
+            .map(|entry| entry.id().to_owned())
+    }
+
     fn two_dimensional_mode_id(&self) -> Option<String> {
         self.library
             .entries()

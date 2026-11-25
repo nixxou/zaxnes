@@ -66,6 +66,14 @@ pub trait GameCatalog {
     /// The game whose ROM is `rom_path`.
     fn game_for_rom(&self, rom_path: &str) -> Option<String>;
 
+    /// The game whose profile is the file called `file_name` (`Faxanadu.3dn`, compared without
+    /// regard to case): how a built-in profile the game database names is found once installed
+    /// (lot GAMEHASH). None when no profile has that name.
+    fn game_for_profile_file(&self, file_name: &str) -> Option<String> {
+        let _ = file_name;
+        None
+    }
+
     /// The "2D Mode" entry.
     fn two_dimensional_mode_id(&self) -> Option<String>;
 

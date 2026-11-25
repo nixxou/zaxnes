@@ -163,6 +163,13 @@ impl RomCrcCache {
         hashes
     }
 
+    /// Keeps `hashes`, read from the file in `path` when it had `stamp` (a file read on another
+    /// thread, `rom_hasher`).
+    pub(crate) fn store(&mut self, path: &Path, stamp: Stamp, hashes: RomHashes) {
+        self.load();
+        self.insert(path, stamp, hashes);
+    }
+
     fn insert(&mut self, path: &Path, stamp: Stamp, hashes: RomHashes) {
         let key = path.to_string_lossy().into_owned();
         if self.entries.get(&key) != Some(&(stamp, hashes)) {

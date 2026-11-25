@@ -44,3 +44,13 @@ ROMs fall back to the name rules of before.
   on a 1 s rest in the console list, at start, in the hacks screen) and
   `achievements/library.rs` (server asked when the list rests on a game).
 - Open: licence of the No-Intro names in `gamedb_roms.csv` before a release.
+- Step 6 (in progress): profile order at launch (`jobs.rs`: player choice > ROM of the entry >
+  `gamedb` > chooser) and in the console list (`ui/handheld/mod.rs` `profile_of`: same, then the
+  name rule). `GameCatalog::game_for_profile_file` finds an installed built-in profile by file
+  name. `persistence/rom_hasher.rs`: the list hashes in the background the files the cache has
+  not seen (`hash_roms_in_background`, `take_rom_hashes` each frame). An exact data CRC match of a
+  widescreen hack is shown as certain (it is what the study checks); name/profile matches stay
+  dark grey until studied, as before.
+- Step 7 plan: `data/ra_games.csv` committed with its header only until the owner runs
+  `tools/ra_game_list.py`; looked up by the cache's `data_md5` (any hashed ROM, not only gamedb
+  ones); dim `[RA]` badge while not studied, the percent once studied.

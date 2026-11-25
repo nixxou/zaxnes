@@ -28,6 +28,42 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.rom_crcs.borrow_mut().known(path)
     }
 
+    /// Hashes in the background the ROMs of `paths` the cache has not seen as they are (lot
+    /// GAMEHASH): each file is read once, and [`EmulationHost::take_rom_hashes`] gives them.
+    pub fn hash_roms_in_background(&self, paths: impl IntoIterator<Item = std::path::PathBuf>) {
+        let unknown: Vec<std::path::PathBuf> = {
+            let mut cache = self.rom_crcs.borrow_mut();
+            paths
+                .into_iter()
+                .filter(|path| cache.known_hashes(path).is_none())
+                .collect()
+        };
+        self.rom_hasher.borrow_mut().queue(unknown);
+    }
+
+    /// The ROMs hashed in the background since the last call, now in the cache (written when
+    /// some were).
+    pub fn take_rom_hashes(&self) -> Vec<std::path::PathBuf> {
+        let done = self.rom_hasher.borrow_mut().poll();
+        if done.is_empty() {
+            return Vec::new();
+        }
+        let mut learned = Vec::new();
+        {
+            let mut cache = self.rom_crcs.borrow_mut();
+            for (path, hashed) in done {
+                if let Some((stamp, hashes)) = hashed {
+                    cache.store(&path, stamp, hashes);
+                    learned.push(path);
+                }
+            }
+        }
+        if !learned.is_empty() {
+            self.save_rom_crcs();
+        }
+        learned
+    }
+
     /// Writes the cache of the ROM CRCs when it learned something.
     pub fn save_rom_crcs(&self) {
         let written = self.rom_crcs.borrow_mut().save();

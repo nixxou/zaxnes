@@ -333,6 +333,8 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     slot_caches: SlotCaches,
     /// The CRC of the data of the ROM files, which tells the games a hack is made for.
     rom_crcs: std::cell::RefCell<crate::persistence::rom_crc_cache::RomCrcCache>,
+    /// The ROM files being hashed in the background for the list (lot GAMEHASH).
+    rom_hasher: std::cell::RefCell<crate::persistence::rom_hasher::RomHasher>,
     /// What the study of each ROM file found: whether a widescreen hack fits it.
     hack_compat: std::cell::RefCell<crate::persistence::hack_compat_cache::HackCompatCache>,
     /// The content of an archive read as it was opened (its profile imported then), kept for the
@@ -498,6 +500,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             legacy_slots,
             slot_caches: SlotCaches::default(),
             rom_crcs: std::cell::RefCell::new(rom_crcs),
+            rom_hasher: std::cell::RefCell::default(),
             hack_compat: std::cell::RefCell::new(hack_compat),
             packed_content: None,
             zapper: ZapperState::new(),
