@@ -11,7 +11,9 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Arc;
 
 use super::rom_crc_cache::{RomHashes, Stamp};
 use crate::emulation::rom_file;
@@ -54,6 +56,9 @@ pub struct RomHasher {
     outbox: Sender<Message>,
     inbox: Receiver<Message>,
     pending: HashSet<PathBuf>,
+    /// Set while a game plays: the thread waits before its next file (owner request: the
+    /// hashing must not take a core from the game).
+    paused: Arc<AtomicBool>,
 }
 
 impl Default for RomHasher {
@@ -63,9 +68,13 @@ impl Default for RomHasher {
             outbox,
             inbox,
             pending: HashSet::new(),
+            paused: Arc::new(AtomicBool::new(false)),
         }
     }
 }
+
+/// How long the paused thread sleeps before it looks again.
+const PAUSE_POLL: std::time::Duration = std::time::Duration::from_millis(200);
 
 impl RomHasher {
     /// Hashes `paths` on a thread, the ones not being hashed already. Nothing is done when no
@@ -79,11 +88,15 @@ impl RomHasher {
             return;
         }
         let outbox = self.outbox.clone();
+        let paused = Arc::clone(&self.paused);
         let work = fresh.clone();
         let spawned = std::thread::Builder::new()
             .name("zaxnes-rom-hash".to_owned())
             .spawn(move || {
                 for path in work {
+                    while paused.load(Ordering::Relaxed) {
+                        std::thread::sleep(PAUSE_POLL);
+                    }
                     let sent = if rom_file::is_archive(&path) {
                         hash_archive(&path, &outbox)
                     } else {
@@ -116,6 +129,11 @@ impl RomHasher {
             }
         }
         polled
+    }
+
+    /// Holds the hashing between two files while `paused` (a game plays), lets it go on after.
+    pub fn set_paused(&self, paused: bool) {
+        self.paused.store(paused, Ordering::Relaxed);
     }
 
     /// Whether files are still being hashed.
@@ -234,6 +252,24 @@ mod tests {
         assert!(done
             .iter()
             .any(|(path, hashed)| *path == missing && hashed.is_none()));
+        drop(std::fs::remove_dir_all(&folder));
+    }
+
+    #[test]
+    fn a_paused_hasher_waits_until_it_goes_on() {
+        let folder =
+            std::env::temp_dir().join(format!("zaxnes-rom-hasher-pause-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let rom = folder.join("game.nes");
+        std::fs::write(&rom, b"NES0123456789abDATA").unwrap();
+        let mut hasher = RomHasher::default();
+        hasher.set_paused(true);
+        hasher.queue(vec![rom.clone()]);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(hasher.poll().is_empty());
+        assert!(hasher.is_busy());
+        hasher.set_paused(false);
+        assert_eq!(1, drain(&mut hasher).roms.len());
         drop(std::fs::remove_dir_all(&folder));
     }
 

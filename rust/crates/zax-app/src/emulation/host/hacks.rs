@@ -10,6 +10,7 @@ use zax_settings::values::SettingValue;
 
 use super::hack_options::{is_on, with_option};
 use super::{EmulationHost, GameView};
+use crate::emulation::emulation_state::EmulationState;
 use crate::emulation::game_catalog::GameCatalog;
 use crate::persistence::hack_compat_cache::Certificate;
 
@@ -100,7 +101,14 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// would otherwise rewrite the whole file on the interface's thread at every frame that
     /// brings a result. Written every [`ROM_CRCS_WRITE_INTERVAL`] seconds while hashing, and as
     /// soon as the hashing is over.
-    fn write_rom_crcs_in_batches(&self, learned: bool) {
+    pub(super) fn write_rom_crcs_in_batches(&self, learned: bool) {
+        // Never while a game plays: the file waits for the list (owner request).
+        if self.game_in_play() {
+            if learned && self.rom_crcs_unsaved_since.get().is_none() {
+                self.rom_crcs_unsaved_since.set(Some(self.elapsed));
+            }
+            return;
+        }
         let since = match self.rom_crcs_unsaved_since.get() {
             Some(since) => since,
             None if learned => {
@@ -114,6 +122,13 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             self.rom_crcs_unsaved_since.set(None);
             self.save_rom_crcs();
         }
+    }
+
+    /// Whether a game is loading or running: the background hashing waits and its cache is not
+    /// written meanwhile. A game paused under a menu or the ROM list is not: the list goes on
+    /// learning its games there (owner request).
+    pub(super) fn game_in_play(&self) -> bool {
+        self.loading || self.state == EmulationState::Running
     }
 
     /// The games of the archive in `path`, as the background listed them while it is as it was
@@ -143,7 +158,14 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// CRC, for the list of the ROMs; gives the CRC.
     pub fn certify_rom(&self, path: &Path, image: &[u8]) -> u32 {
         let crc = self.rom_crcs.borrow_mut().hashes_for(path, image).data_crc;
-        self.save_rom_crcs();
+        // While the background hashes, its batches write the file; else it is written now.
+        if self.rom_hasher.borrow().is_busy() || self.game_in_play() {
+            if self.rom_crcs_unsaved_since.get().is_none() {
+                self.rom_crcs_unsaved_since.set(Some(self.elapsed));
+            }
+        } else {
+            self.save_rom_crcs();
+        }
         let certificate = if builtin_patches::widescreen_capable(crc) {
             Certificate::Fits {
                 patch: builtin_patches::for_data_crc(crc).map(|patch| patch.name.to_owned()),

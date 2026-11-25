@@ -986,6 +986,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.take_core_back();
         self.update_achievements(real_seconds);
         self.elapsed += real_seconds;
+        // The ROMs of the list are hashed while no game plays (owner request).
+        self.rom_hasher
+            .borrow()
+            .set_paused(self.game_in_play());
+        // What the hashing or a study kept back is written once the game no longer runs.
+        self.write_rom_crcs_in_batches(false);
         // The notification timer is real time: neither the pause nor the game speed affect it
         // (REQ-UI-080).
         self.notifications.advance(real_seconds);
