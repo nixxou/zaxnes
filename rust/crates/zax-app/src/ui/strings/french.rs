@@ -1712,6 +1712,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::SHORTCUT_HOME, "Origine"),
     (keys::SHORTCUT_KEYPAD_5, "5 du pavé"),
     (keys::HANDHELD_ARCHIVE_GAMES, "{0} jeux"),
+    (keys::HANDHELD_FILTER_HINT, "Filtrer (Ctrl+F)"),
     (keys::SHORTCUT_KEYPAD_ADD, "+ du pavé"),
     (keys::SHORTCUT_KEYPAD_SUBTRACT, "- du pavé"),
     (keys::SHORTCUT_ESCAPE, "Échap"),

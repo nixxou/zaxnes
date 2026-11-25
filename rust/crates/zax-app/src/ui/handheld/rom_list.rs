@@ -121,6 +121,12 @@ impl RomEntry {
         }
     }
 
+    /// Whether the row is a game or a folder of games: what a letter jumps to and the filter keeps.
+    #[must_use]
+    pub const fn is_listed_game(&self) -> bool {
+        !self.resume && !self.back_to_library && !self.close_archive
+    }
+
     /// Whether the row is an archive of several games, which opens on its list.
     #[must_use]
     pub const fn is_folder(&self) -> bool {
@@ -348,6 +354,25 @@ impl RomListModel {
         if let Some(index) = self.entries.iter().position(|entry| entry.path == path) {
             self.selected = index;
         }
+    }
+
+    /// Selects the next game after the selected one whose name starts with `letter` (any case),
+    /// round the end of the list (owner request: a letter typed on the list). Returns whether
+    /// one was found.
+    pub fn jump_to_initial(&mut self, letter: char) -> bool {
+        let wanted = letter.to_ascii_uppercase();
+        let count = self.entries.len();
+        let found = (1..=count)
+            .map(|step| (self.selected + step) % count.max(1))
+            .find(|index| {
+                self.entries
+                    .get(*index)
+                    .is_some_and(|entry| entry.is_listed_game() && entry.initial() == wanted)
+            });
+        if let Some(index) = found {
+            self.selected = index;
+        }
+        found.is_some()
     }
 
     /// Selects the row `index`, when the list has it.

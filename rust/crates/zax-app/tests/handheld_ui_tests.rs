@@ -1112,3 +1112,74 @@ fn resting_on_a_game_studies_it_in_the_background() {
     assert!(harness.host.rom_certificate(&path).is_some());
     assert!(handheld.roms().entries()[0].crc.is_some());
 }
+
+/// Owner request: in an archive, the verified dumps first, [!] then [!!], each in the archive's
+/// order.
+#[test]
+fn the_games_of_an_archive_list_the_verified_dumps_first() {
+    let (mut harness, mut handheld) = start(&[], &[]);
+    let folder = harness.root.path().join("roms");
+    let game = SyntheticRom::counter();
+    write_zip(
+        &folder.join("Set.zip"),
+        &[
+            ("Game (Hack).nes", &game),
+            ("Game [!!].nes", &game),
+            ("Game [!].nes", &game),
+            ("Game (Beta).nes", &game),
+        ],
+    );
+    handheld.refresh_roms(&harness.host);
+    wait_for_the_hashes(&mut harness, &mut handheld);
+    tap(&mut harness, &mut handheld, PadButton::A);
+    let names: Vec<&str> = handheld
+        .roms()
+        .entries()
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    assert_eq!(
+        ["Set", "Game [!]", "Game [!!]", "Game (Hack)", "Game (Beta)"],
+        names.as_slice()
+    );
+}
+
+/// Owner request: the list's filter keeps the games whose name has its text, any case; its
+/// clear button gives the whole list back; a letter jumps to the next game it starts.
+#[test]
+fn the_filter_and_the_letters_find_a_game() {
+    let (_harness, mut handheld) =
+        start(&[], &["Alpha.nes", "Bravo.nes", "Beta.nes", "Charlie.nes"]);
+    handheld.start_filter();
+    assert!(handheld.filter_typing());
+    handheld.type_text("bE");
+    let names: Vec<&str> = handheld
+        .roms()
+        .entries()
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    assert_eq!(["Beta"], names.as_slice());
+    handheld.finish_typing();
+    assert!(!handheld.filter_typing());
+    assert_eq!("bE", handheld.filter());
+    handheld.clear_filter();
+    assert_eq!(4, handheld.roms().entries().len());
+
+    // The selection stayed on Beta, the game the filter had kept.
+    handheld.jump_to_letter('b');
+    assert_eq!(
+        Some("Bravo"),
+        handheld.roms().selected_entry().map(|e| e.name.as_str())
+    );
+    handheld.jump_to_letter('B');
+    assert_eq!(
+        Some("Beta"),
+        handheld.roms().selected_entry().map(|e| e.name.as_str())
+    );
+    handheld.jump_to_letter('c');
+    assert_eq!(
+        Some("Charlie"),
+        handheld.roms().selected_entry().map(|e| e.name.as_str())
+    );
+}

@@ -45,6 +45,16 @@ const PRINTED: [(PadButton, char); 4] = [
 /// press no button then (nor do those of [`PRINTED`]).
 const LETTERS: [Key; 5] = [Key::Q, Key::E, Key::W, Key::R, Key::H];
 
+/// The buttons the keyboard presses while a text field types.
+const TEXT_ENTRY_BUTTONS: [PadButton; 6] = [
+    PadButton::Up,
+    PadButton::Down,
+    PadButton::Left,
+    PadButton::Right,
+    PadButton::PageUp,
+    PadButton::PageDown,
+];
+
 /// The buttons that also follow a configured keyboard binding.
 const CONFIGURED: [(PadButton, InputAction); 6] = [
     (PadButton::Up, InputAction::UP),
@@ -60,6 +70,9 @@ const CONFIGURED: [(PadButton, InputAction); 6] = [
 #[derive(Debug, Clone, Copy, Default)]
 pub struct KeyboardPad {
     held: [bool; PadButton::ALL.len()],
+    /// While a text field of the list types (its filter, owner request): only the arrows and
+    /// the pages press buttons, every other key types.
+    text_entry: bool,
 }
 
 impl KeyboardPad {
@@ -68,7 +81,23 @@ impl KeyboardPad {
     pub const fn new() -> Self {
         Self {
             held: [false; PadButton::ALL.len()],
+            text_entry: false,
         }
+    }
+
+    /// Whether a text field types: only the arrows and the pages press buttons meanwhile.
+    pub fn set_text_entry(&mut self, text_entry: bool) {
+        self.text_entry = text_entry;
+    }
+
+    /// Whether `key` presses a button of the pad by itself (owner request: such a letter typed
+    /// on the list presses its button; any other letter jumps to the games it starts).
+    #[must_use]
+    pub fn is_pad_key(key: Key) -> bool {
+        FIXED.iter().any(|(_, keys)| keys.contains(&key))
+            || key
+                .printed_letter()
+                .is_some_and(|letter| PRINTED.iter().any(|(_, printed)| *printed == letter))
     }
 
     /// Passes the changes of the keyboard on to `pad`; while `typing`, the letters type text
@@ -81,6 +110,10 @@ impl KeyboardPad {
         typing: bool,
     ) {
         // The letters the held keys print, for the buttons of [`PRINTED`].
+        // With Shift, a letter jumps to the games it starts (owner request): it presses nothing.
+        let shift =
+            keyboard.is_down(Key::ShiftLeft as i32) || keyboard.is_down(Key::ShiftRight as i32);
+        let typing = typing || shift;
         let mut held = Vec::new();
         if !typing {
             keyboard.collect_held_keys(&mut held);
@@ -91,10 +124,15 @@ impl KeyboardPad {
             .filter_map(|key| key.printed_letter())
             .collect();
         for (index, button) in PadButton::ALL.into_iter().enumerate() {
-            let down = Self::is_down(button, bindings, keyboard, typing)
-                || PRINTED
-                    .iter()
-                    .any(|&(target, letter)| target == button && printed.contains(&letter));
+            let down = if self.text_entry {
+                TEXT_ENTRY_BUTTONS.contains(&button)
+                    && Self::is_down(button, bindings, keyboard, true)
+            } else {
+                Self::is_down(button, bindings, keyboard, typing)
+                    || PRINTED
+                        .iter()
+                        .any(|&(target, letter)| target == button && printed.contains(&letter))
+            };
             if down != self.held[index] {
                 self.held[index] = down;
                 pad.set(button, down);
@@ -191,6 +229,23 @@ mod tests {
         assert!(pad.is_held(PadButton::B) && pad.is_held(PadButton::Menu));
         keyboard_pad.release(&mut pad);
         assert!(!pad.is_held(PadButton::B));
+    }
+
+    /// Owner request: a letter of the pad presses nothing with Shift (it jumps on the list), and
+    /// a text field leaves only the arrows and the pages to the pad.
+    #[test]
+    fn shift_and_a_text_field_keep_the_letters_from_the_pad() {
+        let (mut keyboard_pad, mut pad) = (KeyboardPad::new(), PadState::new());
+        let (bindings, keys) = (InputBindings::new(), Keys(RefCell::default()));
+        assert!(KeyboardPad::is_pad_key(Key::Q) && !KeyboardPad::is_pad_key(Key::M));
+        keys.hold(&[Key::Q, Key::ShiftLeft]);
+        keyboard_pad.update(&mut pad, &bindings, &keys, false);
+        assert!(!pad.is_held(PadButton::L1));
+        keys.hold(&[Key::Down, Key::Escape, Key::Enter]);
+        keyboard_pad.set_text_entry(true);
+        keyboard_pad.update(&mut pad, &bindings, &keys, false);
+        assert!(pad.is_held(PadButton::Down));
+        assert!(!pad.is_held(PadButton::B) && !pad.is_held(PadButton::A));
     }
 
     /// Owner request: the letters the hints print press their buttons, and press nothing while

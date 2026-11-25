@@ -105,6 +105,9 @@ pub struct ImguiFrontend {
     swipe: f32,
     /// The system's keyboard is up for the console's keyboard screen (Android, Rust-only).
     system_typing: bool,
+    /// Whether the last key that went down presses a button of the console's pad by itself, and
+    /// whether Shift was held (owner request: such a letter jumps only with Shift).
+    last_key_down: Option<(bool, bool)>,
 }
 
 impl ImguiFrontend {
@@ -238,6 +241,7 @@ impl ImguiFrontend {
             touch_was_down: false,
             swipe: 0.0,
             system_typing: false,
+            last_key_down: None,
         })
     }
 
@@ -246,6 +250,68 @@ impl ImguiFrontend {
         self.platform.handle_event(self.context.io_mut(), event);
         if self.system_typing {
             self.type_on_system_keyboard(event);
+        } else if self.console_shown() {
+            self.type_on_the_list(event);
+        }
+    }
+
+    /// The keyboard on the console's list (owner request): its filter's field types what is
+    /// typed while it has the keyboard (Ctrl+F or / give it, Enter keeps the text, Escape
+    /// empties it); otherwise a letter jumps to the games it starts the name of, a letter that
+    /// presses a button of the pad only with Shift.
+    fn type_on_the_list(&mut self, event: &Event) {
+        use sdl2::keyboard::Mod;
+        let Some(handheld) = &mut self.handheld else {
+            return;
+        };
+        if handheld.filter_typing() {
+            match event {
+                Event::TextInput { text, .. } => handheld.type_text(text),
+                Event::KeyDown {
+                    keycode: Some(Keycode::Backspace),
+                    ..
+                } => handheld.erase_typed(),
+                Event::KeyDown {
+                    keycode: Some(Keycode::Return | Keycode::KpEnter),
+                    ..
+                } => handheld.finish_typing(),
+                Event::KeyDown {
+                    keycode: Some(Keycode::Escape),
+                    ..
+                } => handheld.clear_filter(),
+                _ => {}
+            }
+            return;
+        }
+        match event {
+            Event::KeyDown {
+                keycode,
+                scancode,
+                keymod,
+                ..
+            } => {
+                let control = keymod.intersects(Mod::LCTRLMOD | Mod::RCTRLMOD);
+                let shift = keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD);
+                if (control && *keycode == Some(Keycode::F)) || *keycode == Some(Keycode::Slash) {
+                    handheld.start_filter();
+                    self.last_key_down = None;
+                    return;
+                }
+                let pad = scancode
+                    .and_then(Key::from_scancode)
+                    .is_some_and(KeyboardPad::is_pad_key);
+                self.last_key_down = (!control).then_some((pad, shift));
+            }
+            Event::TextInput { text, .. } => {
+                if let Some((pad, shift)) = self.last_key_down.take() {
+                    if !pad || shift {
+                        if let Some(letter) = text.chars().next() {
+                            handheld.jump_to_letter(letter);
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
@@ -422,6 +488,11 @@ impl ImguiFrontend {
                 self.keyboard_pad.release(self.platform.pad_mut());
             } else {
                 let typing = self.handheld.as_ref().is_some_and(HandheldUi::typing);
+                let filtering = self
+                    .handheld
+                    .as_ref()
+                    .is_some_and(HandheldUi::filter_typing);
+                self.keyboard_pad.set_text_entry(filtering);
                 self.keyboard_pad
                     .update(self.platform.pad_mut(), bindings, keyboard, typing);
             }

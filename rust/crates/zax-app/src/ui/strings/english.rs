@@ -1731,6 +1731,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::SHORTCUT_HOME, "Home"),
     (keys::SHORTCUT_KEYPAD_5, "Keypad 5"),
     (keys::HANDHELD_ARCHIVE_GAMES, "{0} games"),
+    (keys::HANDHELD_FILTER_HINT, "Filter (Ctrl+F)"),
     (keys::SHORTCUT_KEYPAD_ADD, "Keypad +"),
     (keys::SHORTCUT_KEYPAD_SUBTRACT, "Keypad -"),
     (keys::SHORTCUT_ESCAPE, "Esc"),

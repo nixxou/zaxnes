@@ -799,6 +799,9 @@ impl HandheldUi {
             format!("{initial}  {}/{total}", self.roms.selected() + 1)
         };
         painter.title(text::PRODUCT_NAME, &position);
+        if self.filter_available() {
+            self.draw_filter_field(&painter, &position);
+        }
         if total == 0 {
             let folder = self.roms_directory.display().to_string();
             let message = strings::format(&strings::get(keys::HANDHELD_ROMS_EMPTY), &[&folder]);
@@ -1734,6 +1737,81 @@ impl HandheldUi {
         let message = strings::get(keys::HANDHELD_EXIT_HOLD);
         let x = (size[0] - ui.calc_text_size(&message)[0]) * 0.5;
         list.add_text([x, top + (metrics.row - metrics.font) * 0.5], TEXT, message);
+    }
+}
+
+impl HandheldUi {
+    /// The filter's field of the list, left of its position in the title band (owner request):
+    /// the text typed, a caret while it types, a hint while empty, and "x" to empty it.
+    fn draw_filter_field(&self, painter: &Painter<'_>, position: &str) {
+        let metrics = &painter.metrics;
+        let band = metrics.title_band();
+        let height = metrics.font + metrics.padding * 0.6;
+        let right = painter.size[0]
+            - metrics.padding * 2.0
+            - if position.is_empty() {
+                0.0
+            } else {
+                painter.width(position)
+            };
+        let width = (painter.size[0] * 0.28).max(metrics.font * 6.0);
+        let left = (right - width).max(painter.size[0] * 0.35);
+        let top = (band - height) * 0.5;
+        let typing = self.filter_typing();
+        painter
+            .list
+            .add_rect([left, top], [right, top + height], PANEL)
+            .filled(true)
+            .build();
+        painter
+            .list
+            .add_rect(
+                [left, top],
+                [right, top + height],
+                if typing { FOCUS } else { DIM },
+            )
+            .build();
+        let inner = metrics.padding * 0.4;
+        let text_y = top + (height - metrics.font) * 0.5;
+        let clear = !self.filter().is_empty();
+        let clear_width = if clear { painter.width("x") + inner * 2.0 } else { 0.0 };
+        if self.filter().is_empty() && !typing {
+            painter.text(
+                left + inner,
+                text_y,
+                UNSTUDIED,
+                &strings::get(keys::HANDHELD_FILTER_HINT),
+            );
+        } else {
+            let shown = if typing {
+                format!("{}|", self.filter())
+            } else {
+                self.filter().to_owned()
+            };
+            // The end of a long text shows, what is being typed.
+            let room = right - left - inner * 2.0 - clear_width;
+            let mut start = 0;
+            while start < shown.len() && painter.width(&shown[start..]) > room {
+                start = shown[start..]
+                    .char_indices()
+                    .nth(1)
+                    .map_or(shown.len(), |(at, _)| start + at);
+            }
+            painter.text(left + inner, text_y, TEXT, &shown[start..]);
+        }
+        painter.zone(
+            [left, top],
+            [right - clear_width, top + height],
+            ZoneAction::FilterField,
+        );
+        if clear {
+            painter.text(right - clear_width + inner, text_y, FOCUS, "x");
+            painter.zone(
+                [right - clear_width, top],
+                [right, top + height],
+                ZoneAction::FilterClear,
+            );
+        }
     }
 }
 

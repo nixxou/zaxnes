@@ -66,6 +66,10 @@ pub enum ZoneAction {
     Button(PadButton),
     /// A hint of two buttons ("L/R", "</>"): the left half the first, the right half the other.
     Pair(PadButton, PadButton),
+    /// The filter's field of the list (owner request): a click gives it the keyboard.
+    FilterField,
+    /// The button that empties the filter.
+    FilterClear,
 }
 
 /// A place of the screen a click reaches.
@@ -199,8 +203,9 @@ pub fn presses(zones: &[Zone], pointer: &PointerInput, focus: Option<usize>) -> 
                 out.extend(std::iter::repeat_n(step, count));
             }
         }
-        // The scrollbar scrolls (`HandheldUi::update_pointer`), it presses nothing.
-        ZoneAction::Scrollbar { .. } => {}
+        // The scrollbar scrolls and the filter's field types (`HandheldUi::update_pointer`):
+        // they press nothing.
+        ZoneAction::Scrollbar { .. } | ZoneAction::FilterField | ZoneAction::FilterClear => {}
     }
     out
 }

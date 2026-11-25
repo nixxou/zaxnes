@@ -151,6 +151,12 @@ pub struct HandheldUi {
     /// The archive of several games whose list is shown (owner request): its games under a row
     /// that goes back to the folder, on the archive's row.
     opened_archive: Option<PathBuf>,
+    /// The rows of the list before the filter: [`Self::roms`] shows those the filter keeps.
+    unfiltered: Vec<RomEntry>,
+    /// The text that filters the list (owner request), case-insensitive, in the names.
+    filter: String,
+    /// Whether the filter's field types: the keyboard's keys type in it.
+    filter_typing: bool,
     metrics: Metrics,
     heading_font: Option<imgui::FontId>,
     effects: Vec<UiEffect>,
@@ -275,6 +281,9 @@ impl HandheldUi {
             return_on_quit: None,
             library_chosen: false,
             opened_archive: None,
+            unfiltered: Vec::new(),
+            filter: String::new(),
+            filter_typing: false,
             metrics: Metrics::for_height(height),
             heading_font: None,
             effects: Vec::new(),
@@ -407,7 +416,8 @@ impl HandheldUi {
                 .map(|entry| {
                     RomEntry::new(crate::emulation::rom_file::member_path(archive, entry))
                 })
-                .collect()
+                .collect::<Vec<RomEntry>>()
+                
         } else if outside {
             host.outside_library_roms()
                 .iter()
@@ -473,7 +483,116 @@ impl HandheldUi {
                 .filter(|entry| entry.remote.is_none() && entry.is_game())
                 .map(|entry| entry.path.clone()),
         );
-        self.roms.replace(entries);
+        if self.opened_archive.is_some() {
+            // Owner request: the verified dumps first, [!] then [!!], each in the archive's order.
+            entries.sort_by_key(|entry| (!entry.close_archive, verified_rank(&entry.name)));
+        }
+        self.unfiltered = entries;
+        self.apply_filter();
+    }
+
+    /// Shows the rows of [`Self::unfiltered`] the filter keeps: the heading rows (Resume, back)
+    /// always, the games and folders whose name has the filter's text.
+    fn apply_filter(&mut self) {
+        let wanted = self.filter.to_lowercase();
+        let kept: Vec<RomEntry> = self
+            .unfiltered
+            .iter()
+            .filter(|entry| {
+                wanted.is_empty()
+                    || !entry.is_listed_game()
+                    || entry.name.to_lowercase().contains(&wanted)
+            })
+            .cloned()
+            .collect();
+        self.roms.replace(kept);
+    }
+
+    /// Changes the row of `path`, in the list and in its unfiltered rows.
+    fn change_row(&mut self, path: &Path, mut change: impl FnMut(&mut RomEntry)) {
+        for entry in self
+            .unfiltered
+            .iter_mut()
+            .chain(self.roms.entries_mut().iter_mut())
+            .filter(|entry| entry.path == path)
+        {
+            change(entry);
+        }
+    }
+
+    /// Whether the list has a filter (owner request); not on a `PortMaster` handheld, which has
+    /// no keyboard.
+    #[must_use]
+    pub const fn filter_available(&self) -> bool {
+        !(self.device && cfg!(target_os = "linux"))
+    }
+
+    /// The text that filters the list.
+    #[must_use]
+    pub fn filter(&self) -> &str {
+        &self.filter
+    }
+
+    /// Whether the filter's field types.
+    #[must_use]
+    pub const fn filter_typing(&self) -> bool {
+        self.filter_typing
+    }
+
+    /// The filter's field takes the keyboard (a click on it, Ctrl+F or /).
+    pub fn start_filter(&mut self) {
+        if self.filter_available() && self.screen == Screen::Home {
+            self.filter_typing = true;
+        }
+    }
+
+    /// The filter's field lets the keyboard go, its text kept.
+    pub fn stop_filter(&mut self) {
+        self.filter_typing = false;
+    }
+
+    /// Empties the filter (its clear button, Escape in the field).
+    pub fn clear_filter(&mut self) {
+        self.filter_typing = false;
+        if !self.filter.is_empty() {
+            self.filter.clear();
+            self.apply_filter();
+        }
+    }
+
+    /// Text typed in the filter's field.
+    fn type_filter(&mut self, text: &str) {
+        self.filter
+            .extend(text.chars().filter(|character| !character.is_control()));
+        self.apply_filter();
+        self.select_first_game();
+    }
+
+    /// The filter's field's backspace.
+    fn erase_filter(&mut self) {
+        if self.filter.pop().is_some() {
+            self.apply_filter();
+            self.select_first_game();
+        }
+    }
+
+    /// Selects the first game or folder of the list (under its heading row, if any).
+    fn select_first_game(&mut self) {
+        if let Some(index) = self
+            .roms
+            .entries()
+            .iter()
+            .position(RomEntry::is_listed_game)
+        {
+            self.roms.select_index(index);
+        }
+    }
+
+    /// A letter typed on the list (owner request): the next game it starts the name of.
+    pub fn jump_to_letter(&mut self, letter: char) {
+        if self.screen == Screen::Home && !self.filter_typing && letter.is_alphanumeric() {
+            self.roms.jump_to_initial(letter);
+        }
     }
 
     /// The ROMs hashed in the background since the last frame: their profile and their
@@ -488,17 +607,15 @@ impl HandheldUi {
         // Only the rows of what came back change, one by one: a folder of thousands of archives
         // listed as they come must not make the whole list again at every frame (owner request,
         // the scrolling slowed down).
-        let indices: Vec<usize> = self
-            .roms
-            .entries()
-            .iter()
-            .enumerate()
-            .filter(|(_, entry)| hashed.contains(&entry.path))
-            .map(|(index, _)| index)
-            .collect();
+        let mut changed = false;
         let mut removed: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
-        for index in indices {
-            let Some(mut entry) = self.roms.entries().get(index).cloned() else {
+        for index in 0..self.unfiltered.len() {
+            let Some(mut entry) = self
+                .unfiltered
+                .get(index)
+                .filter(|entry| hashed.contains(&entry.path))
+                .cloned()
+            else {
                 continue;
             };
             if entry.archive.is_some() && !entry.close_archive {
@@ -522,19 +639,18 @@ impl HandheldUi {
                 entry.widescreen = false;
                 entry.widescreen_other = None;
             }
-            if let Some(slot) = self.roms.entries_mut().get_mut(index) {
+            if let Some(slot) = self.unfiltered.get_mut(index) {
                 *slot = entry;
+                changed = true;
             }
         }
         if !removed.is_empty() {
-            let kept: Vec<RomEntry> = self
-                .roms
-                .entries()
-                .iter()
-                .filter(|entry| entry.close_archive || !removed.contains(&entry.path))
-                .cloned()
-                .collect();
-            self.roms.replace(kept);
+            self.unfiltered
+                .retain(|entry| entry.close_archive || !removed.contains(&entry.path));
+            changed = true;
+        }
+        if changed {
+            self.apply_filter();
         }
     }
 
@@ -568,14 +684,7 @@ impl HandheldUi {
     /// The list shows what the study of the ROM in `path` found, once its hacks screen opened
     /// or its game started.
     fn note_study(&mut self, path: &Path, host: &AppHost) {
-        if let Some(entry) = self
-            .roms
-            .entries_mut()
-            .iter_mut()
-            .find(|entry| entry.path == path)
-        {
-            Self::find_widescreen(host, entry);
-        }
+        self.change_row(path, |entry| Self::find_widescreen(host, entry));
     }
 
     /// The profile a game plays with: the one remembered for the file, the one that owns the
@@ -811,6 +920,28 @@ impl HandheldUi {
                 }
             }
             input.wheel = 0.0;
+        }
+        // The filter's field and its clear button (owner request); a click elsewhere lets the
+        // field's keyboard go.
+        if input.clicked {
+            let hit = self
+                .zones
+                .borrow()
+                .iter()
+                .rev()
+                .find(|zone| zone.contains(input.position))
+                .map(|zone| zone.action);
+            match hit {
+                Some(pointer::ZoneAction::FilterField) => {
+                    self.start_filter();
+                    return;
+                }
+                Some(pointer::ZoneAction::FilterClear) => {
+                    self.clear_filter();
+                    return;
+                }
+                _ => self.stop_filter(),
+            }
         }
         let presses = pointer::presses(&self.zones.borrow(), &input, self.focus_rank.get());
         for button in presses {
@@ -1404,14 +1535,7 @@ impl HandheldUi {
 
     /// The list shows the widescreen of the game in `path` as `on`.
     fn note_widescreen(&mut self, path: &Path, on: bool) {
-        if let Some(entry) = self
-            .roms
-            .entries_mut()
-            .iter_mut()
-            .find(|entry| entry.path == path)
-        {
-            entry.widescreen_on = on;
-        }
+        self.change_row(path, |entry| entry.widescreen_on = on);
     }
 
     /// The hacks screen, while it is open.
@@ -1610,11 +1734,15 @@ impl HandheldUi {
     /// types with it on Android (Rust-only, owner request).
     #[must_use]
     pub fn typing(&self) -> bool {
-        self.screen == Screen::Keyboard && self.keyboard.is_some()
+        self.screen == Screen::Keyboard && self.keyboard.is_some() || self.filter_typing
     }
 
     /// Text typed on the system's keyboard.
     pub fn type_text(&mut self, text: &str) {
+        if self.filter_typing {
+            self.type_filter(text);
+            return;
+        }
         if let Some(keyboard) = self
             .keyboard
             .as_mut()
@@ -1626,6 +1754,10 @@ impl HandheldUi {
 
     /// The system keyboard's backspace.
     pub fn erase_typed(&mut self) {
+        if self.filter_typing {
+            self.erase_filter();
+            return;
+        }
         if let Some(keyboard) = self
             .keyboard
             .as_mut()
@@ -1637,6 +1769,10 @@ impl HandheldUi {
 
     /// The system keyboard's enter: the text goes to its field.
     pub fn finish_typing(&mut self) {
+        if self.filter_typing {
+            self.stop_filter();
+            return;
+        }
         let Some(keyboard) = self
             .keyboard
             .as_ref()
@@ -2001,5 +2137,17 @@ fn apply_camera(preset: CameraPreset, host: &mut AppHost) {
             host.enqueue(Command::SetCameraMode, CommandArgs::of_number(1));
         }
         CameraPreset::ResetView => host.enqueue(Command::ResetView, CommandArgs::default()),
+    }
+}
+
+/// Where a game of an archive comes (owner request): a `[!]` dump first, then `[!!]`, then the
+/// others.
+fn verified_rank(name: &str) -> u8 {
+    if name.contains("[!]") {
+        0
+    } else if name.contains("[!!]") {
+        1
+    } else {
+        2
     }
 }
