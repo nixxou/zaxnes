@@ -986,4 +986,19 @@ fn a_rom_of_the_command_line_plays_without_the_profile_chooser() {
         .settings_store()
         .and_then(|store| store.games().profile_for(&far).map(str::to_owned));
     assert_eq!(None, remembered);
+    // A second launch: the default 3D entry keeps this ROM as its last one, which does not make
+    // it the ROM's profile (it plays the same way, through the fallback, not remembered either).
+    harness.host.enqueue(
+        zax_app::emulation::commands::Command::Stop,
+        zax_app::emulation::commands::CommandArgs::default(),
+    );
+    harness.settle();
+    harness.host.open_rom_from_command_line(&far);
+    harness.settle();
+    assert_eq!(wanted.as_deref(), harness.host.current_game_id());
+    let remembered = harness
+        .host
+        .settings_store()
+        .and_then(|store| store.games().profile_for(&far).map(str::to_owned));
+    assert_eq!(None, remembered);
 }

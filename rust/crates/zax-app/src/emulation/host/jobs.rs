@@ -265,7 +265,13 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             .and_then(|store| store.games().profile_for(rom_path).map(str::to_owned))
             .filter(|target| self.games.exists(target));
         let target = chosen
-            .or_else(|| self.games.game_for_rom(rom_path))
+            // The generic entries (2D, default 3D) keep the last ROM played with them: that is no
+            // profile of the ROM, and it must not hide the game database's.
+            .or_else(|| {
+                self.games
+                    .game_for_rom(rom_path)
+                    .filter(|game_id| !self.is_generic_entry(game_id))
+            })
             .or_else(|| self.database_profile(rom_path));
         if let Some(game_id) = target {
             self.launch_rom_with_profile(rom_path, &game_id);
@@ -286,6 +292,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             self.games.set_rom_path(&game_id, &full.to_string_lossy());
             self.launch_game(&game_id);
         }
+    }
+
+    /// Whether `game_id` is the 2D Mode or the default 3D entry.
+    fn is_generic_entry(&self, game_id: &str) -> bool {
+        self.games.two_dimensional_mode_id().as_deref() == Some(game_id)
+            || self.games.default_three_dimensional_id().as_deref() == Some(game_id)
     }
 
     /// What the archive at `rom_path` held when it was opened, if it was the last one opened.
