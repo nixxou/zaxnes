@@ -268,6 +268,7 @@ mod tests {
         // 2.2 carries in its bundle.
         assert_eq!(vec!["Chase"], profile_names(0x331B_CC87));
         assert_eq!(vec!["zooming_secretary"], profile_names(0x6AA4_574C));
+        assert_eq!(vec!["Depths"], profile_names(0x81B7_6AE6));
     }
 
     /// Every ROM a feature table names by data CRC is in the database, so that the list can show
