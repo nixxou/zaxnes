@@ -60,16 +60,74 @@ pub(crate) struct Stamp {
     pub(crate) nanos: u32,
 }
 
+thread_local! {
+    /// The stamps already read by this thread while a list is made (owner request: one look at
+    /// the disk per file, not one per cache consulted), see [`with_stamp_memo`].
+    static STAMP_MEMO: std::cell::RefCell<Option<HashMap<PathBuf, Option<Stamp>>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Runs `make` with the stamps of the files read once each: every cache that asks for the stamp
+/// of the same file meanwhile gets the first reading (the list of the ROMs, made again at once).
+pub fn with_stamp_memo<R>(make: impl FnOnce() -> R) -> R {
+    let outer = STAMP_MEMO.with(|memo| memo.borrow().is_some());
+    if !outer {
+        STAMP_MEMO.with(|memo| *memo.borrow_mut() = Some(HashMap::new()));
+    }
+    let result = make();
+    if !outer {
+        STAMP_MEMO.with(|memo| *memo.borrow_mut() = None);
+    }
+    result
+}
+
+/// Puts the stamp of `path`, from `metadata` the folder's listing gave with it, in the memo of
+/// [`with_stamp_memo`] when one is open: on Windows the listing has it already, no look at the
+/// file.
+pub fn remember_stamp(path: &Path, metadata: &std::fs::Metadata) {
+    STAMP_MEMO.with(|memo| {
+        if let Some(known) = memo.borrow_mut().as_mut() {
+            known.insert(path.to_path_buf(), Stamp::from_metadata(metadata));
+        }
+    });
+}
+
 impl Stamp {
-    pub(crate) fn of(path: &Path) -> Option<Self> {
-        // A game of an archive (lot LAUNCH-OUTSIDE) changes with its archive.
-        let metadata = std::fs::metadata(crate::emulation::rom_file::container_of(path)).ok()?;
+    fn from_metadata(metadata: &std::fs::Metadata) -> Option<Self> {
         let modified = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
         Some(Self {
             size: metadata.len(),
             seconds: modified.as_secs(),
             nanos: modified.subsec_nanos(),
         })
+    }
+
+    pub(crate) fn of(path: &Path) -> Option<Self> {
+        let memoised =
+            STAMP_MEMO.with(|memo| memo.borrow().as_ref().map(|known| known.get(path).copied()));
+        match memoised {
+            Some(Some(stamp)) => stamp,
+            Some(None) => {
+                let stamp = Self::read(path);
+                STAMP_MEMO.with(|memo| {
+                    if let Some(known) = memo.borrow_mut().as_mut() {
+                        known.insert(path.to_path_buf(), stamp);
+                    }
+                });
+                stamp
+            }
+            None => Self::read(path),
+        }
+    }
+
+    fn read(path: &Path) -> Option<Self> {
+        // A file of the disk at once; a game of an archive (lot LAUNCH-OUTSIDE), which is no
+        // file, changes with its archive.
+        let metadata = match std::fs::metadata(path) {
+            Ok(metadata) if metadata.is_file() => metadata,
+            _ => std::fs::metadata(crate::emulation::rom_file::container_of(path)).ok()?,
+        };
+        Self::from_metadata(&metadata)
     }
 }
 
@@ -363,6 +421,24 @@ fn parse_hashes(record: &Record) -> Option<RomHashes> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Owner request: while a list is made, each file is looked at once: a change meanwhile is
+    /// seen by the next list.
+    #[test]
+    fn a_file_is_looked_at_once_while_a_list_is_made() {
+        let folder =
+            std::env::temp_dir().join(format!("zaxnes-stamp-memo-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let rom = folder.join("game.nes");
+        std::fs::write(&rom, b"1234").unwrap();
+        with_stamp_memo(|| {
+            let first = Stamp::of(&rom).unwrap();
+            std::fs::write(&rom, b"12345678").unwrap();
+            assert_eq!(first, Stamp::of(&rom).unwrap());
+        });
+        assert_eq!(8, Stamp::of(&rom).unwrap().size);
+        drop(std::fs::remove_dir_all(&folder));
+    }
 
     #[test]
     fn a_file_is_read_once_and_again_when_it_changes() {

@@ -402,6 +402,11 @@ impl HandheldUi {
 
     /// Reads the ROM folder again and finds the profile of each game.
     pub fn refresh_roms(&mut self, host: &AppHost) {
+        // One look at the disk per file while the list is made (owner request).
+        crate::persistence::rom_crc_cache::with_stamp_memo(|| self.make_rom_list(host));
+    }
+
+    fn make_rom_list(&mut self, host: &AppHost) {
         self.library = ProfileChooserModel::new(host.games().library())
             .all()
             .to_vec();

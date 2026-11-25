@@ -248,11 +248,24 @@ pub fn scan(directory: &Path) -> Vec<RomEntry> {
     };
     let mut entries: Vec<RomEntry> = listing
         .filter_map(Result::ok)
-        .map(|entry| entry.path())
+        // The listing's own type, read with it: no look at each file (owner request). A link is
+        // followed.
+        .filter(|entry| {
+            entry
+                .file_type()
+                .is_ok_and(|kind| kind.is_file() || kind.is_symlink() && entry.path().is_file())
+        })
+        .map(|entry| {
+            let path = entry.path();
+            if let Some(metadata) = entry.metadata().ok().filter(std::fs::Metadata::is_file) {
+                crate::persistence::rom_crc_cache::remember_stamp(&path, &metadata);
+            }
+            path
+        })
         .filter(|path| {
             // Lot MAPPERS-P: UNIF images and Study Box tapes too; lot FDS: disk images; and the
             // `.zip` and `.7z` archives of a game (owner request), by their extension alone.
-            path.is_file() && crate::emulation::rom_file::is_rom_file(path)
+            crate::emulation::rom_file::is_rom_file(path)
         })
         .map(RomEntry::new)
         .collect();
