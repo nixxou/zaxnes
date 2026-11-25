@@ -161,20 +161,6 @@ impl ShaderProgram {
         }
     }
 
-    /// Sets a `vec4[]` uniform from `values`, four floats per element. Uploaded every call: an
-    /// array is larger than the cache of the scalar setters.
-    pub fn set_vec4_array(&mut self, name: &'static str, values: &[f32]) {
-        let (gl, handle) = (&self.gl, self.handle);
-        let uniform = self.uniforms.entry(name).or_insert_with(|| Uniform {
-            location: gl.uniform_location(handle, name),
-            last: [0; 16],
-            len: 0,
-        });
-        if let Some(location) = uniform.location {
-            self.gl.uniform_vec4_array(location, values);
-        }
-    }
-
     /// Sets a `mat4` uniform from a [`Matrix4x4`]. The matrix is stored row by row and applied
     /// to row vectors, so uploading it untransposed gives GLSL the column-vector matrix the
     /// shaders expect.

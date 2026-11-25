@@ -162,9 +162,7 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
         battery: request.battery,
         profile,
         mesh: request.mesh,
-        // `ZAXNES_DEFAULT_3D`: an empty profile plays as the application's "3D by default (no
-        // profile)" entry rather than as "2D Mode" (lot F3D).
-        force_three_dimensional: std::env::var_os("ZAXNES_DEFAULT_3D").is_some(),
+        force_three_dimensional: false,
         advanced: request.advanced,
         delay_mesh: request.delay_mesh,
         tiles: request.tiles.clone(),
@@ -553,11 +551,6 @@ pub(crate) struct Host {
     /// Emulated frames left before the meshes are handed to the renderer (`--delay-mesh`); 0
     /// means they are handed over as they are built, which is the application's own behaviour.
     delay_mesh: i32,
-    /// Lot F3D: the fields of a Famicom 3D System game, as the application keeps them.
-    stereo: zax_engine3d::stereo::StereoTracker,
-    /// Whether the profile is empty: the default 3D, the only case the relief is given in
-    /// (`ZAXNES_F3D_OFF` turns it off, to compare).
-    profile_free: bool,
 }
 
 impl Host {
@@ -635,10 +628,6 @@ impl Host {
             zapper_offset: Vec3::default(),
             run_ahead: 0,
             delay_mesh: startup.delay_mesh,
-            stereo: zax_engine3d::stereo::StereoTracker::default(),
-            profile_free: profile.permanent_patterns.is_empty()
-                && profile.temporary_patterns.is_empty()
-                && std::env::var_os("ZAXNES_F3D_OFF").is_none(),
         };
         host.install_runtime(profile, model, &mut scene)?;
         host.load_profile(profile, &mut scene, startup.tiles.clone())?;
@@ -736,31 +725,6 @@ impl Host {
         let batch = self.core.frame_batch();
         records.clear();
         records.extend_from_slice(batch.records);
-        // Lot F3D, as `GameSession::convert_batch_lent`: the left fields only, with their relief.
-        self.stereo
-            .push(Some(self.core.expansion_output()), records, |picture| {
-                self.core.pixel_frame_indices_into(picture);
-            });
-        let depth = if self.profile_free && !self.engine.two_dimensional_mode {
-            self.stereo.depth_field()
-        } else {
-            None
-        };
-        if std::env::var_os("ZAXNES_F3D_DEBUG").is_some() {
-            eprintln!(
-                "f3d frame {counter}: out {:02X} active {} 2d {} depth {:?}",
-                self.core.expansion_output(),
-                self.stereo.active(),
-                self.engine.two_dimensional_mode,
-                depth
-            );
-        }
-        if depth.is_some() {
-            if let Some(left) = self.stereo.left_records() {
-                records.clear();
-                records.extend_from_slice(left);
-            }
-        }
         let batch = FrameBatch {
             records,
             palette: batch.palette,
@@ -790,18 +754,6 @@ impl Host {
         self.scripted(scene, |engine| {
             engine.convert(&batch, counter);
         });
-        if let Some(depth) = &depth {
-            // `ZAXNES_F3D_TV`: the depth a player sees from 1.5 m of a small television.
-            let viewing = if std::env::var_os("ZAXNES_F3D_TV").is_some() {
-                zax_engine3d::stereo::Viewing::television()
-            } else {
-                zax_engine3d::stereo::Viewing::default()
-            };
-            if let Some(relief) = self.stereo.relief(&viewing) {
-                let (frame, settings) = self.engine.converting_frame_and_settings_mut();
-                zax_engine3d::stereo::apply(frame, settings, depth, relief, &viewing);
-            }
-        }
         self.engine.publish();
         self.sync_settings(scene);
         // Step 5, after the conversion: with run-ahead off it is one `bool` test.

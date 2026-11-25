@@ -63,14 +63,8 @@ struct AffinePlacement;
 
 impl Placement for AffinePlacement {
     #[inline]
-    fn write(
-        self,
-        data: &mut Vec<u8>,
-        model: &Mat4,
-        deform: Option<&DeformParameters>,
-        stereo: bool,
-    ) {
-        push_affine_placement(data, model, deform, stereo);
+    fn write(self, data: &mut Vec<u8>, model: &Mat4, deform: Option<&DeformParameters>) {
+        push_affine_placement(data, model, deform);
     }
 }
 
@@ -79,9 +73,8 @@ const AFFINE_PLACEMENT: AffinePlacement = AffinePlacement;
 /// Bytes of a deformation (`Deform` in common.wgsl), which only deformed runs have.
 const DEFORM_BYTES: u64 = 128;
 /// Bytes of the frame block (`Frame` in scene.wgsl): two matrices and five `vec4`, the eye of
-/// AMD-049 REQ-SCN-075, the four curvature `vec4` of AMD-043 REQ-SCN-067, AMD-055's own, then the
-/// stereo relief of lot F3D (a head `vec4` and 60 `vec4` of row depths).
-const FRAME_BYTES: u64 = 304 + 16 + 960;
+/// AMD-049 REQ-SCN-075, the four curvature `vec4` of AMD-043 REQ-SCN-067 and AMD-055's own.
+const FRAME_BYTES: u64 = 304;
 /// Bytes of the shadow frame block (`ShadowFrame` in shadow.wgsl): the matrix, the time, and the
 /// same four curvature `vec4` (REQ-SCN-068 bends this pass too).
 const SHADOW_FRAME_BYTES: u64 = 144;
@@ -1510,8 +1503,7 @@ impl WgpuSceneRenderer {
             self.upload_palette(list.palette());
         }
         #[allow(clippy::cast_possible_wrap)] // The side is at most the device limit.
-        let constants = SceneConstants::new(scene, view, volume, self.shadow_map_size as i32)
-            .with_stereo(frame);
+        let constants = SceneConstants::new(scene, view, volume, self.shadow_map_size as i32);
         self.queue.write_buffer(
             &self.frame_buffer,
             0,
@@ -3369,12 +3361,7 @@ fn instance_base(run: &InstanceRun) -> u32 {
 
 /// Appends one placement: the first three rows of the model matrix (the affine part the shader
 /// applies) and the deformation's tile position.
-fn push_affine_placement(
-    data: &mut Vec<u8>,
-    model: &Mat4,
-    deform: Option<&DeformParameters>,
-    stereo: bool,
-) {
+fn push_affine_placement(data: &mut Vec<u8>, model: &Mat4, deform: Option<&DeformParameters>) {
     let tile = deform.map_or(Vec3::ZERO, |deform| deform.tile_relative_to_pivot);
     let cells = [
         model[(0, 0)],
@@ -3392,7 +3379,7 @@ fn push_affine_placement(
         tile.x,
         tile.y,
         tile.z,
-        if stereo { 1.0 } else { 0.0 },
+        0.0,
     ];
     let mut block = [0_u8; AFFINE_BYTES];
     for (slot, value) in block.chunks_exact_mut(4).zip(cells) {
@@ -3513,12 +3500,6 @@ fn frame_bytes(constants: &SceneConstants, local_camera: bool) -> Vec<u8> {
     // step 2: a Classic frame copies no more bytes for the reflections than it already did.
     let up = crate::style::floor_vertical(local_camera);
     push_vec4(&mut data, [constants.voxel_cell, up[0], up[1], up[2]]);
-    // Lot F3D: the relief of the background rows, read only by the tiles flagged in their
-    // placement (`deform_tile.w`).
-    push_vec4(&mut data, constants.stereo.head);
-    for quad in constants.stereo.depths.chunks_exact(4) {
-        push_vec4(&mut data, [quad[0], quad[1], quad[2], quad[3]]);
-    }
     data
 }
 

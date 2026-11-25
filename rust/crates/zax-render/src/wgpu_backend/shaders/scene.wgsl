@@ -32,48 +32,9 @@ struct Frame {
     // block does **not** grow for the reflections and a Classic frame copies no more bytes than it
     // copied after step 2.
     style: vec4<f32>,
-    // Lot F3D: x 1 while a Famicom 3D System game's background has a relief, yz the default
-    // camera's axis, w its distance; then the depth of the 240 rows, four per vec4. Written
-    // whatever the variant; read only for the tiles whose placement has deform_tile.w = 1.
-    stereo_head: vec4<f32>,
-    stereo: array<vec4<f32>, 60>,
 }
 
 @group(0) @binding(0) var<uniform> frame: Frame;
-
-// Lot F3D: the relief of a Famicom 3D System game's background, the twin of zaxStereo in
-// scene.vert. Returns the moved position; `normal` is transported by the cofactor matrix.
-fn zax_stereo_row(row: i32) -> f32 {
-    return frame.stereo[row / 4][row % 4];
-}
-
-struct ZaxStereo {
-    scene: vec3<f32>,
-    normal: vec3<f32>,
-}
-
-fn zax_stereo(scene: vec3<f32>, normal: vec3<f32>) -> ZaxStereo {
-    let u = clamp(247.5 - scene.y, 0.0, 239.0);
-    let row = i32(floor(u));
-    let next = min(row + 1, 239);
-    let d0 = zax_stereo_row(row);
-    let d1 = zax_stereo_row(next);
-    let z = mix(d0, d1, u - f32(row));
-    let slope = d1 - d0;
-    let camera = frame.stereo_head.w;
-    let axis = frame.stereo_head.yz;
-    let e = (camera + z) / camera;
-    let de = -slope / camera;
-    let r0 = vec3<f32>(e, (scene.x - axis.x) * de, 0.0);
-    let r1 = vec3<f32>(0.0, e + (scene.y - axis.y) * de, 0.0);
-    let r2 = vec3<f32>(0.0, -slope, 1.0);
-    var out: ZaxStereo;
-    out.normal = vec3<f32>(dot(cross(r1, r2), normal), dot(cross(r2, r0), normal),
-        dot(cross(r0, r1), normal));
-    out.scene = vec3<f32>(axis + (scene.xy - axis) * e, scene.z + z);
-    return out;
-}
-
 @group(0) @binding(1) var palette: texture_2d<f32>;
 @group(0) @binding(2) var shadow_map: texture_depth_2d;
 
@@ -159,21 +120,13 @@ fn vs_main(
         local += zax_deformation(deforms[draw.modes2.x], instance.deform_tile.xyz, position, frame.params.x);
     }
 
-    var scene = zax_place(instance, local);
+    let scene = zax_place(instance, local);
     var out: VertexOut;
     out.scene = scene.xyz;
     // REQ-SCN-028: the normal is the mesh normal, unchanged by the deformation. The sign is -1
     // for a mirrored placement, whose cofactor matrix points the normal inwards (Q-069).
     out.normal = draw.tilting.z * zax_place_normal(instance, normal);
     out.uv = uv;
-    // Lot F3D: after `out.scene`, which the clipping of REQ-SCN-036 reads where the flat picture
-    // has the tile. Such a tile neither casts nor receives a shadow (`DrawItem::stereo`): the
-    // shadow map and its lookup know only flat positions.
-    if (frame.stereo_head.x != 0.0 && instance.deform_tile.w != 0.0) {
-        let moved = zax_stereo(scene, out.normal);
-        scene = moved.scene;
-        out.normal = moved.normal;
-    }
     out.run = run;
 //#if ZAX_VOXEL_GRID || ZAX_PIXEL_SHADOW
     // The untouched attributes: `position` is the voxel-grid position of REQ-E3D-504 and `normal`

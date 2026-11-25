@@ -155,8 +155,6 @@ pub struct FrameDrawList {
     palette: [Rgb24; FramePalette::ENTRY_COUNT],
     frame_counter: i32,
     time: f32,
-    /// Lot F3D: the relief of the background tiles (the tiles whose `sprite` is false).
-    stereo_relief: Option<crate::stereo::StereoRelief>,
 }
 
 impl Default for FrameDrawList {
@@ -166,7 +164,6 @@ impl Default for FrameDrawList {
             palette: [Rgb24::default(); FramePalette::ENTRY_COUNT],
             frame_counter: 0,
             time: 0.0,
-            stereo_relief: None,
         }
     }
 }
@@ -196,16 +193,8 @@ impl FrameDrawList {
         self.time
     }
 
-    /// Lot F3D: the relief the renderer gives the background tiles' vertices, when the frame
-    /// has one.
-    #[must_use]
-    pub const fn stereo_relief(&self) -> Option<&crate::stereo::StereoRelief> {
-        self.stereo_relief.as_ref()
-    }
-
     fn begin(&mut self, frame: &ConversionFrame) {
         self.tiles.clear();
-        self.stereo_relief.clone_from(&frame.stereo_relief().cloned());
         self.frame_counter = frame.counter();
         self.time = frame.time();
         frame.palette().copy_colors_to(&mut self.palette);
