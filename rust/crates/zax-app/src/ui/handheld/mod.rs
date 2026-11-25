@@ -528,12 +528,31 @@ impl HandheldUi {
                 id
             }
         });
-        let known = remembered
-            .or_else(|| host.games().game_for_rom(&path))
-            .or_else(|| {
-                host.games()
-                    .game_for_profile_names(&crate::gamedb::profile_names(entry.crc?))
-            });
+        let generic = |id: &str| {
+            retired.as_deref() == Some(id)
+                || host.games().default_three_dimensional_id().as_deref() == Some(id)
+        };
+        let real = || {
+            host.games()
+                .game_for_rom(&path)
+                .filter(|id| !generic(id))
+                .or_else(|| {
+                    host.games()
+                        .game_for_profile_names(&crate::gamedb::profile_names(entry.crc?))
+                })
+        };
+        // "No profile" remembered gives way to a profile of the ROM the library got after the
+        // choice (owner request), as when the game is launched.
+        let chosen_at = host
+            .settings_store()
+            .map_or(0, |store| store.games().profile_time_for(&path));
+        let remembered = match remembered {
+            Some(id) if generic(&id) => real()
+                .filter(|real| host.games().added_at(real) > chosen_at)
+                .or(Some(id)),
+            other => other,
+        };
+        let known = remembered.or_else(real);
         let choice = known
             .and_then(|id| self.library.iter().find(|choice| choice.id == id))
             .or_else(|| {

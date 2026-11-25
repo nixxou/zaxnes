@@ -51,9 +51,9 @@ fn the_retired_2d_mode_plays_as_no_profile() {
     assert!(!harness.host.showing_two_dimensional());
 }
 
-/// A ROM remembered with "No profile" plays with its own profile once the library has one.
-#[test]
-fn a_remembered_no_profile_gives_way_to_a_profile_of_the_rom() {
+/// The ROM of Castle Quest, launched once with it, then "No profile" (or the retired 2D Mode)
+/// remembered for it at `chosen_at`, Castle Quest's profile dated `added`.
+fn remembered_no_profile(chosen_at: Option<i64>, added: i64) -> (UiHarness, String) {
     use zax_app::emulation::game_catalog::GameCatalog as _;
     let mut harness = UiHarness::new(&["Castle Quest"]);
     let rom = harness.write_rom("Castle.nes");
@@ -70,20 +70,54 @@ fn a_remembered_no_profile_gives_way_to_a_profile_of_the_rom() {
         .set_profile_for(&full, "g0");
     harness.run_with(Command::OpenRom, CommandArgs::of_text(&rom));
     assert_eq!(Some("g0"), harness.host.current_game_id());
-    // Then a generic entry (No profile, or the retired 2D Mode this library has) remembered for
-    // it, as a choice made before the profile existed.
     let none = harness
         .host
         .games()
         .default_three_dimensional_id()
         .or_else(|| harness.host.games().two_dimensional_mode_id())
         .expect("a generic entry");
-    harness
+    let games = harness
         .host
         .settings_store_mut()
         .expect("a settings store")
+        .games_mut();
+    match chosen_at {
+        Some(time) => games.set_profile_for_at(&full, &none, time),
+        // A choice of a games.json written before the dates: none recorded.
+        None => games.set_profile_for_at(&full, &none, 0),
+    }
+    harness
+        .host
         .games_mut()
-        .set_profile_for(&full, &none);
+        .library_mut()
+        .find_mut("g0")
+        .expect("Castle Quest")
+        .added = added;
+    (harness, rom)
+}
+
+/// Owner request: "No profile" chosen for a ROM gives way to a profile of the ROM the library
+/// got after the choice.
+#[test]
+fn a_profile_added_after_no_profile_was_chosen_takes_over() {
+    let (mut harness, rom) = remembered_no_profile(Some(100), 200);
+    harness.run_with(Command::OpenRom, CommandArgs::of_text(&rom));
+    assert_eq!(Some("g0"), harness.host.current_game_id());
+}
+
+/// ... but "No profile" chosen after the profile was there stays.
+#[test]
+fn no_profile_chosen_after_the_profile_stays() {
+    let (mut harness, rom) = remembered_no_profile(Some(300), 200);
+    harness.run_with(Command::OpenRom, CommandArgs::of_text(&rom));
+    let current = harness.host.current_game_id().map(str::to_owned);
+    assert!(current.is_some_and(|id| id != "g0"));
+}
+
+/// A choice of a file written before the dates existed is older than any dated profile.
+#[test]
+fn an_undated_no_profile_gives_way_to_a_dated_profile() {
+    let (mut harness, rom) = remembered_no_profile(None, 200);
     harness.run_with(Command::OpenRom, CommandArgs::of_text(&rom));
     assert_eq!(Some("g0"), harness.host.current_game_id());
 }

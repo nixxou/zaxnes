@@ -34,6 +34,15 @@ pub struct GameLibraryRecord {
     /// Whether the user marked the game as a favourite (AMD-053 REQ-UI-210, §3 point 11). False
     /// by default, and false for every entry of a file migrated from schema version 1.
     pub favorite: bool,
+    /// When the library first had this profile, in Unix seconds (Rust-only, owner request): a
+    /// "No profile" chosen for a ROM before it gives way to it. 0 in a file written before.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub added: i64,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // the signature serde asks for
+const fn is_zero(value: &i64) -> bool {
+    *value == 0
 }
 
 /// The library file.

@@ -88,6 +88,9 @@ pub struct GameLibraryEntry {
     /// The identity of the profile whose content the entry shows (AMD-065 REQ-PROF-086) and its
     /// generation (REQ-PROF-085).
     identity: GameIdentity,
+    /// When the library first had this profile, in Unix seconds; 0 until
+    /// [`GameLibrary::stamp_new_entries`] dates it (Rust-only, owner request).
+    pub added: i64,
     /// The identities of the profiles this entry has replaced (REQ-PROF-087). A third profile of
     /// the same game must still find the entry by what any of them carried: a built-in paired by
     /// its `Id` with a 2.1 profile of another name stays reachable under that name.
@@ -126,6 +129,7 @@ impl GameLibraryEntry {
             last_played: 0,
             cover: None,
             favorite: false,
+            added: 0,
             identity,
             replaced: Vec::new(),
         }
@@ -501,6 +505,7 @@ impl GameLibrary {
                     last_played: entry.last_played,
                     cover: entry.cover.clone(),
                     favorite: entry.favorite,
+                    added: entry.added,
                 })
                 .collect(),
             ..GameLibraryFile::default()
@@ -590,7 +595,20 @@ impl GameLibrary {
             entry.last_played = record.last_played;
             entry.cover.clone_from(&record.cover);
             entry.favorite = record.favorite;
+            entry.added = record.added;
         }
+    }
+
+    /// Dates every entry the library has not dated yet with `unix_seconds`: a profile new to it
+    /// (imported, or built into a newer program) and, once, every entry of a file written before
+    /// the dates existed. Returns whether any was dated, so that the file is written again.
+    pub fn stamp_new_entries(&mut self, unix_seconds: i64) -> bool {
+        let mut stamped = false;
+        for entry in self.entries.iter_mut().filter(|entry| entry.added == 0) {
+            entry.added = unix_seconds;
+            stamped = true;
+        }
+        stamped
     }
 }
 

@@ -127,6 +127,14 @@ impl LibraryGameCatalog {
         );
         let mut catalog = Self::from_library(library, paths.clone(), log);
         catalog.built_in_contents = built_in.into_contents();
+        // A profile new to the library (built into this program, or found in a profile folder)
+        // is dated now, as is, once, every entry of a file written before the dates existed.
+        if catalog
+            .library
+            .stamp_new_entries(OffsetDateTime::now_utc().unix_timestamp())
+        {
+            catalog.save();
+        }
         catalog
     }
 
@@ -249,6 +257,7 @@ impl LibraryGameCatalog {
             (result.outcome, &result.profile)
         {
             self.library.add_user_profile(imported, Some(&adapter));
+            self.date_profile(&imported.id);
             // A replaced profile must be read again rather than served from the cache.
             self.profiles.remove(&imported.id);
             self.save();
@@ -319,11 +328,22 @@ impl LibraryGameCatalog {
                 .is_some()
             {
                 self.profiles.remove(&profile.id);
+                if let Some(entry) = self.library.find_mut(&profile.id) {
+                    entry.added = OffsetDateTime::now_utc().unix_timestamp();
+                }
                 added = true;
             }
         }
         if added {
             self.save();
+        }
+    }
+
+    /// Dates the profile `game_id` now: it has just been imported, or imported again over an
+    /// older one (Rust-only, owner request: a "No profile" chosen before gives way to it).
+    fn date_profile(&mut self, game_id: &str) {
+        if let Some(entry) = self.library.find_mut(game_id) {
+            entry.added = OffsetDateTime::now_utc().unix_timestamp();
         }
     }
 
@@ -585,6 +605,10 @@ impl GameCatalog for LibraryGameCatalog {
             .iter()
             .find(|entry| entry.is_2d_mode())
             .map(|entry| entry.id().to_owned())
+    }
+
+    fn added_at(&self, game_id: &str) -> i64 {
+        self.library.find(game_id).map_or(0, |entry| entry.added)
     }
 
     fn default_three_dimensional_id(&self) -> Option<String> {

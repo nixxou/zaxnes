@@ -21,6 +21,10 @@ pub struct GameConfigFile<S> {
     storage: S,
     recent: Vec<String>,
     rom_profiles: Vec<(String, String)>,
+    /// When each choice of `rom_profiles` was made, in Unix seconds (Rust-only, owner request):
+    /// a "No profile" choice gives way to a profile of the ROM the library got after it. A
+    /// choice of a file written before has none (0).
+    rom_profile_times: Vec<(String, i64)>,
     rom_options: Vec<(String, GameOptions)>,
     read_only: bool,
     dirty: bool,
@@ -45,6 +49,7 @@ impl<S: SettingsStorage> GameConfigFile<S> {
             storage,
             recent: Vec::new(),
             rom_profiles: Vec::new(),
+            rom_profile_times: Vec::new(),
             rom_options: Vec::new(),
             read_only: false,
             dirty: false,
@@ -92,6 +97,8 @@ impl<S: SettingsStorage> GameConfigFile<S> {
         let profiles_before = self.rom_profiles.len();
         self.rom_profiles
             .retain(|(path, _)| !same_path(path, rom_path));
+        self.rom_profile_times
+            .retain(|(path, _)| !same_path(path, rom_path));
         let options_before = self.rom_options.len();
         self.rom_options
             .retain(|(path, _)| !same_path(path, rom_path));
@@ -111,8 +118,27 @@ impl<S: SettingsStorage> GameConfigFile<S> {
             .map(|(_, id)| id.as_str())
     }
 
-    /// Remembers the profile chosen for a ROM file (AMD-010 REQ-UI-201).
+    /// When the choice of [`Self::profile_for`] was made, in Unix seconds; 0 for a choice of a
+    /// file written before the dates existed.
+    #[must_use]
+    pub fn profile_time_for(&self, rom_path: &str) -> i64 {
+        self.rom_profile_times
+            .iter()
+            .find(|(path, _)| same_path(path, rom_path))
+            .map_or(0, |(_, time)| *time)
+    }
+
+    /// Remembers the profile chosen for a ROM file (AMD-010 REQ-UI-201), dated now.
     pub fn set_profile_for(&mut self, rom_path: &str, profile_id: &str) {
+        self.set_profile_for_at(
+            rom_path,
+            profile_id,
+            OffsetDateTime::now_utc().unix_timestamp(),
+        );
+    }
+
+    /// [`Self::set_profile_for`], dated `unix_seconds`.
+    pub fn set_profile_for_at(&mut self, rom_path: &str, profile_id: &str, unix_seconds: i64) {
         if rom_path.trim().is_empty() || profile_id.trim().is_empty() {
             return;
         }
@@ -129,6 +155,10 @@ impl<S: SettingsStorage> GameConfigFile<S> {
                 .rom_profiles
                 .push((rom_path.to_owned(), profile_id.to_owned())),
         }
+        self.rom_profile_times
+            .retain(|(path, _)| !same_path(path, rom_path));
+        self.rom_profile_times
+            .push((rom_path.to_owned(), unix_seconds));
         self.dirty = true;
     }
 
@@ -158,6 +188,7 @@ impl<S: SettingsStorage> GameConfigFile<S> {
     pub fn load(&mut self, now: OffsetDateTime) -> SettingsLoadResult {
         self.recent.clear();
         self.rom_profiles.clear();
+        self.rom_profile_times.clear();
         self.rom_options.clear();
         self.read_only = false;
         self.dirty = false;
@@ -240,6 +271,12 @@ impl<S: SettingsStorage> GameConfigFile<S> {
             .iter()
             .map(|(path, id)| (path.clone(), Value::String(id.clone())))
             .collect();
+        let times: Map<String, Value> = self
+            .rom_profile_times
+            .iter()
+            .filter(|(path, _)| self.profile_for(path).is_some())
+            .map(|(path, time)| (path.clone(), Value::from(*time)))
+            .collect();
         let options: Map<String, Value> = self
             .rom_options
             .iter()
@@ -254,12 +291,15 @@ impl<S: SettingsStorage> GameConfigFile<S> {
                 (path.clone(), Value::Object(values))
             })
             .collect();
-        let root = serde_json::json!({
+        let mut root = serde_json::json!({
             "schemaVersion": Self::CURRENT_SCHEMA_VERSION,
             "recentRoms": recent,
             "romProfiles": associations,
             "romOptions": options,
         });
+        if !times.is_empty() {
+            root["romProfileTimes"] = Value::Object(times);
+        }
         let bytes = persistence::encode(&root)?;
         self.storage.write(Self::DEFAULT_NAME, &bytes)?;
         self.dirty = false;
@@ -296,6 +336,16 @@ impl<S: SettingsStorage> GameConfigFile<S> {
                     Some((_, value)) => id.clone_into(value),
                     None => self.rom_profiles.push((path.clone(), id.to_owned())),
                 }
+            }
+        }
+        let Some(times) = root.get("romProfileTimes").and_then(Value::as_object) else {
+            return;
+        };
+        for (path, time) in times {
+            if let Some(time) = time.as_i64().filter(|time| *time > 0) {
+                self.rom_profile_times
+                    .retain(|(known, _)| !same_path(known, path));
+                self.rom_profile_times.push((path.clone(), time));
             }
         }
     }

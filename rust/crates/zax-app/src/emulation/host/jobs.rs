@@ -273,16 +273,22 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             .and_then(|store| store.games().profile_for(rom_path).map(str::to_owned))
             .filter(|target| self.games.exists(target));
         // A generic entry remembered for the file (No profile, the retired 2D Mode) gives way to
-        // a real profile of the ROM: the game database's, or one installed since (a 3dSen
-        // import). The player picks No profile again from the chooser if they want it.
-        let real = || {
-            self.games
-                .game_for_rom(rom_path)
-                .filter(|game_id| !self.is_generic_entry(game_id))
-                .or_else(|| self.database_profile(rom_path))
-        };
+        // a real profile of the ROM the library got after the choice: the game database's, or
+        // one imported since (owner request). A choice made after the profile stays; a choice
+        // of a file written before the dates were kept is older than any of them.
         let chosen = match chosen {
-            Some(game_id) if self.is_generic_entry(&game_id) => real().or(Some(game_id)),
+            Some(game_id) if self.is_generic_entry(&game_id) => {
+                let chosen_at = self
+                    .settings_store
+                    .as_ref()
+                    .map_or(0, |store| store.games().profile_time_for(rom_path));
+                self.games
+                    .game_for_rom(rom_path)
+                    .filter(|real| !self.is_generic_entry(real))
+                    .or_else(|| self.database_profile(rom_path))
+                    .filter(|real| self.games.added_at(real) > chosen_at)
+                    .or(Some(game_id))
+            }
             other => other,
         };
         let target = chosen

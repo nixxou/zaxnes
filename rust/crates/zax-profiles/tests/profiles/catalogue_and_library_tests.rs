@@ -809,6 +809,7 @@ fn req_pers_035_the_library_file_is_reconciled_with_the_available_profiles() {
                 last_played: 7,
                 cover: None,
                 favorite: false,
+                added: 0,
             },
             GameLibraryRecord {
                 id: Some("ghost".to_owned()),

@@ -89,6 +89,12 @@ pub trait GameCatalog {
     /// The "3D by default" entry.
     fn default_three_dimensional_id(&self) -> Option<String>;
 
+    /// When the library first had the profile `game_id`, in Unix seconds; 0 when unknown
+    /// (Rust-only, owner request).
+    fn added_at(&self, _game_id: &str) -> i64 {
+        0
+    }
+
     /// Records the ROM chosen for the game.
     fn set_rom_path(&mut self, game_id: &str, rom_path: &str);
 
