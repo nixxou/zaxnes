@@ -2126,3 +2126,14 @@ enforce CHR-RAM write-protection" for them and must give them 8 KiB of PRG-RAM. 
 build keeps MR-15-1 for the K-1029 and lifts it for an image declaring battery RAM or NES 2.0
 PRG-RAM (cartridge database included), which is not a K-1029. Bao Xiao San Guo (`CE102393`,
 8 KiB battery RAM in the database) writes its CHR in mode 0 and now shows its logo.
+
+### J17. Cartridge database keys of dumps with a trainer or a misc ROM
+Mesen's `MesenNesDB.txt` keys a cartridge by the CRC of everything after the header (the NES 2.0
+database's `rom` CRC: trainer and misc ROM included), while the loader looks up `data_crc` (PRG-ROM
+and CHR-ROM only). 698 lines of `cartdb.csv` (616 dumps with a trainer, 82 with a misc ROM) could
+therefore never be found. `tools/cartdb_from_mesen.py` now takes NewRisingSun's `nes20db.xml`
+(2021-12-25, the copy shipped with puNES 0.111) as a second argument and writes those lines under
+their `data_crc`, computed by combining the PRG and CHR CRCs of the NES 2.0 database; the row
+contents are unchanged. Over the Hackset metadata, the database now knows 90 of the 228 dumps with
+a trainer (none before) and 5 598 of 33 931 images (5 509 before). Not checked: a trainer dump
+actually loaded with the database on.
