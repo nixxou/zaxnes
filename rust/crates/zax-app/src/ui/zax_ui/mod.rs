@@ -134,6 +134,9 @@ pub struct ZaxUi {
     pub browser: FileBrowserModel,
     /// Height of the menu bar, which the game view sits under (REQ-UI-200).
     pub chrome_height: f32,
+    /// How far under the bar the FPS counter goes: the console's title band, which holds the
+    /// list's position on the right (owner request: the counter hid it).
+    pub fps_lowered: f32,
     /// Whether the menu bar was drawn this frame: during a game it shows only under the pointer.
     pub menu_bar_drawn: bool,
     /// Whether a menu of the bar was open, or the bar under the pointer, last frame.
@@ -207,6 +210,7 @@ impl ZaxUi {
             chooser: ProfileChooserModel::new(host.games().library()),
             browser: FileBrowserModel::new(),
             chrome_height: 0.0,
+            fps_lowered: 0.0,
             menu_bar_drawn: false,
             menu_engaged: false,
             menu_bar_height: MENU_BAR_REVEAL,

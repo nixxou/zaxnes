@@ -112,6 +112,10 @@ fn req_ui_205_the_model_enumerates_every_menu_command() {
         LoadCurrentSlot,
         PreviousSlot,
         NextSlot,
+        // Lot KEYS step 2: the shader presets in turn, a picture of the game.
+        NextShader,
+        PreviousShader,
+        TakeScreenshot,
     ];
     for command in expected {
         assert!(

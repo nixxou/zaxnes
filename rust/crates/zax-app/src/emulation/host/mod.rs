@@ -168,6 +168,9 @@ pub struct EmulationHostOptions<C: GameCatalog, V: GameView = NoView> {
     pub tile_cache: bool,
 }
 
+/// The speed while the slow motion key is held (lot KEYS).
+const SLOW_MOTION_FACTOR: f64 = 0.5;
+
 impl<C: GameCatalog, V: GameView> EmulationHostOptions<C, V> {
     /// Options with the required parts; everything else is absent.
     #[must_use]
@@ -324,6 +327,10 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     /// The multiplier of the speed the console's in-game menu sets, x1 to x10 (Rust-only, owner
     /// request); see [`EmulationHost::set_speed_boost`].
     speed_boost: f64,
+    /// Whether the slow motion key is held (lot KEYS, `RetroArch`'s E): half the speed.
+    slow_motion: bool,
+    /// Whether F8 asked for a picture of the game, which the application takes (lot KEYS).
+    pub(super) screenshot_requested: bool,
     /// The notification area.
     pub notifications: NotificationCenter,
     /// What the renderer does with the slang shaders, for the shaders window (Rust-only).
@@ -506,6 +513,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             core_ahead: true,
             fast_forward: FastForwardState::new(),
             speed_boost: 1.0,
+            slow_motion: false,
+            screenshot_requested: false,
             notifications: NotificationCenter::new(),
             shader_report: crate::ui::shader_panel::ShaderReport::default(),
             slots: SaveSlotIndex::new(),
@@ -988,9 +997,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.update_achievements(real_seconds);
         self.elapsed += real_seconds;
         // The ROMs of the list are hashed while no game plays (owner request).
-        self.rom_hasher
-            .borrow()
-            .set_paused(self.game_in_play());
+        self.rom_hasher.borrow().set_paused(self.game_in_play());
         // What the hashing or a study kept back is written once the game no longer runs.
         self.write_rom_crcs_in_batches(false);
         // The notification timer is real time: neither the pause nor the game speed affect it
@@ -1664,6 +1671,61 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.speed_boost
     }
 
+    /// Half the game speed while `held` (lot KEYS, `RetroArch`'s slow motion key held).
+    pub fn set_slow_motion(&mut self, held: bool) {
+        if held == self.slow_motion {
+            return;
+        }
+        self.slow_motion = held;
+        self.apply_speed();
+        self.pacer.reset();
+    }
+
+    /// Whether F8 asked for a picture of the game since the last call (lot KEYS).
+    pub fn take_screenshot_request(&mut self) -> bool {
+        std::mem::take(&mut self.screenshot_requested)
+    }
+
+    /// The next (`step` 1) or previous (-1) shader preset of the display mode on screen, no
+    /// shader among them (owner request: `RetroArch`'s M and N, the presets only), with its
+    /// notification.
+    pub(super) fn step_shader(&mut self, step: i32) {
+        use crate::ui::{keys, shader_looks, strings};
+        use zax_settings::shader_slots::{self, ShaderSlot};
+        use zax_settings::values::SettingValue;
+        let three_d = !self.showing_two_dimensional();
+        let wide = self.scene.margin > 0.0 || self.scene.margin_y > 0.0;
+        let slot = ShaderSlot::of(three_d, wide);
+        // None first, then the families the pack holds.
+        let order: Vec<Option<usize>> = std::iter::once(None)
+            .chain(shader_looks::looks().map(|(index, _)| Some(index)))
+            .collect();
+        let ids = slot.ids();
+        let current = (self.settings.get(ids.mode).as_int() == shader_slots::PRESET)
+            .then(|| shader_looks::state_of(&self.settings, slot).map(|state| state.look))
+            .flatten();
+        let at = order.iter().position(|look| *look == current).unwrap_or(0);
+        let count = i32::try_from(order.len()).unwrap_or(1);
+        let at = i32::try_from(at).unwrap_or(0);
+        let next = usize::try_from((at + step).rem_euclid(count)).unwrap_or(0);
+        let chosen = order.get(next).copied().flatten();
+        self.update_settings(|settings| match chosen {
+            Some(look) => {
+                settings.set(ids.mode, SettingValue::Enum(shader_slots::PRESET));
+                shader_looks::choose_look(settings, slot, look);
+            }
+            None => {
+                settings.set(ids.mode, SettingValue::Enum(shader_slots::OFF));
+            }
+        });
+        let name = chosen.map_or_else(
+            || strings::get(keys::SHADER_NONE),
+            |look| shader_looks::LOOKS[look].name(),
+        );
+        let text = strings::format(&strings::get(keys::SHADER_CHOSEN), &[&name]);
+        self.notifications.show_normal(&text);
+    }
+
     /// Multiplies the game speed by `boost`, 1 to 10 (Rust-only, owner request): on top of
     /// `emu.game_speed` and fast forward, kept until it is changed again. The clock is reset as
     /// for a change of the speed setting (REQ-LOOP-075).
@@ -1685,7 +1747,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             self.fast_forward.factor()
         } else {
             self.settings.speed_factor()
-        } * self.speed_boost;
+        } * self.speed_boost
+            * if self.slow_motion {
+                SLOW_MOTION_FACTOR
+            } else {
+                1.0
+            };
         self.pacer.speed = factor;
         let exact_rate = self.settings.get(SettingId::EmuExactRate).as_bool();
         if let Some(session) = &mut self.session {

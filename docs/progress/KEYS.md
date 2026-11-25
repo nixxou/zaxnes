@@ -36,5 +36,9 @@ differs, moves every action still on its default key of the old layout to the ne
 
 1. Done: layout table, keys, current slot, notifications, Escape, options rows, tests
    (`keys_layout_tests.rs`), goldens and OPTIONS-LAYOUT.
-2. Left: screenshot F8, slow motion E, fast forward toggle (no free key: Space is Select),
-   shaders M/N (librashader not in dev), cheats (lot CHEATS), movie record O.
+2. Done (2026-11-26): O records a movie, F8 saves a picture of the game in
+   `<user data>/screenshots/<rom>-<date>-<time>.png`, M / N go round the shader presets (the
+   families of `shader_looks`) of the display mode on screen with "none" among them, E held
+   halves the speed. Also: the GoodSets' `zz_` / `z_` ignored by the name rule, the FPS counter
+   under the console's title band.
+3. Left: cheats (lot CHEATS). Owner: no fast forward toggle on Space.

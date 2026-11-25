@@ -1724,6 +1724,12 @@ impl HandheldUi {
         }
     }
 
+    /// The height of the title band of the screens, in pixels.
+    #[must_use]
+    pub fn title_band(&self) -> f32 {
+        self.metrics.title_band()
+    }
+
     /// The height of a row of the lists, in pixels.
     #[must_use]
     pub const fn row_height(&self) -> f32 {

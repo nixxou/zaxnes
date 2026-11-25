@@ -610,6 +610,9 @@ impl Running {
         // The frames the real-time pad finished during the last wait are this frame's too.
         let mut emulated =
             self.host.tick(real, &snapshot) + std::mem::take(&mut self.state.carried_frames);
+        if self.host.take_screenshot_request() {
+            self.save_screenshot(width, height);
+        }
         self.log_rates(emulated);
         self.state.emulated_now = emulated;
         self.source.end_sample();
@@ -814,6 +817,63 @@ impl Running {
         closing
     }
 
+    /// F8 (lot KEYS, `RetroArch`'s screenshot): the view of the game at the window's size, as a PNG
+    /// in the `screenshots` folder of the user data, named after the ROM and the time.
+    fn save_screenshot(&mut self, width: i32, height: i32) {
+        use crate::ui::{keys, strings};
+        let (Ok(width), Ok(height)) = (u32::try_from(width), u32::try_from(height)) else {
+            return;
+        };
+        let Some(rgb) = self
+            .host
+            .view_mut()
+            .and_then(|view| view.capture_rgb(width, height))
+        else {
+            return;
+        };
+        let png = zax_render::assets::png_image::encode_rgb(width, height, &rgb);
+        let stem = self
+            .host
+            .current_game_id()
+            .and_then(|id| self.host.games().rom_path(id))
+            .and_then(|rom| {
+                std::path::Path::new(&rom)
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy().into_owned())
+            })
+            .unwrap_or_else(|| "zaxnes".to_owned());
+        let now = OffsetDateTime::now_local().unwrap_or_else(|_| OffsetDateTime::now_utc());
+        let name = format!(
+            "{stem}-{:04}{:02}{:02}-{:02}{:02}{:02}.png",
+            now.year(),
+            u8::from(now.month()),
+            now.day(),
+            now.hour(),
+            now.minute(),
+            now.second()
+        );
+        let folder = self.host.paths().root.join("screenshots");
+        let written = png
+            .ok()
+            .ok_or_else(|| std::io::Error::other("PNG"))
+            .and_then(|bytes| {
+                std::fs::create_dir_all(&folder)?;
+                crate::user_data_paths::write_atomic(&folder.join(&name), &bytes)
+            });
+        match written {
+            Ok(()) => {
+                let text = strings::format(&strings::get(keys::SCREENSHOT_SAVED), &[&name]);
+                self.host.notifications.show_normal(&text);
+            }
+            Err(error) => {
+                log(&format!("screenshot {name} not written: {error}"));
+                self.host
+                    .notifications
+                    .show_error(&strings::get(keys::SCREENSHOT_FAILED));
+            }
+        }
+    }
+
     /// Puts the keyboard layout of the options in force (lot KEYS): the fixed shortcuts follow
     /// it at once, and player one's keys still on the defaults of the layout they were last
     /// brought to move to those of this one, once.
@@ -905,6 +965,16 @@ impl Running {
                 self.host.enqueue(command, CommandArgs::default());
             }
         }
+        // RetroArch's slow motion (lot KEYS): E held, in game, keys of the game's own.
+        let slow = crate::input::key_layout::layout()
+            == crate::input::key_layout::KeyLayout::RetroArch
+            && !self.ui.console_shown()
+            && !self.ui.wants_keyboard()
+            && zax_platform::input::KeyboardDevice::is_down(
+                &self.input.keyboard,
+                zax_platform::input::Key::E as i32,
+            );
+        self.host.set_slow_motion(slow);
         let capturing = self.source.rebinding().suppresses_actions();
         self.ui.handle_shortcuts(
             &mut self.host,

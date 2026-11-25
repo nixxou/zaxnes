@@ -42,6 +42,10 @@ fn the_retroarch_layout_has_retroarch_hotkeys() {
         (Key::Keypad5, none, Host(Command::ResetView)),
         (Key::F9, none, Host(Command::ToggleMute)),
         (Key::Escape, none, Ui(UiCommand::EscapeQuit)),
+        (Key::O, none, Host(Command::ToggleMovieRecording)),
+        (Key::F8, none, Host(Command::TakeScreenshot)),
+        (Key::M, none, Host(Command::NextShader)),
+        (Key::N, none, Host(Command::PreviousShader)),
         // Kept from Zaxnes.
         (Key::F11, none, Host(Command::ToggleTwoDimensional)),
         (Key::P, none, Host(Command::PauseResume)),
@@ -181,4 +185,19 @@ fn escape_closes_a_modal_window_first() {
     harness.pump();
     assert!(!harness.ui.state.file_browser);
     assert!(!harness.host.quit_requested());
+}
+
+/// Owner request: M and N go round the shader presets of the display mode, no shader among
+/// them, and say which.
+#[test]
+fn the_shader_keys_go_round_the_presets_and_say_which() {
+    strings::set_language(UiLanguage::English);
+    let mut harness = LoopHarness::create();
+    harness.launch("castle");
+    harness.run(Command::NextShader);
+    let first = notification(&harness).expect("a notification");
+    assert!(first.starts_with("Shader: "), "{first}");
+    // Back where it was: no shader.
+    harness.run(Command::PreviousShader);
+    assert_eq!(Some("Shader: none".to_owned()), notification(&harness));
 }

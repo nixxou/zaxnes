@@ -310,7 +310,26 @@ fn retroarch() -> Vec<MenuShortcut> {
             &strings::get(keys::SHORTCUT_ESCAPE),
         ),
     ]);
+    list.extend(retroarch_tools());
     list
+}
+
+/// The keys of step 2 of lot KEYS in the `RetroArch` layout: the movie, the screenshot and the
+/// shader presets.
+fn retroarch_tools() -> [MenuShortcut; 4] {
+    let shortcut = |key, command, text: &str| MenuShortcut {
+        key,
+        modifiers: ShortcutModifiers::NONE,
+        command: ShortcutCommand::Host(command),
+        args: CommandArgs::default(),
+        text: text.to_owned(),
+    };
+    [
+        shortcut(Key::O, Command::ToggleMovieRecording, "O"),
+        shortcut(Key::F8, Command::TakeScreenshot, "F8"),
+        shortcut(Key::M, Command::NextShader, "M"),
+        shortcut(Key::N, Command::PreviousShader, "N"),
+    ]
 }
 
 /// The layout Zaxnes always had: one key per slot, Home for the console mode too.

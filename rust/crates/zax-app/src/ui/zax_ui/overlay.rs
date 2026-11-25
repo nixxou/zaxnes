@@ -150,7 +150,10 @@ impl ZaxUi {
         let window = ui
             .window("FPS")
             .position(
-                [ui.io().display_size[0] - 12.0, self.chrome_height + 12.0],
+                [
+                    ui.io().display_size[0] - 12.0,
+                    self.chrome_height + self.fps_lowered + 12.0,
+                ],
                 Condition::Always,
             )
             .position_pivot([1.0, 0.0])

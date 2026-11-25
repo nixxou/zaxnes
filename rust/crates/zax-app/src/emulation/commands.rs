@@ -157,6 +157,11 @@ commands! {
     ToggleHackOption => "video.toggle_hack_option", Shortcut::None, false;
     ToggleFullscreen => "video.toggle_fullscreen", Shortcut::Key("shortcut.alt_enter"), true;
     ToggleFpsCounter => "video.toggle_fps", Shortcut::None, true;
+    // Lot KEYS step 2: RetroArch's M and N, the shader presets of the display mode in turn, no
+    // shader among them; F8, a picture of the game.
+    NextShader => "video.next_shader", Shortcut::None, false;
+    PreviousShader => "video.previous_shader", Shortcut::None, false;
+    TakeScreenshot => "video.screenshot", Shortcut::None, false;
     SetVolume => "audio.set_volume", Shortcut::None, false;
     VolumeUp => "audio.volume_up", Shortcut::None, false;
     VolumeDown => "audio.volume_down", Shortcut::None, false;

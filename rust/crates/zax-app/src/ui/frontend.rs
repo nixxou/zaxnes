@@ -626,7 +626,9 @@ impl ImguiFrontend {
                 if !device && self.shots.is_none() {
                     leave_console = self.ui.draw_menu_bar_over_console(ui, frame.host);
                 }
+                self.ui.fps_lowered = handheld.title_band();
                 self.ui.draw_fps_counter(ui, frame);
+                self.ui.fps_lowered = 0.0;
             } else if !device && playing && !desktop_modal && self.shots.is_none() {
                 // The gamepad plays as in the console mode (owner request): the menu button
                 // opens its menu, X, Y and L2 act in game.

@@ -265,6 +265,12 @@ pub fn scan(directory: &Path) -> Vec<RomEntry> {
 #[must_use]
 pub fn normalise(name: &str) -> String {
     let untagged = name.split(['(', '[']).next().unwrap_or_default();
+    // The GoodSets' `zz_` (and `z_`) that sends a version to the end of a list (owner request).
+    let lower = untagged.to_lowercase();
+    let untagged = ["zz_", "z_"]
+        .iter()
+        .find(|prefix| lower.starts_with(*prefix))
+        .map_or(untagged, |prefix| &untagged[prefix.len()..]);
     untagged
         .chars()
         .filter(|character| character.is_alphanumeric())
@@ -610,6 +616,17 @@ mod tests {
         ));
         assert_eq!(None, model.handle(PadButton::B));
         assert_eq!(None, RomListModel::default().handle(PadButton::A));
+    }
+
+    /// Owner request: the `zz_` of the `GoodSets` does not hide the game's name.
+    #[test]
+    fn the_goodsets_zz_prefix_is_not_part_of_the_name() {
+        assert_eq!(
+            normalise("Super Mario Bros."),
+            normalise("zz_Super Mario Bros. [World][GoodSet][p1][!]")
+        );
+        assert_eq!(normalise("Zelda"), normalise("z_Zelda (U)"));
+        assert_eq!("zzyzx", normalise("Zzyzx"));
     }
 
     #[test]

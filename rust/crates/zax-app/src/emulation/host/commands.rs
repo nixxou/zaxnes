@@ -94,6 +94,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             }
             Command::NewLuaProfile | Command::CopyAgentPrompt => self.editor_allows(command),
             Command::SeekMovie => !loading && self.movie_timeline.is_some() && args.number >= 0,
+            Command::NextShader | Command::PreviousShader | Command::TakeScreenshot => {
+                !loading && self.session.is_some()
+            }
             Command::OpenRecentRom
             | Command::PreviousSlot
             | Command::NextSlot
@@ -218,7 +221,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::ToggleReflections
             | Command::ToggleHackOption
             | Command::ToggleFullscreen
-            | Command::ToggleFpsCounter => self.execute_video(command, args),
+            | Command::ToggleFpsCounter
+            | Command::NextShader
+            | Command::PreviousShader
+            | Command::TakeScreenshot => self.execute_video(command, args),
             Command::SetVolume
             | Command::VolumeUp
             | Command::VolumeDown
@@ -354,6 +360,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
 
     fn execute_video(&mut self, command: Command, args: &CommandArgs) {
         match command {
+            Command::NextShader => self.step_shader(1),
+            Command::PreviousShader => self.step_shader(-1),
+            // The picture is taken by the application, which has the window (lot KEYS).
+            Command::TakeScreenshot => self.screenshot_requested = true,
             Command::ToggleTwoDimensional => self.two_dimensional_view = !self.two_dimensional_view,
             Command::ResetView => {
                 self.scene.camera.reset_view();
