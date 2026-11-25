@@ -357,6 +357,8 @@ pub const SHORTCUT_LONG_PRESS_MENU: &str = "shortcut.long_press_menu";
 // ------------------------------------------- handheld interface (Rust-only)
 pub const HANDHELD_GAMES_TITLE: &str = "handheld.games_title";
 pub const HANDHELD_ROMS_EMPTY: &str = "handheld.roms_empty";
+/// The row over the files of the command line (lot LAUNCH-OUTSIDE): back to the ROM folder.
+pub const HANDHELD_BACK_TO_LIBRARY: &str = "handheld.back_to_library";
 pub const HANDHELD_TAG_2D: &str = "handheld.tag_2d";
 pub const HANDHELD_PROFILE_FOR: &str = "handheld.profile_for";
 pub const HANDHELD_HINT_PLAY: &str = "handheld.hint.play";
@@ -843,6 +845,7 @@ pub const PUBLISHED: &[&str] = &[
     SHORTCUT_LONG_PRESS_MENU,
     HANDHELD_GAMES_TITLE,
     HANDHELD_ROMS_EMPTY,
+    HANDHELD_BACK_TO_LIBRARY,
     HANDHELD_TAG_2D,
     HANDHELD_PROFILE_FOR,
     HANDHELD_HINT_PLAY,

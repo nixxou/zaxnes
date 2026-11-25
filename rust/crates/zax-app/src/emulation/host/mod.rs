@@ -357,6 +357,9 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     resume: Option<crate::persistence::resume_point::ResumePoint>,
     /// `-noresume`: the resume point is neither read, nor written, nor erased this run (Q-088).
     suspend_resume: bool,
+    /// The ROM files given on the command line (lot LAUNCH-OUTSIDE), as absolute paths: the list
+    /// shows only them until "Back to library", and they leave the resume point alone.
+    outside_library: Vec<String>,
     /// `-emustats`: where the one line per emulated frame goes; none when the option is off,
     /// which is the default (AMD-053 REQ-UI-213).
     emu_stats: Option<LogFn>,
@@ -510,6 +513,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             defer_conversion: false,
             resume: None,
             suspend_resume,
+            outside_library: Vec::new(),
             emu_stats,
             library_search: String::new(),
         };

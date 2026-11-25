@@ -111,9 +111,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
 
         // Rule 1, which wins over rule 2: quitting from Stopped erases the point, so ignoring the
-        // Resume entry and then quitting without playing does clear it.
+        // Resume entry and then quitting without playing does clear it. Lot LAUNCH-OUTSIDE: not
+        // in a run started on a file of the command line, which is no visit of the library.
         if self.state == EmulationState::Stopped {
-            self.clear_resume_point();
+            if self.outside_library.is_empty() {
+                self.clear_resume_point();
+            }
             return false;
         }
 
@@ -129,6 +132,15 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             return false;
         }
         if !self.paths.is_writable {
+            return false;
+        }
+        // Lot LAUNCH-OUTSIDE: the Resume row is the library's; a game of the command line leaves
+        // the point as it was and only gets its auto slot.
+        if self
+            .current_rom_path()
+            .is_some_and(|rom| self.is_outside_library(rom))
+        {
+            self.write_auto_save();
             return false;
         }
 
@@ -168,6 +180,29 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
     }
 
+    // ------------------------------------------- the files of the command line (LAUNCH-OUTSIDE)
+
+    /// Records that `rom` was given on the command line: the list shows it alone, under "Back to
+    /// library", and playing it leaves the resume point alone.
+    pub fn mark_outside_library(&mut self, rom: &str) {
+        let rom = absolute(rom);
+        if !self.outside_library.contains(&rom) {
+            self.outside_library.push(rom);
+        }
+    }
+
+    /// The ROM files given on the command line, in their order.
+    #[must_use]
+    pub fn outside_library_roms(&self) -> &[String] {
+        &self.outside_library
+    }
+
+    /// Whether `rom` is one of the files given on the command line.
+    #[must_use]
+    pub fn is_outside_library(&self, rom: &str) -> bool {
+        self.outside_library.contains(&absolute(rom))
+    }
+
     // --------------------------------------------- favourites and search (REQ-UI-210, REQ-UI-211)
 
     /// The text typed in the search of the enumeration of the games (`library.search`).
@@ -180,4 +215,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     pub fn set_library_search(&mut self, text: &str) {
         text.clone_into(&mut self.library_search);
     }
+}
+
+/// `path` made absolute, as the command line's files are kept.
+fn absolute(path: &str) -> String {
+    std::path::absolute(path).map_or_else(
+        |_| path.to_owned(),
+        |full| full.to_string_lossy().into_owned(),
+    )
 }

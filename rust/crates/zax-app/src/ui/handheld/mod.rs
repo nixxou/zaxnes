@@ -145,6 +145,9 @@ pub struct HandheldUi {
     launch_wait: f32,
     /// The ROM another application asked for and wants to have back on quitting it.
     return_on_quit: Option<std::path::PathBuf>,
+    /// Whether "Back to library" was chosen (lot LAUNCH-OUTSIDE): the list shows the ROM folder,
+    /// not the files of the command line.
+    library_chosen: bool,
     metrics: Metrics,
     heading_font: Option<imgui::FontId>,
     effects: Vec<UiEffect>,
@@ -267,6 +270,7 @@ impl HandheldUi {
             combo: ExitCombo::new(),
             launch_wait: 0.0,
             return_on_quit: None,
+            library_chosen: false,
             metrics: Metrics::for_height(height),
             heading_font: None,
             effects: Vec::new(),
@@ -388,11 +392,21 @@ impl HandheldUi {
         self.library = ProfileChooserModel::new(host.games().library())
             .all()
             .to_vec();
+        // Lot LAUNCH-OUTSIDE: the files of the command line alone, under "Back to library",
+        // until it is chosen.
+        let outside = !self.library_chosen && !host.outside_library_roms().is_empty();
         // Web build: the games of the pages of games, downloaded when played (owner request).
-        let mut entries = rom_list::with_remote_games(
-            rom_list::scan(&self.roms_directory),
-            &crate::web_bridge::remote_games(),
-        );
+        let mut entries = if outside {
+            host.outside_library_roms()
+                .iter()
+                .map(|rom| RomEntry::new(PathBuf::from(rom)))
+                .collect()
+        } else {
+            rom_list::with_remote_games(
+                rom_list::scan(&self.roms_directory),
+                &crate::web_bridge::remote_games(),
+            )
+        };
         // The widescreen of the games without one of their own: the global value.
         let mut global = host.settings().clone();
         global.clear_session_layer();
@@ -415,8 +429,11 @@ impl HandheldUi {
                 .find(|(id, _)| *id == SettingId::VideoWidescreen)
                 .map_or(global_on, |(_, value)| value.as_int() != 0);
         }
-        // REQ-LOOP-076: the Resume entry heads the enumeration of the games.
-        if let Some(game) = host.resume_game_title() {
+        // REQ-LOOP-076: the Resume entry heads the enumeration of the games, the library's only
+        // (lot LAUNCH-OUTSIDE): over the command line's files, "Back to library" heads instead.
+        if outside {
+            entries.insert(0, RomEntry::library_row());
+        } else if let Some(game) = host.resume_game_title() {
             entries.insert(0, RomEntry::resume_row(&game));
         }
         // Lot GAMEHASH: the files the hash cache has not seen are hashed in the background, once
@@ -424,7 +441,7 @@ impl HandheldUi {
         host.hash_roms_in_background(
             entries
                 .iter()
-                .filter(|entry| entry.remote.is_none() && !entry.resume)
+                .filter(|entry| entry.remote.is_none() && entry.is_game())
                 .map(|entry| entry.path.clone()),
         );
         self.roms.replace(entries);
@@ -1127,7 +1144,8 @@ impl HandheldUi {
             }
             RomListCommand::ChooseProfile(_)
             | RomListCommand::Options
-            | RomListCommand::ResumeLast => {}
+            | RomListCommand::ResumeLast
+            | RomListCommand::BackToLibrary => {}
             RomListCommand::GameOptions(path)
             | RomListCommand::Widescreen(path)
             | RomListCommand::Hacks(path)
@@ -1192,6 +1210,11 @@ impl HandheldUi {
             // AMD-053 REQ-LOOP-076: the Resume row, which loads the resume point.
             RomListCommand::ResumeLast => {
                 host.enqueue(Command::ResumeLast, CommandArgs::default());
+            }
+            // Lot LAUNCH-OUTSIDE: the ROM folder from now on.
+            RomListCommand::BackToLibrary => {
+                self.library_chosen = true;
+                self.refresh_roms(host);
             }
         }
     }

@@ -2671,6 +2671,8 @@ fn start_game_from_command_line(
     };
     let full: PathBuf = std::path::absolute(rom).unwrap_or_else(|_| PathBuf::from(rom));
     let full = full.to_string_lossy().into_owned();
+    // Lot LAUNCH-OUTSIDE: back to the list shows this file alone, under "Back to library".
+    host.mark_outside_library(&full);
     if let Some(movie) = options.movie_path.as_deref() {
         let movie = std::path::absolute(movie).unwrap_or_else(|_| PathBuf::from(movie));
         host.play_movie_after_launch(&movie.to_string_lossy());

@@ -46,6 +46,9 @@ pub struct RomEntry {
     /// Whether this row is the `Resume` entry of AMD-053 REQ-LOOP-076 rather than a ROM file: it
     /// heads the list while the resume point stands, and its `name` is the title of its game.
     pub resume: bool,
+    /// Whether this row is "Back to library" (lot LAUNCH-OUTSIDE) rather than a ROM file: it
+    /// heads the list of the files given on the command line and goes back to the ROM folder.
+    pub back_to_library: bool,
     /// The address of a game of a page of games (web build), not downloaded yet: playing it
     /// downloads it (owner request, 2026-11-20).
     pub remote: Option<String>,
@@ -69,6 +72,7 @@ impl RomEntry {
             widescreen_forced: false,
             widescreen_unstudied: false,
             resume: false,
+            back_to_library: false,
             remote: None,
         }
     }
@@ -92,6 +96,21 @@ impl RomEntry {
             resume: true,
             ..Self::new(PathBuf::new())
         }
+    }
+
+    /// The "Back to library" row of lot LAUNCH-OUTSIDE.
+    #[must_use]
+    pub fn library_row() -> Self {
+        Self {
+            back_to_library: true,
+            ..Self::new(PathBuf::new())
+        }
+    }
+
+    /// Whether the row is a game's, not the Resume or the "Back to library" row.
+    #[must_use]
+    pub const fn is_game(&self) -> bool {
+        !self.resume && !self.back_to_library
     }
 
     /// The title of its 3D profile, when it has one (not the "2D Mode" entry).
@@ -134,6 +153,8 @@ pub enum RomListCommand {
     Achievements(PathBuf),
     /// Load the resume point (AMD-053 REQ-LOOP-076): the `Resume` row at the head of the list.
     ResumeLast,
+    /// Leave the files of the command line for the ROM folder (lot LAUNCH-OUTSIDE).
+    BackToLibrary,
 }
 
 /// The folder the paths of the remote rows are under; nothing is ever written there.
@@ -299,20 +320,13 @@ impl RomListModel {
             PadButton::Down => self.move_by(1),
             PadButton::Left => self.move_by(-PAGE),
             PadButton::Right => self.move_by(PAGE),
-            PadButton::A => {
-                return self.selected_entry().map(|entry| {
-                    // REQ-LOOP-076: the Resume row loads the resume point, as a slot load does.
-                    if entry.resume {
-                        RomListCommand::ResumeLast
-                    } else {
-                        RomListCommand::Play(entry.path.clone())
-                    }
-                });
-            }
+            // REQ-LOOP-076: the Resume row loads the resume point, as a slot load does; Start
+            // plays, as A does (owner request).
+            PadButton::A | PadButton::Start => return self.selected_entry().map(activate),
             PadButton::X => {
                 return self
                     .selected_entry()
-                    .filter(|entry| !entry.resume)
+                    .filter(|entry| entry.is_game())
                     .map(|entry| RomListCommand::ChooseProfile(entry.path.clone()));
             }
             PadButton::Y => return Some(RomListCommand::Options),
@@ -320,39 +334,41 @@ impl RomListModel {
             PadButton::L1 => {
                 return self
                     .selected_entry()
-                    .filter(|entry| !entry.resume)
+                    .filter(|entry| entry.is_game())
                     .map(|entry| RomListCommand::Widescreen(entry.path.clone()));
             }
             PadButton::R1 => {
                 return self
                     .selected_entry()
-                    .filter(|entry| !entry.resume)
+                    .filter(|entry| entry.is_game())
                     .map(|entry| RomListCommand::Hacks(entry.path.clone()));
             }
             PadButton::R2 => {
                 return self
                     .selected_entry()
-                    .filter(|entry| !entry.resume)
+                    .filter(|entry| entry.is_game())
                     .map(|entry| RomListCommand::Achievements(entry.path.clone()));
-            }
-            PadButton::Start => {
-                return self.selected_entry().map(|entry| {
-                    if entry.resume {
-                        RomListCommand::ResumeLast
-                    } else {
-                        RomListCommand::Play(entry.path.clone())
-                    }
-                });
             }
             PadButton::Select => {
                 return self
                     .selected_entry()
-                    .filter(|entry| !entry.resume)
+                    .filter(|entry| entry.is_game())
                     .map(|entry| RomListCommand::GameOptions(entry.path.clone()));
             }
             _ => {}
         }
         None
+    }
+}
+
+/// What A (or Start) does on `entry`.
+fn activate(entry: &RomEntry) -> RomListCommand {
+    if entry.resume {
+        RomListCommand::ResumeLast
+    } else if entry.back_to_library {
+        RomListCommand::BackToLibrary
+    } else {
+        RomListCommand::Play(entry.path.clone())
     }
 }
 

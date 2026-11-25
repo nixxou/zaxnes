@@ -867,3 +867,44 @@ fn a_bundle_in_the_import_folder_is_imported_and_marked_done() {
     .starts_with("ok"));
     assert!(folder.join("README.txt").is_file());
 }
+
+/// Lot LAUNCH-OUTSIDE: a game given on the command line, from another folder than the ROM
+/// folder, is the only game of the list once quit, under "Back to library", which goes back to
+/// the ROM folder. No Resume row is offered over it.
+#[test]
+fn a_game_of_the_command_line_has_the_list_to_itself_until_back_to_library() {
+    let (mut harness, mut handheld) = start(&[], &["Game.nes"]);
+    let far = harness.root.path().join("elsewhere");
+    std::fs::create_dir_all(&far).unwrap();
+    let far = far.join("Far.nes");
+    std::fs::write(&far, SyntheticRom::counter()).unwrap();
+    let far = far.to_string_lossy().into_owned();
+    harness.host.mark_outside_library(&far);
+    // As `start_game_from_command_line` does with a profile: here "2D Mode".
+    harness.host.launch_rom_with_profile(&far, "2d");
+    harness.settle();
+    press(&mut harness, &mut handheld, &[]);
+    tap(&mut harness, &mut handheld, PadButton::Menu);
+    assert_eq!(Screen::Overlay, handheld.screen());
+    // Quit to ROM list is the row before the last (Exit).
+    tap(&mut harness, &mut handheld, PadButton::Up);
+    tap(&mut harness, &mut handheld, PadButton::Up);
+    tap(&mut harness, &mut handheld, PadButton::A);
+    harness.settle();
+    assert_eq!(Screen::Home, handheld.screen());
+    let entries = handheld.roms().entries();
+    assert_eq!(2, entries.len());
+    assert!(entries[0].back_to_library);
+    assert_eq!("Far", entries[1].name);
+    assert!(entries.iter().all(|entry| !entry.resume));
+    // Back to library: the ROM folder.
+    assert!(handheld.roms().selected_entry().unwrap().back_to_library);
+    tap(&mut harness, &mut handheld, PadButton::A);
+    let names: Vec<&str> = handheld
+        .roms()
+        .entries()
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    assert_eq!(["Game"], names.as_slice());
+}

@@ -285,3 +285,34 @@ fn req_ui_210_211_the_chooser_marks_filters_and_searches() {
 
     let _ = (library, GameLibrary::default());
 }
+
+/// Lot LAUNCH-OUTSIDE: a game given on the command line leaves the resume point alone, at its
+/// exit as when it is stopped first, and is kept in its own auto slot instead.
+#[test]
+fn a_game_of_the_command_line_leaves_the_resume_point_alone() {
+    let mut harness = LoopHarness::create();
+    harness.launch("g1");
+    harness.run_frames(30);
+    harness.host.shutdown();
+    let library_point = std::fs::read(harness.paths.resume_state_file()).unwrap();
+
+    let mut next = harness.restart_with(with_g1);
+    let rom =
+        zax_app::emulation::game_catalog::GameCatalog::rom_path(next.host.games(), "g1").unwrap();
+    next.host.mark_outside_library(&rom);
+    next.launch("g1");
+    next.run_frames(30);
+    assert!(next.host.is_outside_library(&rom));
+    next.host.shutdown();
+    assert_eq!(
+        library_point,
+        std::fs::read(next.paths.resume_state_file()).unwrap()
+    );
+    assert!(next.paths.slot_state_file("g1", "auto").is_file());
+
+    // Stopped first, then the exit: rule 1 does not clear it in such a run either.
+    let mut third = next.restart_with(with_g1);
+    third.host.mark_outside_library(&rom);
+    third.host.shutdown();
+    assert!(third.paths.resume_state_file().is_file());
+}

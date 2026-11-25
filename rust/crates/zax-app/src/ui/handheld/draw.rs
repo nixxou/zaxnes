@@ -855,7 +855,9 @@ impl HandheldUi {
                 badges.push(("[RA]", UNSTUDIED));
             }
             let label = home_row_label(entry);
-            if badges.is_empty() {
+            if entry.back_to_library {
+                painter.row(slot, selected, &label, ("", DIM));
+            } else if badges.is_empty() {
                 painter.row(slot, selected, &label, (&tag.0, colour));
             } else {
                 painter.row_badged(slot, selected, &label, &badges, (&tag.0, colour));
@@ -1723,7 +1725,9 @@ impl HandheldUi {
 /// the form is free, and this one is a star before the name. REQ-LOOP-076: the Resume row says
 /// what it is, with the title of its game.
 fn home_row_label(entry: &RomEntry) -> String {
-    if entry.resume {
+    if entry.back_to_library {
+        strings::get(keys::HANDHELD_BACK_TO_LIBRARY)
+    } else if entry.resume {
         format!(
             "{} — {}",
             strings::get(&Command::ResumeLast.label_key()),
