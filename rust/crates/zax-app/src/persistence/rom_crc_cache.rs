@@ -89,11 +89,26 @@ struct Record {
     file_crc: String,
 }
 
+/// The games of one archive as the JSON holds them (lot GAMEHASH: the list shows an archive of
+/// several games as a folder of them).
+#[derive(Debug, Serialize, Deserialize)]
+struct ArchiveRecord {
+    path: String,
+    size: u64,
+    modified: u64,
+    #[serde(default)]
+    modified_nanos: u32,
+    /// Its entries with a game's extension, in its order.
+    games: Vec<String>,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Body {
     #[serde(default)]
     version: u32,
     entries: Vec<Record>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    archives: Vec<ArchiveRecord>,
 }
 
 /// The hashes of each ROM file seen, read from its file on first use.
@@ -102,6 +117,8 @@ pub struct RomCrcCache {
     /// Where it is kept; none when nothing is persisted.
     file: Option<PathBuf>,
     entries: HashMap<String, (Stamp, RomHashes)>,
+    /// The games of each archive seen, with the archive's stamp then.
+    archives: HashMap<String, (Stamp, Vec<String>)>,
     loaded: bool,
     dirty: bool,
 }
@@ -164,6 +181,25 @@ impl RomCrcCache {
         hashes
     }
 
+    /// The games of the archive in `path` while it is as it was when they were listed, without
+    /// opening it: none when it was not seen as it is.
+    pub fn known_archive_games(&mut self, path: &Path) -> Option<Vec<String>> {
+        self.load();
+        let stamp = Stamp::of(path)?;
+        let (kept, games) = self.archives.get(&*path.to_string_lossy())?;
+        (*kept == stamp).then(|| games.clone())
+    }
+
+    /// Keeps `games`, listed from the archive in `path` when it had `stamp`.
+    pub(crate) fn store_archive(&mut self, path: &Path, stamp: Stamp, games: Vec<String>) {
+        self.load();
+        let key = path.to_string_lossy().into_owned();
+        if self.archives.get(&key) != Some(&(stamp, games.clone())) {
+            self.archives.insert(key, (stamp, games));
+            self.dirty = true;
+        }
+    }
+
     /// Keeps `hashes`, read from the file in `path` when it had `stamp` (a file read on another
     /// thread, `rom_hasher`).
     pub(crate) fn store(&mut self, path: &Path, stamp: Stamp, hashes: RomHashes) {
@@ -201,9 +237,22 @@ impl RomCrcCache {
             })
             .collect();
         entries.sort_by(|a, b| a.path.cmp(&b.path));
+        let mut archives: Vec<ArchiveRecord> = self
+            .archives
+            .iter()
+            .map(|(path, (stamp, games))| ArchiveRecord {
+                path: path.clone(),
+                size: stamp.size,
+                modified: stamp.seconds,
+                modified_nanos: stamp.nanos,
+                games: games.clone(),
+            })
+            .collect();
+        archives.sort_by(|a, b| a.path.cmp(&b.path));
         let text = serde_json::to_string_pretty(&Body {
             version: VERSION,
             entries,
+            archives,
         })
         .map_err(std::io::Error::other)?;
         if let Some(parent) = file.parent() {
@@ -237,6 +286,14 @@ impl RomCrcCache {
                 nanos: record.modified_nanos,
             };
             self.entries.insert(record.path, (stamp, hashes));
+        }
+        for record in body.archives {
+            let stamp = Stamp {
+                size: record.size,
+                seconds: record.modified,
+                nanos: record.modified_nanos,
+            };
+            self.archives.insert(record.path, (stamp, record.games));
         }
     }
 }

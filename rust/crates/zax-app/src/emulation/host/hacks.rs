@@ -48,7 +48,21 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             let mut cache = self.rom_crcs.borrow_mut();
             paths
                 .into_iter()
-                .filter(|path| cache.known_hashes(path).is_none())
+                .filter(|path| {
+                    if !crate::emulation::rom_file::is_archive(path) {
+                        return cache.known_hashes(path).is_none();
+                    }
+                    // An archive: listed, and each of its games hashed, under its own path for
+                    // one game, `<archive>/<entry>` for several.
+                    match cache.known_archive_games(path) {
+                        None => true,
+                        Some(games) if games.len() == 1 => cache.known_hashes(path).is_none(),
+                        Some(games) => games.iter().any(|entry| {
+                            let member = crate::emulation::rom_file::member_path(path, entry);
+                            cache.known_hashes(&member).is_none()
+                        }),
+                    }
+                })
                 .collect()
         };
         self.rom_hasher.borrow_mut().queue(unknown);
@@ -65,9 +79,15 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let mut learned = Vec::new();
         {
             let mut cache = self.rom_crcs.borrow_mut();
-            for (path, hashed) in done {
+            for (path, hashed) in done.roms {
                 if let Some((stamp, hashes)) = hashed {
                     cache.store(&path, stamp, hashes);
+                    learned.push(path);
+                }
+            }
+            for (path, listed) in done.archives {
+                if let Some((stamp, games)) = listed {
+                    cache.store_archive(&path, stamp, games);
                     learned.push(path);
                 }
             }
@@ -94,6 +114,13 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             self.rom_crcs_unsaved_since.set(None);
             self.save_rom_crcs();
         }
+    }
+
+    /// The games of the archive in `path`, as the background listed them while it is as it was
+    /// then; none while it was not listed (lot GAMEHASH).
+    #[must_use]
+    pub fn known_archive_games(&self, path: &Path) -> Option<Vec<String>> {
+        self.rom_crcs.borrow_mut().known_archive_games(path)
     }
 
     /// Writes the cache of the ROM CRCs when it learned something.

@@ -149,6 +149,37 @@ pub fn games_in(path: &Path) -> Result<Vec<String>, String> {
         .collect())
 }
 
+/// The games of the archive `path` (its entries with a game's extension, in its order) with the
+/// CRC-32 of the whole file the archive keeps for each, read from its directory alone.
+///
+/// # Errors
+/// As [`read`].
+pub fn games_with_crc(path: &Path) -> Result<Vec<(String, Option<u32>)>, String> {
+    Ok(open_archive(path)?.map_or_else(Vec::new, |mut archive| archive.games_with_crc()))
+}
+
+/// The games `entries` of the archive `archive`, read in one pass (a solid 7z decodes once),
+/// each packaged as [`read`] does it.
+///
+/// # Errors
+/// The archive could not be opened or read.
+pub fn read_games(archive: &Path, entries: &[&str]) -> Result<Vec<(String, RomData)>, String> {
+    let Some(mut opened) = open_archive(archive)? else {
+        return Ok(Vec::new());
+    };
+    let files = opened.read(entries)?;
+    Ok(files
+        .into_iter()
+        .filter_map(|(entry, bytes)| {
+            let kind = extension_of(&entry);
+            let name = format!("{}.{kind}", stem_of(base_name(&entry)));
+            package(&kind, bytes, name, archive)
+                .ok()
+                .map(|rom| (entry, rom))
+        })
+        .collect())
+}
+
 /// The paths of the games of the archive `path` when it holds more than one (lot
 /// LAUNCH-OUTSIDE: the list shows them instead of playing the first); none otherwise.
 #[must_use]
@@ -330,6 +361,34 @@ impl<R: Read + Seek> Archive<R> {
         }
     }
 
+    /// The files with a game's extension and the CRC-32 the archive keeps for each (none when
+    /// it keeps none), without decompressing anything.
+    fn games_with_crc(&mut self) -> Vec<(String, Option<u32>)> {
+        let is_game = |name: &str| GAME_EXTENSIONS.contains(&extension_of(name).as_str());
+        match self {
+            Self::Zip(archive) => (0..archive.len())
+                .filter_map(|index| {
+                    let file = archive.by_index_raw(index).ok()?;
+                    let name = file.name().to_owned();
+                    (!name.ends_with('/') && is_game(&name)).then(|| (name, Some(file.crc32())))
+                })
+                .collect(),
+            Self::SevenZip(reader) => reader
+                .archive()
+                .files
+                .iter()
+                .filter(|entry| !entry.is_directory && entry.has_stream && is_game(&entry.name))
+                .map(|entry| {
+                    let crc = entry
+                        .has_crc
+                        .then(|| u32::try_from(entry.crc).ok())
+                        .flatten();
+                    (entry.name.clone(), crc)
+                })
+                .collect(),
+        }
+    }
+
     /// The bytes of the files `wanted`, by name, in one pass (a solid 7z decodes in order: the
     /// pass stops once every wanted file is read).
     fn read(&mut self, wanted: &[&str]) -> Result<Vec<(String, Vec<u8>)>, String> {
@@ -421,9 +480,7 @@ fn read_archive<R: Read + Seek>(
     // order), and chosen once its region is known (owner request, `extras`).
     let extras: Vec<&String> = names
         .iter()
-        .filter(|name| {
-            [PROFILE_EXTENSION, PACK_EXTENSION].contains(&extension_of(name).as_str())
-        })
+        .filter(|name| [PROFILE_EXTENSION, PACK_EXTENSION].contains(&extension_of(name).as_str()))
         .collect();
     let to_read: Vec<&str> = std::iter::once(game.as_str())
         .chain(extras.iter().map(|name| name.as_str()))
