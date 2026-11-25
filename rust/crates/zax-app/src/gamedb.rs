@@ -38,8 +38,27 @@ pub struct Game {
     pub profile: &'static str,
 }
 
+/// A game RetroAchievements has achievements for (`data/ra_games.csv`, `tools/ra_game_list.py`),
+/// by one of the hashes it accepts. Seen from the list before the server is asked: the study of
+/// the ROM (`achievements::library`) has the last word.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RaGame {
+    /// The hash, lowercase hexadecimal: `data_md5` of a clean dump.
+    pub md5: &'static str,
+    /// The game's id on the site.
+    pub game_id: u32,
+    /// `nes` or `fds`.
+    pub console: &'static str,
+    /// How many achievements it has.
+    pub achievements: u32,
+    /// How many points they are worth.
+    pub points: u32,
+    /// Its title on the site.
+    pub title: &'static str,
+}
+
 mod tables {
-    use super::{Game, Rom};
+    use super::{Game, RaGame, Rom};
     include!(concat!(env!("OUT_DIR"), "/gamedb-tables.rs"));
 }
 
@@ -120,6 +139,16 @@ pub fn roms_named(name: &str) -> impl Iterator<Item = &'static Rom> {
 /// lists, before anything is extracted).
 pub fn roms_in_file(file_crc32: u32) -> impl Iterator<Item = &'static Rom> {
     matches(tables::BY_FILE_CRC32, file_crc32)
+}
+
+/// The RetroAchievements game of a ROM whose data MD5 is `md5` (lowercase hexadecimal), as the
+/// list RetroAchievements gave when `ra_games.csv` was made.
+#[must_use]
+pub fn ra_game(md5: &str) -> Option<&'static RaGame> {
+    let at = tables::RA_GAMES
+        .binary_search_by(|game| game.md5.cmp(md5))
+        .ok()?;
+    tables::RA_GAMES.get(at)
 }
 
 /// Every ROM image, sorted by data CRC.
@@ -213,6 +242,17 @@ mod tests {
                 validated.crc
             );
         }
+    }
+
+    #[test]
+    fn the_retroachievements_list_is_sorted_and_found() {
+        assert!(tables::RA_GAMES
+            .windows(2)
+            .all(|pair| pair[0].md5 < pair[1].md5));
+        for game in tables::RA_GAMES {
+            assert_eq!(Some(game), ra_game(game.md5));
+        }
+        assert_eq!(None, ra_game("00000000000000000000000000000000"));
     }
 
     #[test]

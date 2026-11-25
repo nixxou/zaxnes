@@ -30,8 +30,8 @@ ROMs fall back to the name rules of before.
 3. [x] Hashes in one pass (`data_crc`, `data_md5`, `file_crc32`), cache v3 (`48ef4667`). No `ra_md5`: Zaxnes already hashes PRG+CHR for RetroAchievements (`achievements/library.rs`), which is `data_md5`.
 4. [x] `tools/gamedb_build.py` -> `zax-app/data/gamedb.csv`; `profiles/index.csv`.
 5. [x] `gamedb` module: generated table + indexes, lookups, consistency tests.
-6. [ ] Catalogue: provisional badges, 3D profile order (player choice > gamedb > name rule).
-7. [ ] RetroAchievements list wired in (`ra_games.csv`, empty until generated).
+6. [x] Catalogue: provisional badges, 3D profile order (player choice > gamedb > name rule).
+7. [x] RetroAchievements list wired in (`ra_games.csv`, empty until generated).
 
 ## Log
 
@@ -54,3 +54,10 @@ ROMs fall back to the name rules of before.
 - Step 7 plan: `data/ra_games.csv` committed with its header only until the owner runs
   `tools/ra_game_list.py`; looked up by the cache's `data_md5` (any hashed ROM, not only gamedb
   ones); dim `[RA]` badge while not studied, the percent once studied.
+- Step 6 committed `3d05079d`. Step 7: `gamedb::ra_game(md5)`, dark grey `[RA]` in the console
+  list while RetroAchievements is on and the ROM not studied; checked with a temporary row (quoted
+  title with a comma) then the file put back to its header.
+- Not done / next: the desktop (window) library does not show these badges (only the console list
+  had them before); `widescreen_other` could use the game id (`gamedb::roms_of_game`) instead of
+  the name; the archive listing (`roms_in_file`) is not used by the list yet; the 3D profile order
+  was not tried in the running app.

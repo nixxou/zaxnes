@@ -28,6 +28,15 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.rom_crcs.borrow_mut().known(path)
     }
 
+    /// The hashes the cache keeps for the ROM in `path`, without reading the file (lot GAMEHASH).
+    #[must_use]
+    pub fn known_rom_hashes(
+        &self,
+        path: &Path,
+    ) -> Option<crate::persistence::rom_crc_cache::RomHashes> {
+        self.rom_crcs.borrow_mut().known_hashes(path)
+    }
+
     /// Hashes in the background the ROMs of `paths` the cache has not seen as they are (lot
     /// GAMEHASH): each file is read once, and [`EmulationHost::take_rom_hashes`] gives them.
     pub fn hash_roms_in_background(&self, paths: impl IntoIterator<Item = std::path::PathBuf>) {

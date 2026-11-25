@@ -642,6 +642,19 @@ fn achievement_percent(frame: &UiFrame<'_>, path: &std::path::Path) -> Option<St
         .map(|percent| crate::ui::achievements_view::percent_text(percent, 100))
 }
 
+/// Whether RetroAchievements is on, the ROM in `path` was not studied yet, and the list of games
+/// with achievements (`gamedb::ra_game`) has its data MD5 (lot GAMEHASH): provisional, the study
+/// says.
+fn achievements_expected(frame: &UiFrame<'_>, path: &std::path::Path) -> bool {
+    let achievements = &frame.host.achievements;
+    achievements.is_enabled()
+        && achievements.known_game(path).is_none()
+        && frame
+            .host
+            .known_rom_hashes(path)
+            .is_some_and(|hashes| crate::gamedb::ra_game(&hashes.data_md5_hex()).is_some())
+}
+
 /// The achievement selected in the grid, told at `y`: its title and points, its description.
 fn draw_grid_choice(
     painter: &Painter<'_>,
@@ -836,6 +849,10 @@ impl HandheldUi {
             }
             if let Some(percent) = &percent {
                 badges.push((percent, FOCUS));
+            } else if achievements_expected(frame, &entry.path) {
+                // Lot GAMEHASH: RetroAchievements lists the ROM's hash; dark grey until the list
+                // studies it and asks the server.
+                badges.push(("[RA]", UNSTUDIED));
             }
             let label = home_row_label(entry);
             if badges.is_empty() {

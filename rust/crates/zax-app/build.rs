@@ -215,6 +215,7 @@ fn gamedb() -> std::io::Result<()> {
         }
         code.push_str("];\n");
     }
+    ra_games(&data.join("ra_games.csv"), &mut code)?;
     code.push_str("\npub static BY_FILE_CRC32: &[(u32, u32)] = &[\n");
     for (crc, rom) in &by_file {
         let _ = writeln!(
@@ -226,6 +227,41 @@ fn gamedb() -> std::io::Result<()> {
     }
     code.push_str("];\n");
     std::fs::write(environment("OUT_DIR")?.join("gamedb-tables.rs"), code)
+}
+
+/// Appends `RA_GAMES` to `code`: RetroAchievements' games by MD5 from `source`
+/// (`tools/ra_game_list.py`), which must be sorted by it.
+fn ra_games(source: &Path, code: &mut String) -> std::io::Result<()> {
+    use std::fmt::Write as _;
+    let bad = |what: String| std::io::Error::other(what);
+    code.push_str("\npub static RA_GAMES: &[RaGame] = &[\n");
+    let mut last_md5: Option<String> = None;
+    for row in csv_rows(source)? {
+        let [md5, id, console, achievements, points, title] = row.as_slice() else {
+            return Err(bad(format!("ra_games.csv: 6 fields expected: {row:?}")));
+        };
+        if md5.len() != 32 || !md5.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(bad(format!("ra_games.csv: bad MD5 {md5}")));
+        }
+        if last_md5.as_deref().is_some_and(|last| md5.as_str() <= last) {
+            return Err(bad(format!("ra_games.csv: not sorted, or repeated: {md5}")));
+        }
+        last_md5 = Some(md5.clone());
+        let number = |text: &str| {
+            text.parse::<u32>()
+                .map_err(|_| bad(format!("ra_games.csv: bad number {text}")))
+        };
+        let _ = writeln!(
+            code,
+            "    RaGame {{ md5: {md5:?}, game_id: {}, console: {console:?}, achievements: {}, \
+             points: {}, title: {title:?} }},",
+            number(id)?,
+            number(achievements)?,
+            number(points)?
+        );
+    }
+    code.push_str("];\n");
+    Ok(())
 }
 
 fn environment(name: &str) -> std::io::Result<PathBuf> {
