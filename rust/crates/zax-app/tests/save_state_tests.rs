@@ -337,11 +337,13 @@ fn req_pers_054_deleting_a_slot_removes_its_file() {
 
 #[test]
 fn req_pers_050_the_model_holds_thirty_seven_slots() {
+    // The 37 of REQ-PERS-050, and the auto slot of lot LAUNCH-OUTSIDE (Rust-only).
     let index = SaveSlotIndex::new();
-    assert_eq!(save_slots::NUMBERED_SLOT_COUNT + 1, index.slots().len());
+    assert_eq!(save_slots::NUMBERED_SLOT_COUNT + 2, index.slots().len());
     assert!(index.find("1").is_some());
     assert!(index.find("36").is_some());
     assert!(index.find(QUICK_SLOT_ID).is_some());
+    assert!(index.find(save_slots::AUTO_SLOT_ID).is_some());
     assert!(index.find("37").is_none());
     assert_eq!(10, save_slots::EXPOSED_SLOT_COUNT);
     assert!(!save_slots::is_valid_slot_id("0"));

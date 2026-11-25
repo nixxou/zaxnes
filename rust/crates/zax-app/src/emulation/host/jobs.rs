@@ -699,6 +699,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                     || self.session.as_ref().is_some_and(|session| {
                         session.core().kind() != self.engine_for_game(&game.id)
                     });
+                // Lot LAUNCH-OUTSIDE: the game left is kept in its auto slot (its slots are
+                // still the chosen ones; step 2 chooses the new game's).
+                self.write_auto_save();
                 self.stop_current_game(false, job.reload_profile);
                 job.stage = 1;
                 Step::Continue

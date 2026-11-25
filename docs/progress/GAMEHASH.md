@@ -79,3 +79,20 @@ ROMs fall back to the name rules of before.
   lacks. The 3dSen 2.2 bundle holds one ROM only (Chase, read with Zaxnes's own
   `read_text_assets`; 103 text assets): Chase `331BCC87` added. Zooming Secretary, Depths and the
   Flappy profiles ship without a ROM: they need the owner's ROM file to be added the same way.
+- Zooming Secretary `6AA4574C` (33a309c4), Depths = ld44.latest `81B76AE6` (688c879d, all 241
+  hashed tiles of the 3dSen profile resolve on it, 7 and 5 for the controls), FlappyZaxNes gets
+  its MD5, file CRC and built-in profile from crates/zax-app/demo (eae5a0af).
+
+## Lot LAUNCH-OUTSIDE (owner, 2026-11-25)
+
+Plan, in this branch:
+1. Auto-save per file: leaving a running game (quit, back to the list, another game) writes the
+   slot `auto` of its ROM (`<rom>.<ext>`), shown read-only in the Load list (never in Save).
+2. A game launched from the command line: back to the list shows only that game, under a
+   "Back to library" row that goes to the catalogue. Its per-game options still work (keyed by
+   path). The Resume row and the resume point stay for the library only: no resume point is
+   written for a game outside the ROM folder.
+3. An archive holding several games, from the command line: the list of its games (same "Back to
+   library" row) instead of launching the first one. An archive member is addressed as
+   `<archive path>/<entry name>` (the archive read as a folder), so options and saves are per
+   game; names and profiles through gamedb (file CRC, data CRC).

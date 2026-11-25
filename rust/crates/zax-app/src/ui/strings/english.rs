@@ -39,6 +39,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::BUTTON_BROWSE, "Browse..."),
     (keys::ROMS_FOLDER_HINT, "The games the console mode lists. Empty: {0}"),
     (keys::SLOT_QUICK, "Quick state"),
+    (keys::SLOT_AUTO, "Auto save"),
     (keys::SLOT_PREFIX, "Slot"),
     // ----------------------------------------------------- window titles
     (keys::WINDOW_OPTIONS, "Options"),

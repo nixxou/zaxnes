@@ -48,7 +48,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Command::ResumeLast => !loading && self.resume_available(),
             Command::SaveSlot => self.can_save(args.number),
             Command::LoadSlot => {
-                let slot = numbered_slot_id(args.number);
+                let slot = slot_of(args);
                 !loading && is_valid_slot_id(&slot) && self.slots.is_occupied(&slot)
             }
             Command::QuickSave => self.current_game.is_some() && !stopped && !loading,
@@ -264,7 +264,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Command::SaveSlot => {
                 self.save_to_slot(&numbered_slot_id(args.number), true);
             }
-            Command::LoadSlot => self.load_slot(&numbered_slot_id(args.number)),
+            Command::LoadSlot => self.load_slot(&slot_of(args)),
             Command::QuickSave => self.quick_save(),
             Command::QuickLoad => self.quick_load(),
             Command::DeleteSlot => {
@@ -291,7 +291,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Command::SwitchDiskSide => self.change_disk(DiskChange::SwitchSide),
             Command::InsertNextDisk => self.change_disk(DiskChange::NextDisk),
             Command::EjectDisk => self.change_disk(DiskChange::Eject),
-            Command::Stop => self.stop_current_game(true, true),
+            Command::Stop => {
+                self.write_auto_save();
+                self.stop_current_game(true, true);
+            }
             Command::FastForward => self.request_fast_forward(args.number),
             Command::Rollback => self.perform_rollback(),
             Command::FrameBack => self.step_frame_back(),
@@ -581,4 +584,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
 /// budget.
 fn has_text(args: &CommandArgs) -> bool {
     args.text.as_deref().is_some_and(|text| !text.is_empty())
+}
+
+/// The slot a load names: its identifier as text (the auto slot), else its number.
+fn slot_of(args: &CommandArgs) -> String {
+    args.text
+        .clone()
+        .unwrap_or_else(|| numbered_slot_id(args.number))
 }

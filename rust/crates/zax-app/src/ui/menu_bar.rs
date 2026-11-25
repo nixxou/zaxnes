@@ -21,7 +21,7 @@ use crate::emulation::speed_setting;
 use crate::persistence::app_settings::{AppSettings, TvRegionSetting};
 use crate::persistence::console_model::ConsoleModel;
 use crate::persistence::save_slots::{
-    numbered_slot_id, SaveSlotRecord, EXPOSED_SLOT_COUNT, QUICK_SLOT_ID,
+    numbered_slot_id, SaveSlotRecord, AUTO_SLOT_ID, EXPOSED_SLOT_COUNT, QUICK_SLOT_ID,
 };
 use crate::persistence::save_state_file;
 
@@ -541,6 +541,14 @@ fn slot_items(numbered: Command, quick: Command, host: &AppHost) -> Vec<MenuItem
         )),
         CommandArgs::default(),
     ));
+    // Lot LAUNCH-OUTSIDE: the auto slot loads (by its identifier) and is never saved into.
+    if numbered == Command::LoadSlot {
+        items.push(MenuItem::of(
+            Command::LoadSlot,
+            Some(slot_id_label(AUTO_SLOT_ID, host.slots.find(AUTO_SLOT_ID))),
+            CommandArgs::of_text(AUTO_SLOT_ID),
+        ));
+    }
     items
 }
 
@@ -603,6 +611,16 @@ pub fn slot_engine_note(host: &AppHost, slot_id: &str) -> Option<EngineNote> {
     }
     (engine != zax_core_api::EngineKind::Zaxnes)
         .then(|| EngineNote::Shown(text::slot_engine(engine)))
+}
+
+/// The label of the slot `slot_id` (numbered, quick or auto) in the state lists.
+#[must_use]
+pub fn slot_id_label(slot_id: &str, record: Option<&SaveSlotRecord>) -> String {
+    match slot_id {
+        QUICK_SLOT_ID => format!("{} — {}", text::quick_slot(), state_stamp(record)),
+        AUTO_SLOT_ID => format!("{} — {}", text::auto_slot(), state_stamp(record)),
+        _ => slot_label(slot_id.parse().unwrap_or(0), record),
+    }
 }
 
 #[must_use]

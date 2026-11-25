@@ -225,6 +225,12 @@ pub fn quick_slot() -> String {
     strings::get(keys::SLOT_QUICK)
 }
 
+/// The auto slot in the Load lists (lot LAUNCH-OUTSIDE).
+#[must_use]
+pub fn auto_slot() -> String {
+    strings::get(keys::SLOT_AUTO)
+}
+
 /// Prefix of a numbered slot in the state submenus.
 #[must_use]
 pub fn slot_prefix() -> String {

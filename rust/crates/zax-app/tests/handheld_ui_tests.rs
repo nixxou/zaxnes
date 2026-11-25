@@ -188,7 +188,7 @@ fn save_state_writes_the_chosen_slot_and_the_game_goes_on() {
     tap(&mut harness, &mut handheld, PadButton::A);
     assert_eq!(Screen::States, handheld.screen());
     assert_eq!(StatesMode::Save, handheld.states().mode());
-    assert_eq!(2, handheld.states().slot());
+    assert_eq!(Some(2), handheld.states().slot());
     tap(&mut harness, &mut handheld, PadButton::A);
     harness.settle();
     assert!(harness.host.slots.is_occupied("2"));
@@ -239,6 +239,10 @@ fn quit_to_the_rom_list_stops_the_game() {
     harness.settle();
     assert_eq!(Screen::Home, handheld.screen());
     assert_eq!(None, harness.host.current_game_id());
+    // Lot LAUNCH-OUTSIDE: the game left is in its auto slot, which it offers once played again.
+    play(&mut harness, &mut handheld);
+    assert!(harness.host.slots.is_occupied("auto"));
+    assert!(harness.host.slot_state_file("auto").is_file());
 }
 
 #[test]

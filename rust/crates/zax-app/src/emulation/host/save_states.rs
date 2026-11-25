@@ -214,6 +214,42 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         Ok(())
     }
 
+    /// Writes the auto slot of the game being left (Rust-only, owner request, lot
+    /// LAUNCH-OUTSIDE): called before a stop, a launch or the exit stops it. Nothing is written
+    /// without a running game, on a read-only root, or while a job loads one; a failure is only
+    /// logged, the game being left anyway.
+    pub(super) fn write_auto_save(&mut self) {
+        if self.state == EmulationState::Stopped
+            || self.current_game.is_none()
+            || !self.paths.is_writable
+            || !self
+                .session
+                .as_ref()
+                .is_some_and(crate::game_session::GameSession::has_rom)
+        {
+            return;
+        }
+        let Some(content) = self.capture_save_state(save_slots::AUTO_SLOT_ID) else {
+            return;
+        };
+        let picture = self.thumbnail_for_slot();
+        self.write_auto_save_of(&content, picture.as_deref());
+    }
+
+    /// Writes `content`, a capture made for another slot (the resume point's), as the auto slot.
+    pub(super) fn write_auto_save_of(
+        &mut self,
+        content: &SaveStateContent,
+        picture: Option<&[u8]>,
+    ) {
+        let mut content = content.clone();
+        save_slots::AUTO_SLOT_ID.clone_into(&mut content.header.slot_id);
+        if let Err(error) = self.write_slot(save_slots::AUTO_SLOT_ID, &content, picture) {
+            self.slots.vacate(save_slots::AUTO_SLOT_ID);
+            self.log(&format!("the auto save could not be written: {error}"));
+        }
+    }
+
     /// The quick save (REQ-LOOP-043): the quick slot, no thumbnail, and its notification.
     pub fn quick_save(&mut self) {
         if self.current_game.is_none() || self.state == EmulationState::Stopped {

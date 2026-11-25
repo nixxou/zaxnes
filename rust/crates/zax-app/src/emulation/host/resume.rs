@@ -139,6 +139,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let Some(content) = self.capture_save_state(resume_point::SLOT_ID) else {
             return false;
         };
+        // Lot LAUNCH-OUTSIDE: the same capture is the game's auto slot.
+        self.write_auto_save_of(&content, picture.as_deref());
         match resume_point::write(&self.paths, &content, picture.as_deref()) {
             Ok(()) => {
                 self.log(&format!(

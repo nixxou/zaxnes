@@ -22,6 +22,10 @@ pub const NUMBERED_SLOT_COUNT: usize = 36;
 pub const EXPOSED_SLOT_COUNT: usize = 10;
 /// Identifier of the quick slot.
 pub const QUICK_SLOT_ID: &str = "quick";
+/// Identifier of the auto slot (Rust-only, owner request, lot LAUNCH-OUTSIDE): the state a game
+/// is left in, written when it stops (back to the list, another game, the exit), whatever folder
+/// its file is in. The Load lists offer it; no Save list does.
+pub const AUTO_SLOT_ID: &str = "auto";
 
 /// One slot of the index.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -59,7 +63,7 @@ struct SaveSlotIndexFile {
     slots: Vec<SaveSlotRecord>,
 }
 
-/// The slots, in menu order: the numbered ones, then the quick one.
+/// The slots, in menu order: the numbered ones, then the quick one, then the auto one.
 #[derive(Debug, Clone)]
 pub struct SaveSlotIndex {
     slots: Vec<SaveSlotRecord>,
@@ -88,6 +92,10 @@ impl SaveSlotIndex {
             .collect();
         slots.push(SaveSlotRecord {
             id: QUICK_SLOT_ID.to_owned(),
+            ..SaveSlotRecord::default()
+        });
+        slots.push(SaveSlotRecord {
+            id: AUTO_SLOT_ID.to_owned(),
             ..SaveSlotRecord::default()
         });
         Self {
@@ -337,10 +345,11 @@ pub fn numbered_slot_id(number: i32) -> String {
     number.to_string()
 }
 
-/// Whether `slot_id` names the quick slot or a numbered one.
+/// Whether `slot_id` names the quick slot, the auto slot or a numbered one.
 #[must_use]
 pub fn is_valid_slot_id(slot_id: &str) -> bool {
     slot_id == QUICK_SLOT_ID
+        || slot_id == AUTO_SLOT_ID
         || slot_id
             .parse::<usize>()
             .is_ok_and(|number| (1..=NUMBERED_SLOT_COUNT).contains(&number))

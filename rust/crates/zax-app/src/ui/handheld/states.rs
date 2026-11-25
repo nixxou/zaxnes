@@ -1,9 +1,10 @@
 //! The save state screen of the in-game menu (Rust-only, owner request): the numbered slots,
 //! to save into or to load from, each with its date and, for the one selected, its thumbnail.
-//! The two uses look apart (colour and title), so that a save is never taken for a load.
+//! The two uses look apart (colour and title), so that a save is never taken for a load. The
+//! Load screen starts with the auto slot (lot LAUNCH-OUTSIDE), which the Save screen has not.
 
 use super::pad::PadButton;
-use crate::persistence::save_slots::EXPOSED_SLOT_COUNT;
+use crate::persistence::save_slots::{numbered_slot_id, AUTO_SLOT_ID, EXPOSED_SLOT_COUNT};
 
 /// Whether the screen saves or loads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,12 +28,12 @@ pub enum SlotState {
 }
 
 /// What a press asks for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StatesCommand {
     /// Save into this numbered slot.
     Save(i32),
-    /// Load this numbered slot.
-    Load(i32),
+    /// Load this slot, by its identifier (a number, or the auto slot).
+    Load(String),
     /// Back to the in-game menu.
     Back,
 }
@@ -52,10 +53,39 @@ impl StatesModel {
     #[must_use]
     pub fn new(mode: StatesMode, slot: i32) -> Self {
         let index = usize::try_from(slot - 1).unwrap_or(0);
-        Self {
-            mode,
-            selected: index.min(EXPOSED_SLOT_COUNT - 1),
+        let mut model = Self { mode, selected: 0 };
+        model.selected = index.min(EXPOSED_SLOT_COUNT - 1) + model.first_numbered();
+        model
+    }
+
+    /// The row of the first numbered slot: 1 on the Load screen, under the auto slot.
+    const fn first_numbered(&self) -> usize {
+        match self.mode {
+            StatesMode::Save => 0,
+            StatesMode::Load => 1,
         }
+    }
+
+    /// How many rows the screen has.
+    #[must_use]
+    pub const fn count(&self) -> usize {
+        EXPOSED_SLOT_COUNT + self.first_numbered()
+    }
+
+    /// The identifier of the slot on row `index`.
+    #[must_use]
+    pub fn slot_id_at(&self, index: usize) -> String {
+        if index < self.first_numbered() {
+            AUTO_SLOT_ID.to_owned()
+        } else {
+            numbered_slot_id(i32::try_from(index - self.first_numbered() + 1).unwrap_or(1))
+        }
+    }
+
+    /// The identifier of the selected slot.
+    #[must_use]
+    pub fn slot_id(&self) -> String {
+        self.slot_id_at(self.selected)
     }
 
     /// Whether it saves or loads.
@@ -70,20 +100,22 @@ impl StatesModel {
         self.selected
     }
 
-    /// The number of the selected slot, from 1.
+    /// The number of the selected slot, from 1; none on the auto slot.
     #[must_use]
-    pub fn slot(&self) -> i32 {
-        i32::try_from(self.selected + 1).unwrap_or(1)
+    pub fn slot(&self) -> Option<i32> {
+        self.selected
+            .checked_sub(self.first_numbered())
+            .and_then(|index| i32::try_from(index + 1).ok())
     }
 
-    /// One press of a button; `state_of` tells how a numbered slot stands. A on an empty slot
-    /// loads nothing.
+    /// One press of a button; `state_of` tells how a slot stands, by its identifier. A on an
+    /// empty slot loads nothing.
     pub fn handle(
         &mut self,
         button: PadButton,
-        state_of: impl Fn(i32) -> SlotState,
+        state_of: impl Fn(&str) -> SlotState,
     ) -> Option<StatesCommand> {
-        let count = EXPOSED_SLOT_COUNT;
+        let count = self.count();
         match button {
             PadButton::Up => self.selected = (self.selected + count - 1) % count,
             PadButton::Down => self.selected = (self.selected + 1) % count,
@@ -92,11 +124,12 @@ impl StatesModel {
                 self.selected = (self.selected + PAGE).min(count - 1);
             }
             PadButton::A => {
-                let slot = self.slot();
-                return match self.mode {
-                    StatesMode::Save => Some(StatesCommand::Save(slot)),
-                    StatesMode::Load if state_of(slot) == SlotState::Empty => None,
-                    StatesMode::Load => Some(StatesCommand::Load(slot)),
+                let id = self.slot_id();
+                return match (self.mode, self.slot()) {
+                    (StatesMode::Save, Some(slot)) => Some(StatesCommand::Save(slot)),
+                    (StatesMode::Save, None) => None,
+                    (StatesMode::Load, _) if state_of(&id) == SlotState::Empty => None,
+                    (StatesMode::Load, _) => Some(StatesCommand::Load(id)),
                 };
             }
             PadButton::B | PadButton::Menu => return Some(StatesCommand::Back),
@@ -110,34 +143,34 @@ impl StatesModel {
 mod tests {
     use super::*;
 
-    fn all(state: SlotState) -> impl Fn(i32) -> SlotState {
+    fn all(state: SlotState) -> impl Fn(&str) -> SlotState {
         move |_| state
     }
 
     #[test]
     fn it_opens_on_the_slot_of_the_menu_and_wraps() {
         let mut model = StatesModel::new(StatesMode::Save, 3);
-        assert_eq!(3, model.slot());
+        assert_eq!(Some(3), model.slot());
         model.handle(PadButton::Up, all(SlotState::Empty));
         model.handle(PadButton::Up, all(SlotState::Empty));
         model.handle(PadButton::Up, all(SlotState::Empty));
-        assert_eq!(10, model.slot());
+        assert_eq!(Some(10), model.slot());
         model.handle(PadButton::Down, all(SlotState::Empty));
-        assert_eq!(1, model.slot());
-        assert_eq!(10, StatesModel::new(StatesMode::Load, 99).slot());
-        assert_eq!(1, StatesModel::new(StatesMode::Load, -4).slot());
+        assert_eq!(Some(1), model.slot());
+        assert_eq!(Some(10), StatesModel::new(StatesMode::Load, 99).slot());
+        assert_eq!(Some(1), StatesModel::new(StatesMode::Load, -4).slot());
     }
 
     #[test]
     fn left_and_right_move_by_a_page_without_wrapping() {
-        let mut model = StatesModel::new(StatesMode::Load, 1);
+        let mut model = StatesModel::new(StatesMode::Save, 1);
         model.handle(PadButton::Right, all(SlotState::Fits));
-        assert_eq!(6, model.slot());
+        assert_eq!(Some(6), model.slot());
         model.handle(PadButton::R1, all(SlotState::Fits));
-        assert_eq!(10, model.slot());
+        assert_eq!(Some(10), model.slot());
         model.handle(PadButton::Left, all(SlotState::Fits));
         model.handle(PadButton::L1, all(SlotState::Fits));
-        assert_eq!(1, model.slot());
+        assert_eq!(Some(1), model.slot());
     }
 
     #[test]
@@ -156,7 +189,7 @@ mod tests {
             SlotState::OtherVersion,
         ] {
             assert_eq!(
-                Some(StatesCommand::Load(4)),
+                Some(StatesCommand::Load("4".to_owned())),
                 load.handle(PadButton::A, all(state))
             );
         }
@@ -164,5 +197,26 @@ mod tests {
             Some(StatesCommand::Back),
             load.handle(PadButton::B, all(SlotState::Fits))
         );
+    }
+
+    /// Lot LAUNCH-OUTSIDE: the Load screen starts with the auto slot, which loads by its
+    /// identifier; the Save screen has no such row.
+    #[test]
+    fn the_load_screen_heads_with_the_auto_slot() {
+        let mut load = StatesModel::new(StatesMode::Load, 1);
+        assert_eq!(EXPOSED_SLOT_COUNT + 1, load.count());
+        assert_eq!("1", load.slot_id());
+        load.handle(PadButton::Up, all(SlotState::Fits));
+        assert_eq!(
+            (None, AUTO_SLOT_ID.to_owned()),
+            (load.slot(), load.slot_id())
+        );
+        assert_eq!(
+            Some(StatesCommand::Load(AUTO_SLOT_ID.to_owned())),
+            load.handle(PadButton::A, all(SlotState::Fits))
+        );
+        let save = StatesModel::new(StatesMode::Save, 1);
+        assert_eq!(EXPOSED_SLOT_COUNT, save.count());
+        assert_eq!("1", save.slot_id());
     }
 }

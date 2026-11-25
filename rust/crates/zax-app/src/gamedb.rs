@@ -298,11 +298,9 @@ mod tests {
 
     #[test]
     fn the_retroachievements_list_is_sorted_and_found() {
-        assert!(
-            tables::RA_GAMES
-                .windows(2)
-                .all(|pair| pair[0].md5 < pair[1].md5)
-        );
+        assert!(tables::RA_GAMES
+            .windows(2)
+            .all(|pair| pair[0].md5 < pair[1].md5));
         for game in tables::RA_GAMES {
             assert_eq!(Some(game), ra_game(game.md5));
         }
@@ -311,11 +309,9 @@ mod tests {
 
     #[test]
     fn the_indexes_are_sorted_and_hold_every_image() {
-        assert!(
-            roms()
-                .windows(2)
-                .all(|pair| pair[0].data_crc < pair[1].data_crc)
-        );
+        assert!(roms()
+            .windows(2)
+            .all(|pair| pair[0].data_crc < pair[1].data_crc));
         assert!(games().windows(2).all(|pair| pair[0].id < pair[1].id));
         assert_eq!(roms().len(), tables::BY_GAME.len());
         for (key, index) in tables::BY_GAME {

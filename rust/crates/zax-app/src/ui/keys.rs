@@ -45,6 +45,8 @@ pub const BUTTON_BROWSE: &str = "button.browse";
 /// What the ROM folder row says under the field: what the folder is for and the default.
 pub const ROMS_FOLDER_HINT: &str = "hint.roms_folder";
 pub const SLOT_QUICK: &str = "slot.quick";
+/// The auto slot of a game (lot LAUNCH-OUTSIDE): the state it was left in.
+pub const SLOT_AUTO: &str = "slot.auto";
 pub const SLOT_PREFIX: &str = "slot.prefix";
 
 // -------------------------------------------------------- window titles
@@ -641,6 +643,7 @@ pub const PUBLISHED: &[&str] = &[
     BUTTON_BROWSE,
     ROMS_FOLDER_HINT,
     SLOT_QUICK,
+    SLOT_AUTO,
     SLOT_PREFIX,
     WINDOW_OPTIONS,
     WINDOW_KEY_CONFIG,

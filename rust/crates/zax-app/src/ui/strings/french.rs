@@ -38,6 +38,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::BUTTON_BROWSE, "Parcourir…"),
     (keys::ROMS_FOLDER_HINT, "Les jeux que liste le mode console. Vide : {0}"),
     (keys::SLOT_QUICK, "État rapide"),
+    (keys::SLOT_AUTO, "Sauvegarde auto"),
     (keys::SLOT_PREFIX, "Emplacement"),
     // ----------------------------------------------------- window titles
     (keys::WINDOW_OPTIONS, "Options"),

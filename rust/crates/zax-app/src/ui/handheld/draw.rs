@@ -1532,27 +1532,27 @@ impl HandheldUi {
 
         // The slots, on the left.
         let split = (size[0] * 0.56).round();
-        let total = crate::persistence::save_slots::EXPOSED_SLOT_COUNT;
+        let total = states.count();
         let rows = metrics.visible_rows(size[1]);
         let first = painter.window(states.selected_index(), rows, total);
         for (row, index) in (first..total).take(rows).enumerate() {
-            let slot = i32::try_from(index + 1).unwrap_or(1);
-            let record = frame.host.slots.find(&numbered_slot_id(slot));
-            let colour = match slot_state(frame.host, slot) {
+            let slot = states.slot_id_at(index);
+            let record = frame.host.slots.find(&slot);
+            let colour = match slot_state(frame.host, &slot) {
                 SlotState::Empty => DIM,
                 SlotState::Fits => TEXT,
                 SlotState::OtherMode => OTHER_MODE,
                 SlotState::OtherVersion => WARNING,
             };
-            let label = menu_bar::slot_label(slot, record);
+            let label = menu_bar::slot_id_label(&slot, record);
             let (name, date) = label.split_once(" — ").unwrap_or((label.as_str(), ""));
             // The engine that made the state, when it is not Zaxnes or the game runs on another;
             // red when it is not the engine in play, whose state it cannot load.
             let (date, colour) =
-                match menu_bar::slot_engine_note(frame.host, &numbered_slot_id(slot)) {
+                match menu_bar::slot_engine_note(frame.host, &slot) {
                     Some(menu_bar::EngineNote::Shown(note)) => (format!("{date} · {note}"), colour),
                     Some(menu_bar::EngineNote::Refused(_)) => {
-                        let engine = frame.host.slot_engine(&numbered_slot_id(slot));
+                        let engine = frame.host.slot_engine(&slot);
                         let name = engine.map_or("?", zax_core_api::EngineKind::display_name);
                         (format!("{date} · {name}"), WARNING)
                     }
@@ -1602,7 +1602,7 @@ impl HandheldUi {
             .rounding(metrics.padding * 0.3)
             .thickness(3.0)
             .build();
-        let slot = states.slot();
+        let slot = states.slot_id();
         if self.state_picture_shown() {
             painter
                 .list
@@ -1613,7 +1613,7 @@ impl HandheldUi {
                 )
                 .build();
         } else {
-            let empty = !frame.host.slots.is_occupied(&numbered_slot_id(slot));
+            let empty = !frame.host.slots.is_occupied(&slot);
             let message = if empty {
                 text::empty_slot()
             } else {
@@ -1628,14 +1628,14 @@ impl HandheldUi {
             );
         }
         // Under it, why the state does not load as it is, when it does not.
-        let caption = match slot_state(frame.host, slot) {
+        let caption = match slot_state(frame.host, &slot) {
             SlotState::OtherMode => Some((keys::SLOT_OTHER_PATCH, OTHER_MODE)),
             SlotState::OtherVersion => Some((keys::SLOT_OTHER_HACK_VERSION, WARNING)),
             SlotState::Empty | SlotState::Fits => None,
         };
         let caption = caption.map(|(key, colour)| (strings::get(key), colour));
         // A state of another engine than the game's says so first: that is what stops it.
-        let caption = match menu_bar::slot_engine_note(frame.host, &numbered_slot_id(slot)) {
+        let caption = match menu_bar::slot_engine_note(frame.host, &slot) {
             Some(menu_bar::EngineNote::Refused(note)) => Some((note, WARNING)),
             Some(menu_bar::EngineNote::Shown(note)) if caption.is_none() => Some((note, DIM)),
             _ => caption,

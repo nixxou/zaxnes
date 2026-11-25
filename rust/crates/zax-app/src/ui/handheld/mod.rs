@@ -57,7 +57,6 @@ use crate::emulation::commands::{Command, CommandArgs};
 use crate::emulation::game_catalog::GameCatalog as _;
 use crate::emulation::host::{HostEvent, SlotPatchStatus};
 use crate::input::BindingDeviceKind;
-use crate::persistence::save_slots::numbered_slot_id;
 use crate::ui::{keys, strings};
 
 /// Seconds a binding waits for a button before it gives up.
@@ -161,7 +160,7 @@ pub struct HandheldUi {
     was_two_dimensional: bool,
     states: StatesModel,
     /// The slot and the save time of the thumbnail shown, and whether it has one.
-    shown_picture: Option<(i32, i64, bool)>,
+    shown_picture: Option<(String, i64, bool)>,
     /// The changes of the pictures, for the renderer.
     pictures: Vec<PictureUpdate>,
     /// Whether the host waits for an answer to a question, which the interface then asks.
@@ -818,18 +817,19 @@ impl HandheldUi {
         if self.screen != Screen::States {
             return;
         }
-        let slot = self.states.slot();
-        let record = host.slots.find(&numbered_slot_id(slot));
+        let slot = self.states.slot_id();
+        let record = host.slots.find(&slot);
         let saved_at = record
             .filter(|record| record.is_occupied())
             .map_or(0, |record| record.saved_at);
         if self
             .shown_picture
-            .is_some_and(|(shown, at, _)| (shown, at) == (slot, saved_at))
+            .as_ref()
+            .is_some_and(|(shown, at, _)| (shown.as_str(), *at) == (slot.as_str(), saved_at))
         {
             return;
         }
-        let picture = (saved_at != 0).then(|| state_picture(host, slot)).flatten();
+        let picture = (saved_at != 0).then(|| state_picture(host, &slot)).flatten();
         self.shown_picture = Some((slot, saved_at, picture.is_some()));
         self.pictures.push(PictureUpdate {
             id: STATE_PICTURE_ID,
@@ -841,7 +841,8 @@ impl HandheldUi {
     #[must_use]
     pub fn state_picture_shown(&self) -> bool {
         self.shown_picture
-            .is_some_and(|(slot, _, shown)| shown && slot == self.states.slot())
+            .as_ref()
+            .is_some_and(|(slot, _, shown)| *shown && *slot == self.states.slot_id())
     }
 
     /// The save state screen.
@@ -1641,12 +1642,14 @@ impl HandheldUi {
                 self.screen = self.states_return;
                 return;
             }
-            StatesCommand::Save(slot) => (Command::SaveSlot, slot),
-            StatesCommand::Load(slot) => (Command::LoadSlot, slot),
+            StatesCommand::Save(slot) => (Command::SaveSlot, CommandArgs::of_number(slot)),
+            StatesCommand::Load(slot) => (Command::LoadSlot, CommandArgs::of_text(&slot)),
         };
-        // The menu then shows the slot used last.
-        self.overlay.set_slot(slot);
-        host.enqueue(command, CommandArgs::of_number(slot));
+        // The menu then shows the numbered slot used last.
+        if let Some(slot) = self.states.slot() {
+            self.overlay.set_slot(slot);
+        }
+        host.enqueue(command, slot);
         host.enqueue(Command::Resume, CommandArgs::default());
         self.screen = Screen::InGame;
     }
@@ -1811,23 +1814,21 @@ impl HandheldUi {
     }
 }
 
-/// How the numbered slot `slot` stands for the game being played.
-fn slot_state(host: &AppHost, slot: i32) -> SlotState {
-    let id = numbered_slot_id(slot);
-    if !host.slots.is_occupied(&id) {
+/// How the slot `id` stands for the game being played.
+fn slot_state(host: &AppHost, id: &str) -> SlotState {
+    if !host.slots.is_occupied(id) {
         return SlotState::Empty;
     }
-    match host.slot_patch_status(&id) {
+    match host.slot_patch_status(id) {
         SlotPatchStatus::Fits => SlotState::Fits,
         SlotPatchStatus::OtherComponents => SlotState::OtherMode,
         SlotPatchStatus::OtherVersion => SlotState::OtherVersion,
     }
 }
 
-/// The thumbnail of the numbered slot `slot`, as the renderer takes it: none when it has no
-/// readable one.
-fn state_picture(host: &AppHost, slot: i32) -> Option<UiPicture> {
-    let file = host.slot_thumbnail_file(&numbered_slot_id(slot));
+/// The thumbnail of the slot `slot`, as the renderer takes it: none when it has no readable one.
+fn state_picture(host: &AppHost, slot: &str) -> Option<UiPicture> {
+    let file = host.slot_thumbnail_file(slot);
     let image = zax_render::assets::png_image::decode(&std::fs::read(file).ok()?).ok()?;
     Some(UiPicture {
         width: u32::try_from(image.width).ok()?,

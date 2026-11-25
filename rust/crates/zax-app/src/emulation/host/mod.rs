@@ -1514,6 +1514,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// which satisfies REQ-LOOP-041's "between two emulated frames" by construction.
     pub fn shutdown(&mut self) {
         self.complete_frame_in_flight();
+        // Lot LAUNCH-OUTSIDE: the auto slot of the game left, as a stop writes it, from the
+        // resume point's capture (one Save hook per exit, REQ-LOOP-076); its own capture when
+        // the resume point is suspended. A loading exit writes nothing.
+        if self.suspend_resume && !self.loading {
+            self.write_auto_save();
+        }
         self.write_or_clear_resume_point();
         self.stop_current_game(true, true);
         if self.legacy_slots.save(&self.paths).is_err() {
