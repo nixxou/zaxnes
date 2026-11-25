@@ -2652,6 +2652,14 @@ pub fn data_crc(image: &[u8]) -> u32 {
     crc32(rom_data(image))
 }
 
+/// MD5 of the same data as [`data_crc`]. Behind an iNES header, it is the hash RetroAchievements
+/// knows a NES game by (rcheevos leaves the 16-byte header out), on a dump without a trainer or
+/// an overdump.
+#[must_use]
+pub fn data_md5(image: &[u8]) -> [u8; 16] {
+    crate::movie::fm2::md5(rom_data(image))
+}
+
 /// The data of `image`, as [`data_crc`] reads it.
 #[must_use]
 pub fn rom_data(image: &[u8]) -> &[u8] {

@@ -47,8 +47,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// the CRC of its data or by the signatures of a hack pack. What it finds is kept, with the
     /// CRC, for the list of the ROMs; gives the CRC.
     pub fn certify_rom(&self, path: &Path, image: &[u8]) -> u32 {
-        let crc = builtin_patches::data_crc(image);
-        self.rom_crcs.borrow_mut().remember(path, crc);
+        let crc = self.rom_crcs.borrow_mut().hashes_for(path, image).data_crc;
         self.save_rom_crcs();
         let certificate = if builtin_patches::widescreen_capable(crc) {
             Certificate::Fits {
