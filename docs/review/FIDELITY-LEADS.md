@@ -2127,7 +2127,7 @@ build keeps MR-15-1 for the K-1029 and lifts it for an image declaring battery R
 PRG-RAM (cartridge database included), which is not a K-1029. Bao Xiao San Guo (`CE102393`,
 8 KiB battery RAM in the database) writes its CHR in mode 0 and now shows its logo.
 
-### J39. Cartridge database keys of dumps with a trainer or a misc ROM
+### J17. Cartridge database keys of dumps with a trainer or a misc ROM
 Mesen's `MesenNesDB.txt` keys a cartridge by the CRC of everything after the header (the NES 2.0
 database's `rom` CRC: trainer and misc ROM included), while the loader looks up `data_crc` (PRG-ROM
 and CHR-ROM only). 698 lines of `cartdb.csv` (616 dumps with a trainer, 82 with a misc ROM) could
