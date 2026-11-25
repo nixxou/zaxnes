@@ -1091,3 +1091,24 @@ fn an_archive_of_several_games_is_a_folder_and_back_returns_to_its_row() {
             .map(|entry| entry.name.as_str())
     );
 }
+
+/// Resting on a game for a second studies it (its hashes, the widescreen that fits it) on a
+/// thread of its own, not the interface's; the row follows when the study comes back.
+#[test]
+fn resting_on_a_game_studies_it_in_the_background() {
+    let (mut harness, mut handheld) = start(&[], &["Game.nes"]);
+    let path = handheld.roms().entries()[0].path.clone();
+    assert!(harness.host.rom_certificate(&path).is_none());
+    let pad = PadState::new();
+    frame(&mut harness, &mut handheld, &pad, 0.6);
+    frame(&mut harness, &mut handheld, &pad, 0.6);
+    for _ in 0..300 {
+        if harness.host.rom_certificate(&path).is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        frame(&mut harness, &mut handheld, &pad, 0.01);
+    }
+    assert!(harness.host.rom_certificate(&path).is_some());
+    assert!(handheld.roms().entries()[0].crc.is_some());
+}

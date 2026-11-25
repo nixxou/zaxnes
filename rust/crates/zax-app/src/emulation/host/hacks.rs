@@ -18,6 +18,25 @@ use crate::persistence::hack_compat_cache::Certificate;
 /// the background.
 const ROM_CRCS_WRITE_INTERVAL: f64 = 2.0;
 
+/// What the study of a ROM finds, from its data CRC `crc` and its image: a widescreen hack made
+/// for it (built-in patch, or a hack pack that takes it, whole or not), or none.
+#[must_use]
+pub fn certificate_of(crc: u32, image: &[u8]) -> Certificate {
+    if builtin_patches::widescreen_capable(crc) {
+        Certificate::Fits {
+            patch: builtin_patches::for_data_crc(crc).map(|patch| patch.name.to_owned()),
+            whole: true,
+        }
+    } else if let Some((patch, applied)) = builtin_patches::pack_for(image) {
+        Certificate::Fits {
+            patch: Some(patch.name.to_owned()),
+            whole: applied.refused.is_empty(),
+        }
+    } else {
+        Certificate::Unfit
+    }
+}
+
 impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// The CRC-32 of the data of the ROM in `path` (iNES header excluded), read from the file
     /// only when the cache has not seen it as it is; none when it cannot be read.
@@ -83,6 +102,13 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             for (path, hashed) in done.roms {
                 if let Some((stamp, hashes)) = hashed {
                     cache.store(&path, stamp, hashes);
+                    learned.push(path);
+                }
+            }
+            for (path, studied) in done.studied {
+                if let Some((stamp, hashes, certificate)) = studied {
+                    cache.store(&path, stamp, hashes);
+                    self.keep_certificate(&path, certificate);
                     learned.push(path);
                 }
             }
@@ -166,19 +192,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         } else {
             self.save_rom_crcs();
         }
-        let certificate = if builtin_patches::widescreen_capable(crc) {
-            Certificate::Fits {
-                patch: builtin_patches::for_data_crc(crc).map(|patch| patch.name.to_owned()),
-                whole: true,
-            }
-        } else if let Some((patch, applied)) = builtin_patches::pack_for(image) {
-            Certificate::Fits {
-                patch: Some(patch.name.to_owned()),
-                whole: applied.refused.is_empty(),
-            }
-        } else {
-            Certificate::Unfit
-        };
+        self.keep_certificate(path, certificate_of(crc, image));
+        crc
+    }
+
+    /// Keeps what the study of the ROM in `path` found, and writes the study cache.
+    fn keep_certificate(&self, path: &Path, certificate: Certificate) {
         let mut cache = self.hack_compat.borrow_mut();
         cache.certify(path, certificate);
         if let Err(error) = cache.save() {
@@ -186,7 +205,13 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 "the hack study cache could not be written: {error}"
             ));
         }
-        crc
+    }
+
+    /// Studies the ROM in `path` in the background, as [`Self::certify_rom`] does it: its file is
+    /// read on a thread, not the interface's, and the result comes back with
+    /// [`Self::take_rom_hashes`] (owner request: a game deep in a solid 7z took a while).
+    pub fn study_rom_in_background(&self, path: &Path) {
+        self.rom_hasher.borrow_mut().study(path.to_path_buf());
     }
 
     /// Whether the built-in patch of a ROM applies when it loads: the patches are allowed and

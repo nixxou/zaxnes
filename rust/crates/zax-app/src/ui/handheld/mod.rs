@@ -812,11 +812,10 @@ impl HandheldUi {
         }
         // Studied once: the same game stays without a new reading until the list moves.
         self.resting_on = Some((path.clone(), f32::NEG_INFINITY));
+        // Read and studied on a thread of its own; the row follows when it comes back
+        // (`take_rom_hashes`).
         if host.rom_certificate(&path).is_none() {
-            if let Ok(rom) = crate::emulation::rom_file::read(&path) {
-                host.certify_rom(&path, &rom.image);
-                self.note_study(&path, host);
-            }
+            host.study_rom_in_background(&path);
         }
         // Then its achievements, while RetroAchievements is on and someone is signed in.
         host.achievements.study_rom(&path);

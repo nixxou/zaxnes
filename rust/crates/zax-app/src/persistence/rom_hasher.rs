@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 
+use super::hack_compat_cache::Certificate;
 use super::rom_crc_cache::{RomHashes, Stamp};
 use crate::emulation::rom_file;
 
@@ -25,11 +26,15 @@ pub(crate) type Hashed = (PathBuf, Option<(Stamp, RomHashes)>);
 /// read).
 pub(crate) type Listed = (PathBuf, Option<(Stamp, Vec<String>)>);
 
+/// One ROM studied: its stamp, hashes and certificate (none when it could not be read).
+pub(crate) type Studied = (PathBuf, Option<(Stamp, RomHashes, Certificate)>);
+
 /// What the thread sends.
 #[derive(Debug)]
 enum Message {
     Rom(Hashed),
     Archive(Listed),
+    Studied(Studied),
     /// Everything of the queued path `0` was sent.
     Done(PathBuf),
 }
@@ -41,12 +46,14 @@ pub(crate) struct Polled {
     pub roms: Vec<Hashed>,
     /// The archives listed.
     pub archives: Vec<Listed>,
+    /// The ROMs studied.
+    pub studied: Vec<Studied>,
 }
 
 impl Polled {
     /// Whether nothing came back.
     pub fn is_empty(&self) -> bool {
-        self.roms.is_empty() && self.archives.is_empty()
+        self.roms.is_empty() && self.archives.is_empty() && self.studied.is_empty()
     }
 }
 
@@ -123,12 +130,41 @@ impl RomHasher {
             match message {
                 Message::Rom(hashed) => polled.roms.push(hashed),
                 Message::Archive(listed) => polled.archives.push(listed),
+                Message::Studied(studied) => polled.studied.push(studied),
                 Message::Done(path) => {
                     self.pending.remove(&path);
                 }
             }
         }
         polled
+    }
+
+    /// Studies the ROM in `path` on a thread of its own, at once (the player rests on it): its
+    /// hashes and what widescreen hack fits it. Nothing when it is being studied already.
+    pub fn study(&mut self, path: PathBuf) {
+        let key = study_key(&path);
+        if self.pending.contains(&key) {
+            return;
+        }
+        let outbox = self.outbox.clone();
+        let done = key.clone();
+        let spawned = std::thread::Builder::new()
+            .name("zaxnes-rom-study".to_owned())
+            .spawn(move || {
+                let studied = Stamp::of(&path).and_then(|stamp| {
+                    let rom = rom_file::read(&path).ok()?;
+                    let hashes = RomHashes::of(&rom.image);
+                    let certificate =
+                        crate::emulation::host::certificate_of(hashes.data_crc, &rom.image);
+                    Some((stamp, hashes, certificate))
+                });
+                if outbox.send(Message::Studied((path, studied))).is_ok() {
+                    let _ = outbox.send(Message::Done(done));
+                }
+            });
+        if spawned.is_ok() {
+            self.pending.insert(key);
+        }
     }
 
     /// Holds the hashing between two files while `paused` (a game plays), lets it go on after.
@@ -141,6 +177,13 @@ impl RomHasher {
     pub fn is_busy(&self) -> bool {
         !self.pending.is_empty()
     }
+}
+
+/// The key a study of `path` is pending under, apart from a hashing of the same file.
+fn study_key(path: &Path) -> PathBuf {
+    let mut key = path.as_os_str().to_owned();
+    key.push("#study");
+    PathBuf::from(key)
 }
 
 /// Lists the archive `path` and hashes its games; false once the receiver is gone.

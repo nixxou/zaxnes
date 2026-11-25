@@ -13,6 +13,7 @@ mod games;
 pub mod hack_options;
 mod hack_switch;
 mod hacks;
+pub use hacks::certificate_of;
 mod jobs;
 mod movies;
 mod own_movies;
