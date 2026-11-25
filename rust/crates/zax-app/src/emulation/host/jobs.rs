@@ -267,18 +267,24 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let target = chosen
             .or_else(|| self.games.game_for_rom(rom_path))
             .or_else(|| self.database_profile(rom_path));
-        let target = target.or_else(|| {
-            (!ask)
-                .then(|| {
-                    self.games
-                        .default_three_dimensional_id()
-                        .or_else(|| self.games.two_dimensional_mode_id())
-                })
-                .flatten()
-        });
-        match target {
-            Some(game_id) => self.launch_rom_with_profile(rom_path, &game_id),
-            None => self.request_ui(Command::ChooseProfile, &CommandArgs::of_text(rom_path)),
+        if let Some(game_id) = target {
+            self.launch_rom_with_profile(rom_path, &game_id);
+            return;
+        }
+        if ask {
+            self.request_ui(Command::ChooseProfile, &CommandArgs::of_text(rom_path));
+            return;
+        }
+        // The command line's fallback, the default 3D (else 2D), is not remembered for the file:
+        // a profile installed later (a 3dSen import) must still be found for it.
+        let fallback = self
+            .games
+            .default_three_dimensional_id()
+            .or_else(|| self.games.two_dimensional_mode_id());
+        if let Some(game_id) = fallback {
+            let full = full_path(rom_path);
+            self.games.set_rom_path(&game_id, &full.to_string_lossy());
+            self.launch_game(&game_id);
         }
     }
 

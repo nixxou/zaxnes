@@ -980,4 +980,10 @@ fn a_rom_of_the_command_line_plays_without_the_profile_chooser() {
         .or_else(|| harness.host.games().two_dimensional_mode_id());
     assert!(wanted.is_some());
     assert_eq!(wanted.as_deref(), harness.host.current_game_id());
+    // The fallback is not remembered for the file: a profile installed later is found for it.
+    let remembered = harness
+        .host
+        .settings_store()
+        .and_then(|store| store.games().profile_for(&far).map(str::to_owned));
+    assert_eq!(None, remembered);
 }
