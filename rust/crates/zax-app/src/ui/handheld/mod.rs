@@ -480,29 +480,61 @@ impl HandheldUi {
     /// widescreen are found again with their data CRC (lot GAMEHASH). The widescreen stays
     /// provisional (dark grey, `widescreen_unstudied`) until the ROM is studied.
     fn take_rom_hashes(&mut self, host: &AppHost) {
-        let hashed = host.take_rom_hashes();
+        let hashed: std::collections::HashSet<PathBuf> =
+            host.take_rom_hashes().into_iter().collect();
         if hashed.is_empty() {
             return;
         }
-        // An archive listed: the list is made again, its row becoming a folder or leaving it.
-        if hashed.iter().any(|path| {
-            crate::emulation::rom_file::is_archive(path)
-                && self.roms.entries().iter().any(|entry| entry.path == *path)
-        }) {
-            self.refresh_roms(host);
-            return;
+        // Only the rows of what came back change, one by one: a folder of thousands of archives
+        // listed as they come must not make the whole list again at every frame (owner request,
+        // the scrolling slowed down).
+        let indices: Vec<usize> = self
+            .roms
+            .entries()
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| hashed.contains(&entry.path))
+            .map(|(index, _)| index)
+            .collect();
+        let mut removed: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+        for index in indices {
+            let Some(mut entry) = self.roms.entries().get(index).cloned() else {
+                continue;
+            };
+            if entry.archive.is_some() && !entry.close_archive {
+                match host.known_archive_games(&entry.path) {
+                    // No game in it: out of the list.
+                    Some(games) if games.is_empty() => {
+                        removed.insert(entry.path.clone());
+                        continue;
+                    }
+                    Some(games) => entry.archive_games = games.len(),
+                    None => {}
+                }
+            }
+            if entry.is_game() {
+                entry.crc = host.known_rom_crc(&entry.path);
+                entry.profile = self.profile_of(host, &entry);
+                Self::find_widescreen(host, &mut entry);
+            } else if entry.is_folder() {
+                entry.crc = None;
+                entry.profile = None;
+                entry.widescreen = false;
+                entry.widescreen_other = None;
+            }
+            if let Some(slot) = self.roms.entries_mut().get_mut(index) {
+                *slot = entry;
+            }
         }
-        let mut entries: Vec<RomEntry> = self.roms.entries_mut().to_vec();
-        for entry in entries
-            .iter_mut()
-            .filter(|entry| hashed.contains(&entry.path))
-        {
-            entry.crc = host.known_rom_crc(&entry.path);
-            entry.profile = self.profile_of(host, entry);
-            Self::find_widescreen(host, entry);
-        }
-        for (slot, entry) in self.roms.entries_mut().iter_mut().zip(entries) {
-            *slot = entry;
+        if !removed.is_empty() {
+            let kept: Vec<RomEntry> = self
+                .roms
+                .entries()
+                .iter()
+                .filter(|entry| entry.close_archive || !removed.contains(&entry.path))
+                .cloned()
+                .collect();
+            self.roms.replace(kept);
         }
     }
 

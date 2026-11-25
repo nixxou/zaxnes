@@ -146,7 +146,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let busy = self.rom_hasher.borrow().is_busy();
         if !busy || self.elapsed - since >= ROM_CRCS_WRITE_INTERVAL {
             self.rom_crcs_unsaved_since.set(None);
-            self.save_rom_crcs();
+            self.rom_crcs.borrow_mut().save_in_background();
         }
     }
 

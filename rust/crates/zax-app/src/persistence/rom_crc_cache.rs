@@ -121,6 +121,8 @@ pub struct RomCrcCache {
     archives: HashMap<String, (Stamp, Vec<String>)>,
     loaded: bool,
     dirty: bool,
+    /// The thread [`RomCrcCache::save_in_background`] hands the file to, once started.
+    writer: Option<std::sync::mpsc::Sender<(PathBuf, Body)>>,
 }
 
 impl RomCrcCache {
@@ -220,9 +222,51 @@ impl RomCrcCache {
     /// # Errors
     /// The file could not be written.
     pub fn save(&mut self) -> std::io::Result<()> {
-        let Some(file) = self.file.as_ref().filter(|_| self.dirty) else {
+        let Some(file) = self.file.clone().filter(|_| self.dirty) else {
             return Ok(());
         };
+        write_body(&file, &self.body())?;
+        self.dirty = false;
+        Ok(())
+    }
+
+    /// [`Self::save`] on a thread of its own (owner request: a cache of thousands of games takes
+    /// a while to write, and the list must keep scrolling): what the cache holds now is handed
+    /// to the writer, which writes the last one it was given, atomically.
+    pub fn save_in_background(&mut self) {
+        let Some(file) = self.file.clone().filter(|_| self.dirty) else {
+            return;
+        };
+        let body = self.body();
+        if self.writer.is_none() {
+            let (sender, receiver) = std::sync::mpsc::channel::<(PathBuf, Body)>();
+            let spawned = std::thread::Builder::new()
+                .name("zaxnes-rom-crc-write".to_owned())
+                .spawn(move || {
+                    while let Ok(first) = receiver.recv() {
+                        // Only the latest matters.
+                        let (file, body) = receiver.try_iter().last().unwrap_or(first);
+                        let _ = write_body(&file, &body);
+                    }
+                });
+            if spawned.is_ok() {
+                self.writer = Some(sender);
+            }
+        }
+        let sent = self
+            .writer
+            .as_ref()
+            .is_some_and(|writer| writer.send((file.clone(), body)).is_ok());
+        if sent {
+            self.dirty = false;
+        } else {
+            self.writer = None;
+            let _ = self.save();
+        }
+    }
+
+    /// What the file holds, in a stable order.
+    fn body(&self) -> Body {
         let mut entries: Vec<Record> = self
             .entries
             .iter()
@@ -249,18 +293,11 @@ impl RomCrcCache {
             })
             .collect();
         archives.sort_by(|a, b| a.path.cmp(&b.path));
-        let text = serde_json::to_string_pretty(&Body {
+        Body {
             version: VERSION,
             entries,
             archives,
-        })
-        .map_err(std::io::Error::other)?;
-        if let Some(parent) = file.parent() {
-            std::fs::create_dir_all(parent)?;
         }
-        crate::user_data_paths::write_atomic(file, text.as_bytes())?;
-        self.dirty = false;
-        Ok(())
     }
 
     fn load(&mut self) {
@@ -296,6 +333,15 @@ impl RomCrcCache {
             self.archives.insert(record.path, (stamp, record.games));
         }
     }
+}
+
+/// Writes `body` to `file`, atomically.
+fn write_body(file: &Path, body: &Body) -> std::io::Result<()> {
+    let text = serde_json::to_string_pretty(body).map_err(std::io::Error::other)?;
+    if let Some(parent) = file.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    crate::user_data_paths::write_atomic(file, text.as_bytes())
 }
 
 /// The hashes of `record`; none for a malformed one.
