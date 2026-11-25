@@ -3,8 +3,10 @@
 //! profile".
 
 mod common;
+mod ui_harness;
 
 use common::{LoopHarness, SyntheticRom};
+use ui_harness::UiHarness;
 use zax_app::emulation::commands::{Command, CommandArgs};
 
 fn harness() -> LoopHarness {
@@ -47,4 +49,41 @@ fn the_retired_2d_mode_plays_as_no_profile() {
     assert!(harness.host.showing_two_dimensional());
     harness.run(Command::ToggleTwoDimensional);
     assert!(!harness.host.showing_two_dimensional());
+}
+
+/// A ROM remembered with "No profile" plays with its own profile once the library has one.
+#[test]
+fn a_remembered_no_profile_gives_way_to_a_profile_of_the_rom() {
+    use zax_app::emulation::game_catalog::GameCatalog as _;
+    let mut harness = UiHarness::new(&["Castle Quest"]);
+    let rom = harness.write_rom("Castle.nes");
+    let full = std::path::absolute(&rom)
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    // A first launch with its profile: the library knows the ROM as Castle Quest's.
+    harness
+        .host
+        .settings_store_mut()
+        .expect("a settings store")
+        .games_mut()
+        .set_profile_for(&full, "g0");
+    harness.run_with(Command::OpenRom, CommandArgs::of_text(&rom));
+    assert_eq!(Some("g0"), harness.host.current_game_id());
+    // Then a generic entry (No profile, or the retired 2D Mode this library has) remembered for
+    // it, as a choice made before the profile existed.
+    let none = harness
+        .host
+        .games()
+        .default_three_dimensional_id()
+        .or_else(|| harness.host.games().two_dimensional_mode_id())
+        .expect("a generic entry");
+    harness
+        .host
+        .settings_store_mut()
+        .expect("a settings store")
+        .games_mut()
+        .set_profile_for(&full, &none);
+    harness.run_with(Command::OpenRom, CommandArgs::of_text(&rom));
+    assert_eq!(Some("g0"), harness.host.current_game_id());
 }

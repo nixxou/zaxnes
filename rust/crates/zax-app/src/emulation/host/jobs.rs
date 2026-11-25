@@ -272,6 +272,19 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             .as_ref()
             .and_then(|store| store.games().profile_for(rom_path).map(str::to_owned))
             .filter(|target| self.games.exists(target));
+        // A generic entry remembered for the file (No profile, the retired 2D Mode) gives way to
+        // a real profile of the ROM: the game database's, or one installed since (a 3dSen
+        // import). The player picks No profile again from the chooser if they want it.
+        let real = || {
+            self.games
+                .game_for_rom(rom_path)
+                .filter(|game_id| !self.is_generic_entry(game_id))
+                .or_else(|| self.database_profile(rom_path))
+        };
+        let chosen = match chosen {
+            Some(game_id) if self.is_generic_entry(&game_id) => real().or(Some(game_id)),
+            other => other,
+        };
         let target = chosen
             // The generic entries (2D, default 3D) keep the last ROM played with them: that is no
             // profile of the ROM, and it must not hide the game database's.
