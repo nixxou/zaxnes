@@ -908,3 +908,56 @@ fn a_game_of_the_command_line_has_the_list_to_itself_until_back_to_library() {
         .collect();
     assert_eq!(["Game"], names.as_slice());
 }
+
+/// Lot LAUNCH-OUTSIDE: an archive of several games on the command line lists its games under
+/// "Back to library"; each plays as a file of the archive and gets its own auto slot.
+#[test]
+fn an_archive_of_several_games_lists_them_and_each_plays_on_its_own() {
+    use std::io::Write as _;
+    let (mut harness, mut handheld) = start(&[], &["Game.nes"]);
+    let far = harness.root.path().join("elsewhere");
+    std::fs::create_dir_all(&far).unwrap();
+    let archive = far.join("Pack.zip");
+    let mut writer = zip::ZipWriter::new(std::fs::File::create(&archive).unwrap());
+    for name in ["One.nes", "Two.nes"] {
+        writer
+            .start_file(name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(&SyntheticRom::counter()).unwrap();
+    }
+    writer.finish().unwrap();
+    // What `start_game_from_command_line` does with it.
+    let games = zax_app::emulation::rom_file::several_games(&archive).expect("two games");
+    for game in &games {
+        harness.host.mark_outside_library(&game.to_string_lossy());
+    }
+    handheld.refresh_roms(&harness.host);
+    let names: Vec<&str> = handheld
+        .roms()
+        .entries()
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    assert_eq!(["", "One", "Two"], names.as_slice());
+    assert!(handheld.roms().entries()[0].back_to_library);
+
+    // Two plays as a file of the archive.
+    tap(&mut harness, &mut handheld, PadButton::Down);
+    tap(&mut harness, &mut handheld, PadButton::Down);
+    tap(&mut harness, &mut handheld, PadButton::A);
+    harness.settle();
+    assert_eq!(
+        Some(games[1].to_string_lossy().as_ref()),
+        harness.host.current_rom_path()
+    );
+    press(&mut harness, &mut handheld, &[]);
+    tap(&mut harness, &mut handheld, PadButton::Menu);
+    tap(&mut harness, &mut handheld, PadButton::Up);
+    tap(&mut harness, &mut handheld, PadButton::Up);
+    tap(&mut harness, &mut handheld, PadButton::A); // quit to the list
+    harness.settle();
+    assert_eq!(Screen::Home, handheld.screen());
+    assert_eq!(3, handheld.roms().entries().len());
+    assert!(harness.paths.slot_state_file("Two", "auto").is_file());
+    assert!(!harness.paths.slot_state_file("One", "auto").exists());
+}

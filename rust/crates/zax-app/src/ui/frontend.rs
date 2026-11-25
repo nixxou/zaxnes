@@ -767,13 +767,13 @@ fn pointer_input(ui: &imgui::Ui) -> PointerInput {
 
 /// The console mode the desktop starts in: without a game to start, it opens on the ROM list of
 /// its console mode, which goes by itself once a game plays (owner request); F1 or Home leaves
-/// it. `--console` keeps it on.
+/// it. `--console` keeps it on. An archive of several games starts none (lot LAUNCH-OUTSIDE).
 fn console_at_start(options: &AppOptions, has_console: bool) -> ConsoleMode {
-    let opens_on_list = !options.handheld
-        && !options.console
-        && !options.smoke_test
-        && options.rom_path.is_none()
-        && has_console;
+    let no_game = options.rom_path.as_deref().is_none_or(|rom| {
+        crate::emulation::rom_file::several_games(std::path::Path::new(rom)).is_some()
+    });
+    let opens_on_list =
+        !options.handheld && !options.console && !options.smoke_test && no_game && has_console;
     ConsoleMode {
         active: options.console || opens_on_list,
         automatic: opens_on_list,

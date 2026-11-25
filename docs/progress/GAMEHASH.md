@@ -96,3 +96,20 @@ Plan, in this branch:
    library" row) instead of launching the first one. An archive member is addressed as
    `<archive path>/<entry name>` (the archive read as a folder), so options and saves are per
    game; names and profiles through gamedb (file CRC, data CRC).
+
+LAUNCH-OUTSIDE done (2026-11-25), each step with tests, full zax-app suite green:
+- step 1 `b14ab678`… (amended, see log): slot `auto` (`<rom>.ssauto`) in `SaveSlotIndex`, written
+  by `write_auto_save` before Stop, before a launch's stop, and at the exit from the resume
+  point's own capture (one Save hook per exit, REQ-LOOP-076 test). Load lists: first row of the
+  console Load screen (`StatesModel` now by slot id), last item of the menu bar's Load submenu
+  (`LoadSlot` with the id as text).
+- step 2 `c6c7509a`: `EmulationHost::mark_outside_library` (from `start_game_from_command_line`),
+  the console list shows those files under "Back to library" (`RomEntry::library_row`,
+  `RomListCommand::BackToLibrary`), no Resume row there; such a game writes no resume point and
+  a Stopped exit of such a run does not clear it.
+- step 3: `rom_file::archive_member` / `member_path` / `games_in` / `several_games`: one game of
+  an archive is `<archive>/<entry>`, read with its own name (saves and states per entry) and only
+  the profile/pack named like it; the hash cache stamps the archive. An archive of 2+ games on
+  the command line launches nothing and lists them; the desktop then opens on the console list.
+- Not done: names from gamedb (No-Intro by file CRC) for archive entries; the desktop window
+  library (menu bar) shows nothing of this; not tried in the running app.

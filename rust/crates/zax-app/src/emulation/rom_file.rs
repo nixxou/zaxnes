@@ -3,10 +3,14 @@
 //! A bare file is read as it always was: one comparison of its extension, then the file. An
 //! archive is opened only when a game is loaded or studied, never while one runs: its game ends
 //! up in the same bytes in memory as a bare file's.
+//!
+//! One game of an archive holding several (lot LAUNCH-OUTSIDE) is named as a file of the archive
+//! read as a folder, `<archive>/<entry>`: its options, its saves and its states are its own, named
+//! after the entry.
 
 use std::fs;
 use std::io::{Cursor, Read, Seek};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use zip::ZipArchive;
 
@@ -93,6 +97,79 @@ pub fn is_rom_file(path: &Path) -> bool {
     has_extension(path, &GAME_EXTENSIONS) || is_archive(path)
 }
 
+/// The archive and the entry `path` names when it is a game of an archive read as a folder
+/// (`<archive>/<entry>`, the entry with `/` between its folders); none for a file of the disk.
+#[must_use]
+pub fn archive_member(path: &Path) -> Option<(PathBuf, String)> {
+    if path.is_file() {
+        return None;
+    }
+    let archive = path
+        .ancestors()
+        .skip(1)
+        .find(|folder| is_archive(folder) && folder.is_file())?;
+    let entry: Vec<String> = path
+        .strip_prefix(archive)
+        .ok()?
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    (!entry.is_empty()).then(|| (archive.to_path_buf(), entry.join("/")))
+}
+
+/// The file of the disk that holds `path`: the archive of a game of an archive, else `path`.
+#[must_use]
+pub fn container_of(path: &Path) -> PathBuf {
+    archive_member(path).map_or_else(|| path.to_path_buf(), |(archive, _)| archive)
+}
+
+/// The path of the game `entry` of the archive `archive` (see [`archive_member`]).
+#[must_use]
+pub fn member_path(archive: &Path, entry: &str) -> PathBuf {
+    entry
+        .split(['/', '\\'])
+        .filter(|part| !part.is_empty())
+        .fold(archive.to_path_buf(), |path, part| path.join(part))
+}
+
+/// The entries of the archive `path` that have a game's extension, in the archive's order.
+///
+/// # Errors
+/// As [`read`].
+pub fn games_in(path: &Path) -> Result<Vec<String>, String> {
+    let Some(archive) = open_archive(path)? else {
+        return Ok(Vec::new());
+    };
+    let names = archive.names();
+    Ok(names
+        .into_iter()
+        .filter(|name| GAME_EXTENSIONS.contains(&extension_of(name).as_str()))
+        .collect())
+}
+
+/// The paths of the games of the archive `path` when it holds more than one (lot
+/// LAUNCH-OUTSIDE: the list shows them instead of playing the first); none otherwise.
+#[must_use]
+pub fn several_games(path: &Path) -> Option<Vec<PathBuf>> {
+    if !is_archive(path) {
+        return None;
+    }
+    let games = games_in(path).ok()?;
+    (games.len() > 1).then(|| games.iter().map(|entry| member_path(path, entry)).collect())
+}
+
+/// The archive at `path`, by its extension; none for a file that is not one.
+fn open_archive(path: &Path) -> Result<Option<Archive<fs::File>>, String> {
+    let extension = path
+        .extension()
+        .map(|extension| extension.to_string_lossy().to_lowercase());
+    match extension.as_deref() {
+        Some("zip") => Ok(Some(Archive::zip(open(path)?)?)),
+        Some("7z") => Ok(Some(Archive::seven_zip(open(path)?)?)),
+        _ => Ok(None),
+    }
+}
+
 /// Reads the ROM at `path`; from an archive, its game (see [`read_content`]).
 ///
 /// # Errors
@@ -109,12 +186,19 @@ pub fn read(path: &Path) -> Result<RomData, String> {
 /// # Errors
 /// As [`read`].
 pub fn read_content(path: &Path) -> Result<GameContent, String> {
+    // Lot LAUNCH-OUTSIDE: one game of an archive, named after its entry.
+    if let Some((archive, entry)) = archive_member(path) {
+        return match open_archive(&archive)? {
+            Some(opened) => read_archive(&archive, opened, Some(&entry)),
+            None => Err(UNCOMPRESSION_FAILED_MESSAGE.to_owned()),
+        };
+    }
     let extension = path
         .extension()
         .map(|extension| extension.to_string_lossy().to_lowercase());
     let rom = match extension.as_deref() {
-        Some("zip") => return read_archive(path, Archive::zip(open(path)?)?),
-        Some("7z") => return read_archive(path, Archive::seven_zip(open(path)?)?),
+        Some("zip") => return read_archive(path, Archive::zip(open(path)?)?, None),
+        Some("7z") => return read_archive(path, Archive::seven_zip(open(path)?)?, None),
         Some("rar") => return Err(RAR_UNSUPPORTED_MESSAGE.to_owned()),
         Some(kind @ ("studybox" | "fds" | "qd")) => {
             let bytes = fs::read(path).map_err(|error| error.to_string())?;
@@ -125,10 +209,10 @@ pub fn read_content(path: &Path) -> Result<GameContent, String> {
             // An archive under another name (a frontend's file without its extension): known by
             // its first bytes, a comparison of four bytes for any other game.
             if image.starts_with(ZIP_MAGIC) {
-                return read_archive(path, Archive::zip(Cursor::new(image))?);
+                return read_archive(path, Archive::zip(Cursor::new(image))?, None);
             }
             if image.starts_with(SEVEN_ZIP_MAGIC) {
-                return read_archive(path, Archive::seven_zip(Cursor::new(image))?);
+                return read_archive(path, Archive::seven_zip(Cursor::new(image))?, None);
             }
             RomData {
                 image,
@@ -291,26 +375,49 @@ impl<R: Read + Seek> Archive<R> {
     }
 }
 
+/// `name` without its extension.
+fn stem_of(name: &str) -> &str {
+    name.rsplit_once('.').map_or(name, |(stem, _)| stem)
+}
+
 /// The base name of an archive entry (after its last folder).
 fn base_name(name: &str) -> &str {
     name.rsplit(['/', '\\']).next().unwrap_or(name)
 }
 
-/// The game of the archive at `path`, with its profile and its pack.
+/// The game of the archive at `path`, with its profile and its pack: its entry `wanted` when one
+/// is asked for (lot LAUNCH-OUTSIDE), which takes the profile and the pack named as it only and
+/// gives the game the entry's name, else its first game.
 fn read_archive<R: Read + Seek>(
     path: &Path,
     mut archive: Archive<R>,
+    wanted: Option<&str>,
 ) -> Result<GameContent, String> {
     let names = archive.names();
+    let wanted_stem = wanted.map(|entry| stem_of(base_name(entry)).to_lowercase());
     let first_of = |kind: &str| {
         names
             .iter()
+            .filter(|name| {
+                wanted_stem
+                    .as_ref()
+                    .is_none_or(|stem| stem_of(base_name(name)).to_lowercase() == *stem)
+            })
             .find(|name| extension_of(name) == kind)
             .cloned()
     };
-    let game = names
-        .iter()
-        .find(|name| GAME_EXTENSIONS.contains(&extension_of(name).as_str()))
+    if let Some(entry) = wanted {
+        if !names.iter().any(|name| name == entry) {
+            return Err(UNCOMPRESSION_FAILED_MESSAGE.to_owned());
+        }
+    }
+    let game = wanted
+        .and_then(|entry| names.iter().find(|name| *name == entry))
+        .or_else(|| {
+            names
+                .iter()
+                .find(|name| GAME_EXTENSIONS.contains(&extension_of(name).as_str()))
+        })
         .or_else(|| {
             // No game's extension: the first file that is neither a profile nor a pack, read as a
             // `.nes` (what the zip reader always did with its first entry).
@@ -322,12 +429,12 @@ fn read_archive<R: Read + Seek>(
         .ok_or_else(|| UNCOMPRESSION_FAILED_MESSAGE.to_owned())?;
     let profile = first_of(PROFILE_EXTENSION);
     let pack = first_of(PACK_EXTENSION);
-    let wanted: Vec<&str> = [Some(&game), profile.as_ref(), pack.as_ref()]
+    let to_read: Vec<&str> = [Some(&game), profile.as_ref(), pack.as_ref()]
         .into_iter()
         .flatten()
         .map(String::as_str)
         .collect();
-    let mut files = archive.read(&wanted)?;
+    let mut files = archive.read(&to_read)?;
     let mut take = |name: &str| {
         files
             .iter()
@@ -349,11 +456,14 @@ fn read_archive<R: Read + Seek>(
     let profile = packed(profile);
     let pack = packed(pack);
     // The game takes the archive's name with its own kind: the saves and states of an archived
-    // game are named after the archive, as they were.
-    let stem = path
-        .file_stem()
-        .map(|stem| stem.to_string_lossy().into_owned())
-        .unwrap_or_default();
+    // game are named after the archive, as they were; one game of several, after its entry.
+    let stem = match wanted {
+        Some(entry) => stem_of(base_name(entry)).to_owned(),
+        None => path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    };
     let kind = extension_of(&game);
     let kind = if GAME_EXTENSIONS.contains(&kind.as_str()) {
         kind
@@ -409,6 +519,50 @@ mod tests {
         );
         assert_eq!(content.pack.expect("pack").bytes, b"ZXPKpack");
         assert_eq!(read(&path).expect("rom").image, b"NES\x1arom");
+    }
+
+    /// Lot LAUNCH-OUTSIDE: an archive of several games lists them, and each is read as a file
+    /// of the archive read as a folder, named after its entry, with its own profile only.
+    #[test]
+    fn each_game_of_an_archive_reads_as_a_file_of_it() {
+        let path = temp("Pack (Several).zip");
+        zip_of(
+            &path,
+            &[
+                ("One.nes", b"NES\x1aone"),
+                ("sub/Two.nes", b"NES\x1atwo"),
+                ("Two.3dn", b"profile"),
+                ("readme.txt", b"hello"),
+            ],
+        );
+        assert_eq!(vec!["One.nes", "sub/Two.nes"], games_in(&path).unwrap());
+        let games = several_games(&path).expect("several");
+        assert_eq!(path.join("One.nes"), games[0]);
+        assert_eq!(path.join("sub").join("Two.nes"), games[1]);
+        assert_eq!(
+            Some((path.clone(), "sub/Two.nes".to_owned())),
+            archive_member(&games[1])
+        );
+        assert_eq!(path, container_of(&games[1]));
+        assert_eq!(None, archive_member(&path));
+
+        let one = read_content(&games[0]).expect("one");
+        assert_eq!(
+            (one.rom.name.as_str(), one.rom.image.as_slice()),
+            ("One.nes", &b"NES\x1aone"[..])
+        );
+        assert!(one.profile.is_none());
+        let two = read_content(&games[1]).expect("two");
+        assert_eq!(
+            (two.rom.name.as_str(), two.rom.image.as_slice()),
+            ("Two.nes", &b"NES\x1atwo"[..])
+        );
+        assert_eq!(two.profile.expect("its profile").name, "Two.3dn");
+        assert!(read_content(&path.join("Missing.nes")).is_err());
+
+        let single = temp("Single.zip");
+        zip_of(&single, &[("Game.nes", b"NES\x1arom")]);
+        assert_eq!(None, several_games(&single));
     }
 
     #[test]

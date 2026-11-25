@@ -62,7 +62,8 @@ pub(crate) struct Stamp {
 
 impl Stamp {
     pub(crate) fn of(path: &Path) -> Option<Self> {
-        let metadata = std::fs::metadata(path).ok()?;
+        // A game of an archive (lot LAUNCH-OUTSIDE) changes with its archive.
+        let metadata = std::fs::metadata(crate::emulation::rom_file::container_of(path)).ok()?;
         let modified = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
         Some(Self {
             size: metadata.len(),

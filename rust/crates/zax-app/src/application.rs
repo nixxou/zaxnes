@@ -2671,7 +2671,19 @@ fn start_game_from_command_line(
     };
     let full: PathBuf = std::path::absolute(rom).unwrap_or_else(|_| PathBuf::from(rom));
     let full = full.to_string_lossy().into_owned();
-    // Lot LAUNCH-OUTSIDE: back to the list shows this file alone, under "Back to library".
+    // Lot LAUNCH-OUTSIDE: an archive of several games is not played; the list shows its games,
+    // under "Back to library".
+    if let Some(games) = crate::emulation::rom_file::several_games(Path::new(&full)) {
+        for game in &games {
+            host.mark_outside_library(&game.to_string_lossy());
+        }
+        log(&format!(
+            "{full} holds {} games: the list shows them.",
+            games.len()
+        ));
+        return;
+    }
+    // Back to the list shows this file alone, under "Back to library".
     host.mark_outside_library(&full);
     if let Some(movie) = options.movie_path.as_deref() {
         let movie = std::path::absolute(movie).unwrap_or_else(|_| PathBuf::from(movie));
