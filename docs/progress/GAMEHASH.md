@@ -98,7 +98,7 @@ Plan, in this branch:
    game; names and profiles through gamedb (file CRC, data CRC).
 
 LAUNCH-OUTSIDE done (2026-11-25), each step with tests, full zax-app suite green:
-- step 1 `b14ab678`… (amended, see log): slot `auto` (`<rom>.ssauto`) in `SaveSlotIndex`, written
+- step 1 `a4f8f3b0`: slot `auto` (`<rom>.ssauto`) in `SaveSlotIndex`, written
   by `write_auto_save` before Stop, before a launch's stop, and at the exit from the resume
   point's own capture (one Save hook per exit, REQ-LOOP-076 test). Load lists: first row of the
   console Load screen (`StatesModel` now by slot id), last item of the menu bar's Load submenu
