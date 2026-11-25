@@ -267,6 +267,7 @@ mod tests {
         // A homebrew the Hackset does not know (profiles/extra_roms.csv): Chase, whose ROM 3dSen
         // 2.2 carries in its bundle.
         assert_eq!(vec!["Chase"], profile_names(0x331B_CC87));
+        assert_eq!(vec!["zooming_secretary"], profile_names(0x6AA4_574C));
     }
 
     /// Every ROM a feature table names by data CRC is in the database, so that the list can show
