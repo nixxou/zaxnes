@@ -13,8 +13,15 @@ Owner request (2026-11-21): play Mesen HD packs. Branch `feat/hd-pack` from dev,
 ## Decisions
 
 - Where packs are looked for: `HdPacks/` beside the ROM, then `<user data>/HdPacks/`. Each holds
-  folders (with `hires.txt`) or `.zip` files named like the ROM. A `hires.txt` inside the ROM's
-  own `.zip` / `.7z` comes first.
+  folders (with `hires.txt`) or `.zip` files named like the ROM. A pack inside the ROM's own
+  `.zip` / `.7z` comes first.
+- Integration into dev (2026-11-26, owner: "même règles que pour les autres fichiers
+  additionnels"): a pack of the ROM's archive is a folder of it holding a `hires.txt` (the root
+  for one at the top), and it goes with a game by `rom_file::extras::choose`, the rule of the
+  archive's profiles and hack packs: the folder named as the game first, then one whose region
+  or timing tags are all the game's, then an untagged one, never another game's own
+  (`rom_file::read_hd_pack_files`). A game picked inside an archive (`<archive>/<entry>`) looks
+  in that archive and in `HdPacks/` beside it, by its entry's name.
 - Crate `zax-hdpacks` (safe Rust): `hires.txt` reader and the CPU compositor of the HD frame.
   The parked workshop crate (`feat/hdpack`) is not merged; only ideas came from it.
 - Which tile drew a pixel is decided from the core's tile records (background tile covering it,

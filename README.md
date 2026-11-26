@@ -210,6 +210,9 @@ Each game can run on one of three engines, picked in its options:
   on Android. They're grouped by style (CRT Guest, Mega Bezel, CRT Royale, LCD…), each with a few
   simple options like curvature or scanlines. On the PC you can still edit every parameter.
 - **Movies**: record a game and replay it exactly.
+- **Side by side 3D** (Half or Full SBS) for 3D TVs, video glasses and headsets, and the Famicom
+  3D System games shown with each eye's own picture.
+- **Mesen HD packs** in 2D, found in the game's archive or in an `HdPacks` folder.
 - **Cheats**: Game Genie, Pro Action Replay and raw codes on all three engines, kept per game, a
   built-in cheat database of 1958 games (or your own Mesen or libretro sheets), matched to the
   ROM by its No-Intro name,

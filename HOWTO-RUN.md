@@ -711,6 +711,39 @@ la sienne : ligne **« Palette de couleurs NES »** des options du jeu (écran d
 en mode console, menu déroulant **« Options du jeu »** sur PC), « Utiliser le global » reprenant
 celle des réglages.
 
+### 3D côte à côte (téléviseur 3D, lunettes vidéo, casque)
+
+Le réglage **Side by side 3D** (`video.sbs_3d`) dessine la scène 3D vue par deux caméras
+parallèles, une par œil, côte à côte dans la fenêtre : **Half SBS** serre les deux images dans
+la largeur d'une seule (ce qu'attend un téléviseur 3D), **Full SBS** les met chacune en pleine
+largeur (lunettes et casques). **Side by side 3D strength** (0,25 à 3, 1 par défaut) écarte plus
+ou moins les deux yeux. Les shaders slang s'appliquent à chaque œil, et l'interface est dessinée
+dans chaque moitié.
+
+Les jeux du **Famicom 3D System** (*Famicom Grand Prix II*, *JJ*…) montrent leurs deux images
+alternées comme le faisaient les lunettes : **Side by side Famicom 3D System**
+(`video.sbs_famicom_3d`, Half SBS par défaut) place l'image de chaque œil dans sa moitié, telle
+que le jeu l'a dessinée. Les deux réglages sont dans l'onglet d'options **Affichage**, le menu
+**Vidéo** et le mode console.
+
+### Packs HD de Mesen
+
+**HD pack in 2D** (`video.hd_pack_2d`, désactivé par défaut, réglable aussi pour un seul jeu)
+dessine l'image 2D avec le pack HD du jeu au format de Mesen (`hires.txt` et ses images). La 3D
+avec un pack HD n'est pas encore là. Le pack est cherché, dans cet ordre :
+
+1. **dans l'archive du jeu** : un dossier qui contient un `hires.txt` (ou le `hires.txt` à la
+   racine), choisi pour le jeu avec les règles des autres fichiers d'une archive (profils,
+   packs de hacks) : le dossier au nom du jeu d'abord, puis un dossier dont les étiquettes de
+   région ou de timing (`usa`, `europe`, `japan`, `world`, `ntsc`, `pal`) sont toutes celles du
+   jeu, puis un dossier sans étiquette ; jamais le dossier propre d'un autre jeu de l'archive ;
+2. dans le dossier `HdPacks` à côté de la ROM (à côté de son archive), puis dans `HdPacks` des
+   données utilisateur : un dossier avec un `hires.txt`, ou un `.zip` / `.7z` d'un tel dossier,
+   au nom du jeu avec la même tolérance que les profils 3D (étiquettes coupées, casse ignorée).
+
+Un pack peut peser des centaines de mégaoctets : il est lu en arrière-plan, et le journal dit
+lequel a été pris.
+
 ### Overscan (8 lignes du haut et du bas)
 
 La NES produit 240 lignes, mais un téléviseur NTSC n'en montrait qu'environ 224 : les 8 premières
