@@ -39,7 +39,7 @@ Notes for the NES:
 | 2 | RAM search in `zax-cheats`: snapshot of `$0000-$07FF` and `$6000-$7FFF` through a read closure, filters (known value, unknown value relative to the last snapshot, by delta), sizes 1/2 bytes, BCD, candidate list, "add as cheat" | done (no "add as cheat" yet, it is UI) |
 | 3 | Importers: Mesen JSON (BeesNES / Mesen), libretro `.cht`, FCEUX `.cht`, Nestopia XML | Mesen JSON, libretro, FCEUX done; Nestopia XML to do. FCEUX's layout from memory (its `cheat.cpp` is not in the tree): check against FCEUX before relying on it |
 | 3b | Sheet of a ROM: `zax_cheats::sheet::choose` and `zax_app::cheat_database` (folder or zip, Mesen JSON or libretro `.cht`), through the game database's No-Intro name of the data CRC, then the file name | done |
-| 4 | Engines: RAM cheats through `Engine::write_memory` after each frame (all engines); Game Genie on Zaxnes's CPU read path (one flag tested only above `$8000`, off unless a code is on), FCEUX through its own cheat API, NesHawk through its bus poke | |
+| 4 | Engines: RAM cheats through `Engine::write_memory` after each frame (all engines); Game Genie on Zaxnes's CPU read path, FCEUX through its own cheat API, NesHawk through its bus | RAM codes on every engine and Game Genie on Zaxnes done; FCEUX and NesHawk Game Genie to do |
 | 5 | Application: cheats per game saved beside the other per-game data, Cheats window (list, add, enable), Search window, libretro `retro_cheat_set` | |
 | 6 | Database: decide what to ship (see 3.) | |
 
@@ -64,3 +64,22 @@ Notes for the NES:
   title only (`OtherRegion`, codes may not work). The match kind is kept so the UI can warn below
   `Exact`. Against BeesNES's database, over the 3 144 ROMs of the game database: 1 568 exact,
   428 same region, 385 other region, 763 none (ignored test `coverage_of_a_real_database`).
+- 2026-11-26: step 4, first half.
+  - `Engine::set_cpu_read_patches(&[CpuReadPatch])` in `zax-core-api` (default: refused unless
+    empty). Zaxnes takes them: while a patch is on, every frame (standard, slice, Fidelite+) runs
+    the new board kind `PatchedBoard`, the dispatch of every board with `PATCHES_ROM` set, whose
+    reads of `$8000-$FFFF` go through `NesBus::read_patched_rom_as` (out of line). The same rule
+    as the VS. System's generic path: the specialised and generic paths hold no test at all, the
+    only change they see is the boxed `rom_patches` field at the end of `NesBus`. The fast core is
+    off while a patch is on. `read_memory` shows the patched bytes too.
+  - `EngineHandle::set_cheats(&CheatList)`: RAM codes applied after every frame (whole frame,
+    last slice, run-ahead frame) through `read_memory` / `write_memory`, so on every engine; Game
+    Genie codes handed to the engine; both dropped by `load_rom`.
+  - Tests: `zax-nes/tests/game_genie_tests.rs` (a program's `LDA #` operand patched, with and
+    without compare, standard and Fidelite+), `zax-app/tests/cheat_engine_tests.rs`.
+  - To do: a callgrind level-1 run of the standard path against the base (C: too full for the
+    WSL builds today); FCEUX's and NesHawk's Game Genie; with run-ahead, the RAM codes are applied
+    to the frame shown, after the frames run ahead.
+  - Seen on the way, not changed: the Fidelite+ loop and the slice loop do not send a VS. System
+    image to the generic path as the standard frame does, and `Fid<K>` does not forward
+    `RUNS_VS`; the VS quirks may be missing on those paths.

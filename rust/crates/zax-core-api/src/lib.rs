@@ -39,7 +39,7 @@ mod state;
 mod tile_record;
 
 pub use audio::{AudioError, MAX_RATIO_ADJUSTMENT, MAX_SAMPLE_RATE, MIN_SAMPLE_RATE};
-pub use engine::{Capabilities, Capability, Engine, EngineKind};
+pub use engine::{Capabilities, Capability, CpuReadPatch, Engine, EngineKind};
 pub use frame_batch::{FrameBatch, PaletteSnapshot, VisibleRows, STANDARD_ROWS};
 pub use input::{button, ControllerPortType, InputWord, InvalidPort, PORT_2_SHIFT, PORT_COUNT};
 pub use region::NesRegion;

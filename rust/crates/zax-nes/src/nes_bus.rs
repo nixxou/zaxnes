@@ -197,6 +197,10 @@ pub struct NesBus {
     /// data accesses at `$3000`-`$3FFF` reach the extension when the zone holds its data there
     /// (`WideExtension::zone_data`), the game's still reach the PPU.
     zone_instruction: bool,
+    /// The Game Genie's patches (lot CHEATS), `None` without any. Boxed and last, and read on
+    /// the [`PatchedBoard`](crate::cartridges::PatchedBoard) path only: the frame takes that path
+    /// while there are some, so no other path holds a test for them.
+    rom_patches: Option<Box<[zax_core_api::CpuReadPatch]>>,
 }
 
 impl NesBus {
@@ -260,6 +264,7 @@ impl NesBus {
             fast_limit: i64::MAX,
             apu_quiet: 0,
             zone_instruction: false,
+            rom_patches: None,
         }
     }
 
@@ -1336,6 +1341,10 @@ impl NesBus {
     #[allow(clippy::inline_always)] // Measured: lot PR-1 step 3, -0.84 % over thirteen ROMs.
     #[inline(always)]
     fn read_internal_body_as<K: BoardKind>(&mut self, address: u16) -> u8 {
+        // Lot CHEATS: a constant, so only the Game Genie's path holds this.
+        if K::PATCHES_ROM && address >= 0x8000 {
+            return self.read_patched_rom_as::<K>(address);
+        }
         if address >= 0x8000 {
             if let Some(value) = self
                 .cartridge
@@ -1393,6 +1402,42 @@ impl NesBus {
             Some(value) => value,
             None => self.external_bus(),
         }
+    }
+
+    /// A read of `$8000-$FFFF` through the Game Genie (lot CHEATS): what the cartridge answers,
+    /// as [`NesBus::read_internal_body_as`] reads it, then the patches.
+    #[inline(never)]
+    fn read_patched_rom_as<K: BoardKind>(&mut self, address: u16) -> u8 {
+        let window = self
+            .cartridge
+            .as_ref()
+            .and_then(|cartridge| cartridge.read_rom_window(address));
+        let original = match window {
+            Some(value) => value,
+            None => match self
+                .cartridge
+                .as_mut()
+                .and_then(|cartridge| cartridge.try_cpu_read_as::<K>(address))
+            {
+                Some(value) => value,
+                None => self.external_bus(),
+            },
+        };
+        self.rom_patches.as_deref().map_or(original, |patches| {
+            zax_core_api::CpuReadPatch::apply(patches, address, original)
+        })
+    }
+
+    /// Sets the Game Genie's patches (lot CHEATS); an empty slice removes them.
+    pub fn set_rom_patches(&mut self, patches: &[zax_core_api::CpuReadPatch]) {
+        self.rom_patches = (!patches.is_empty()).then(|| patches.into());
+    }
+
+    /// Whether the Game Genie has patches: the frame then takes the
+    /// [`PatchedBoard`](crate::cartridges::PatchedBoard) path.
+    #[must_use]
+    pub fn rom_patched(&self) -> bool {
+        self.rom_patches.is_some()
     }
 
     /// The out-of-line copy of [`NesBus::read_internal_body`]: every reader of the bus that is
@@ -1987,6 +2032,17 @@ impl NesBus {
     /// $2000-$401F reads back as 0, as REQ-CORE-081 asks, so that a host or a script
     /// peeking at $2002 cannot clear the `VBlank` flag under the game's feet.
     fn cpu_peek(&self, address: u16) -> u8 {
+        let value = self.cpu_peek_unpatched(address);
+        match self.rom_patches.as_deref() {
+            Some(patches) if address >= 0x8000 => {
+                zax_core_api::CpuReadPatch::apply(patches, address, value)
+            }
+            _ => value,
+        }
+    }
+
+    /// [`NesBus::cpu_peek`] without the Game Genie.
+    fn cpu_peek_unpatched(&self, address: u16) -> u8 {
         if address < 0x2000 {
             return self.ram[usize::from(address) & (RAM_SIZE - 1)];
         }

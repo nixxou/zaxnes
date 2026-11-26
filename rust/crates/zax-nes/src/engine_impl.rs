@@ -111,6 +111,11 @@ impl Engine for NesCore {
         NesCore::write_memory(self, address, value);
     }
 
+    fn set_cpu_read_patches(&mut self, patches: &[zax_core_api::CpuReadPatch]) -> bool {
+        NesCore::set_cpu_read_patches(self, patches);
+        true
+    }
+
     #[inline]
     fn save_state_to(
         &self,

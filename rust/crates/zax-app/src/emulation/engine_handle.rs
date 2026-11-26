@@ -60,6 +60,9 @@ pub struct EngineHandle {
     /// on an engine that has no ring of its own to share. `None` on Zaxnes, whose APU ring *is*
     /// shared and is used unchanged.
     shared_audio: Option<Arc<Mutex<SharedRing>>>,
+    /// The RAM writes of the cheats that are on (lot CHEATS), applied after every frame; empty
+    /// without any. The Game Genie's patches are the engine's (`Engine::set_cpu_read_patches`).
+    ram_cheats: Box<[zax_cheats::RamWrite]>,
 }
 
 /// A ring of samples the main thread fills a frame at a time and the audio thread drains, for an
@@ -131,6 +134,7 @@ impl std::fmt::Debug for EngineHandle {
             .field("cycles", &self.cycles)
             .field("image", &self.loaded_image.as_ref().map(Vec::len))
             .field("shared_audio", &self.shared_audio.is_some())
+            .field("ram_cheats", &self.ram_cheats.len())
             .finish()
     }
 }
@@ -150,6 +154,7 @@ impl EngineHandle {
             loaded_image: None,
             cycles: 0,
             shared_audio,
+            ram_cheats: Box::default(),
         }
     }
 
@@ -353,6 +358,9 @@ impl EngineHandle {
     /// an engine that does not keep one.
     pub fn load_rom(&mut self, image: &[u8], name: &str) -> zax_core_api::RomLoadResult {
         self.cycles = 0;
+        // A new game drops the cheats of the last (lot CHEATS).
+        self.ram_cheats = Box::default();
+        self.engine.set_cpu_read_patches(&[]);
         let result = self.engine.load_rom(image, name);
         self.loaded_image = result.success.then(|| image.to_vec());
         result
@@ -439,8 +447,38 @@ impl EngineHandle {
     pub fn run_frame(&mut self, word: InputWord) -> i64 {
         let cycles = self.engine.run_frame(word);
         self.cycles = self.cycles.saturating_add(cycles);
+        self.apply_ram_cheats();
         self.pump_audio();
         cycles
+    }
+
+    /// Puts a game's cheats in force (lot CHEATS): its RAM codes after every frame, its Game
+    /// Genie codes on the engine's CPU reads. `false` when the engine cannot take the Game Genie
+    /// codes, which then do nothing; the RAM codes work on every engine. A new ROM drops them.
+    pub fn set_cheats(&mut self, cheats: &zax_cheats::CheatList) -> bool {
+        self.ram_cheats = cheats.ram_writes().into_boxed_slice();
+        let patches: Vec<zax_core_api::CpuReadPatch> = cheats
+            .rom_patches()
+            .into_iter()
+            .map(|patch| zax_core_api::CpuReadPatch {
+                address: patch.address,
+                value: patch.value,
+                compare: patch.compare,
+            })
+            .collect();
+        self.engine.set_cpu_read_patches(&patches)
+    }
+
+    /// The cheats' RAM writes, after a frame (lot CHEATS): nothing without any.
+    fn apply_ram_cheats(&mut self) {
+        for write in &self.ram_cheats {
+            if write
+                .compare
+                .is_none_or(|compare| self.engine.read_memory(write.address) == compare)
+            {
+                self.engine.write_memory(write.address, write.value);
+            }
+        }
     }
 
     /// Lot FIDPLUS-B (B3): one slice of a frame, from where the last one stopped (or a new frame)
@@ -454,6 +492,7 @@ impl EngineHandle {
         };
         if let Some(cycles) = cycles {
             self.cycles = self.cycles.saturating_add(cycles);
+            self.apply_ram_cheats();
         }
         self.pump_audio();
         cycles
@@ -476,6 +515,7 @@ impl EngineHandle {
             None => self.engine.run_frame(word),
         };
         self.cycles = self.cycles.saturating_add(cycles);
+        self.apply_ram_cheats();
         self.pump_audio();
         cycles
     }

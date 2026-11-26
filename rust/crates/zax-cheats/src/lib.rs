@@ -49,6 +49,17 @@ impl RomPatch {
     }
 }
 
+/// A RAM write repeated each frame: what Pro Action Replay and raw codes become.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RamWrite {
+    /// CPU address.
+    pub address: u16,
+    /// Byte written.
+    pub value: u8,
+    /// Byte the address must hold for the write to happen.
+    pub compare: Option<u8>,
+}
+
 /// A game's cheats.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CheatList {
@@ -91,6 +102,19 @@ impl CheatList {
                     Some(RomPatch { address, value, compare })
                 }
                 CheatEffect::RamWrite { .. } => None,
+            })
+            .collect()
+    }
+
+    /// The RAM writes of the cheats that are on, for an engine to apply after each frame.
+    #[must_use]
+    pub fn ram_writes(&self) -> Vec<RamWrite> {
+        enabled_codes(&self.cheats)
+            .filter_map(|code| match code.effect {
+                CheatEffect::RamWrite { address, value, compare } => {
+                    Some(RamWrite { address, value, compare })
+                }
+                CheatEffect::RomRead { .. } => None,
             })
             .collect()
     }

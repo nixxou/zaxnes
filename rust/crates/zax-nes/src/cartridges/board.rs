@@ -820,6 +820,11 @@ pub trait BoardKind {
     /// instructions over 300 frames (+0.045 % `core`).
     const RUNS_VS: bool = false;
 
+    /// Whether this kind's CPU reads of `$8000-$FFFF` go through the Game Genie's patches
+    /// ([`PatchedBoard`], lot CHEATS): `true` for that kind alone, which the frame takes while a
+    /// code is on, so every other path holds no test for them.
+    const PATCHES_ROM: bool = false;
+
     /// Whether this kind's board may watch the PPU address bus (lot C3c-bus): `false` for the
     /// five one-board kinds whose board never does (NROM, MMC1, `UxROM`, `CNROM`, `AxROM`), so
     /// that the bus events added for the boards that do — the sprite phase's garbage nametable
@@ -861,6 +866,7 @@ impl<K: BoardKind> BoardKind for Fid<K> {
     type B = K::B;
     const SWITCHES: bool = K::SWITCHES;
     const FIDELITY_PLUS: bool = true;
+    const PATCHES_ROM: bool = K::PATCHES_ROM;
     const WATCHES_BUS: bool = K::WATCHES_BUS;
     const A12_ONLY: bool = K::A12_ONLY;
 
@@ -912,6 +918,35 @@ impl<K: BoardKind> BoardKind for Fast<K> {
     #[inline(always)]
     fn board_mut(board: &mut Board) -> &mut Self::B {
         K::board_mut(board)
+    }
+}
+
+/// Every board, through the [`Board`] dispatch, with the Game Genie's patches on the CPU's reads
+/// of `$8000-$FFFF` (lot CHEATS): the path of a frame while a code is on, whatever the board.
+pub enum PatchedBoard {}
+
+impl BoardKind for PatchedBoard {
+    type B = Board;
+
+    const RUNS_VS: bool = true;
+    const PATCHES_ROM: bool = true;
+
+    #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
+    #[inline(always)]
+    fn matches(_: &Board) -> bool {
+        true
+    }
+
+    #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
+    #[inline(always)]
+    fn board(board: &Board) -> &Board {
+        board
+    }
+
+    #[allow(clippy::inline_always)] // Lot CORE-2: the specialised paths rest on these being inlined.
+    #[inline(always)]
+    fn board_mut(board: &mut Board) -> &mut Board {
+        board
     }
 }
 

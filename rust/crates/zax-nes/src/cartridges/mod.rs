@@ -35,7 +35,7 @@ pub use board::Mmc5ExtKind;
 pub(crate) use board::{has_fast_path, with_board_kind, with_fast_board_kind};
 pub use board::{
     AnyBoard, AxRomKind, BoardKind, CnRomKind, Fast, Fid, Mmc1Kind, Mmc3Kind, Mmc5Kind, NromKind,
-    UxRomKind,
+    PatchedBoard, UxRomKind,
 };
 use mappers::Mapper;
 

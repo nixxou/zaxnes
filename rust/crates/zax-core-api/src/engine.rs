@@ -299,6 +299,30 @@ pub enum Capability {
     MachineInternals,
 }
 
+/// A byte the CPU reads in place of the cartridge's (a Game Genie code, lot CHEATS).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CpuReadPatch {
+    /// CPU address, `$8000-$FFFF`.
+    pub address: u16,
+    /// The byte read.
+    pub value: u8,
+    /// The byte the cartridge must hold there for the patch to answer.
+    pub compare: Option<u8>,
+}
+
+impl CpuReadPatch {
+    /// The byte read at `address` when the cartridge answers `original`, through `patches`.
+    #[must_use]
+    pub fn apply(patches: &[Self], address: u16, original: u8) -> u8 {
+        patches
+            .iter()
+            .find(|patch| {
+                patch.address == address && patch.compare.is_none_or(|compare| compare == original)
+            })
+            .map_or(original, |patch| patch.value)
+    }
+}
+
 /// One emulated NES machine.
 ///
 /// # `Send` but **not** `Sync`
@@ -397,6 +421,14 @@ pub trait Engine: Send {
 
     /// Writes one byte of the CPU address space (REQ-CORE-081).
     fn write_memory(&mut self, address: u16, value: u8);
+
+    /// Replaces the bytes the CPU reads from the cartridge at `$8000-$FFFF`, as a Game Genie
+    /// does (lot CHEATS): each patch answers its address, when the cartridge holds its compare
+    /// value there if it has one. An empty slice removes them. `false` when the engine cannot,
+    /// and the patches are then not applied; the default.
+    fn set_cpu_read_patches(&mut self, patches: &[CpuReadPatch]) -> bool {
+        patches.is_empty()
+    }
 
     // ------------------------------------------------------------ savestates
 

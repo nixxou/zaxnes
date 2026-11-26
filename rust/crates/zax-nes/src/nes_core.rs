@@ -1,6 +1,7 @@
 use crate::apu::{Apu2A03, AudioError, AudioReader};
 use crate::cartridges::{
     has_fast_path, with_board_kind, with_fast_board_kind, AnyBoard, BoardKind, Cartridge,
+    PatchedBoard,
 };
 use crate::cpu::{Cpu6502, CpuBus};
 use crate::input::{ControllerPortType, InputPorts, InvalidPort, ZapperPosition};
@@ -1277,10 +1278,13 @@ impl NesCore {
             self.bus.ppu_mut().set_fidelity_plus(self.fidelity_plus);
             self.bus.defer_ppu();
             loop {
-                let done = match self.bus.cartridge().filter(|_| !self.generic_path) {
+                // Lot CHEATS: the Game Genie's codes take their own path.
+                let patched = self.bus.rom_patched();
+                let done = match self.bus.cartridge().filter(|_| !self.generic_path && !patched) {
                     Some(cartridge) => with_board_kind!(cartridge.board(), K => {
                         self.run_fidelity_plus_steps::<K>(idle_loop)
                     }),
+                    None if patched => self.run_fidelity_plus_steps::<PatchedBoard>(idle_loop),
                     None => self.run_fidelity_plus_steps::<AnyBoard>(idle_loop),
                 };
                 if done {
@@ -1341,6 +1345,7 @@ impl NesCore {
             && !fidelity
             && !self.generic_path
             && !self.bus.is_vs_image()
+            && !self.bus.rom_patched()
             && self
                 .bus
                 .cartridge()
@@ -1349,13 +1354,17 @@ impl NesCore {
             self.bus.set_fast_limit(until);
         }
         let done = loop {
-            let outcome = match self.bus.cartridge().filter(|_| !self.generic_path) {
+            let patched = self.bus.rom_patched();
+            let outcome = match self.bus.cartridge().filter(|_| !self.generic_path && !patched) {
                 Some(cartridge) if fast => with_fast_board_kind!(cartridge.board(), K => {
                     self.run_fast_frame_steps::<K>(frame.idle_loop, until)
                 }, self.run_slice_steps::<AnyBoard>(frame.idle_loop, until, fidelity)),
                 Some(cartridge) => with_board_kind!(cartridge.board(), K => {
                     self.run_slice_steps::<K>(frame.idle_loop, until, fidelity)
                 }),
+                None if patched => {
+                    self.run_slice_steps::<PatchedBoard>(frame.idle_loop, until, fidelity)
+                }
                 None => self.run_slice_steps::<AnyBoard>(frame.idle_loop, until, fidelity),
             };
             match outcome {
@@ -1446,11 +1455,14 @@ impl NesCore {
         loop {
             // Lot MAPPERS-N: a VS. System image always takes the generic path, the one kind that
             // carries the bus's VS quirks (`BoardKind::RUNS_VS`).
-            let generic = self.generic_path || self.bus.is_vs_image();
+            // Lot CHEATS: the Game Genie's codes take their own path, the generic one with them.
+            let patched = self.bus.rom_patched();
+            let generic = self.generic_path || self.bus.is_vs_image() || patched;
             let done = match self.bus.cartridge().filter(|_| !generic) {
                 Some(cartridge) => {
                     with_board_kind!(cartridge.board(), K => self.run_frame_steps::<K>(idle_loop))
                 }
+                None if patched => self.run_frame_steps::<PatchedBoard>(idle_loop),
                 None => self.run_frame_steps::<AnyBoard>(idle_loop),
             };
             if done {
@@ -1691,7 +1703,7 @@ impl NesCore {
     /// One frame through the fast core, when the board has a fast path: `false` (nothing run)
     /// otherwise, and the standard loop takes the frame.
     fn run_fast_frame(&mut self, idle_loop: Option<(u16, u16)>) -> bool {
-        if self.generic_path || self.bus.is_vs_image() {
+        if self.generic_path || self.bus.is_vs_image() || self.bus.rom_patched() {
             return false;
         }
         if !self
@@ -2716,6 +2728,13 @@ impl NesCore {
     #[must_use]
     pub fn read_memory(&self, address: u16) -> u8 {
         self.bus.peek(address)
+    }
+
+    /// Sets the Game Genie's patches on the CPU's reads of `$8000-$FFFF` (lot CHEATS); an empty
+    /// slice removes them. While there are some, every frame takes the
+    /// [`PatchedBoard`] path.
+    pub fn set_cpu_read_patches(&mut self, patches: &[zax_core_api::CpuReadPatch]) {
+        self.bus.set_rom_patches(patches);
     }
 
     /// Writes CPU memory as a CPU write would, without advancing time (REQ-CORE-082).
