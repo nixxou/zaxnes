@@ -105,6 +105,9 @@ pub struct NesCore {
     report_age: Option<u8>,
     /// Whether the smooth scrolling from the run-ahead is on (the host's option of each game).
     smooth_ahead: bool,
+    /// Lot HD-PACK: whether the host draws an HD pack, whose backgrounds with a scroll ratio
+    /// follow the playfield's scroll ([`NesCore::playfield_origin`]): the lines' scroll is kept.
+    hd_scroll: bool,
     /// Whether the game's own `smooth_scroll` aid is on, worked out when the options, the patch
     /// or the pack change ([`NesCore::refresh_patch_cache`]) and **never inside a frame**: the
     /// question costs a scan of `builtin_patches::patches()`, and `end_frame` asked it twice a
@@ -211,6 +214,7 @@ impl NesCore {
             last_scroll: None,
             report_age: None,
             smooth_ahead: false,
+            hd_scroll: false,
             smooth_scroll_on: false,
             smooth_scroll_live: false,
             idle_loop: None,
@@ -2162,7 +2166,7 @@ impl NesCore {
         self.bus
             .ppu_mut()
             .set_wants_playfield_end(on && decoder.is_some());
-        let tracked = on || self.smooth_ahead;
+        let tracked = on || self.smooth_ahead || self.hd_scroll;
         self.bus.ppu_mut().set_tracks_line_scroll(tracked);
         if !on {
             self.camera_fraction = None;
@@ -2272,6 +2276,22 @@ impl NesCore {
             self.smooth_scroll_live = true;
         }
         self.smooth_ahead = on;
+    }
+
+    /// Lot HD-PACK: keeps the scroll of each line for the frames to come, or stops (unless the
+    /// smooth scrolling keeps it), for [`NesCore::playfield_origin`]. Cheap to call each frame.
+    pub fn set_tracks_playfield_scroll(&mut self, on: bool) {
+        self.hd_scroll = on;
+        let tracked = on || self.smooth_scroll_on || self.smooth_ahead;
+        self.bus.ppu_mut().set_tracks_line_scroll(tracked);
+    }
+
+    /// Lot HD-PACK: where the picture just made starts on the 512 × 480 plane, the scroll of its
+    /// playfield ([`crate::ppu::Ppu2C02::playfield_origin`]); `None` while the lines' scroll is
+    /// not kept.
+    #[must_use]
+    pub fn playfield_origin(&self) -> Option<(i32, i32)> {
+        self.bus.ppu().playfield_origin()
     }
 
     /// Whether option `key` of the game's patch, or of its hack pack's aids, is on.

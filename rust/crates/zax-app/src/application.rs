@@ -3278,6 +3278,7 @@ fn draw_hd_picture(state: &mut RunState, session: &GameSession, width: usize) {
         frame: u64::try_from(core.frame_count()).unwrap_or(0),
         rgb: &rgb,
         memory: &memory,
+        scroll: core.playfield_origin(),
     };
     zax_hdpacks::compose(&loaded.pack, &loaded.chr, &input, &mut state.hd.picture);
     state.hd_scale = loaded.pack.scale.max(1) as usize;
@@ -3329,6 +3330,9 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         .hd
         .follow(rom.as_deref(), Some(&user_root), &crate::app_log::line);
     state.hd_scale = 0;
+    // An HD pack's backgrounds with a scroll ratio follow the playfield's scroll, kept while one
+    // is drawn.
+    let hd_scroll = hd_2d && state.hd.pack().is_some();
     // The smooth scrolling from the run-ahead: nothing to draw between two frames at 60 frames a
     // second or less, nor a real frame to slide from without run-ahead; then nothing is done.
     let smooth_ahead = host
@@ -3357,6 +3361,7 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         session.set_overscan(overscan);
         session.core_mut().set_hack_options(hack_options);
         session.core_mut().set_smooth_scroll_ahead(smooth_ahead);
+        session.core_mut().set_tracks_playfield_scroll(hd_scroll);
         session.core_mut().set_sprite_limit(sprite_limit);
         session.core_mut().set_widescreen_margin(widescreen);
         session

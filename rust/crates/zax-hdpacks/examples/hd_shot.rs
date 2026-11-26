@@ -50,6 +50,7 @@ fn main() {
         eprintln!("ROM not loaded");
         return;
     }
+    core.set_tracks_playfield_scroll(true);
     for frame in 0..frames {
         let pressed = starts.iter().any(|&s| (s..s + 4).contains(&frame));
         core.run_frame(if pressed { u16::from(button::START) } else { 0 });
@@ -74,6 +75,7 @@ fn main() {
         frame: frames,
         rgb: &rgb,
         memory: &memory,
+        scroll: core.playfield_origin(),
     };
     let mut out = Vec::new();
     let started = std::time::Instant::now();

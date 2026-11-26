@@ -51,6 +51,23 @@ pub struct FrameInput<'a> {
     pub rgb: &'a NesRgb,
     /// Reads a byte of CPU memory (memory conditions).
     pub memory: &'a dyn Fn(u16) -> u8,
+    /// Where the playfield's picture starts on the PPU's 512 × 480 plane (its scroll), which a
+    /// background with a scroll ratio follows; `None` when the engine does not tell it (those
+    /// backgrounds then stay where their line puts them).
+    pub scroll: Option<(i32, i32)>,
+}
+
+/// How far a background's picture is moved, in NES pixels, by the playfield's `scroll` and its
+/// scroll ratios: the scroll times the ratio, the fraction dropped.
+#[allow(clippy::cast_precision_loss)] // a scroll below 512
+fn scroll_offset(background: &crate::pack::Background, scroll: Option<(i32, i32)>) -> (i32, i32) {
+    let Some((x, y)) = scroll else {
+        return (0, 0);
+    };
+    (
+        (x as f32 * background.scroll_x) as i32,
+        (y as f32 * background.scroll_y) as i32,
+    )
 }
 
 /// The CHR ROM tile indices of each pattern (empty for a CHR-RAM game).
@@ -555,6 +572,7 @@ pub struct Composer {
 fn composite_layer(
     pack: &HdPack,
     layer: &[usize],
+    scroll: Option<(i32, i32)>,
     margins: Margins,
     scale: i32,
     (hd_width, hd_height): (usize, usize),
@@ -567,7 +585,13 @@ fn composite_layer(
         .rev()
         .map(|&at| {
             let background = &pack.backgrounds[at];
-            (background, pack.pictures[background.image].get())
+            let (ox, oy) = scroll_offset(background, scroll);
+            (
+                background,
+                pack.pictures[background.image].get(),
+                (background.left + ox) * scale,
+                (background.top + oy) * scale,
+            )
         })
         .collect();
     let (left, top) = (margins.0 * scale, margins.1 * scale);
@@ -577,9 +601,9 @@ fn composite_layer(
         for (hx, pixel) in row.iter_mut().enumerate() {
             let sx = hx as i32 - left;
             let (mut r, mut g, mut b, mut a) = (0u32, 0u32, 0u32, 0u32);
-            for (background, picture) in &front_first {
-                let py = background.top * scale + sy;
-                let px = background.left * scale + sx;
+            for (background, picture, left_at, top_at) in &front_first {
+                let py = top_at + sy;
+                let px = left_at + sx;
                 if px < 0 || py < 0 || px as u32 >= picture.width || py as u32 >= picture.height {
                     continue;
                 }
@@ -664,9 +688,18 @@ impl Composer {
         let hd_size = (width * scale, height * scale);
         let margins = Margins(input.margin, input.margin_y);
         let (picture, palette, nes_rgb) = (input.picture, input.palette, input.rgb);
+        let scroll = input.scroll;
         for (layer, buffer) in self.layers.iter_mut().enumerate() {
             if !direct[layer] && !layers[layer].is_empty() {
-                composite_layer(pack, &layers[layer], margins, scale as i32, hd_size, buffer);
+                composite_layer(
+                    pack,
+                    &layers[layer],
+                    scroll,
+                    margins,
+                    scale as i32,
+                    hd_size,
+                    buffer,
+                );
             }
         }
         let composites = &self.layers;
@@ -680,10 +713,11 @@ impl Composer {
             for &at in layer {
                 let background = &pack.backgrounds[at];
                 let picture = pack.pictures[background.image].get();
+                let (ox, oy) = scroll_offset(background, scroll);
                 for j in 0..scale {
                     for i in 0..scale {
-                        let hx = (background.left + sx) * scale as i32 + i as i32;
-                        let hy = (background.top + sy) * scale as i32 + j as i32;
+                        let hx = (background.left + ox + sx) * scale as i32 + i as i32;
+                        let hy = (background.top + oy + sy) * scale as i32 + j as i32;
                         if hx < 0 || hy < 0 {
                             continue;
                         }
@@ -915,6 +949,7 @@ mod tests {
             frame: 0,
             rgb: &rgb,
             memory: &memory,
+            scroll: None,
         };
         let mut out = Vec::new();
         compose(&pack, &ChrIndex::default(), &input, &mut out);
@@ -947,5 +982,54 @@ mod tests {
                     [off]<background>bg_a.png,1,0,0,5\n[on]<background>bg_b.png,1,0,0,5\n";
         let out = run(text, &picture, &records, palette);
         assert_eq!(&[200, 0, 0, 255], &out[0..4]);
+    }
+    /// The red of the first pixel drawn with a background of `ratio` across, the playfield's
+    /// scroll `scroll`, over a picture whose column x is red 4x.
+    fn red_at_scroll(ratio: &str, scroll: Option<(i32, i32)>) -> u8 {
+        let (_, mut records, palette) = frame();
+        records[0].plane0 = 0;
+        let picture = vec![0x0F; 64];
+        let text = format!("<ver>107\n<scale>1\n<background>bg.png,1,{ratio},0,5\n");
+        let pack = crate::pack::parse(&text, |_| {
+            let mut data = Vec::new();
+            for _ in 0..64 {
+                for x in 0..64u8 {
+                    data.extend_from_slice(&[x * 4, 0, 0, 255]);
+                }
+            }
+            Ok(Picture::ready(Rgba {
+                width: 64,
+                height: 64,
+                data,
+            }))
+        })
+        .unwrap_or_default();
+        let rgb = grey();
+        let memory = |_: u16| 0;
+        let input = FrameInput {
+            picture: &picture,
+            width: 8,
+            height: 8,
+            margin: 0,
+            margin_y: 0,
+            records: &records,
+            palette,
+            frame: 0,
+            rgb: &rgb,
+            memory: &memory,
+            scroll,
+        };
+        let mut out = Vec::new();
+        compose(&pack, &ChrIndex::default(), &input, &mut out);
+        out[0]
+    }
+
+    #[test]
+    fn a_background_with_a_scroll_ratio_follows_the_playfield_s_scroll() {
+        assert_eq!(40, red_at_scroll("1", Some((10, 0))));
+        assert_eq!(20, red_at_scroll("0.5", Some((10, 0))));
+        assert_eq!(0, red_at_scroll("0", Some((10, 0))));
+        // An engine that does not tell the scroll: the background stays where its line puts it.
+        assert_eq!(0, red_at_scroll("1", None));
     }
 }

@@ -907,6 +907,21 @@ impl EngineHandle {
         }
     }
 
+    /// Lot HD-PACK: whether the engine keeps the playfield's scroll for an HD pack's backgrounds
+    /// with a scroll ratio; ignored on an engine whose PPU is not ours.
+    pub fn set_tracks_playfield_scroll(&mut self, on: bool) {
+        if let Some(core) = self.zaxnes_mut() {
+            core.set_tracks_playfield_scroll(on);
+        }
+    }
+
+    /// Lot HD-PACK: the playfield's scroll on the 512 × 480 plane in the picture just made;
+    /// `None` on an engine whose PPU is not ours (its pack backgrounds are then drawn fixed).
+    #[must_use]
+    pub fn playfield_origin(&self) -> Option<(i32, i32)> {
+        self.zaxnes().and_then(NesCore::playfield_origin)
+    }
+
     /// The 8-sprites-per-line limit of the picture; ignored on an engine whose PPU is not ours.
     pub fn set_sprite_limit(&mut self, limit: SpriteLimit) {
         if let Some(core) = self.zaxnes_mut() {

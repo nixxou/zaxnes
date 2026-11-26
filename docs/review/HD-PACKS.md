@@ -57,10 +57,24 @@ backgrounds, 528 additions), read straight from its `.7z` in `HdPacks/`: title s
 right; read in 0.1 s; a frame in 2.9 ms over the cores (rayon), 25 ms the first time a picture is
 decoded. All its pictures decoded would be 1 GB, so they are decoded when first drawn.
 
+## Scroll ratios (fix/hd-scroll, 2026-11-26)
+
+A `<background>`'s scroll ratios move it by the playfield's scroll times the ratio (fraction
+dropped). The scroll is `NesCore::playfield_origin`: the start, on the 512 x 480 plane, of the
+longest band of lines drawn with one scroll (the smooth scrolling's band, so a status bar with
+a scroll of its own is left out), else the first line with a background. The lines' scroll is
+kept only while an HD pack is drawn (`set_tracks_playfield_scroll`). Castlevania's stage 1 needs
+it: its lower background, gate and pillar have a ratio of 1; before, they stayed in place and
+jumped at each screen. Checked against MesenCE 2.2.1 on the same walk (Start, then Right, a
+shot every 180 frames): same pillar position at 3 s, same framing at 6 s. Which line Mesen takes
+the scroll from when it changes mid-frame was not read in its code: the band is an assumption
+that agrees with Castlevania.
+
 ## Not supported yet (and why)
 
 - `ppuMemoryCheck*`: the core API reads CPU memory only; such a condition is false.
-- `<background>` scroll ratios: the NES scroll is not known to the app; drawn fixed.
+- `<background>` scroll ratios on NesHawk and FCEUX: their PPU does not tell the playfield's
+  scroll; such a background is drawn fixed there (the Zaxnes core follows it, below).
 - Decoded pictures are never released: a long session through every stage can reach the 1 GB
   above. To do: release the pictures not drawn for a while.
 - `<fallback>` tiles, `disableCache`, the per-scanline background tile cache: not read.

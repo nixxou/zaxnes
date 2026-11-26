@@ -677,6 +677,25 @@ impl Ppu2C02 {
         Some((x, i16::try_from(from).ok()?, i16::try_from(to).ok()?))
     }
 
+    /// Lot HD-PACK: where the playfield's picture starts on the 512 × 480 plane, the scroll an
+    /// HD pack's background with a scroll ratio follows: the band of
+    /// [`Ppu2C02::playfield_scroll`] across, and down the line its first line shows less that
+    /// line's number. Without such a band, the first line with a background. `None` while the
+    /// lines' scroll is not kept or no line has a background.
+    #[must_use]
+    pub fn playfield_origin(&self) -> Option<(i32, i32)> {
+        let line = match self.playfield_scroll() {
+            Some((_, from, _)) => usize::try_from(from).ok()?,
+            None => self.line_scroll.iter().position(Option::is_some)?,
+        };
+        let (x, y) = self.line_scroll.get(line).copied().flatten()?;
+        let line = i32::try_from(line).ok()?;
+        // The lines' scroll down is kept one line short of the one each line shows (measured:
+        // a scroll of 20 keeps 19 for line 0 and goes on from there), which the smooth
+        // scrolling, reading only the scroll across and the band's lines, never saw.
+        Some((i32::from(x), (i32::from(y) + 1 - line).rem_euclid(480)))
+    }
+
     fn rows_to_decode(&self) -> Vec<(usize, CapturedRow, bool)> {
         let mut rows = Vec::with_capacity(32);
         for (index, captured) in self.captured_rows.iter().enumerate() {
