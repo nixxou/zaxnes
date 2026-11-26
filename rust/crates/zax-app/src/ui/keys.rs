@@ -627,6 +627,68 @@ pub const ACH_KEY_SPACE: &str = "achievements.key.space";
 /// Hint and key: the text is done.
 pub const ACH_KEY_DONE: &str = "achievements.key.done";
 
+// ------------------------------------------------- lot CHEATS
+pub const MENU_CHEATS: &str = "menu.cheats";
+pub const MENU_RAM_SEARCH: &str = "menu.ram_search";
+pub const CHEATS_TITLE: &str = "cheats.title";
+pub const CHEATS_ALL_ON: &str = "cheats.all_on";
+pub const CHEATS_EMPTY: &str = "cheats.empty";
+pub const CHEATS_GENIE_REFUSED: &str = "cheats.genie_refused";
+pub const CHEATS_DELETE: &str = "cheats.delete";
+pub const CHEATS_ADD_HEADER: &str = "cheats.add_header";
+pub const CHEATS_DESCRIPTION: &str = "cheats.description";
+pub const CHEATS_CODES: &str = "cheats.codes";
+pub const CHEATS_CODES_HINT: &str = "cheats.codes_hint";
+pub const CHEATS_ADD: &str = "cheats.add";
+pub const CHEATS_DATABASE_HEADER: &str = "cheats.database_header";
+pub const CHEATS_DATABASE_PATH: &str = "cheats.database_path";
+pub const CHEATS_DATABASE_USE: &str = "cheats.database_use";
+pub const CHEATS_DATABASE_BROWSE: &str = "cheats.database_browse";
+pub const CHEATS_DATABASE_LOOK_UP: &str = "cheats.database_look_up";
+pub const CHEATS_NO_DATABASE: &str = "cheats.no_database";
+pub const CHEATS_NO_SHEET: &str = "cheats.no_sheet";
+pub const CHEATS_SHEET: &str = "cheats.sheet";
+pub const CHEATS_MATCH_EXACT: &str = "cheats.match.exact";
+pub const CHEATS_MATCH_FILE_NAME: &str = "cheats.match.file_name";
+pub const CHEATS_MATCH_SAME_REGION: &str = "cheats.match.same_region";
+pub const CHEATS_MATCH_OTHER_REGION: &str = "cheats.match.other_region";
+pub const CHEATS_ADD_ALL: &str = "cheats.add_all";
+pub const CHEATS_SKIPPED: &str = "cheats.skipped";
+pub const CHEATS_DATABASE_ERROR: &str = "cheats.database_error";
+pub const CHEATS_NONE_NOTICE: &str = "cheats.none_notice";
+pub const CHEATS_SELECTED_NOTICE: &str = "cheats.selected_notice";
+pub const CHEATS_STATE_ON: &str = "cheats.state_on";
+pub const CHEATS_STATE_OFF: &str = "cheats.state_off";
+pub const CHEATS_KEYS_NOTE: &str = "cheats.keys_note";
+pub const CHEATS_ACHIEVEMENTS_NOTE: &str = "cheats.achievements_note";
+pub const SEARCH_TITLE: &str = "search.title";
+pub const SEARCH_SIZE: &str = "search.size";
+pub const SEARCH_SIZE_BYTE: &str = "search.size.byte";
+pub const SEARCH_SIZE_WORD: &str = "search.size.word";
+pub const SEARCH_SIZE_BCD: &str = "search.size.bcd";
+pub const SEARCH_SIGNED: &str = "search.signed";
+pub const SEARCH_START: &str = "search.start";
+pub const SEARCH_COUNT: &str = "search.count";
+pub const SEARCH_NOT_STARTED: &str = "search.not_started";
+pub const SEARCH_TO_PREVIOUS: &str = "search.to_previous";
+pub const SEARCH_TO_DELTA: &str = "search.to_delta";
+pub const SEARCH_TO_VALUE: &str = "search.to_value";
+pub const SEARCH_FILTER: &str = "search.filter";
+pub const SEARCH_UNDO: &str = "search.undo";
+pub const SEARCH_CHANGED: &str = "search.changed";
+pub const SEARCH_UNCHANGED: &str = "search.unchanged";
+pub const SEARCH_INCREASED: &str = "search.increased";
+pub const SEARCH_DECREASED: &str = "search.decreased";
+pub const SEARCH_ADDRESS: &str = "search.address";
+pub const SEARCH_PREVIOUS: &str = "search.previous";
+pub const SEARCH_CURRENT: &str = "search.current";
+pub const SEARCH_SHOWN: &str = "search.shown";
+pub const SEARCH_VALUE: &str = "search.value";
+pub const SEARCH_ADD_CHEAT: &str = "search.add_cheat";
+pub const SEARCH_ADDED: &str = "search.added";
+pub const SEARCH_BAD_VALUE: &str = "search.bad_value";
+pub const SEARCH_NO_GAME: &str = "search.no_game";
+
 /// Every key published above, for the parity tests (the prefixes are not keys).
 pub const PUBLISHED: &[&str] = &[
     MENU_FILE,
@@ -1024,4 +1086,64 @@ pub const PUBLISHED: &[&str] = &[
     ACH_KEY_SHIFT,
     ACH_KEY_SPACE,
     ACH_KEY_DONE,
+    MENU_CHEATS,
+    MENU_RAM_SEARCH,
+    CHEATS_TITLE,
+    CHEATS_ALL_ON,
+    CHEATS_EMPTY,
+    CHEATS_GENIE_REFUSED,
+    CHEATS_DELETE,
+    CHEATS_ADD_HEADER,
+    CHEATS_DESCRIPTION,
+    CHEATS_CODES,
+    CHEATS_CODES_HINT,
+    CHEATS_ADD,
+    CHEATS_DATABASE_HEADER,
+    CHEATS_DATABASE_PATH,
+    CHEATS_DATABASE_USE,
+    CHEATS_DATABASE_BROWSE,
+    CHEATS_DATABASE_LOOK_UP,
+    CHEATS_NO_DATABASE,
+    CHEATS_NO_SHEET,
+    CHEATS_SHEET,
+    CHEATS_MATCH_EXACT,
+    CHEATS_MATCH_FILE_NAME,
+    CHEATS_MATCH_SAME_REGION,
+    CHEATS_MATCH_OTHER_REGION,
+    CHEATS_ADD_ALL,
+    CHEATS_SKIPPED,
+    CHEATS_DATABASE_ERROR,
+    CHEATS_NONE_NOTICE,
+    CHEATS_SELECTED_NOTICE,
+    CHEATS_STATE_ON,
+    CHEATS_STATE_OFF,
+    CHEATS_KEYS_NOTE,
+    CHEATS_ACHIEVEMENTS_NOTE,
+    SEARCH_TITLE,
+    SEARCH_SIZE,
+    SEARCH_SIZE_BYTE,
+    SEARCH_SIZE_WORD,
+    SEARCH_SIZE_BCD,
+    SEARCH_SIGNED,
+    SEARCH_START,
+    SEARCH_COUNT,
+    SEARCH_NOT_STARTED,
+    SEARCH_TO_PREVIOUS,
+    SEARCH_TO_DELTA,
+    SEARCH_TO_VALUE,
+    SEARCH_FILTER,
+    SEARCH_UNDO,
+    SEARCH_CHANGED,
+    SEARCH_UNCHANGED,
+    SEARCH_INCREASED,
+    SEARCH_DECREASED,
+    SEARCH_ADDRESS,
+    SEARCH_PREVIOUS,
+    SEARCH_CURRENT,
+    SEARCH_SHOWN,
+    SEARCH_VALUE,
+    SEARCH_ADD_CHEAT,
+    SEARCH_ADDED,
+    SEARCH_BAD_VALUE,
+    SEARCH_NO_GAME,
 ];

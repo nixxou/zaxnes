@@ -3083,6 +3083,16 @@ fn achievements(out: &mut Vec<SettingDescriptor>) {
             SettingTheme::Achievements,
         ));
     }
+    // Lot CHEATS: the cheat database the player chose (a folder or a zip of sheets), empty for
+    // the one beside the program or in the user data, if any.
+    out.push(SettingDescriptor::new(
+        SettingId::CheatsDatabase,
+        SettingKind::Text,
+        SettingValue::from(""),
+        SettingScope::User,
+        SettingEffect::Immediate,
+        SettingTheme::Emulation,
+    ));
 }
 
 /// The four slots of the slang shaders (`shader.<slot>.*`): the 2D one is off or on, the

@@ -329,6 +329,7 @@ setting_ids! {
     AchievementsChallenges => "achievements.challenges",
     AchievementsUsername => "achievements.username",
     AchievementsToken => "achievements.token",
+    CheatsDatabase => "cheats.database",
 }
 
 /// Whether `key` is a stable key of the grammar of REQ-PERS-080: dot-separated segments of `a-z`,

@@ -162,6 +162,11 @@ commands! {
     NextShader => "video.next_shader", Shortcut::None, false;
     PreviousShader => "video.previous_shader", Shortcut::None, false;
     TakeScreenshot => "video.screenshot", Shortcut::None, false;
+    // Lot CHEATS: RetroArch's T, Y and U, the previous or next cheat and the selected one on or
+    // off.
+    PreviousCheat => "cheats.previous", Shortcut::None, false;
+    NextCheat => "cheats.next", Shortcut::None, false;
+    ToggleCheat => "cheats.toggle", Shortcut::None, false;
     SetVolume => "audio.set_volume", Shortcut::None, false;
     VolumeUp => "audio.volume_up", Shortcut::None, false;
     VolumeDown => "audio.volume_down", Shortcut::None, false;

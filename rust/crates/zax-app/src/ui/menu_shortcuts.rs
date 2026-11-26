@@ -316,7 +316,7 @@ fn retroarch() -> Vec<MenuShortcut> {
 
 /// The keys of step 2 of lot KEYS in the `RetroArch` layout: the movie, the screenshot and the
 /// shader presets.
-fn retroarch_tools() -> [MenuShortcut; 4] {
+fn retroarch_tools() -> [MenuShortcut; 7] {
     let shortcut = |key, command, text: &str| MenuShortcut {
         key,
         modifiers: ShortcutModifiers::NONE,
@@ -329,6 +329,10 @@ fn retroarch_tools() -> [MenuShortcut; 4] {
         shortcut(Key::F8, Command::TakeScreenshot, "F8"),
         shortcut(Key::M, Command::NextShader, "M"),
         shortcut(Key::N, Command::PreviousShader, "N"),
+        // Lot CHEATS: RetroArch's cheat index minus, plus and toggle.
+        shortcut(Key::T, Command::PreviousCheat, "T"),
+        shortcut(Key::Y, Command::NextCheat, "Y"),
+        shortcut(Key::U, Command::ToggleCheat, "U"),
     ]
 }
 

@@ -63,6 +63,9 @@ pub struct EngineHandle {
     /// The RAM writes of the cheats that are on (lot CHEATS), applied after every frame; empty
     /// without any. The Game Genie's patches are the engine's (`Engine::set_cpu_read_patches`).
     ram_cheats: Box<[zax_cheats::RamWrite]>,
+    /// Which version of the host's cheats is in force ([`EngineHandle::set_cheats_stamped`]): 0
+    /// for none, as a new ROM leaves it, so the host knows to put them back.
+    cheats_stamp: u64,
 }
 
 /// A ring of samples the main thread fills a frame at a time and the audio thread drains, for an
@@ -135,6 +138,7 @@ impl std::fmt::Debug for EngineHandle {
             .field("image", &self.loaded_image.as_ref().map(Vec::len))
             .field("shared_audio", &self.shared_audio.is_some())
             .field("ram_cheats", &self.ram_cheats.len())
+            .field("cheats_stamp", &self.cheats_stamp)
             .finish()
     }
 }
@@ -155,6 +159,7 @@ impl EngineHandle {
             cycles: 0,
             shared_audio,
             ram_cheats: Box::default(),
+            cheats_stamp: 0,
         }
     }
 
@@ -360,6 +365,7 @@ impl EngineHandle {
         self.cycles = 0;
         // A new game drops the cheats of the last (lot CHEATS).
         self.ram_cheats = Box::default();
+        self.cheats_stamp = 0;
         self.engine.set_cpu_read_patches(&[]);
         let result = self.engine.load_rom(image, name);
         self.loaded_image = result.success.then(|| image.to_vec());
@@ -467,6 +473,18 @@ impl EngineHandle {
             })
             .collect();
         self.engine.set_cpu_read_patches(&patches)
+    }
+
+    /// [`EngineHandle::set_cheats`], remembering `stamp`, the host's version of the list.
+    pub fn set_cheats_stamped(&mut self, cheats: &zax_cheats::CheatList, stamp: u64) -> bool {
+        self.cheats_stamp = stamp;
+        self.set_cheats(cheats)
+    }
+
+    /// The stamp of the cheats in force: 0 after a new ROM.
+    #[must_use]
+    pub const fn cheats_stamp(&self) -> u64 {
+        self.cheats_stamp
     }
 
     /// The cheats' RAM writes, after a frame (lot CHEATS): nothing without any.

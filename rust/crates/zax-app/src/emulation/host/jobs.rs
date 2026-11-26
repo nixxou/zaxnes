@@ -1051,6 +1051,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.apply_speed();
         self.pacer.reset();
         self.start_achievements(job.state.as_ref());
+        self.start_cheats();
         self.load_progress = 1.0;
         self.set_state(EmulationState::Running);
         // Lot FCEUX-23 step 5: the visible marker. A user who reports "the 3D is wrong" has to be

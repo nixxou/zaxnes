@@ -97,6 +97,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Command::NextShader | Command::PreviousShader | Command::TakeScreenshot => {
                 !loading && self.session.is_some()
             }
+            Command::PreviousCheat | Command::NextCheat | Command::ToggleCheat => {
+                !loading && self.session.as_ref().is_some_and(GameSession::has_rom)
+            }
             Command::OpenRecentRom
             | Command::PreviousSlot
             | Command::NextSlot
@@ -235,6 +238,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::ShowDataFolder
             | Command::ShowAbout
             | Command::CancelModal => self.request_ui(command, args),
+            Command::PreviousCheat => self.step_selected_cheat(-1),
+            Command::NextCheat => self.step_selected_cheat(1),
+            Command::ToggleCheat => self.toggle_selected_cheat(),
             Command::ToggleMovieRecording => self.toggle_movie_recording(),
             Command::PlayMovie => self.play_movie(args.text.as_deref().unwrap_or_default()),
             Command::StopMovie => self.stop_movie(),

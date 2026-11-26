@@ -7,6 +7,7 @@
 
 mod achievements;
 mod bk2_movies;
+pub mod cheats;
 mod commands;
 mod game_options;
 mod games;
@@ -337,6 +338,8 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     pub shader_report: crate::ui::shader_panel::ShaderReport,
     /// The save slots of the game chosen (owner request: its ROM's files; none without a game).
     pub slots: SaveSlotIndex,
+    /// The cheats of the game in play (lot CHEATS).
+    cheats: cheats::CheatState,
     /// The slots shared by every game before the files were named after the ROM: a game's
     /// states move to its files when it is chosen.
     pub legacy_slots: SaveSlotIndex,
@@ -518,6 +521,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             notifications: NotificationCenter::new(),
             shader_report: crate::ui::shader_panel::ShaderReport::default(),
             slots: SaveSlotIndex::new(),
+            cheats: cheats::CheatState::default(),
             legacy_slots,
             slot_caches: SlotCaches::default(),
             rom_crcs: std::cell::RefCell::new(rom_crcs),
@@ -1015,6 +1019,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             return 0;
         }
         self.apply_commands();
+        // Lot CHEATS: the cheats changed, or a new ROM dropped them.
+        self.sync_cheats();
         if self.advance_movie_seek() {
             // A seek takes the tick: its frames are the movie's, not the pacer's.
             self.dispatch_setting_changes();

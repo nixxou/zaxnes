@@ -200,6 +200,19 @@ impl RamSearch {
             .collect()
     }
 
+    /// The current value of each of `candidates` (a part of [`Self::candidates`], the rows a list
+    /// shows), in their order.
+    pub fn current_values_of(
+        &self,
+        candidates: &[Candidate],
+        read: impl Fn(u16) -> u8,
+    ) -> Vec<Option<i64>> {
+        candidates
+            .iter()
+            .map(|candidate| self.value_at(candidate.address, &read))
+            .collect()
+    }
+
     /// The size values are read as.
     #[must_use]
     pub fn size(&self) -> ValueSize {
