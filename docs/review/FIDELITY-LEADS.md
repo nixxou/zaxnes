@@ -1293,6 +1293,12 @@ the PPU model at run time, so they cannot meet this. Fixed by the same routing i
 `Fid<K>::RUNS_VS = K::RUNS_VS`; `vs_system_tests::the_rc2c05_identifier_reaches_the_game_on_every_frame_loop`
 runs a program reading `$2002` through the three loops (before: standard `$1B`, Fidelite+ and
 slices `$00`).
+Real dumps (Hackset GoodSet `_vs` files, `vs_rom_loop_tests`, frames whose shown palette
+differs from the standard frame's, slices / Fidelite+, before the fix):
+Vs. Castlevania 197 / 197 of 600, Dr. Mario 590 / 590, Excitebike 0 / 591, Ice Climber 0 / 595,
+Top Gun 2 987 / 2 987 of 4 000 (its last picture 3 colours in slices against 8), Duck Hunt and
+Tetris 0 / 0. After: 0 everywhere in slices, pictures and cycles equal; Fidelite+ 1 frame of 600
+on Dr. Mario and Ice Climber (its own timing, a palette write a frame apart).
 
 ## H. Video output (shaders lot, not core)
 
