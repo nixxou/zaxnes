@@ -7,6 +7,7 @@
 //! the file manager) is returned as [`UiEffect`]s for the loop to carry out.
 
 mod achievements;
+mod cheats;
 mod dialogs;
 mod hacks;
 mod key_config;
@@ -101,6 +102,8 @@ pub enum BrowserPurpose {
     ThreeDSenArchive,
     /// A movie to play (EDITOR-1): `.fm2` or Zaxnes's own.
     Movie,
+    /// The cheat database (lot CHEATS): a zip, or a sheet of a folder of them.
+    CheatDatabase,
 }
 
 impl BrowserPurpose {
@@ -183,6 +186,8 @@ pub struct ZaxUi {
     movie_bar: movie_bar::MovieBar,
     /// The fields of the shaders window.
     shader_window: shaders::ShaderWindow,
+    /// The fields of the cheats and RAM search windows (lot CHEATS).
+    cheats: cheats::CheatsWindow,
 }
 
 /// The band at the top of the window that reveals the hidden menu bar before it was ever drawn.
@@ -236,6 +241,7 @@ impl ZaxUi {
             import_dialog: None,
             movie_bar: movie_bar::MovieBar::default(),
             shader_window: shaders::ShaderWindow::default(),
+            cheats: cheats::CheatsWindow::default(),
         }
     }
 
@@ -362,6 +368,12 @@ impl ZaxUi {
         }
         if self.state.achievements {
             self.draw_achievement_list(ui, frame.host);
+        }
+        if self.state.cheats {
+            self.draw_cheats(ui, frame.host);
+        }
+        if self.state.ram_search {
+            self.draw_ram_search(ui, frame.host);
         }
         // REQ-UI-110: the confirmation box is drawn last, so it sits over everything else. The
         // import dialogue of AMD-056 REQ-UI-214 belongs to the interface, not to the host, and
@@ -649,6 +661,7 @@ impl ZaxUi {
             BrowserPurpose::Profile => text::import_profile_title(),
             BrowserPurpose::RomsFolder => text::roms_folder_title(),
             BrowserPurpose::Movie => text::open_movie_title(),
+            BrowserPurpose::CheatDatabase => strings::get(keys::CHEATS_DATABASE_HEADER),
         }
     }
 
@@ -662,6 +675,7 @@ impl ZaxUi {
             BrowserPurpose::Profile => file_browser::profile_filters(),
             BrowserPurpose::RomsFolder => Vec::new(),
             BrowserPurpose::Movie => file_browser::movie_filters(),
+            BrowserPurpose::CheatDatabase => file_browser::cheat_database_filters(),
         }
     }
 
@@ -756,6 +770,20 @@ impl ZaxUi {
             BrowserPurpose::Profile => self.import_profile(host, path),
             BrowserPurpose::RomsFolder => {
                 host.update_settings(|model| model.set(SettingId::UiRomsFolder, path));
+            }
+            BrowserPurpose::CheatDatabase => {
+                let chosen = Path::new(path);
+                let database = if chosen
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
+                {
+                    chosen.to_path_buf()
+                } else {
+                    chosen.parent().map_or_else(|| chosen.to_path_buf(), Path::to_path_buf)
+                };
+                let database = database.to_string_lossy().into_owned();
+                host.set_cheat_database(&database);
+                self.cheats.database_chosen(&database);
             }
         }
     }

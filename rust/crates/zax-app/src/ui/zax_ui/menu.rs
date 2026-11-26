@@ -138,6 +138,8 @@ impl ZaxUi {
             }
         }
         ui.separator();
+        self.draw_cheats_entries(ui, host);
+        ui.separator();
         self.draw_achievements_entry(ui, host);
         if changed {
             host.set_game_options(&rom, model.options());

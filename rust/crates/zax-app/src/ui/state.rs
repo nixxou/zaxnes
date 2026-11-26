@@ -33,6 +33,10 @@ pub struct UiState {
     pub achievements: bool,
     /// The shaders window (Rust-only).
     pub shaders: bool,
+    /// The cheats of the game in play (lot CHEATS).
+    pub cheats: bool,
+    /// The RAM search (lot CHEATS).
+    pub ram_search: bool,
 }
 
 impl UiState {

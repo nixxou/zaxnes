@@ -79,6 +79,16 @@ pub fn movie_filters() -> Vec<FileFilter> {
     ]
 }
 
+/// The filters of the cheat database dialog (lot CHEATS): a zip of sheets, or any sheet of a
+/// folder of them, which stands for its folder.
+#[must_use]
+pub fn cheat_database_filters() -> Vec<FileFilter> {
+    vec![
+        filter(keys::CHEATS_DATABASE_HEADER, &["zip", "json", "cht"]),
+        filter(keys::BROWSER_FILTER_ALL, &[]),
+    ]
+}
+
 /// The filters of the profile import dialog. Both extensions are offered (AMD-062
 /// REQ-PROF-063); which format a file holds is decided by its content, never by its name.
 #[must_use]

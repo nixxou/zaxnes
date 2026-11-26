@@ -505,8 +505,12 @@ pub fn first_line(description: &str) -> &str {
     description.lines().next().unwrap_or_default().trim()
 }
 
-/// A cheat made of one code typed by the player, on.
-#[must_use]
+/// A cheat made of the codes typed by the player, on; named after its codes without a
+/// description.
+///
+/// # Errors
+///
+/// The first code that does not read.
 pub fn typed_cheat(description: &str, codes: &str) -> Result<Cheat, zax_cheats::CodeError> {
     let codes = zax_cheats::CheatCode::parse_list(codes)?;
     let description = if description.trim().is_empty() {
@@ -523,4 +527,37 @@ pub fn typed_cheat(description: &str, codes: &str) -> Result<Cheat, zax_cheats::
         codes,
         enabled: true,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_found_value_becomes_codes() {
+        assert_eq!(codes_for_value(0x075A, ValueSize::Byte, 9).as_deref(), Some("075A:09"));
+        assert_eq!(codes_for_value(0x075A, ValueSize::Byte, -1).as_deref(), Some("075A:FF"));
+        assert_eq!(codes_for_value(0x075A, ValueSize::Byte, 256), None);
+        assert_eq!(codes_for_value(0x07DE, ValueSize::Bcd, 42).as_deref(), Some("07DE:42"));
+        assert_eq!(codes_for_value(0x07DE, ValueSize::Bcd, 100), None);
+        assert_eq!(
+            codes_for_value(0x0300, ValueSize::Word, 0x1234).as_deref(),
+            Some("0300:34+0301:12")
+        );
+        let cheat = typed_cheat("", "0300:34+0301:12").unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(cheat.codes.len(), 2);
+        assert_eq!(cheat.description, "0300:34+0301:12");
+    }
+
+    #[test]
+    fn a_game_in_an_archive_is_looked_up_by_its_entry() {
+        let member = crate::emulation::rom_file::member_path(
+            Path::new("roms/Castlevania.7z"),
+            "Castlevania (U) (PRG1) [!].nes",
+        );
+        let (crc, stem) = sheet_keys(&member.to_string_lossy(), None);
+        assert_eq!(crc, None);
+        assert_eq!(stem, "Castlevania (U) (PRG1) [!]");
+        assert_eq!(sheet_keys("roms/Mega Man 3 (USA).nes", None).1, "Mega Man 3 (USA)");
+    }
 }

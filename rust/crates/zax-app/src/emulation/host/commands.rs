@@ -89,16 +89,18 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Command::StopMovie => !loading && self.movie_mode().is_some(),
             // FCEUX-48: a note needs a movie of ours; an `.fm2` is never written over.
             Command::AnnotateMovie => !loading && self.movie_takes_notes(),
-            Command::OpenMovie | Command::ReloadScript => {
+            // Lot CHEATS: T, Y and U need a game too.
+            Command::OpenMovie
+            | Command::ReloadScript
+            | Command::PreviousCheat
+            | Command::NextCheat
+            | Command::ToggleCheat => {
                 !loading && self.session.as_ref().is_some_and(GameSession::has_rom)
             }
             Command::NewLuaProfile | Command::CopyAgentPrompt => self.editor_allows(command),
             Command::SeekMovie => !loading && self.movie_timeline.is_some() && args.number >= 0,
             Command::NextShader | Command::PreviousShader | Command::TakeScreenshot => {
                 !loading && self.session.is_some()
-            }
-            Command::PreviousCheat | Command::NextCheat | Command::ToggleCheat => {
-                !loading && self.session.as_ref().is_some_and(GameSession::has_rom)
             }
             Command::OpenRecentRom
             | Command::PreviousSlot
