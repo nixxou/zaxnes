@@ -1757,3 +1757,48 @@ fn a_nes20_header_is_trusted_except_on_the_mapper() {
     assert!(note.contains("the VS table says mapper 99"), "{note}");
     assert!(note.contains("the table wins"), "{note}");
 }
+
+/// How a frame is run, for [`the_rc2c05_identifier_reaches_the_game_on_every_frame_loop`].
+#[derive(Debug, Clone, Copy)]
+enum FrameLoop {
+    Standard,
+    FidelityPlus,
+    Slices,
+}
+
+/// The `$2002` identifier must reach the **game**, whatever loop runs its frames. The tests above
+/// read the register straight through the bus; this one runs a program, on an NROM image, whose
+/// board has a specialised path (lot CORE-2), where the VS quirks are compiled out: each loop
+/// must send a VS image to the generic path (`BoardKind::RUNS_VS`).
+#[test]
+fn the_rc2c05_identifier_reaches_the_game_on_every_frame_loop() {
+    // $8000: LDA $2002; AND #$1F; STA $10; JMP $8000
+    let program = [0xAD, 0x02, 0x20, 0x29, 0x1F, 0x85, 0x10, 0x4C, 0x00, 0x80];
+    let mut rom = image(0, 0x09, byte13_of(VsPpuModel::Rc2c05_01), 0);
+    rom[16..16 + program.len()].copy_from_slice(&program);
+    let mut seen = Vec::new();
+    for frame_loop in [FrameLoop::Standard, FrameLoop::FidelityPlus, FrameLoop::Slices] {
+        let mut core = NesCore::new();
+        let load = core.load_rom(&rom, "SyntheticVs.nes");
+        assert!(load.success, "{:?}", load.error);
+        core.set_fidelity_plus(matches!(frame_loop, FrameLoop::FidelityPlus));
+        for _ in 0..3 {
+            match frame_loop {
+                FrameLoop::Standard | FrameLoop::FidelityPlus => {
+                    core.run_frame(0);
+                }
+                FrameLoop::Slices => {
+                    let mut until = core.cycle_count();
+                    loop {
+                        until += 1000;
+                        if core.run_frame_slice(0, until).is_some() {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        seen.push((frame_loop, core.read_memory(0x0010)));
+    }
+    assert!(seen.iter().all(|(_, value)| *value == 0x1B), "{seen:?}");
+}

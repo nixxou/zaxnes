@@ -861,6 +861,9 @@ impl<K: BoardKind> BoardKind for Fid<K> {
     type B = K::B;
     const SWITCHES: bool = K::SWITCHES;
     const FIDELITY_PLUS: bool = true;
+    // The VS quirks of the kind it copies: without it the Fidelite+ copy of the generic path
+    // left them out (fix/vs-paths).
+    const RUNS_VS: bool = K::RUNS_VS;
     const WATCHES_BUS: bool = K::WATCHES_BUS;
     const A12_ONLY: bool = K::A12_ONLY;
 

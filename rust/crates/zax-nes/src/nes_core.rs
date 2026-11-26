@@ -1276,8 +1276,10 @@ impl NesCore {
             // this loop too while its edges are pending, posting none.
             self.bus.ppu_mut().set_fidelity_plus(self.fidelity_plus);
             self.bus.defer_ppu();
+            // A VS. System image takes the generic path, as in the standard frame (fix/vs-paths).
+            let generic = self.generic_path || self.bus.is_vs_image();
             loop {
-                let done = match self.bus.cartridge().filter(|_| !self.generic_path) {
+                let done = match self.bus.cartridge().filter(|_| !generic) {
                     Some(cartridge) => with_board_kind!(cartridge.board(), K => {
                         self.run_fidelity_plus_steps::<K>(idle_loop)
                     }),
@@ -1348,8 +1350,10 @@ impl NesCore {
         if fast {
             self.bus.set_fast_limit(until);
         }
+        // A VS. System image takes the generic path, as in the standard frame (fix/vs-paths).
+        let generic = self.generic_path || self.bus.is_vs_image();
         let done = loop {
-            let outcome = match self.bus.cartridge().filter(|_| !self.generic_path) {
+            let outcome = match self.bus.cartridge().filter(|_| !generic) {
                 Some(cartridge) if fast => with_fast_board_kind!(cartridge.board(), K => {
                     self.run_fast_frame_steps::<K>(frame.idle_loop, until)
                 }, self.run_slice_steps::<AnyBoard>(frame.idle_loop, until, fidelity)),
