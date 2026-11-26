@@ -564,6 +564,18 @@ pub fn compose(pack: &HdPack, chr: &ChrIndex, input: &FrameInput<'_>, out: &mut 
 #[derive(Debug, Default)]
 pub struct Composer {
     layers: [Vec<[u8; 4]>; 4],
+    /// What each layer was drawn from: its backgrounds and their offsets, the margins, the scale
+    /// and the size. A layer drawn from the same is not drawn again.
+    drawn: [Option<LayerKey>; 4],
+}
+
+/// What a layer of backgrounds is drawn from (see [`Composer`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LayerKey {
+    backgrounds: Vec<(usize, i32, i32)>,
+    margins: (i32, i32),
+    scale: i32,
+    size: (usize, usize),
 }
 
 /// The backgrounds `layer` (ascending priority, all alpha-blended) over the whole HD frame
@@ -598,25 +610,48 @@ fn composite_layer(
     let _ = hd_height;
     for_each_chunk(buffer, hd_width, &|hy, row| {
         let sy = hy as i32 - top;
-        for (hx, pixel) in row.iter_mut().enumerate() {
-            let sx = hx as i32 - left;
-            let (mut r, mut g, mut b, mut a) = (0u32, 0u32, 0u32, 0u32);
-            for (background, picture, left_at, top_at) in &front_first {
+        // Each background's row of this line (none outside its picture), and whether its
+        // colours are used as they are.
+        let rows: Vec<(Option<&[u8]>, i32, f32, bool)> = front_first
+            .iter()
+            .map(|(background, picture, left_at, top_at)| {
                 let py = top_at + sy;
-                let px = left_at + sx;
-                if px < 0 || py < 0 || px as u32 >= picture.width || py as u32 >= picture.height {
+                let line = (py >= 0 && (py as u32) < picture.height).then(|| {
+                    let width = picture.width as usize * 4;
+                    &picture.data[py as usize * width..(py as usize + 1) * width]
+                });
+                let plain = (background.brightness - 1.0).abs() < f32::EPSILON;
+                (line, *left_at - left, background.brightness, plain)
+            })
+            .collect();
+        for (hx, pixel) in row.iter_mut().enumerate() {
+            let (mut r, mut g, mut b, mut a) = (0u32, 0u32, 0u32, 0u32);
+            for &(line, shift, brightness, plain) in &rows {
+                let Some(line) = line else {
+                    continue;
+                };
+                let px = shift + hx as i32;
+                if px < 0 || px as usize * 4 >= line.len() {
                     continue;
                 }
-                let at = ((py as u32 * picture.width + px as u32) * 4) as usize;
-                let alpha = u32::from(picture.data[at + 3]);
+                let at = px as usize * 4;
+                let alpha = u32::from(line[at + 3]);
                 if alpha == 0 {
                     continue;
                 }
+                if a == 0 && alpha == 255 && plain {
+                    // The front-most picture is opaque here: it is the pixel.
+                    r = u32::from(line[at]);
+                    g = u32::from(line[at + 1]);
+                    b = u32::from(line[at + 2]);
+                    a = 255;
+                    break;
+                }
                 let weight = alpha * (255 - a) / 255;
-                let lit_channel = |c: u8| u32::from(lit(c, background.brightness));
-                r += lit_channel(picture.data[at]) * weight / 255;
-                g += lit_channel(picture.data[at + 1]) * weight / 255;
-                b += lit_channel(picture.data[at + 2]) * weight / 255;
+                let lit_channel = |c: u8| u32::from(lit(c, brightness));
+                r += lit_channel(line[at]) * weight / 255;
+                g += lit_channel(line[at + 1]) * weight / 255;
+                b += lit_channel(line[at + 2]) * weight / 255;
                 a += weight;
                 if a >= 255 {
                     break;
@@ -689,8 +724,28 @@ impl Composer {
         let margins = Margins(input.margin, input.margin_y);
         let (picture, palette, nes_rgb) = (input.picture, input.palette, input.rgb);
         let scroll = input.scroll;
-        for (layer, buffer) in self.layers.iter_mut().enumerate() {
-            if !direct[layer] && !layers[layer].is_empty() {
+        for (layer, (buffer, drawn)) in self.layers.iter_mut().zip(&mut self.drawn).enumerate() {
+            if direct[layer] || layers[layer].is_empty() {
+                *drawn = None;
+                continue;
+            }
+            let key = LayerKey {
+                backgrounds: layers[layer]
+                    .iter()
+                    .map(|&at| {
+                        let (ox, oy) = scroll_offset(&pack.backgrounds[at], scroll);
+                        (at, ox, oy)
+                    })
+                    .collect(),
+                margins: (margins.0, margins.1),
+                scale: scale as i32,
+                size: hd_size,
+            };
+            if drawn.as_ref() == Some(&key) && buffer.len() == hd_size.0 * hd_size.1 {
+                continue;
+            }
+            *drawn = Some(key);
+            {
                 composite_layer(
                     pack,
                     &layers[layer],

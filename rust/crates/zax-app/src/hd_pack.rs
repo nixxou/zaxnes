@@ -242,6 +242,11 @@ pub struct HdPackState {
     pub picture: Vec<u8>,
     /// The tile records of the frame drawn (a copy, the session lending them briefly).
     pub records: Vec<TileRecord>,
+    /// What `picture` was drawn from: the pack, the frame's number and its NES picture. A display
+    /// faster than the game shows each frame twice or more; it is drawn once.
+    pub drawn_from: Option<(usize, u64, Vec<u8>)>,
+    /// The compositor, which keeps its layers of backgrounds from one frame to the next.
+    pub composer: zax_hdpacks::compose::Composer,
 }
 
 impl HdPackState {
@@ -255,6 +260,9 @@ impl HdPackState {
         self.rom = rom.map(str::to_owned);
         self.pack = None;
         self.loading = None;
+        // The layers and the picture drawn belong to the pack of the game before.
+        self.composer = zax_hdpacks::compose::Composer::default();
+        self.drawn_from = None;
         let Some(rom) = rom else {
             return;
         };

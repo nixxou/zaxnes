@@ -3267,6 +3267,15 @@ fn draw_hd_picture(state: &mut RunState, session: &GameSession, width: usize) {
         *colour = [nes.r, nes.g, nes.b];
     }
     let core = session.core();
+    let frame = u64::try_from(core.frame_count()).unwrap_or(0);
+    let pack_id = std::sync::Arc::as_ptr(&loaded) as usize;
+    if state.hd.drawn_from.as_ref().is_some_and(|(pack, drawn, picture)| {
+        *pack == pack_id && *drawn == frame && *picture == state.picture
+    }) && !state.hd.picture.is_empty()
+    {
+        state.hd_scale = loaded.pack.scale.max(1) as usize;
+        return;
+    }
     let memory = |address: u16| core.read_memory(address);
     #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // margins of a few dozen
     let input = zax_hdpacks::FrameInput {
@@ -3277,13 +3286,20 @@ fn draw_hd_picture(state: &mut RunState, session: &GameSession, width: usize) {
         margin_y: (height.saturating_sub(240) / 2) as i32,
         records: &state.hd.records,
         palette,
-        frame: u64::try_from(core.frame_count()).unwrap_or(0),
+        frame,
         rgb: &rgb,
         memory: &memory,
         scroll: core.playfield_origin(),
     };
-    zax_hdpacks::compose(&loaded.pack, &loaded.chr, &input, &mut state.hd.picture);
+    state
+        .hd
+        .composer
+        .compose(&loaded.pack, &loaded.chr, &input, &mut state.hd.picture);
     state.hd_scale = loaded.pack.scale.max(1) as usize;
+    let mut source = state.hd.drawn_from.take().map(|(_, _, picture)| picture).unwrap_or_default();
+    source.clear();
+    source.extend_from_slice(&state.picture);
+    state.hd.drawn_from = Some((pack_id, frame, source));
 }
 
 fn update_scene(host: &mut AppHost, state: &mut RunState) {

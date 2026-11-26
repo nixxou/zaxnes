@@ -84,6 +84,13 @@ fn main() {
     let started = std::time::Instant::now();
     compose(&pack, &ChrIndex::default(), &input, &mut out);
     println!("again in {:?}", started.elapsed());
+    // A compositor kept from frame to frame, as the application's: its layers stay drawn.
+    let mut composer = zax_hdpacks::compose::Composer::default();
+    for pass in 0..3 {
+        let started = std::time::Instant::now();
+        composer.compose(&pack, &ChrIndex::default(), &input, &mut out);
+        println!("kept compositor, pass {pass}: {:?}", started.elapsed());
+    }
     let scale = pack.scale;
     #[allow(clippy::cast_possible_truncation)]
     let shot = Rgba {
