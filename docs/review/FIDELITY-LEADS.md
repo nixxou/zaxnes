@@ -1280,6 +1280,26 @@ the start of hpos 1 of line 241; fetch pairs start on odd hpos).
   follows the hardware test; the DMC case alone has no hardware reference yet. Lead kept open for a
   console measurement (a test ROM reading `$4016` right after a DMC fetch, run on hardware).
 
+### G7. VS. System quirks lost on the slice and Fidelite+ loops — fixed (fix/vs-paths, 2026-11-26)
+The RC2C05's `$2002` identifier and `$2000`/`$2001` swap, and the RP2C04 palette remap, are
+compiled into the generic path only (`BoardKind::RUNS_VS`, lot MAPPERS-N), so a VS image must
+take that path. The standard frame sent it there; the slice loop (`run_frame_slice`, the app's
+default since `emu.realtime_input` is on in every preset) and the Fidelite+ loop did not, and
+`Fid<K>` did not carry `RUNS_VS`, so the Fidelite+ copy of the generic path had no quirk either.
+Effect: in the default loop, the 7 VS rows of `vs::roms` on a specialised board (Dr. Mario MMC1,
+Vs. Castlevania and Vs. Top Gun UxROM, From Below and Battle City NROM, the two Famidash vs.
+MMC3) ran as plain NES games; with Fidelite+, all 74. BizHawk and Mesen have one path and test
+the PPU model at run time, so they cannot meet this. Fixed by the same routing in both loops and
+`Fid<K>::RUNS_VS = K::RUNS_VS`; `vs_system_tests::the_rc2c05_identifier_reaches_the_game_on_every_frame_loop`
+runs a program reading `$2002` through the three loops (before: standard `$1B`, Fidelite+ and
+slices `$00`).
+Real dumps (Hackset GoodSet `_vs` files, `vs_rom_loop_tests`, frames whose shown palette
+differs from the standard frame's, slices / Fidelite+, before the fix):
+Vs. Castlevania 197 / 197 of 600, Dr. Mario 590 / 590, Excitebike 0 / 591, Ice Climber 0 / 595,
+Top Gun 2 987 / 2 987 of 4 000 (its last picture 3 colours in slices against 8), Duck Hunt and
+Tetris 0 / 0. After: 0 everywhere in slices, pictures and cycles equal; Fidelite+ 1 frame of 600
+on Dr. Mario and Ice Climber (its own timing, a palette write a frame apart).
+
 ## H. Video output (shaders lot, not core)
 
 ### H1. Composite / RF signal, CRT gamma, phosphor decay — partly done (H2, H4)
