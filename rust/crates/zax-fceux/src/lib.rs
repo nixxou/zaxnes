@@ -5,7 +5,7 @@
 //! the crate existed. Everything below is `#[cfg(feature = "fceux-core")]`.
 //!
 //! With the feature on, the crate links the static library built by the fork
-//! `cleanroom/fceux-zax` (branch `zax`) and wraps its C API ([`sys`]) in a safe interface
+//! <https://github.com/nixxou/fceux-zax> (branch `zax`) and wraps its C API ([`sys`]) in a safe interface
 //! ([`Fceux`]). FCEUX's own sources are never copied into this repository: this crate talks to
 //! the C API and nothing else.
 //!

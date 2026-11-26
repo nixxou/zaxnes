@@ -2,7 +2,7 @@
 //! `fceux-core` feature.
 //!
 //! The library is **not** built from here. FCEUX's sources live only in the fork
-//! (`cleanroom/fceux-zax`), never in this repository, and the fork's own `CMake` project is the
+//! (<https://github.com/nixxou/fceux-zax>, branch `zax`), never in this repository, and the fork's own `CMake` project is the
 //! one build system for them: duplicating its ~240-file source list in a Rust build script would
 //! be a second place to keep right, and driving `CMake` from inside `cargo build` would need it
 //! on `PATH` (on Windows it ships inside Visual Studio and is not there). So the fork is built
@@ -52,7 +52,7 @@ fn main() {
         eprintln!(
             "zax-fceux: `{library}` was not found.\n\
              The `fceux-core` feature links the FCEUX fork, which has to be built first:\n\
-             \n    cd <cleanroom>/fceux-zax && {command}\n\n\
+             \n    git clone https://github.com/nixxou/fceux-zax\n    cd fceux-zax && {command}\n\n\
              Then either put the fork beside this worktree as `fceux-zax/`, or set\n\
              ZAX_FCEUX_DIR to its root, or ZAX_FCEUX_LIB to the directory holding {library}.\n\
              Nothing is downloaded and nothing is built from here; see zax-fceux/build.rs."

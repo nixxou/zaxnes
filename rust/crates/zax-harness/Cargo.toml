@@ -35,7 +35,7 @@ vs-system = ["zax-nes/board-vs-system"]
 # `zax-harness fceux-run` and `fceux-compare`, the FCEUX engine's two commands (lot FCEUX-1
 # step 4). Off by default like everything of that engine: with it off `zax-fceux` is not a
 # dependency at all, no C is linked, and the binary is the one it always was. On, it needs the
-# fork `cleanroom/fceux-zax` built first - `zax-fceux/build.rs` says how.
+# fork https://github.com/nixxou/fceux-zax built first - `zax-fceux/build.rs` says how.
 fceux-core = ["dep:zax-fceux", "zax-fceux/fceux-core"]
 
 # The core's exact sprite-evaluation pipeline (lot MF-4e step 3), out of `default` because it is

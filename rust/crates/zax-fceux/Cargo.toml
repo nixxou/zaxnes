@@ -12,7 +12,7 @@ publish.workspace = true
 # nothing. The shipped binaries do not reference it at all, so the default build is byte-identical
 # to one made before this crate existed.
 #
-# With it on, the crate links the static library the fork `cleanroom/fceux-zax` builds (see
+# With it on, the crate links the static library the fork https://github.com/nixxou/fceux-zax builds (see
 # `build.rs` for how it is found) and wraps its C API.
 default = []
 fceux-core = ["dep:zax-core-api"]
