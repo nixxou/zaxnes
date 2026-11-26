@@ -179,7 +179,8 @@ impl ZaxUi {
         let mut changed = false;
         let mut remove = None;
         let selected = host.selected_cheat();
-        let flags = TableFlags::ROW_BG | TableFlags::BORDERS_INNER_V | TableFlags::SIZING_STRETCH_PROP;
+        let flags =
+            TableFlags::ROW_BG | TableFlags::BORDERS_INNER_V | TableFlags::SIZING_STRETCH_PROP;
         if let Some(_table) = ui.begin_table_with_flags("##cheat_list", 3, flags) {
             for (index, cheat) in list.cheats.iter_mut().enumerate() {
                 let _id = ui.push_id_usize(index);
@@ -218,7 +219,10 @@ impl ZaxUi {
         ui.text(strings::get(keys::CHEATS_ADD_HEADER));
         ui.set_next_item_width(260.0);
         ui.input_text(
-            format!("{}##cheat_description", strings::get(keys::CHEATS_DESCRIPTION)),
+            format!(
+                "{}##cheat_description",
+                strings::get(keys::CHEATS_DESCRIPTION)
+            ),
             &mut window.description,
         )
         .build();
@@ -261,7 +265,10 @@ impl ZaxUi {
         }
         ui.set_next_item_width(340.0);
         ui.input_text(
-            format!("{}##cheat_database", strings::get(keys::CHEATS_DATABASE_PATH)),
+            format!(
+                "{}##cheat_database",
+                strings::get(keys::CHEATS_DATABASE_PATH)
+            ),
             &mut self.cheats.database,
         )
         .build();
@@ -274,7 +281,9 @@ impl ZaxUi {
         if ui.small_button(strings::get(keys::CHEATS_DATABASE_BROWSE)) {
             self.open_browser(host, BrowserPurpose::CheatDatabase);
         }
-        if self.cheats.sheet.is_none() || ui.small_button(strings::get(keys::CHEATS_DATABASE_LOOK_UP)) {
+        if self.cheats.sheet.is_none()
+            || ui.small_button(strings::get(keys::CHEATS_DATABASE_LOOK_UP))
+        {
             self.cheats.sheet = Some(host.cheat_sheet());
         }
         let mut list = host.cheats().clone();
@@ -297,7 +306,10 @@ impl ZaxUi {
                 ui.text_wrapped(strings::get(key));
             }
             Some(Ok(Some(sheet))) => {
-                ui.text(strings::format(&strings::get(keys::CHEATS_SHEET), &[&sheet.name]));
+                ui.text(strings::format(
+                    &strings::get(keys::CHEATS_SHEET),
+                    &[&sheet.name],
+                ));
                 let (text, colour) = match_text(sheet.matched);
                 {
                     let _colour = ui.push_style_color(StyleColor::Text, colour);
@@ -321,22 +333,29 @@ impl ZaxUi {
                     add.extend(missing.iter().copied());
                 }
                 let height = (ui.frame_height_with_spacing() * 8.0).max(120.0);
-                ui.child_window("##sheet").size([0.0, height]).border(true).build(|| {
-                    for (index, cheat) in sheet.imported.cheats.iter().enumerate() {
-                        let _id = ui.push_id_usize(index);
-                        let owned = !missing.contains(&index);
-                        let disabled = ui.begin_disabled(owned);
-                        if ui.small_button(strings::get(keys::CHEATS_ADD)) {
-                            add.push(index);
+                ui.child_window("##sheet")
+                    .size([0.0, height])
+                    .border(true)
+                    .build(|| {
+                        for (index, cheat) in sheet.imported.cheats.iter().enumerate() {
+                            let _id = ui.push_id_usize(index);
+                            let owned = !missing.contains(&index);
+                            let disabled = ui.begin_disabled(owned);
+                            if ui.small_button(strings::get(keys::CHEATS_ADD)) {
+                                add.push(index);
+                            }
+                            drop(disabled);
+                            ui.same_line();
+                            ui.text(host_cheats::first_line(&cheat.description));
+                            if ui.is_item_hovered() {
+                                ui.tooltip_text(format!(
+                                    "{}\n{}",
+                                    cheat.description,
+                                    codes_text(cheat)
+                                ));
+                            }
                         }
-                        drop(disabled);
-                        ui.same_line();
-                        ui.text(host_cheats::first_line(&cheat.description));
-                        if ui.is_item_hovered() {
-                            ui.tooltip_text(format!("{}\n{}", cheat.description, codes_text(cheat)));
-                        }
-                    }
-                });
+                    });
                 // A single one asked is on; "Add all" leaves them off for the player to choose.
                 let all = add.len() > 1;
                 for index in add.drain(..) {
@@ -405,9 +424,17 @@ impl ZaxUi {
             &[&view.count.to_string()],
         ));
         let quick = [
-            (keys::SEARCH_CHANGED, Comparison::NotEqual, Operand::Previous),
+            (
+                keys::SEARCH_CHANGED,
+                Comparison::NotEqual,
+                Operand::Previous,
+            ),
             (keys::SEARCH_UNCHANGED, Comparison::Equal, Operand::Previous),
-            (keys::SEARCH_INCREASED, Comparison::Greater, Operand::Previous),
+            (
+                keys::SEARCH_INCREASED,
+                Comparison::Greater,
+                Operand::Previous,
+            ),
             (keys::SEARCH_DECREASED, Comparison::Less, Operand::Previous),
         ];
         for (index, (key, comparison, operand)) in quick.into_iter().enumerate() {
@@ -418,7 +445,10 @@ impl ZaxUi {
                 host.ram_search(RamSearchAction::Filter(comparison, operand));
             }
         }
-        let comparisons: Vec<String> = COMPARISONS.iter().map(|(_, text)| (*text).to_owned()).collect();
+        let comparisons: Vec<String> = COMPARISONS
+            .iter()
+            .map(|(_, text)| (*text).to_owned())
+            .collect();
         ui.set_next_item_width(60.0);
         ui.combo_simple_string("##comparison", &mut window.comparison, &comparisons);
         ui.same_line();
@@ -459,7 +489,9 @@ impl ZaxUi {
         let height = -3.0 * ui.frame_height_with_spacing();
         let flags = TableFlags::ROW_BG | TableFlags::BORDERS_INNER_V | TableFlags::SCROLL_Y;
         let mut remove = None;
-        if let Some(_table) = ui.begin_table_with_sizing("##candidates", 4, flags, [0.0, height], 0.0) {
+        if let Some(_table) =
+            ui.begin_table_with_sizing("##candidates", 4, flags, [0.0, height], 0.0)
+        {
             ui.table_setup_scroll_freeze(0, 1);
             ui.table_setup_column(strings::get(keys::SEARCH_ADDRESS));
             ui.table_setup_column(strings::get(keys::SEARCH_PREVIOUS));
@@ -478,7 +510,9 @@ impl ZaxUi {
                     .build()
                 {
                     window.selected = Some(*address);
-                    window.value = now.and_then(|now| i32::try_from(now).ok()).unwrap_or_default();
+                    window.value = now
+                        .and_then(|now| i32::try_from(now).ok())
+                        .unwrap_or_default();
                 }
                 ui.table_next_column();
                 ui.text(previous.to_string());
@@ -514,14 +548,15 @@ impl ZaxUi {
             .build();
             ui.same_line();
             if ui.button(strings::get(keys::SEARCH_ADD_CHEAT)) {
-                match host_cheats::codes_for_value(address, size, i64::from(window.value))
-                    .and_then(|codes| {
+                match host_cheats::codes_for_value(address, size, i64::from(window.value)).and_then(
+                    |codes| {
                         host_cheats::typed_cheat(
                             &format!("${address:04X} = {}", window.value),
                             &codes,
                         )
                         .ok()
-                    }) {
+                    },
+                ) {
                     Some(cheat) => {
                         let added = cheat.description.clone();
                         let mut list: CheatList = host.cheats().clone();

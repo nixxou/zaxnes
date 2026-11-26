@@ -71,7 +71,9 @@ pub fn sheet_keys(rom_path: &str, image: Option<&[u8]>) -> (Option<u32>, String)
         },
         |(_, entry)| {
             let name = entry.rsplit(['/', '\\']).next().unwrap_or(&entry);
-            name.rsplit_once('.').map_or(name, |(stem, _)| stem).to_owned()
+            name.rsplit_once('.')
+                .map_or(name, |(stem, _)| stem)
+                .to_owned()
         },
     );
     (crc, stem)
@@ -127,7 +129,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// The file the cheats of `rom` (the key of its save files) are kept in.
     #[must_use]
     pub fn cheat_file(&self, rom: &str) -> PathBuf {
-        self.paths.root.join(CHEATS_FOLDER).join(format!("{rom}.json"))
+        self.paths
+            .root
+            .join(CHEATS_FOLDER)
+            .join(format!("{rom}.json"))
     }
 
     fn save_cheats(&mut self) {
@@ -224,7 +229,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             return;
         }
         let none = CheatList::default();
-        let list = if self.cheats.on { &self.cheats.list } else { &none };
+        let list = if self.cheats.on {
+            &self.cheats.list
+        } else {
+            &none
+        };
         self.cheats.game_genie_refused = !core.set_cheats_stamped(list, stamp);
     }
 
@@ -535,10 +544,19 @@ mod tests {
 
     #[test]
     fn a_found_value_becomes_codes() {
-        assert_eq!(codes_for_value(0x075A, ValueSize::Byte, 9).as_deref(), Some("075A:09"));
-        assert_eq!(codes_for_value(0x075A, ValueSize::Byte, -1).as_deref(), Some("075A:FF"));
+        assert_eq!(
+            codes_for_value(0x075A, ValueSize::Byte, 9).as_deref(),
+            Some("075A:09")
+        );
+        assert_eq!(
+            codes_for_value(0x075A, ValueSize::Byte, -1).as_deref(),
+            Some("075A:FF")
+        );
         assert_eq!(codes_for_value(0x075A, ValueSize::Byte, 256), None);
-        assert_eq!(codes_for_value(0x07DE, ValueSize::Bcd, 42).as_deref(), Some("07DE:42"));
+        assert_eq!(
+            codes_for_value(0x07DE, ValueSize::Bcd, 42).as_deref(),
+            Some("07DE:42")
+        );
         assert_eq!(codes_for_value(0x07DE, ValueSize::Bcd, 100), None);
         assert_eq!(
             codes_for_value(0x0300, ValueSize::Word, 0x1234).as_deref(),
@@ -558,6 +576,9 @@ mod tests {
         let (crc, stem) = sheet_keys(&member.to_string_lossy(), None);
         assert_eq!(crc, None);
         assert_eq!(stem, "Castlevania (U) (PRG1) [!]");
-        assert_eq!(sheet_keys("roms/Mega Man 3 (USA).nes", None).1, "Mega Man 3 (USA)");
+        assert_eq!(
+            sheet_keys("roms/Mega Man 3 (USA).nes", None).1,
+            "Mega Man 3 (USA)"
+        );
     }
 }
