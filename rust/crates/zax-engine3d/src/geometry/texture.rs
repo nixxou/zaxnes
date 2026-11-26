@@ -117,23 +117,6 @@ impl ObjectTexture {
         }
     }
 
-    /// Lot HD-PACK in 3D: a direct texture of `width × height` texels of `colors`, row 0 first
-    /// (an HD pack's picture of a tile).
-    #[must_use]
-    pub fn direct(width: i32, height: i32, colors: Vec<Rgb24>) -> Self {
-        let (width, height) = (width.max(1), height.max(1));
-        let mut colors = colors;
-        colors.resize(area(width, height), Rgb24::new(0, 0, 0));
-        Self {
-            width,
-            height,
-            format: TextureFormat::Direct,
-            // A direct texel of 0 is the universal background colour (REQ-E3D-562): never one.
-            texels: colors.iter().map(|colour| colour.packed().max(1)).collect(),
-            colors: Some(colors),
-        }
-    }
-
     /// The texture of a 3D object: its custom texture when the profile gives one of non-zero
     /// size, the pattern image otherwise (REQ-E3D-426). `background` is the universal
     /// background colour used for the value-0 texels of a direct texture, read once here

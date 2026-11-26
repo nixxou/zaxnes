@@ -434,13 +434,12 @@ fn draw_side_by_side(ui: &Ui, host: &mut AppHost) {
             }
         }
     }
-    // Lot HD-PACK (owner request, 2026-11-26): the game's Mesen HD pack, in 2D and in 3D.
+    // Lot HD-PACK (owner request, 2026-11-26): the game's Mesen HD pack.
     ui.separator();
-    for id in [SettingId::VideoHdPack2d, SettingId::VideoHdPack3d] {
-        let on = host.settings().get(id).as_bool();
-        let label = crate::ui::text::label_of(catalogue::descriptor(id));
-        if ui.menu_item_config(&label).selected(on).build() {
-            host.update_settings(|model| model.set(id, SettingValue::Bool(!on)));
-        }
+    let id = SettingId::VideoHdPack2d;
+    let on = host.settings().get(id).as_bool();
+    let label = crate::ui::text::label_of(catalogue::descriptor(id));
+    if ui.menu_item_config(&label).selected(on).build() {
+        host.update_settings(|model| model.set(id, SettingValue::Bool(!on)));
     }
 }

@@ -564,7 +564,6 @@ impl ThreeD {
                     nes_picture_rgb: &[],
                     nes_picture_hd: None,
                     nes_overlay_hd: None,
-                    hd_tiles: None,
                 },
             );
         }

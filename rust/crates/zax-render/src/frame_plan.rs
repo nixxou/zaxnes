@@ -355,13 +355,7 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
                 .as_ref()
                 .filter(|_| !scene.two_dimensional_mode);
             for tile in list.tiles() {
-                self.collect_tile(
-                    residency,
-                    tile,
-                    (&hud_matrix, &occlusion, &clip_rect),
-                    shift,
-                    frame.hd_tiles,
-                )?;
+                self.collect_tile(residency, tile, &hud_matrix, &occlusion, &clip_rect, shift)?;
             }
         }
 
@@ -505,9 +499,10 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
         &mut self,
         residency: &mut R,
         tile: &DrawTile,
-        (hud_matrix, occlusion, clip_rect): (&Mat4, &Occlusion, &geometry::VisibleRect),
+        hud_matrix: &Mat4,
+        occlusion: &Occlusion,
+        clip_rect: &geometry::VisibleRect,
         shift: Option<&ThreeDShift>,
-        hd_tiles: Option<crate::scene::HdTiles<'_>>,
     ) -> Result<(), R::Error> {
         let Some(mesh) = tile.mesh.as_ref().filter(|mesh| !mesh.is_empty()) else {
             return Ok(());
@@ -560,21 +555,8 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
         // REQ-E3D-644: an object whose texture cannot be allocated contributes no tile to this
         // frame; the rest of the scene is drawn and the next frame is produced as usual. The
         // diagnostic is bounded at one line per pattern (`RenderDiagnostics`).
-        // Lot HD-PACK in 3D: a tile drawn with its pattern's own colours that the pack has a
-        // picture for takes it, read `scale` times as far (a direct texture of the profile keeps
-        // its own).
-        let hd = hd_tiles.and_then(|hd| {
-            let own = tile
-                .texture
-                .as_ref()
-                .is_none_or(|texture| !texture.is_direct());
-            own.then(|| hd.textures.get(&crate::scene::HdTileKey::of(&tile.tile)))
-                .flatten()
-                .map(|texture| (texture, hd.scale))
-        });
-        let wanted_texture = hd.map_or(tile.texture.as_ref(), |(texture, _)| Some(texture));
         let mut texture = None;
-        if let Some(wanted) = wanted_texture {
+        if let Some(wanted) = &tile.texture {
             let Some(resident) = residency.texture(wanted) else {
                 self.diagnostics
                     .texture_unavailable(tile.pattern, self.frame);
@@ -583,21 +565,19 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
             texture = Some(resident);
         }
         #[allow(clippy::cast_precision_loss)] // Texture sizes are small.
-        let texture_size = wanted_texture.map_or(Vector2::ONE, |texture| {
+        let texture_size = tile.texture.as_ref().map_or(Vector2::ONE, |texture| {
             Vector2::new(texture.width() as f32, texture.height() as f32)
         });
-        #[allow(clippy::cast_precision_loss)] // 1 to 10.
-        let hd_scale = hd.map_or(1.0, |(_, scale)| scale as f32);
 
         let item = DrawItem {
             mesh: resident,
             model,
-            color_mode: i32::from(hd.is_some() || tile.texture_format == TextureFormat::Direct),
+            color_mode: i32::from(tile.texture_format == TextureFormat::Direct),
             texture,
             texture_size,
-            palette_table: if hd.is_some() { -1 } else { tile.palette_table },
+            palette_table: tile.palette_table,
             tex_offset: tile.tex_offset.into(),
-            tex_tilting: Vector2::new(tile.tex_tilting.x * hd_scale, tile.tex_tilting.y * hd_scale),
+            tex_tilting: tile.tex_tilting.into(),
             flat_color: Vector3::ZERO,
             alpha: if occluder {
                 geometry::OCCLUDER_ALPHA

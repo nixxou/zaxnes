@@ -81,7 +81,6 @@ options
         video.sbs_3d_strength
         video.sbs_famicom_3d
         video.hd_pack_2d
-        video.hd_pack_3d
       [group.advanced]
         video.max_queued_frames
         row.reset
@@ -218,7 +217,6 @@ simple options
     video.sbs_3d_strength
     video.sbs_famicom_3d
     video.hd_pack_2d
-    video.hd_pack_3d
     row.reset
   page.simple_nes_picture
     row.signal
@@ -294,7 +292,6 @@ game options
       video.anti_alias
       video.max_queued_frames
       video.hd_pack_2d
-      video.hd_pack_3d
     page.rendering_3d
       render.visual_style
       page.enhanced_effects

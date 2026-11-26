@@ -110,7 +110,6 @@ video.sbs_3d
 video.sbs_3d_strength
 video.sbs_famicom_3d
 video.hd_pack_2d
-video.hd_pack_3d
 video.backend [wgpu]
 video.dynamic_resolution
 video.shader_resolution

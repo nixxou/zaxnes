@@ -463,46 +463,6 @@ impl Context<'_, '_> {
     }
 }
 
-/// Lot HD-PACK in 3D: the HD tile of each of `input.records` (in their order), chosen as the 2D
-/// picture chooses it: its rule's conditions evaluated at the tile's top-left pixel. `None` for a
-/// tile the pack has no picture for. `input.picture` is not read.
-#[must_use]
-pub fn record_tiles(pack: &HdPack, chr: &ChrIndex, input: &FrameInput<'_>) -> Vec<Option<HdTile>> {
-    let (entries, owners) = build(pack, chr, input);
-    let context = Context {
-        pack,
-        input,
-        owners: &owners,
-        entries: &entries,
-        chr,
-        global: std::cell::RefCell::new(vec![0; pack.conditions.len()]),
-    };
-    (0..input.records.len())
-        .map(|at| context.tile_of(at))
-        .collect()
-}
-
-/// The pixels of HD tile `tile` (`8 × scale` square, row 0 first, R, G, B, A each), its line's
-/// brightness applied; transparent outside its picture.
-#[must_use]
-pub fn tile_pixels(pack: &HdPack, tile: &HdTile) -> Vec<[u8; 4]> {
-    let side = 8 * pack.scale.max(1);
-    let picture = pack.pictures[tile.image].get();
-    let mut pixels = Vec::with_capacity((side * side) as usize);
-    for y in 0..side {
-        for x in 0..side {
-            let [r, g, b, a] = picture.get(tile.x + x, tile.y + y);
-            pixels.push([
-                lit(r, tile.brightness),
-                lit(g, tile.brightness),
-                lit(b, tile.brightness),
-                a,
-            ]);
-        }
-    }
-    pixels
-}
-
 /// A colour with the brightness of a line applied, as Mesen does.
 fn lit(value: u8, brightness: f32) -> u8 {
     if (brightness - 1.0).abs() < f32::EPSILON {

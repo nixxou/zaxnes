@@ -983,13 +983,6 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
          set for one game. Default: off.",
     ),
     (
-        "detail.video.hd_pack_3d",
-        "Colours the 3D tiles with the game's Mesen HD pack (found as for the 2D): a tile the pack \
-         has a picture for shows it on its faces, at the pack's resolution, its own colours \
-         showing where the HD picture is transparent. A tile with a texture of the 3D profile keeps it, and \
-         the pack's backgrounds are left to the 2D. Can be set for one game. Default: off.",
-    ),
-    (
         "detail.video.anti_alias",
         "Smooths the staircase on the slanted edges of the 3D shapes. The first two levels are \
          multisampling — 4 and 8 samples per pixel — so the pixel art of the textures stays \

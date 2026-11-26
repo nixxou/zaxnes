@@ -207,10 +207,8 @@ const DISPLAY: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::VideoSbs3d),
     LayoutEntry::Row(SettingId::VideoSbs3dStrength),
     LayoutEntry::Row(SettingId::VideoSbsFamicom3d),
-    // Lot HD-PACK (owner request, 2026-11-26): the game's Mesen HD pack, in 2D and in 3D, with
-    // the video outputs.
+    // Lot HD-PACK (owner request, 2026-11-26): the game's Mesen HD pack, with the video outputs.
     LayoutEntry::Row(SettingId::VideoHdPack2d),
-    LayoutEntry::Row(SettingId::VideoHdPack3d),
     LayoutEntry::Group(OptionsGroup::Performance),
     LayoutEntry::Row(SettingId::VideoSkipFrame),
     LayoutEntry::Row(SettingId::EmuCatchUp),
@@ -465,8 +463,10 @@ pub enum TabEntry {
 /// The settings the window leaves out although they are user settings: the last browsed folder
 /// and the window rectangle are state, and the menu music no longer exists (AMD-024
 /// REQ-PUB-005).
-pub const EXCLUDED: [SettingId; 27] = [
+pub const EXCLUDED: [SettingId; 28] = [
     SettingId::UiLastBrowseDir,
+    // Lot HD-PACK: the HD pack in 3D is not drawn yet; its row comes with it.
+    SettingId::VideoHdPack3d,
     SettingId::UiWindowRect,
     // Lot REWRITE-UI: the options' own mode and preset, set by the new window and the console.
     SettingId::UiOptionsAdvanced,

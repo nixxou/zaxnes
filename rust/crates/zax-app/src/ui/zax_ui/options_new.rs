@@ -111,7 +111,6 @@ const PAGES: [Page; 8] = [
             Simple::Row(SettingId::VideoSbsFamicom3d),
             // Lot HD-PACK (owner request, 2026-11-26): the game's Mesen HD pack.
             Simple::Row(SettingId::VideoHdPack2d),
-            Simple::Row(SettingId::VideoHdPack3d),
         ],
         advanced: Advanced::Tabs(&[OptionsTab::Display]),
     },

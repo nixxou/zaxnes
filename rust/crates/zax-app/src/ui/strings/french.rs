@@ -928,14 +928,6 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
          Par défaut : désactivé.",
     ),
     (
-        "detail.video.hd_pack_3d",
-        "Colore les tuiles 3D avec le pack HD de Mesen du jeu (trouvé comme pour la 2D) : une \
-         tuile dont le pack a une image la montre sur ses faces, à la résolution du pack, ses \
-         propres couleurs apparaissant là où l'image HD est transparente. Une tuile qui a une \
-         texture du profil 3D la garde, et les fonds du pack restent à la 2D. Réglable pour un \
-         seul jeu. Par défaut : désactivé.",
-    ),
-    (
         "detail.video.anti_alias",
         "Adoucit l'escalier sur les arêtes obliques des formes 3D. Les deux premiers niveaux sont \
          du multi-échantillonnage — 4 et 8 échantillons par pixel — afin que les textures en pixel \

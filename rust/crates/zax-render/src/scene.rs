@@ -534,44 +534,6 @@ pub struct SceneFrame<'a> {
     /// Lot HD-PACK: the sprites the smooth scrolling draws apart (`SceneState::picture_overlay`)
     /// drawn with the HD pack, as `nes_picture_hd` for the picture.
     pub nes_overlay_hd: Option<HdPicture<'a>>,
-    /// Lot HD-PACK in 3D: the HD pack's texture of the tiles it has a picture for.
-    pub hd_tiles: Option<HdTiles<'a>>,
-}
-
-/// The HD textures of the tiles of a frame, by [`HdTileKey`].
-pub type HdTileTextures = std::collections::HashMap<
-    HdTileKey,
-    std::sync::Arc<zax_engine3d::geometry::texture::ObjectTexture>,
->;
-
-/// Lot HD-PACK in 3D: the texture an HD pack gives a tile of the frame (a direct texture of
-/// `8 x scale` texels a side), found by where the tile is: a background tile by its screen place,
-/// a sprite by its slot.
-#[derive(Debug, Clone, Copy)]
-pub struct HdTiles<'a> {
-    pub textures: &'a HdTileTextures,
-    pub scale: usize,
-}
-
-/// Lot HD-PACK in 3D: which tile of the frame an HD texture is for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum HdTileKey {
-    /// A background tile, by the screen place of its top-left pixel.
-    Background(i32, i32),
-    /// A sprite, by its slot (REQ-CORE-043: 0 to 127).
-    Sprite(i32),
-}
-
-impl HdTileKey {
-    /// The key of a tile of the frame.
-    #[must_use]
-    pub const fn of(tile: &zax_engine3d::frame::FrameTile) -> Self {
-        if tile.background() {
-            Self::Background(tile.x(), tile.y())
-        } else {
-            Self::Sprite(tile.ord())
-        }
-    }
 }
 
 /// Lot HD-PACK: the 2D picture drawn with a Mesen HD pack, `scale` times the size of the NES
@@ -659,7 +621,6 @@ impl<'a> SceneFrame<'a> {
             nes_picture_rgb: &[],
             nes_picture_hd: None,
             nes_overlay_hd: None,
-            hd_tiles: None,
         }
     }
 }

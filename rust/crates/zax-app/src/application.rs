@@ -1853,8 +1853,7 @@ impl Running {
                     nes_picture_rgb: &[],
                     nes_picture_hd: None,
                     nes_overlay_hd: None,
-                    hd_tiles: None,
-                };
+                        };
                 draw_eyes(
                     graphics,
                     (view, right_view.as_ref()),
@@ -2556,7 +2555,6 @@ impl EyePicture {
             // An eye of a Famicom 3D System game is drawn as the console drew it: no HD pack.
             nes_picture_hd: None,
             nes_overlay_hd: None,
-            hd_tiles: None,
         }
     }
 }
@@ -3285,8 +3283,8 @@ fn draw_hd_picture(state: &mut RunState, session: &GameSession, width: usize, ov
         memory: &memory,
         scroll: core.playfield_origin(),
     };
-    let steady = core.steady_sprites();
-    if overlay.len() != state.picture.len() || steady.is_empty() {
+    let hidden = zax_hdpacks::compose::HIDDEN_PIXEL;
+    if overlay.len() != state.picture.len() || overlay.iter().all(|&sprite| sprite == hidden) {
         zax_hdpacks::compose(&loaded.pack, &loaded.chr, &input, &mut state.hd.picture);
         state.hd_scale = loaded.pack.scale.max(1) as usize;
         return;
@@ -3340,7 +3338,7 @@ fn draw_hd_picture(state: &mut RunState, session: &GameSession, width: usize, ov
         .hd
         .records
         .iter()
-        .filter(|record| record.background || !steady.contains(&record.index))
+        .filter(|record| record.background || !drawn_apart(record, overlay, width))
         .copied()
         .collect();
     zax_hdpacks::compose(
@@ -3355,33 +3353,31 @@ fn draw_hd_picture(state: &mut RunState, session: &GameSession, width: usize, ov
     state.hd_scale = scale;
 }
 
-/// Lot HD-PACK in 3D: the HD pack's textures of the tiles of the frame `session` shows, into
-/// `state.hd.tiles`, once the pack is read.
-fn draw_hd_tiles(state: &mut RunState, session: &GameSession) {
-    let Some(loaded) = state.hd.pack() else {
-        return;
-    };
-    let palette = session.copy_picture_records(&mut state.hd.records);
-    let core = session.core();
-    let memory = |address: u16| core.read_memory(address);
-    let rgb = [[0u8; 3]; 64];
-    let margin = core.widescreen_margin().max(0);
-    let records = std::mem::take(&mut state.hd.records);
-    let input = zax_hdpacks::FrameInput {
-        picture: &[],
-        width: 256 + 2 * usize::try_from(margin).unwrap_or(0),
-        height: 240,
-        margin,
-        margin_y: 0,
-        records: &records,
-        palette,
-        frame: u64::try_from(core.frame_count()).unwrap_or(0),
-        rgb: &rgb,
-        memory: &memory,
-        scroll: core.playfield_origin(),
-    };
-    state.hd.tile_textures(&loaded, &input);
-    state.hd.records = records;
+/// Whether sprite `record` is one the smooth scrolling drew apart: one of its pixels is in
+/// `overlay` (`width` wide). Read from the overlay itself, which a kept picture keeps with it,
+/// rather than from the core's list, which belongs to the frame the core is on.
+fn drawn_apart(record: &zax_core_api::TileRecord, overlay: &[u8], width: usize) -> bool {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // margins of a few dozen
+    let (margin, margin_y) = (
+        (width.saturating_sub(256) / 2) as i32,
+        ((overlay.len() / width.max(1)).saturating_sub(240) / 2) as i32,
+    );
+    (0..8).any(|row| {
+        (0..8).any(|column| {
+            let (x, y) = (
+                i32::from(record.x) + column + margin,
+                i32::from(record.y) + row + margin_y,
+            );
+            record
+                .displayed_pixel(column as usize, row as usize)
+                .is_some_and(|pixel| pixel != 0)
+                && usize::try_from(x).is_ok_and(|x| x < width)
+                && usize::try_from(y)
+                    .ok()
+                    .and_then(|y| overlay.get(y * width + usize::try_from(x).unwrap_or(0)))
+                    .is_some_and(|&sprite| sprite != zax_hdpacks::compose::HIDDEN_PIXEL)
+        })
+    })
 }
 
 fn update_scene(host: &mut AppHost, state: &mut RunState) {
@@ -3424,7 +3420,6 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     let smooth_3d = host.settings().get(SettingId::EmuSmoothScroll3d).as_bool();
     // Lot HD-PACK: the pack of the game in play, read once a game starts.
     let hd_2d = host.settings().get(SettingId::VideoHdPack2d).as_bool();
-    let hd_3d = host.settings().get(SettingId::VideoHdPack3d).as_bool();
     let rom = host.current_rom_path().map(str::to_owned);
     let user_root = host.paths().root.clone();
     state
@@ -3575,11 +3570,6 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         scene.picture_crop = zax_profiles::values::Vec4F::new(crop[0], crop[1], crop[2], crop[3]);
         scene.picture_shift = None;
         scene.picture_overlay.clear();
-        // Lot HD-PACK in 3D: the HD pack's textures of the frame's tiles.
-        state.hd.tiles.clear();
-        if hd_3d {
-            draw_hd_tiles(state, session);
-        }
         // Experimental (owner request, 2026-11-20): the 3D playfield between two frames too,
         // from the shift and motion kept with the frame the scene shows.
         let smooth = session.published_smooth();
@@ -3692,12 +3682,6 @@ fn render_scene(
                 rgba: &state.hd.overlay,
                 scale: state.hd_scale,
             }),
-        hd_tiles: (picture.is_empty() && !state.hd.tiles.is_empty()).then_some(
-            zax_render::scene::HdTiles {
-                textures: &state.hd.tiles,
-                scale: state.hd.tile_scale,
-            },
-        ),
     };
     if layout == StereoLayout::Off || scene.two_dimensional_mode {
         return draw_scene(
