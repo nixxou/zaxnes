@@ -71,14 +71,14 @@ shot every 180 frames): same pillar position at 3 s, same framing at 6 s. Which 
 the scroll from when it changes mid-frame was not read in its code: the band is an assumption
 that agrees with Castlevania.
 
-## Smooth scrolling with an HD pack (fix/hd-scroll, 2026-11-26)
+## Smooth scrolling with an HD pack (fix/hd-scroll, 2026-11-26/27)
 
 With the smooth scrolling from the run-ahead (every preset, display above 61 Hz), the sprites
-that move with the camera are drawn apart (`SceneState::picture_overlay`). The overlay is now
-composed with the pack on the whole picture and masked to them; the picture is composed without
-them and their records (the sprites drawn apart read from the overlay itself: a kept picture of the
-pipeline does not carry the core's list). Before, the compositor saw a picture without them (NES pixels kept) and
-the overlay showed them in palette colours on top.
+that move with the camera are drawn apart (`SceneState::picture_overlay`). With an HD pack they
+go back into the picture before it is drawn and the overlay is emptied (owner, 2026-11-27): an
+HD overlay of them was tried (38b6f012, 4798427d) and still showed the NES sprite over the HD
+picture in the application. The price: those sprites move with the playfield's sub-pixel shift
+between two frames, as everything else.
 
 ## Not supported yet (and why)
 

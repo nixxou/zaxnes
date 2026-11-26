@@ -242,9 +242,6 @@ pub struct HdPackState {
     pub picture: Vec<u8>,
     /// The tile records of the frame drawn (a copy, the session lending them briefly).
     pub records: Vec<TileRecord>,
-    /// The HD picture of the sprites the smooth scrolling draws apart, transparent but where they
-    /// are; empty while none are.
-    pub overlay: Vec<u8>,
 }
 
 impl HdPackState {

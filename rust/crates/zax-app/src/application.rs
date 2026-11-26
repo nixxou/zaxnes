@@ -3252,8 +3252,7 @@ fn decode_composite(state: &mut RunState, width: usize, video_phase: Option<usiz
 #[allow(clippy::too_many_lines)] // The scene of a frame, each source of motion in its order.
 /// Lot HD-PACK: the 2D picture of `session` (`width` wide, in `state.picture`) drawn with the
 /// game's HD pack into `state.hd.picture`, once the pack is read.
-fn draw_hd_picture(state: &mut RunState, session: &GameSession, width: usize, overlay: &[u8]) {
-    state.hd.overlay.clear();
+fn draw_hd_picture(state: &mut RunState, session: &GameSession, width: usize) {
     let Some(loaded) = state.hd.pack() else {
         return;
     };
@@ -3283,101 +3282,8 @@ fn draw_hd_picture(state: &mut RunState, session: &GameSession, width: usize, ov
         memory: &memory,
         scroll: core.playfield_origin(),
     };
-    let hidden = zax_hdpacks::compose::HIDDEN_PIXEL;
-    if overlay.len() != state.picture.len() || overlay.iter().all(|&sprite| sprite == hidden) {
-        zax_hdpacks::compose(&loaded.pack, &loaded.chr, &input, &mut state.hd.picture);
-        state.hd_scale = loaded.pack.scale.max(1) as usize;
-        return;
-    }
-    // The smooth scrolling draws the sprites that move with the camera apart, taken out of the
-    // picture: the sprites are drawn with the pack on the whole picture, the picture without them
-    // and their records.
-    let whole: Vec<u8> = state
-        .picture
-        .iter()
-        .zip(overlay)
-        .map(|(&pixel, &sprite)| {
-            if sprite == zax_hdpacks::compose::HIDDEN_PIXEL {
-                pixel
-            } else {
-                sprite
-            }
-        })
-        .collect();
-    zax_hdpacks::compose(
-        &loaded.pack,
-        &loaded.chr,
-        &zax_hdpacks::FrameInput {
-            picture: &whole,
-            ..input
-        },
-        &mut state.hd.overlay,
-    );
-    let scale = loaded.pack.scale.max(1) as usize;
-    // Transparent but where a sprite drawn apart is.
-    let row = width * scale * 4;
-    for (at, _) in overlay
-        .iter()
-        .enumerate()
-        .filter(|(_, &s)| s == zax_hdpacks::compose::HIDDEN_PIXEL)
-    {
-        let (x, y) = (at % width, at / width);
-        for j in 0..scale {
-            for i in 0..scale {
-                if let Some(alpha) = state
-                    .hd
-                    .overlay
-                    .get_mut((y * scale + j) * row + (x * scale + i) * 4 + 3)
-                {
-                    *alpha = 0;
-                }
-            }
-        }
-    }
-    let records: Vec<zax_core_api::TileRecord> = state
-        .hd
-        .records
-        .iter()
-        .filter(|record| record.background || !drawn_apart(record, overlay, width))
-        .copied()
-        .collect();
-    zax_hdpacks::compose(
-        &loaded.pack,
-        &loaded.chr,
-        &zax_hdpacks::FrameInput {
-            records: &records,
-            ..input
-        },
-        &mut state.hd.picture,
-    );
-    state.hd_scale = scale;
-}
-
-/// Whether sprite `record` is one the smooth scrolling drew apart: one of its pixels is in
-/// `overlay` (`width` wide). Read from the overlay itself, which a kept picture keeps with it,
-/// rather than from the core's list, which belongs to the frame the core is on.
-fn drawn_apart(record: &zax_core_api::TileRecord, overlay: &[u8], width: usize) -> bool {
-    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // margins of a few dozen
-    let (margin, margin_y) = (
-        (width.saturating_sub(256) / 2) as i32,
-        ((overlay.len() / width.max(1)).saturating_sub(240) / 2) as i32,
-    );
-    (0..8).any(|row| {
-        (0..8).any(|column| {
-            let (x, y) = (
-                i32::from(record.x) + column + margin,
-                i32::from(record.y) + row + margin_y,
-            );
-            record
-                .displayed_pixel(column as usize, row as usize)
-                .is_some_and(|pixel| pixel != 0)
-                && usize::try_from(x).is_ok_and(|x| x < width)
-                && usize::try_from(y)
-                    .ok()
-                    .and_then(|y| overlay.get(y * width + usize::try_from(x).unwrap_or(0)))
-                    .is_some_and(|&sprite| sprite != zax_hdpacks::compose::HIDDEN_PIXEL)
-        })
-    })
+    zax_hdpacks::compose(&loaded.pack, &loaded.chr, &input, &mut state.hd.picture);
+    state.hd_scale = loaded.pack.scale.max(1) as usize;
 }
 
 fn update_scene(host: &mut AppHost, state: &mut RunState) {
@@ -3493,6 +3399,17 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     if two_dimensional {
         state.picture_height =
             session.copy_nes_picture_layers(&mut state.picture, &mut scene.picture_overlay);
+        // Lot HD-PACK (owner, 2026-11-27): with an HD pack, the sprites the smooth scrolling
+        // drew apart go back into the picture, drawn with it: an overlay of its own showed them
+        // in their NES colours over the HD picture.
+        if hd_2d && state.hd.pack().is_some() && !scene.picture_overlay.is_empty() {
+            for (pixel, &sprite) in state.picture.iter_mut().zip(&scene.picture_overlay) {
+                if sprite != zax_hdpacks::compose::HIDDEN_PIXEL {
+                    *pixel = sprite;
+                }
+            }
+            scene.picture_overlay.clear();
+        }
         scene.picture_shift = session.nes_picture_shift();
         // Experimental (owner request): on a display faster than the game, the playfield drawn
         // between two frames, along the camera's motion to the next one.
@@ -3541,7 +3458,7 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         in_force.leave_out(&mut state.picture, state.picture_height);
         colour_picture(state, session, width, composite);
         if hd_2d {
-            draw_hd_picture(state, session, width, &scene.picture_overlay);
+            draw_hd_picture(state, session, width);
         }
         scene.picture_crop = zax_profiles::values::Vec4F::new(
             in_force.crop()[0],
@@ -3677,11 +3594,7 @@ fn render_scene(
                 scale: state.hd_scale,
             },
         ),
-        nes_overlay_hd: (!picture.is_empty() && state.hd_scale > 0 && !state.hd.overlay.is_empty())
-            .then_some(zax_render::scene::HdPicture {
-                rgba: &state.hd.overlay,
-                scale: state.hd_scale,
-            }),
+        nes_overlay_hd: None,
     };
     if layout == StereoLayout::Off || scene.two_dimensional_mode {
         return draw_scene(
