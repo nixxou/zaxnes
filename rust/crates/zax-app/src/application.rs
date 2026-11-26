@@ -1852,6 +1852,7 @@ impl Running {
                     nes_picture_emphasis: &[],
                     nes_picture_rgb: &[],
                     nes_picture_hd: None,
+                    nes_overlay_hd: None,
                 };
                 draw_eyes(
                     graphics,
@@ -2553,6 +2554,7 @@ impl EyePicture {
             nes_picture_rgb: &self.rgb,
             // An eye of a Famicom 3D System game is drawn as the console drew it: no HD pack.
             nes_picture_hd: None,
+            nes_overlay_hd: None,
         }
     }
 }
@@ -3250,7 +3252,8 @@ fn decode_composite(state: &mut RunState, width: usize, video_phase: Option<usiz
 #[allow(clippy::too_many_lines)] // The scene of a frame, each source of motion in its order.
 /// Lot HD-PACK: the 2D picture of `session` (`width` wide, in `state.picture`) drawn with the
 /// game's HD pack into `state.hd.picture`, once the pack is read.
-fn draw_hd_picture(state: &mut RunState, session: &GameSession, width: usize) {
+fn draw_hd_picture(state: &mut RunState, session: &GameSession, width: usize, overlay: &[u8]) {
+    state.hd.overlay.clear();
     let Some(loaded) = state.hd.pack() else {
         return;
     };
@@ -3280,8 +3283,74 @@ fn draw_hd_picture(state: &mut RunState, session: &GameSession, width: usize) {
         memory: &memory,
         scroll: core.playfield_origin(),
     };
-    zax_hdpacks::compose(&loaded.pack, &loaded.chr, &input, &mut state.hd.picture);
-    state.hd_scale = loaded.pack.scale.max(1) as usize;
+    let steady = core.steady_sprites();
+    if overlay.len() != state.picture.len() || steady.is_empty() {
+        zax_hdpacks::compose(&loaded.pack, &loaded.chr, &input, &mut state.hd.picture);
+        state.hd_scale = loaded.pack.scale.max(1) as usize;
+        return;
+    }
+    // The smooth scrolling draws the sprites that move with the camera apart, taken out of the
+    // picture: the sprites are drawn with the pack on the whole picture, the picture without them
+    // and their records.
+    let whole: Vec<u8> = state
+        .picture
+        .iter()
+        .zip(overlay)
+        .map(|(&pixel, &sprite)| {
+            if sprite == zax_hdpacks::compose::HIDDEN_PIXEL {
+                pixel
+            } else {
+                sprite
+            }
+        })
+        .collect();
+    zax_hdpacks::compose(
+        &loaded.pack,
+        &loaded.chr,
+        &zax_hdpacks::FrameInput {
+            picture: &whole,
+            ..input
+        },
+        &mut state.hd.overlay,
+    );
+    let scale = loaded.pack.scale.max(1) as usize;
+    // Transparent but where a sprite drawn apart is.
+    let row = width * scale * 4;
+    for (at, _) in overlay
+        .iter()
+        .enumerate()
+        .filter(|(_, &s)| s == zax_hdpacks::compose::HIDDEN_PIXEL)
+    {
+        let (x, y) = (at % width, at / width);
+        for j in 0..scale {
+            for i in 0..scale {
+                if let Some(alpha) = state
+                    .hd
+                    .overlay
+                    .get_mut((y * scale + j) * row + (x * scale + i) * 4 + 3)
+                {
+                    *alpha = 0;
+                }
+            }
+        }
+    }
+    let records: Vec<zax_core_api::TileRecord> = state
+        .hd
+        .records
+        .iter()
+        .filter(|record| record.background || !steady.contains(&record.index))
+        .copied()
+        .collect();
+    zax_hdpacks::compose(
+        &loaded.pack,
+        &loaded.chr,
+        &zax_hdpacks::FrameInput {
+            records: &records,
+            ..input
+        },
+        &mut state.hd.picture,
+    );
+    state.hd_scale = scale;
 }
 
 fn update_scene(host: &mut AppHost, state: &mut RunState) {
@@ -3445,7 +3514,7 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         in_force.leave_out(&mut state.picture, state.picture_height);
         colour_picture(state, session, width, composite);
         if hd_2d {
-            draw_hd_picture(state, session, width);
+            draw_hd_picture(state, session, width, &scene.picture_overlay);
         }
         scene.picture_crop = zax_profiles::values::Vec4F::new(
             in_force.crop()[0],
@@ -3581,6 +3650,11 @@ fn render_scene(
                 scale: state.hd_scale,
             },
         ),
+        nes_overlay_hd: (!picture.is_empty() && state.hd_scale > 0 && !state.hd.overlay.is_empty())
+            .then_some(zax_render::scene::HdPicture {
+                rgba: &state.hd.overlay,
+                scale: state.hd_scale,
+            }),
     };
     if layout == StereoLayout::Off || scene.two_dimensional_mode {
         return draw_scene(

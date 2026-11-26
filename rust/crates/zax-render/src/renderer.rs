@@ -111,8 +111,17 @@ impl Residency for GlResidency<'_> {
         self.picture.upload_with_colours(picture, colours, height)
     }
 
-    fn overlay(&mut self, picture: &[u8], height: usize) -> Result<Option<Texture>, GlError> {
-        self.overlay.upload(picture, height)
+    fn overlay(
+        &mut self,
+        picture: &[u8],
+        hd: Option<crate::scene::HdPicture<'_>>,
+        height: usize,
+    ) -> Result<Option<Texture>, GlError> {
+        let colours = crate::scene::PictureColours {
+            hd,
+            ..crate::scene::PictureColours::default()
+        };
+        self.overlay.upload_with_colours(picture, colours, height)
     }
 }
 

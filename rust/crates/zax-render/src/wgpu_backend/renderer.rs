@@ -583,11 +583,12 @@ impl Residency for WgpuResidency<'_> {
     fn overlay(
         &mut self,
         picture: &[u8],
+        hd: Option<crate::scene::HdPicture<'_>>,
         height: usize,
     ) -> Result<Option<TextureHandle>, Self::Error> {
         Ok(self
             .textures
-            .overlay(self.device, self.queue, picture, height))
+            .overlay(self.device, self.queue, picture, hd, height))
     }
 }
 

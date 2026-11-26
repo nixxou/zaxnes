@@ -242,7 +242,12 @@ impl Residency for MeshTable {
         Ok(Some(0))
     }
 
-    fn overlay(&mut self, _picture: &[u8], _height: usize) -> Result<Option<usize>, Self::Error> {
+    fn overlay(
+        &mut self,
+        _picture: &[u8],
+        _hd: Option<crate::scene::HdPicture<'_>>,
+        _height: usize,
+    ) -> Result<Option<usize>, Self::Error> {
         Ok(Some(0))
     }
 }

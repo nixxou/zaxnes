@@ -1,6 +1,7 @@
-//! Walks right through a game headless with an HD pack and writes a shot every 180 frames:
-//! `hd_walk <rom.nes> <pack folder> <out dir> <shots>`. Start is pressed at frame 120; Right is
-//! held once $18 reads 5 (Castlevania's play state), the same script as the Mesen comparison.
+//! Walks right through a game headless with an HD pack and writes a shot every `interval` frames
+//! (180 by default): `hd_walk <rom.nes> <pack folder> <out dir> <shots> [interval] [a@N b@N...]`.
+//! Start is pressed at frame 120; Right is held once $18 reads 5 (Castlevania's play state), A or
+//! B with it for 6 frames from frame N of play: the same script as the Mesen comparison.
 
 use std::path::Path;
 
@@ -12,7 +13,7 @@ use zax_hdpacks::{compose, FolderFiles, FrameInput};
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 5 {
-        eprintln!("usage: hd_walk <rom> <pack folder> <out dir> <shots>");
+        eprintln!("usage: hd_walk <rom> <pack folder> <out dir> <shots> [interval] [a@N b@N...]");
         return;
     }
     let Ok(image) = std::fs::read(&args[1]) else {
@@ -38,22 +39,50 @@ fn main() {
         let c = zax_engine3d::palette::nes_color(index);
         *colour = [c.r, c.g, c.b];
     }
+    let interval: u64 = args
+        .get(5)
+        .and_then(|a| a.parse().ok())
+        .unwrap_or(180)
+        .max(1);
+    // `a@300` / `b@200`: the button held 6 frames from that frame of play on, Right with it.
+    let presses: Vec<(u16, u64)> = args
+        .iter()
+        .skip(6)
+        .filter_map(|press| {
+            let (name, at) = press.split_once('@')?;
+            let button = match name {
+                "a" => button::A,
+                "b" => button::B,
+                _ => return None,
+            };
+            Some((u16::from(button), at.parse().ok()?))
+        })
+        .collect();
+    // HD_WALK_AHEAD=n: the frames run ahead, as the application's run-ahead.
+    let ahead: u8 = std::env::var("HD_WALK_AHEAD")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
     let (mut playing, mut taken, mut frame) = (None::<u64>, 0, 0u64);
     while taken < shots && frame < 20_000 {
         let pad = if (120..124).contains(&frame) {
             u16::from(button::START)
-        } else if playing.is_some() {
-            u16::from(button::RIGHT)
+        } else if let Some(start) = playing {
+            let played = frame - start;
+            presses
+                .iter()
+                .filter(|(_, at)| (*at..at + 6).contains(&played))
+                .fold(u16::from(button::RIGHT), |pad, (button, _)| pad | button)
         } else {
             0
         };
-        core.run_frame(pad);
+        core.run_frame_ahead(pad, ahead);
         frame += 1;
         if playing.is_none() && core.read_memory(0x18) == 5 {
             playing = Some(frame);
         }
         let Some(start) = playing else { continue };
-        if (frame - start) % 180 != 0 {
+        if (frame - start) % interval != 0 {
             continue;
         }
         let mut picture = Vec::new();

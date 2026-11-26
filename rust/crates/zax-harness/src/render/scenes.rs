@@ -68,6 +68,7 @@ impl SyntheticScene {
             nes_picture_emphasis: &self.nes_picture_emphasis,
             nes_picture_rgb: &[],
             nes_picture_hd: None,
+            nes_overlay_hd: None,
             ..SceneFrame::with_draw_list(&self.draw_list)
         }
     }

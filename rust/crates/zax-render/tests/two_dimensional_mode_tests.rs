@@ -42,6 +42,7 @@ fn amd_009_the_pixel_frame_replaces_the_tile_list_with_a_single_quad() {
         nes_picture_emphasis: &[],
         nes_picture_rgb: &[],
         nes_picture_hd: None,
+        nes_overlay_hd: None,
     };
     gl.render(&mut renderer, &built.scene, &frame);
 
@@ -80,6 +81,7 @@ fn fidplus_d2b_a_picture_with_red_emphasis_loses_green_and_blue() {
         nes_picture_emphasis: &emphasis,
         nes_picture_rgb: &[],
         nes_picture_hd: None,
+        nes_overlay_hd: None,
         ..frame(&picture)
     };
     let red = gl.render(&mut renderer, &scene(), &tinted);
@@ -186,6 +188,7 @@ fn amd_009_a_picture_of_the_wrong_size_falls_back_to_the_tile_list() {
         nes_picture_emphasis: &[],
         nes_picture_rgb: &[],
         nes_picture_hd: None,
+        nes_overlay_hd: None,
     };
     gl.render(&mut renderer, &built.scene, &frame);
 
@@ -247,6 +250,7 @@ fn frame(picture: &[u8]) -> SceneFrame<'_> {
         nes_picture_emphasis: &[],
         nes_picture_rgb: &[],
         nes_picture_hd: None,
+        nes_overlay_hd: None,
     }
 }
 

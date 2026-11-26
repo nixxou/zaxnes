@@ -531,6 +531,9 @@ pub struct SceneFrame<'a> {
     pub nes_picture_rgb: &'a [u8],
     /// Lot HD-PACK: the picture drawn with an HD pack, which replaces its colours.
     pub nes_picture_hd: Option<HdPicture<'a>>,
+    /// Lot HD-PACK: the sprites the smooth scrolling draws apart (`SceneState::picture_overlay`)
+    /// drawn with the HD pack, as `nes_picture_hd` for the picture.
+    pub nes_overlay_hd: Option<HdPicture<'a>>,
 }
 
 /// Lot HD-PACK: the 2D picture drawn with a Mesen HD pack, `scale` times the size of the NES
@@ -565,6 +568,7 @@ impl SceneFrame<'_> {
             emphasis: self.nes_picture_emphasis,
             rgb: self.nes_picture_rgb,
             hd: self.nes_picture_hd,
+            overlay_hd: self.nes_overlay_hd,
         }
     }
 }
@@ -579,6 +583,8 @@ pub struct PictureColours<'a> {
     pub rgb: &'a [u8],
     /// Lot HD-PACK: the HD picture, which wins over both.
     pub hd: Option<HdPicture<'a>>,
+    /// Lot HD-PACK: the HD picture of the sprites the smooth scrolling draws apart.
+    pub overlay_hd: Option<HdPicture<'a>>,
 }
 
 impl PictureColours<'_> {
@@ -614,6 +620,7 @@ impl<'a> SceneFrame<'a> {
             nes_picture_emphasis: &[],
             nes_picture_rgb: &[],
             nes_picture_hd: None,
+            nes_overlay_hd: None,
         }
     }
 }

@@ -426,17 +426,15 @@ impl TextureStore {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         indices: &[u8],
+        hd: Option<crate::scene::HdPicture<'_>>,
         height: usize,
     ) -> Option<TextureHandle> {
         let slot = self.overlay;
-        let handle = self.upload_picture(
-            device,
-            queue,
-            indices,
-            crate::scene::PictureColours::default(),
-            height,
-            slot,
-        )?;
+        let colours = crate::scene::PictureColours {
+            hd,
+            ..crate::scene::PictureColours::default()
+        };
+        let handle = self.upload_picture(device, queue, indices, colours, height, slot)?;
         self.overlay = Some(handle);
         Some(handle)
     }

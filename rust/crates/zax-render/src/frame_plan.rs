@@ -91,7 +91,8 @@ pub trait Residency {
     ) -> Result<Option<Self::Texture>, Self::Error>;
 
     /// The sprites the experimental smooth scrolling draws apart (`SceneState::picture_overlay`),
-    /// uploaded as a second picture of the same kind, or `None` when it has the wrong size.
+    /// uploaded as a second picture of the same kind, or `None` when it has the wrong size; with
+    /// `hd`, its colours are those of the HD pack (lot HD-PACK), as [`Residency::picture`]'s.
     ///
     /// # Errors
     ///
@@ -99,6 +100,7 @@ pub trait Residency {
     fn overlay(
         &mut self,
         picture: &[u8],
+        hd: Option<crate::scene::HdPicture<'_>>,
         height: usize,
     ) -> Result<Option<Self::Texture>, Self::Error>;
 }
@@ -433,14 +435,29 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
                 fixed.wide_picture_quad
             };
             if let (Some(quad), false) = (whole, overlay.is_empty()) {
-                if let (Some(texture), Some(mesh)) =
-                    (residency.overlay(overlay, height)?, residency.mesh(quad)?)
-                {
+                // Lot HD-PACK: the overlay is read at its own scale, HD or not.
+                let overlay_hd = colours
+                    .overlay_hd
+                    .filter(|hd| hd.size_for((width, height)).is_some());
+                #[allow(clippy::cast_precision_loss)] // 1 to 10; 256 to 1280, 240 to 720.
+                let (overlay_tilting, overlay_size) =
+                    overlay_hd.map_or((1.0, Vector2::new(width as f32, height as f32)), |hd| {
+                        let scale = hd.scale as f32;
+                        (
+                            scale,
+                            Vector2::new(width as f32 * scale, height as f32 * scale),
+                        )
+                    });
+                if let (Some(texture), Some(mesh)) = (
+                    residency.overlay(overlay, overlay_hd, height)?,
+                    residency.mesh(quad)?,
+                ) {
                     let model = Mat4::translation(Vec3::new(0.0, 0.0, -OVERLAY_NUDGE));
                     self.lists.opaque.push(DrawItem {
                         color_mode: 1,
                         texture: Some(texture),
-                        texture_size,
+                        texture_size: overlay_size,
+                        tex_tilting: Vector2::new(overlay_tilting, overlay_tilting),
                         receive_shadow: false,
                         clip: true,
                         ..DrawItem::plain(mesh, model, (quad.bounds_min(), quad.bounds_max()))
