@@ -3,6 +3,7 @@
 //! - [`code`]: reading and writing Game Genie, Pro Action Replay and raw codes.
 //! - [`search`]: the RAM search that finds the address of a value.
 //! - [`import`]: the cheat files of Mesen, RetroArch and FCEUX.
+//! - [`sheet`]: which sheet of a cheat database goes with a ROM.
 //! - [`CheatList`]: a game's cheats, what the engines apply each frame, and its file.
 //!
 //! See `docs/progress/CHEATS.md` for the survey of other emulators and the plan.
@@ -10,6 +11,7 @@
 pub mod code;
 pub mod import;
 pub mod search;
+pub mod sheet;
 
 use serde::{Deserialize, Serialize};
 

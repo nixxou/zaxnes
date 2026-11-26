@@ -2835,6 +2835,7 @@ dependencies = [
  "walkdir",
  "wgpu",
  "zax-achievements",
+ "zax-cheats",
  "zax-core-api",
  "zax-engine3d",
  "zax-fceux",

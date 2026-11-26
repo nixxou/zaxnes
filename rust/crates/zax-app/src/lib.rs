@@ -8,6 +8,7 @@ pub mod app_options;
 pub mod application;
 pub mod audio;
 pub mod bundled_profiles;
+pub mod cheat_database;
 pub mod core_worker;
 pub mod demo_game;
 pub mod editor_mode;

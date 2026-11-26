@@ -1,6 +1,8 @@
 # CHEATS — cheat codes and a RAM search
 
-Branch `feat/cheats`, worktree `wt-cheats`, from `dev` d02d6dd7 (2026-11-24).
+Branch `feat/cheats`, worktree `wt-cheats`, from `dev` d02d6dd7 (2026-11-24). Continued on
+`feat/cheats-2` in `wt-gamehash` from `dev` bcc9e86b + e6d19087 (2026-11-26): G: too full for a
+second target directory; the two commits of `feat/cheats` cherry-picked.
 
 ## 1. What the other emulators do
 
@@ -36,6 +38,7 @@ Notes for the NES:
 | 1 | `zax-cheats` crate, no engine dependency: code parsing (Game Genie 6/8, PAR, raw with compare), encoding back, a cheat list type | done |
 | 2 | RAM search in `zax-cheats`: snapshot of `$0000-$07FF` and `$6000-$7FFF` through a read closure, filters (known value, unknown value relative to the last snapshot, by delta), sizes 1/2 bytes, BCD, candidate list, "add as cheat" | done (no "add as cheat" yet, it is UI) |
 | 3 | Importers: Mesen JSON (BeesNES / Mesen), libretro `.cht`, FCEUX `.cht`, Nestopia XML | Mesen JSON, libretro, FCEUX done; Nestopia XML to do. FCEUX's layout from memory (its `cheat.cpp` is not in the tree): check against FCEUX before relying on it |
+| 3b | Sheet of a ROM: `zax_cheats::sheet::choose` and `zax_app::cheat_database` (folder or zip, Mesen JSON or libretro `.cht`), through the game database's No-Intro name of the data CRC, then the file name | done |
 | 4 | Engines: RAM cheats through `Engine::write_memory` after each frame (all engines); Game Genie on Zaxnes's CPU read path (one flag tested only above `$8000`, off unless a code is on), FCEUX through its own cheat API, NesHawk through its bus poke | |
 | 5 | Application: cheats per game saved beside the other per-game data, Cheats window (list, add, enable), Search window, libretro `retro_cheat_set` | |
 | 6 | Database: decide what to ship (see 3.) | |
@@ -55,3 +58,9 @@ Notes for the NES:
   1958 files, 45 616 cheats read, 70 skipped (notes without a code, `??` templates, 2 type errors in
   the data). It found Mesen's `AAAA:VV:CC` form and one file with an invalid JSON escape, both
   handled. Next: step 4, the engines.
+- 2026-11-26: matching a ROM to its sheet. Rule, surest first: the sheet with the ROM's No-Intro
+  name (`Exact`), the sheet with its file name (`FileName`, hacks and homebrews), the same title
+  with a region in common (`SameRegion`, another revision or a Virtual Console image), the same
+  title only (`OtherRegion`, codes may not work). The match kind is kept so the UI can warn below
+  `Exact`. Against BeesNES's database, over the 3 144 ROMs of the game database: 1 568 exact,
+  428 same region, 385 other region, 763 none (ignored test `coverage_of_a_real_database`).
