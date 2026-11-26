@@ -528,6 +528,13 @@ impl EngineHandle {
     /// it save, run N, take the frame and load, and until then the interface shows the control
     /// disabled with that reason rather than running it slowly and silently.
     pub fn run_frame_ahead(&mut self, word: InputWord, ahead: u8) -> i64 {
+        // Lot CHEATS: the RAM codes go to the real machine, which the run-ahead holds aside and
+        // puts back before its next frame; written to the frame shown only, they were lost.
+        if !self.ram_cheats.is_empty()
+            && self.zaxnes_mut().is_some_and(NesCore::restore_real_frame)
+        {
+            self.apply_ram_cheats();
+        }
         let cycles = match self.zaxnes_mut() {
             Some(core) => core.run_frame_ahead(word, ahead),
             None => self.engine.run_frame(word),
@@ -547,7 +554,12 @@ impl EngineHandle {
 
     /// Puts the real frame back after a run-ahead; `false` when there was none.
     pub fn restore_real_frame(&mut self) -> bool {
-        self.zaxnes_mut().is_some_and(NesCore::restore_real_frame)
+        let restored = self.zaxnes_mut().is_some_and(NesCore::restore_real_frame);
+        // Lot CHEATS: the real machine gets the RAM codes too, which the frame shown had.
+        if restored {
+            self.apply_ram_cheats();
+        }
+        restored
     }
 
     /// The frame's picture widened by its widescreen margins, into `out`; the number of rows.
