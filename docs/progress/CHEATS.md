@@ -39,9 +39,9 @@ Notes for the NES:
 | 2 | RAM search in `zax-cheats`: snapshot of `$0000-$07FF` and `$6000-$7FFF` through a read closure, filters (known value, unknown value relative to the last snapshot, by delta), sizes 1/2 bytes, BCD, candidate list, "add as cheat" | done (no "add as cheat" yet, it is UI) |
 | 3 | Importers: Mesen JSON (BeesNES / Mesen), libretro `.cht`, FCEUX `.cht`, Nestopia XML | Mesen JSON, libretro, FCEUX done; Nestopia XML to do. FCEUX's layout from memory (its `cheat.cpp` is not in the tree): check against FCEUX before relying on it |
 | 3b | Sheet of a ROM: `zax_cheats::sheet::choose` and `zax_app::cheat_database` (folder or zip, Mesen JSON or libretro `.cht`), through the game database's No-Intro name of the data CRC, then the file name | done |
-| 4 | Engines: RAM cheats through `Engine::write_memory` after each frame (all engines); Game Genie on Zaxnes's CPU read path, FCEUX through its own cheat API, NesHawk through its bus | RAM codes on every engine and Game Genie on Zaxnes done; FCEUX and NesHawk Game Genie to do |
-| 5 | Application: cheats per game saved beside the other per-game data, Cheats window (list, add, enable), Search window, libretro `retro_cheat_set` | |
-| 6 | Database: decide what to ship (see 3.) | |
+| 4 | Engines: RAM cheats through `Engine::write_memory` after each frame (all engines); Game Genie on Zaxnes's CPU read path, FCEUX through its own cheat API, NesHawk through its bus | done on the three engines (FCEUX through the fork branch `zax-cheats`) |
+| 5 | Application: cheats per game saved beside the other per-game data, Cheats window (list, add, enable), Search window, libretro `retro_cheat_set` | done, with the console interface's page and RetroArch's T/Y/U |
+| 6 | Database: decide what to ship (see 3.) | none shipped; the player points at one (`cheats.database`) or drops it beside the program |
 
 ## 3. Open questions for the owner
 
@@ -83,3 +83,33 @@ Notes for the NES:
   - Seen on the way, not changed: the Fidelite+ loop and the slice loop do not send a VS. System
     image to the generic path as the standard frame does, and `Fid<K>` does not forward
     `RUNS_VS`; the VS quirks may be missing on those paths.
+- 2026-11-26: steps 4 and 5 finished (owner: "fais moi une implementation complete").
+  - Host (`emulation/host/cheats.rs`): the list of the game in play, kept in
+    `cheats/<rom>.json` (the entry's name for a game in an archive), read back at each launch,
+    put on the core whenever its stamp (`EngineHandle::cheats_stamp`, 0 after a new ROM) is not
+    the host's; a switch for them all; the RAM search runs in the host at the tick, the core
+    here (with the separate core the UI draws while the core is away); `cheats.database`
+    (internal setting), else `cheats.zip` / `cheats/` beside the program, else
+    `cheats/database(.zip)` in the user data; the data CRC is read when the game starts.
+  - Run-ahead (on by default) defeated the RAM codes: written to the frame shown, then lost when
+    the real machine came back. `EngineHandle::restore_real_frame` and `run_frame_ahead` now
+    write them to the real machine too. Found by `tests/cheat_host_tests.rs`.
+  - Desktop: Game options > Cheats... (list, typed codes, the database's sheet with its match
+    coloured: green exact or file name, orange another version, red another region; Add one on,
+    Add all off; Browse for a zip or a sheet of a folder) and RAM search... (1 byte, 2 bytes,
+    BCD; changed/unchanged/increased/decreased, a comparison with the previous value, the
+    previous plus a delta or a value; undo; the first 500 listed with their value now; add as a
+    cheat). RetroArch layout: T/Y the previous/next cheat, U on/off, with a notification.
+  - Console interface: a Cheats row in the in-game menu (after Hacks): the switch, the sheet's
+    codes taken in one press (off), each cheat on/off. No typing, no RAM search on a pad.
+  - libretro: `retro_cheat_reset`, `retro_cheat_set` (RAM codes before each frame, Game Genie on
+    the CPU reads).
+  - NesHawk: `Bus::rom_patches` on the `$8000-$FFFF` read and peek paths (a `None` test on the
+    ROM read, the C#'s path unchanged otherwise), kept through a power cycle, out of the state.
+  - FCEUX: `zax_set_read_patches` in the fork (branch `zax-cheats`, worktree
+    `cleanroom/fceux-zax-cheats`, commit 0cb755df): FCEUX's substitute cheats (type 1), the
+    list replaced as a whole, `savecheats` reset so closing a game never writes FCEUX's `.cht`.
+    Only the MSVC library is built; the Linux (zig), aarch64 and Android libraries of the fork
+    must be rebuilt from that branch before a release links them, or the link fails.
+  - Not done: the callgrind level-1 comparison of the standard path (no Zaxnes core change since
+    041b7a6e's boxed field and out-of-line patched path).

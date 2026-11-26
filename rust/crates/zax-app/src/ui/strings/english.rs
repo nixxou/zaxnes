@@ -1765,7 +1765,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::CHEATS_STATE_ON, "on"),
     (keys::CHEATS_STATE_OFF, "off"),
     (keys::CHEATS_KEYS_NOTE, "RetroArch keys: T and Y choose a cheat, U turns it on or off."),
-    (keys::CHEATS_ACHIEVEMENTS_NOTE, "Cheats are on while RetroAchievements run: unlocks may be refused."),
+    (keys::CHEATS_ACHIEVEMENTS_NOTE, "Cheats are on while RetroAchievements run: what you unlock now, you unlock with their help."),
     (keys::SEARCH_TITLE, "RAM search"),
     (keys::SEARCH_SIZE, "Size"),
     (keys::SEARCH_SIZE_BYTE, "1 byte"),

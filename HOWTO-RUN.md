@@ -302,6 +302,44 @@ cyan quand le jeu en a ; « Tout remettre en global » les efface toutes. Change
 partie, dans la fenêtre d'options, une option que le jeu a en propre change la valeur du jeu,
 pas le réglage global.
 
+### Triches
+
+**Options du jeu ▸ Triches…** ouvre la liste des triches du jeu en cours ; **Recherche RAM…**
+cherche une adresse dans sa mémoire. Les deux sont grisés sans jeu.
+
+- **La liste.** Chaque triche se coche ou se décoche ; « Triches activées » les coupe toutes
+  sans perdre leurs cases. La liste est gardée pour ce jeu dans `cheats\<rom>.json` des données
+  utilisateur (§ 6), un fichier JSON lisible et modifiable à la main, relu à chaque lancement.
+  Pour un jeu dans une archive, le fichier porte le nom de l'entrée, pas celui de l'archive.
+- **Ajouter un code.** Game Genie (6 ou 8 lettres), Pro Action Replay (8 chiffres) ou brut,
+  `AAAA:VV` (la valeur écrite à chaque image) et `AAAA?CC:VV` (seulement tant que l'octet vaut
+  `CC`) ; plusieurs codes d'une même triche se joignent par `+`. Les codes Game Genie remplacent
+  ce que le processeur lit dans la ROM ; ils marchent sur les trois moteurs (Zaxnes, FCEUX,
+  NesHawk). Les codes RAM aussi.
+- **La base de triches.** Zaxnes n'en fournit pas. Désignez un dossier ou un zip de fiches, une
+  par ROM et à son nom No-Intro (`.json` de Mesen, ou `.cht` de libretro-database), dans le
+  champ **Base** ou avec **Parcourir…** ; sans choix, Zaxnes prend `cheats.zip` ou le dossier
+  `cheats` à côté de l'exécutable, puis `cheats\database.zip` ou `cheats\database` des données
+  utilisateur. La fiche du jeu est trouvée par la CRC de ses données (son nom No-Intro dans la
+  base des jeux), puis par le nom du fichier, puis par le titre. La fenêtre dit à quel point elle
+  est sûre : faite pour cette ROM, trouvée par le nom du fichier, faite pour une autre version
+  (orange : les codes peuvent ne pas marcher) ou pour une autre région (rouge). « Ajouter » prend
+  un code activé, « Tout ajouter » les prend tous désactivés.
+- **La recherche RAM.** « Nouvelle recherche » relève toute la RAM ($0000-$07FF) et la RAM de
+  la cartouche ($6000-$7FFF), en 1 octet, 2 octets ou BCD (deux chiffres par octet, comme les
+  scores). Jouez, puis filtrez : changé, inchangé, augmenté, diminué, ou une comparaison avec la
+  valeur précédente, la précédente plus un écart, ou une valeur connue. « Annuler » revient sur
+  le dernier filtre. Une adresse choisie devient une triche avec la valeur voulue.
+- **Touches** (disposition RetroArch) : `T` et `Y` choisissent la triche précédente ou suivante
+  (une notification la nomme), `U` l'active ou la désactive.
+- **Mode console.** Le menu en jeu a une page **Triches** : l'interrupteur général, la reprise
+  des codes de la fiche du jeu, et chaque triche à activer avec A. Taper un code et la recherche
+  RAM restent dans les fenêtres du bureau.
+- **RetroArch.** Le cœur libretro prend les triches de RetroArch (`retro_cheat_set`).
+
+Les triches changent le jeu : un film enregistré avec elles ne se rejoue qu'avec elles. Avec
+RetroAchievements en marche, la fenêtre rappelle que les succès obtenus le sont avec leur aide.
+
 ### Moteur d'émulation (par jeu)
 
 *Seulement dans une version construite avec la fonctionnalité `fceux-core`* : la ligne **Moteur
@@ -925,6 +963,7 @@ l'explorateur, et `--userdata <dossier>` l'emporte sur tout le reste.
 | `battery/<sha1>.srm` | RAM sauvegardée par pile, par ROM (Zelda, Final Fantasy…) |
 | `profiles/*.3dn` | profils utilisateur importés — et, en plus, ceux du dossier `profiles` à côté de l'exécutable |
 | `covers/*.png` | jaquettes, nommées `<Titre>_3dsen_<Id>.png` |
+| `cheats/<rom>.json` | les triches d'un jeu (§ Triches) ; `cheats/database.zip` ou `cheats/database/`, une base de triches |
 | `logs/` | journaux |
 
 Ce qu'il faut savoir :

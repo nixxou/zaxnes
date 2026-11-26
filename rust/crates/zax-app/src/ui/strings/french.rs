@@ -1746,7 +1746,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::CHEATS_STATE_ON, "activée"),
     (keys::CHEATS_STATE_OFF, "désactivée"),
     (keys::CHEATS_KEYS_NOTE, "Touches RetroArch : T et Y choisissent une triche, U l'active ou la désactive."),
-    (keys::CHEATS_ACHIEVEMENTS_NOTE, "Des triches sont actives avec RetroAchievements : les succès peuvent être refusés."),
+    (keys::CHEATS_ACHIEVEMENTS_NOTE, "Des triches sont actives avec RetroAchievements : les succès obtenus maintenant le seront avec leur aide."),
     (keys::SEARCH_TITLE, "Recherche RAM"),
     (keys::SEARCH_SIZE, "Taille"),
     (keys::SEARCH_SIZE_BYTE, "1 octet"),
