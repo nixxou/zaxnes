@@ -113,3 +113,4 @@ Notes for the NES:
     must be rebuilt from that branch before a release links them, or the link fails.
   - Not done: the callgrind level-1 comparison of the standard path (no Zaxnes core change since
     041b7a6e's boxed field and out-of-line patched path).
+  - Callgrind level 1 (clean builds from git archive, dev bc767c68 vs 53c8d5ad, 300 frames): mm2 core 7 284 470 450 -> 7 284 465 830, total -0.001 %; zelda2 core 7 372 035 172 -> 7 372 030 552, total -0.001 %. No cost on the standard path.
