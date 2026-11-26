@@ -1,0 +1,25 @@
+[package]
+name = "zax-hdpacks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Mesen HD packs (feat/hd-pack): the `hires.txt` reader and the compositor of the HD frame from
+# the core's picture and tile records. Safe Rust, no graphics: the application uploads the frame.
+[dependencies]
+zax-core-api = { path = "../zax-core-api" }
+png = "0.17"
+
+# The rows of the HD frame drawn over the cores (already in the lock).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = "1"
+
+[dev-dependencies]
+# The `hd_shot` example plays a ROM headless.
+zax-nes = { path = "../zax-nes" }
+zax-engine3d = { path = "../zax-engine3d" }
+
+[lints]
+workspace = true

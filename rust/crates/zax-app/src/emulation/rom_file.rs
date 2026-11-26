@@ -441,6 +441,124 @@ fn stem_of(name: &str) -> &str {
     name.rsplit_once('.').map_or(name, |(stem, _)| stem)
 }
 
+/// Lot HD-PACK: the files of the Mesen HD pack of the game `game` (an entry of the archive at
+/// `path`, `image` its bytes) in that archive (a `.zip` or `.7z`, or a file whose first bytes say
+/// it is one). A pack of an archive is a folder holding a `hires.txt` (the archive's root for one
+/// at its top), and it goes with a game by the rules of the archive's other extra files
+/// ([`extras::choose`]: the folder named as the game first, then one whose region or timing tags
+/// are all the game's, then an untagged one; never another game's own). The text and pictures of
+/// the folder chosen, beside its `hires.txt` or below, by their names in the archive; `None` when
+/// none goes with the game.
+///
+/// # Errors
+/// The archive cannot be opened or decoded.
+pub fn read_hd_pack_files(
+    path: &Path,
+    game: &str,
+    image: &[u8],
+) -> Result<Option<NamedFiles>, String> {
+    let extension = path
+        .extension()
+        .map(|extension| extension.to_string_lossy().to_lowercase());
+    let zip = match extension.as_deref() {
+        Some("zip") => true,
+        Some("7z") => false,
+        _ => {
+            let mut head = [0u8; 6];
+            let mut file = open(path)?;
+            let read = file.read(&mut head).map_err(|error| error.to_string())?;
+            let head = &head[..read];
+            if head.starts_with(ZIP_MAGIC) {
+                true
+            } else if head.starts_with(SEVEN_ZIP_MAGIC) {
+                false
+            } else {
+                return Ok(None);
+            }
+        }
+    };
+    if zip {
+        hd_pack_files(Archive::zip(open(path)?)?, game, image)
+    } else {
+        hd_pack_files(Archive::seven_zip(open(path)?)?, game, image)
+    }
+}
+
+/// Files read from an archive: each one's name and bytes.
+pub type NamedFiles = Vec<(String, Vec<u8>)>;
+
+/// The name a pack folder of an archive goes by for [`extras::choose`]: the folder's path with a
+/// made-up extension (`Game (Europe)/` is `Game (Europe).hdpack`), the root's `hires.hdpack`.
+fn hd_pack_name(prefix: &str) -> String {
+    let folder = prefix.trim_end_matches('/');
+    if folder.is_empty() {
+        "hires.hdpack".to_owned()
+    } else {
+        format!("{folder}.hdpack")
+    }
+}
+
+fn hd_pack_files<R: Read + Seek>(
+    mut archive: Archive<R>,
+    game: &str,
+    image: &[u8],
+) -> Result<Option<NamedFiles>, String> {
+    let names = archive.names();
+    let lower = |name: &str| name.replace('\\', "/").to_lowercase();
+    // Every folder holding a `hires.txt`, in the archive's order.
+    let mut prefixes: Vec<String> = Vec::new();
+    for name in &names {
+        let name = name.replace('\\', "/");
+        let low = name.to_lowercase();
+        if low == "hires.txt" || low.ends_with("/hires.txt") {
+            let prefix = name[..name.len() - "hires.txt".len()].to_owned();
+            if !prefixes.contains(&prefix) {
+                prefixes.push(prefix);
+            }
+        }
+    }
+    let candidates: Vec<String> = prefixes.iter().map(|prefix| hd_pack_name(prefix)).collect();
+    let candidate_names: Vec<&str> = candidates.iter().map(String::as_str).collect();
+    let games: Vec<&str> = names
+        .iter()
+        .filter(|name| GAME_EXTENSIONS.contains(&extension_of(name).as_str()))
+        .map(String::as_str)
+        .collect();
+    let traits = extras::RomTraits::of(image);
+    let Some(chosen) = extras::choose(&candidate_names, game, &games, &traits) else {
+        return Ok(None);
+    };
+    let Some(at) = candidates.iter().position(|name| name == chosen) else {
+        return Ok(None);
+    };
+    let prefix = prefixes[at].to_lowercase();
+    // The text and pictures; the sounds of a pack are not played. A pack nested in the folder of
+    // another (a folder below with its own `hires.txt`) is that pack's, not this one's.
+    let nested: Vec<String> = prefixes
+        .iter()
+        .map(|other| other.to_lowercase())
+        .filter(|other| other.len() > prefix.len() && other.starts_with(&prefix))
+        .collect();
+    let wanted: Vec<&str> = names
+        .iter()
+        .filter(|name| {
+            let name = lower(name);
+            name.starts_with(&prefix)
+                && !nested.iter().any(|other| name.starts_with(other.as_str()))
+                && [".txt", ".png"].iter().any(|kind| name.ends_with(kind))
+        })
+        .map(String::as_str)
+        .collect();
+    let mut files = archive.read(&wanted)?;
+    // The pack's names are its own: the folder it sits in is not part of them.
+    let cut = prefixes[at].len();
+    for (name, _) in &mut files {
+        let plain = name.replace('\\', "/");
+        plain.get(cut..).unwrap_or(&plain).clone_into(name);
+    }
+    Ok(Some(files))
+}
+
 /// The base name of an archive entry (after its last folder).
 fn base_name(name: &str) -> &str {
     name.rsplit(['/', '\\']).next().unwrap_or(name)
@@ -561,6 +679,63 @@ mod tests {
             writer.write_all(bytes).expect("bytes");
         }
         writer.finish().expect("finish");
+    }
+
+    /// Lot HD-PACK: an archive's HD packs go with its games by the rules of its other extra
+    /// files: the folder named as the game, else an untagged one, never another game's own.
+    #[test]
+    fn an_archive_s_hd_pack_goes_with_its_game_as_the_other_extras() {
+        let path = temp("Game (Several) hd.zip");
+        zip_of(
+            &path,
+            &[
+                ("Game (USA).nes", b"NES\x1ausa"),
+                ("Game (Europe).nes", b"NES\x1aeurope"),
+                ("Bonus.nes", b"NES\x1abonus"),
+                ("Game (USA)/hires.txt", b"<ver>106 usa"),
+                ("Game (USA)/tiles.png", b"usa png"),
+                ("Game (Europe)/hires.txt", b"<ver>106 europe"),
+                ("common/hires.txt", b"<ver>106 common"),
+                ("common/sounds/jump.ogg", b"ogg"),
+            ],
+        );
+        let pack = |game: &str| {
+            let mut files = read_hd_pack_files(&path, game, b"")
+                .expect("read")
+                .unwrap_or_default();
+            files.sort();
+            files
+        };
+        assert_eq!(
+            pack("Game (USA).nes"),
+            vec![
+                ("hires.txt".to_owned(), b"<ver>106 usa".to_vec()),
+                ("tiles.png".to_owned(), b"usa png".to_vec()),
+            ]
+        );
+        assert_eq!(
+            pack("Game (Europe).nes"),
+            vec![("hires.txt".to_owned(), b"<ver>106 europe".to_vec())]
+        );
+        // A game without a folder of its own takes the untagged one, without its sounds.
+        assert_eq!(
+            pack("Bonus.nes"),
+            vec![("hires.txt".to_owned(), b"<ver>106 common".to_vec())]
+        );
+        let _ = fs::remove_file(&path);
+
+        // Only the other game's own pack: none for this one.
+        let path = temp("Game (Two) hd.zip");
+        zip_of(
+            &path,
+            &[
+                ("Game (USA).nes", b"NES\x1ausa"),
+                ("Game (Europe).nes", b"NES\x1aeurope"),
+                ("Game (USA)/hires.txt", b"<ver>106 usa"),
+            ],
+        );
+        assert_eq!(None, read_hd_pack_files(&path, "Game (Europe).nes", b"").expect("read"));
+        let _ = fs::remove_file(&path);
     }
 
     #[test]

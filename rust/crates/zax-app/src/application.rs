@@ -1851,6 +1851,7 @@ impl Running {
                     nes_picture_height: 0,
                     nes_picture_emphasis: &[],
                     nes_picture_rgb: &[],
+                    nes_picture_hd: None,
                 };
                 draw_eyes(
                     graphics,
@@ -2499,6 +2500,10 @@ struct RunState {
     /// It decoded from the composite signal (`video.composite_signal`), three bytes a pixel;
     /// empty with the option off.
     picture_rgb: Vec<u8>,
+    /// Lot HD-PACK: the game's HD pack and the HD picture of the frame shown.
+    hd: crate::hd_pack::HdPackState,
+    /// The scale of `hd.picture` when this frame has one, 0 otherwise.
+    hd_scale: usize,
     composite: zax_nes::composite::RowDecoder,
     /// Whether its playfield is drawn between two frames (the experimental 120 Hz scrolling):
     /// every display frame is then drawn, a new emulated frame or not.
@@ -2546,6 +2551,8 @@ impl EyePicture {
             nes_picture_height: self.height,
             nes_picture_emphasis: &self.emphasis,
             nes_picture_rgb: &self.rgb,
+            // An eye of a Famicom 3D System game is drawn as the console drew it: no HD pack.
+            nes_picture_hd: None,
         }
     }
 }
@@ -2568,6 +2575,8 @@ impl RunState {
             picture_height: 0,
             picture_emphasis: Vec::new(),
             picture_rgb: Vec::new(),
+            hd: crate::hd_pack::HdPackState::default(),
+            hd_scale: 0,
             composite: zax_nes::composite::RowDecoder::default(),
             picture_between: false,
             emulated_now: 0,
@@ -3239,6 +3248,41 @@ fn decode_composite(state: &mut RunState, width: usize, video_phase: Option<usiz
 }
 
 #[allow(clippy::too_many_lines)] // The scene of a frame, each source of motion in its order.
+/// Lot HD-PACK: the 2D picture of `session` (`width` wide, in `state.picture`) drawn with the
+/// game's HD pack into `state.hd.picture`, once the pack is read.
+fn draw_hd_picture(state: &mut RunState, session: &GameSession, width: usize) {
+    let Some(loaded) = state.hd.pack() else {
+        return;
+    };
+    let height = state.picture_height;
+    if width == 0 || height == 0 {
+        return;
+    }
+    let palette = session.copy_picture_records(&mut state.hd.records);
+    let mut rgb = [[0u8; 3]; 64];
+    for (index, colour) in rgb.iter_mut().enumerate() {
+        let nes = zax_engine3d::palette::nes_color(index);
+        *colour = [nes.r, nes.g, nes.b];
+    }
+    let core = session.core();
+    let memory = |address: u16| core.read_memory(address);
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // margins of a few dozen
+    let input = zax_hdpacks::FrameInput {
+        picture: &state.picture,
+        width,
+        height,
+        margin: (width.saturating_sub(256) / 2) as i32,
+        margin_y: (height.saturating_sub(240) / 2) as i32,
+        records: &state.hd.records,
+        palette,
+        frame: u64::try_from(core.frame_count()).unwrap_or(0),
+        rgb: &rgb,
+        memory: &memory,
+    };
+    zax_hdpacks::compose(&loaded.pack, &loaded.chr, &input, &mut state.hd.picture);
+    state.hd_scale = loaded.pack.scale.max(1) as usize;
+}
+
 fn update_scene(host: &mut AppHost, state: &mut RunState) {
     let two_dimensional = host.showing_two_dimensional();
     let composite = composite_options(host);
@@ -3277,6 +3321,14 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     let scene_scale = host.scene_scale();
     // `emu.smooth_scroll_3d`: the 3D scene slides as well (owner, 2026-11-20).
     let smooth_3d = host.settings().get(SettingId::EmuSmoothScroll3d).as_bool();
+    // Lot HD-PACK: the pack of the game in play, read once a game starts.
+    let hd_2d = host.settings().get(SettingId::VideoHdPack2d).as_bool();
+    let rom = host.current_rom_path().map(str::to_owned);
+    let user_root = host.paths().root.clone();
+    state
+        .hd
+        .follow(rom.as_deref(), Some(&user_root), &crate::app_log::line);
+    state.hd_scale = 0;
     // The smooth scrolling from the run-ahead: nothing to draw between two frames at 60 frames a
     // second or less, nor a real frame to slide from without run-ahead; then nothing is done.
     let smooth_ahead = host
@@ -3387,6 +3439,9 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         let in_force = overscan.in_force(i32::try_from(width).map_or(0, |width| (width - 256) / 2));
         in_force.leave_out(&mut state.picture, state.picture_height);
         colour_picture(state, session, width, composite);
+        if hd_2d {
+            draw_hd_picture(state, session, width);
+        }
         scene.picture_crop = zax_profiles::values::Vec4F::new(
             in_force.crop()[0],
             in_force.crop()[1],
@@ -3515,6 +3570,12 @@ fn render_scene(
         } else {
             &state.picture_rgb
         },
+        nes_picture_hd: (!picture.is_empty() && state.hd_scale > 0).then_some(
+            zax_render::scene::HdPicture {
+                rgba: &state.hd.picture,
+                scale: state.hd_scale,
+            },
+        ),
     };
     if layout == StereoLayout::Off || scene.two_dimensional_mode {
         return draw_scene(

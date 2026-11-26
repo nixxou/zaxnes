@@ -817,6 +817,8 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.video.nes_palette", "NES colour palette"),
     ("setting.video.composite_signal", "Composite signal"),
     ("setting.video.emphasis_3d", "Colour emphasis in 3D"),
+    ("setting.video.hd_pack_2d", "HD pack in 2D"),
+    ("setting.video.hd_pack_3d", "HD pack in 3D"),
     ("setting.emu.builtin_patches", "Built-in ROM patches (at the next ROM load)"),
     ("setting.audio.volume", "Master volume"),
     ("setting.audio.bg_music", "Menu music"),

@@ -2979,7 +2979,30 @@ fn video_nes_palette(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("Colour emphasis in 3D"),
     );
+    video_hd_pack(out);
     video_signal(out);
+}
+
+/// Lot HD-PACK (owner request, 2026-11-21): the Mesen HD pack found for the game, in the 2D
+/// picture and on the 3D scene; both off by default (owner, 2026-11-24). Not exposed to Lua.
+fn video_hd_pack(out: &mut Vec<SettingDescriptor>) {
+    for (id, default, label) in [
+        (SettingId::VideoHdPack2d, false, "HD pack in 2D"),
+        (SettingId::VideoHdPack3d, false, "HD pack in 3D"),
+    ] {
+        out.push(
+            SettingDescriptor::new(
+                id,
+                SettingKind::Bool,
+                SettingValue::Bool(default),
+                SettingScope::User,
+                SettingEffect::Immediate,
+                SettingTheme::Video,
+            )
+            .with_domain(Domain::switch())
+            .with_label(label),
+        );
+    }
 }
 
 fn video_signal(out: &mut Vec<SettingDescriptor>) {

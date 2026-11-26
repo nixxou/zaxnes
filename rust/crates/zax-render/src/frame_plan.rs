@@ -397,12 +397,20 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
         let Some((width, height)) = crate::interop::picture_size(picture.len(), height) else {
             return Ok(false);
         };
+        // Lot HD-PACK: the HD picture is `scale` texels a NES pixel; the quad's coordinates are
+        // NES pixels, so the texture is read `scale` times as far.
+        #[allow(clippy::cast_precision_loss)] // 1 to 10.
+        let hd = colours
+            .hd
+            .filter(|hd| hd.size_for((width, height)).is_some())
+            .map_or(1.0, |hd| hd.scale as f32);
+        let tex_tilting = Vector2::new(hd, hd);
         if let (Some(shift), Some((playfield, rest))) = (shift, fixed.picture_bands) {
             let Some(texture) = residency.picture(picture, colours, height)? else {
                 return Ok(false);
             };
             #[allow(clippy::cast_precision_loss)] // 256 to 1280, 240 to 720.
-            let texture_size = Vector2::new(width as f32, height as f32);
+            let texture_size = Vector2::new(width as f32 * hd, height as f32 * hd);
             let moved = Mat4::translation(Vec3::new(-shift, 0.0, 0.0));
             for (band, model) in [(playfield, moved), (rest, Mat4::IDENTITY)] {
                 let Some(mesh) = residency.mesh(band)? else {
@@ -412,6 +420,7 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
                     color_mode: 1,
                     texture: Some(texture),
                     texture_size,
+                    tex_tilting,
                     receive_shadow: false,
                     clip: true,
                     ..DrawItem::plain(mesh, model, (band.bounds_min(), band.bounds_max()))
@@ -459,7 +468,8 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
             color_mode: 1,
             texture: Some(texture),
             #[allow(clippy::cast_precision_loss)] // 256 to 1280, 240 to 720.
-            texture_size: Vector2::new(width as f32, height as f32),
+            texture_size: Vector2::new(width as f32 * hd, height as f32 * hd),
+            tex_tilting,
             // Nothing else is in the scene in 2D mode, so the quad neither casts nor receives.
             receive_shadow: false,
             clip: true,

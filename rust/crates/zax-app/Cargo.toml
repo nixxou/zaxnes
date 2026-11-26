@@ -52,6 +52,8 @@ zax-settings = { path = "../zax-settings" }
 zax-profiles = { path = "../zax-profiles" }
 zax-scripting = { path = "../zax-scripting" }
 zax-engine3d = { path = "../zax-engine3d" }
+# Lot HD-PACK: Mesen HD packs.
+zax-hdpacks = { path = "../zax-hdpacks" }
 zax-render = { path = "../zax-render" }
 zax-platform = { path = "../zax-platform" }
 zax-achievements = { path = "../zax-achievements" }

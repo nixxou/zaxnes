@@ -20,6 +20,7 @@ pub mod game_session;
 pub mod gamedb;
 pub mod graphics;
 pub mod handheld_mode;
+pub mod hd_pack;
 pub mod head_on_pull;
 pub mod import_folder;
 pub mod input;

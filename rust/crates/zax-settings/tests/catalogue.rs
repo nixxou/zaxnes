@@ -201,6 +201,8 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "video.emphasis_3d",
             "video.frozen_dot_crawl",
             "video.half_rate_3d",
+            "video.hd_pack_2d",
+            "video.hd_pack_3d",
             "video.nes_palette",
             "video.overscan_bottom",
             "video.overscan_left",

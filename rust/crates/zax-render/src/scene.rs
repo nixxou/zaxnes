@@ -529,6 +529,32 @@ pub struct SceneFrame<'a> {
     /// `nes_picture`, which then only gives the opacity: the composite decoder's output (lot
     /// FIDPLUS-D2b step 2). Empty: the palette (with `nes_picture_emphasis`) gives the colours.
     pub nes_picture_rgb: &'a [u8],
+    /// Lot HD-PACK: the picture drawn with an HD pack, which replaces its colours.
+    pub nes_picture_hd: Option<HdPicture<'a>>,
+}
+
+/// Lot HD-PACK: the 2D picture drawn with a Mesen HD pack, `scale` times the size of the NES
+/// picture each way, 4 bytes (R, G, B, A) a pixel. The NES picture still gives the size.
+#[derive(Debug, Clone, Copy)]
+pub struct HdPicture<'a> {
+    pub rgba: &'a [u8],
+    pub scale: usize,
+}
+
+impl HdPicture<'_> {
+    /// The largest side of an HD picture: what every GPU the renderers run on takes.
+    pub const MAX_SIDE: usize = 4096;
+
+    /// Its size for a NES picture of `size`, when it is that size and not too large.
+    #[must_use]
+    pub fn size_for(&self, size: (usize, usize)) -> Option<(usize, usize)> {
+        let hd = (size.0 * self.scale, size.1 * self.scale);
+        (self.scale >= 1
+            && hd.0 <= Self::MAX_SIDE
+            && hd.1 <= Self::MAX_SIDE
+            && self.rgba.len() == hd.0 * hd.1 * 4)
+            .then_some(hd)
+    }
 }
 
 impl SceneFrame<'_> {
@@ -538,6 +564,7 @@ impl SceneFrame<'_> {
         PictureColours {
             emphasis: self.nes_picture_emphasis,
             rgb: self.nes_picture_rgb,
+            hd: self.nes_picture_hd,
         }
     }
 }
@@ -550,6 +577,8 @@ pub struct PictureColours<'a> {
     pub emphasis: &'a [u8],
     /// Three bytes a pixel, or empty; wins over `emphasis`.
     pub rgb: &'a [u8],
+    /// Lot HD-PACK: the HD picture, which wins over both.
+    pub hd: Option<HdPicture<'a>>,
 }
 
 impl PictureColours<'_> {
@@ -584,6 +613,7 @@ impl<'a> SceneFrame<'a> {
             nes_picture_height: 0,
             nes_picture_emphasis: &[],
             nes_picture_rgb: &[],
+            nes_picture_hd: None,
         }
     }
 }

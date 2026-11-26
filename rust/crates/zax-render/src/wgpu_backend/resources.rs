@@ -451,8 +451,33 @@ impl TextureStore {
         height: usize,
         slot: Option<TextureHandle>,
     ) -> Option<TextureHandle> {
-        let (width, height) = crate::interop::picture_size(indices.len(), height)?;
+        let base = crate::interop::picture_size(indices.len(), height)?;
+        // Lot HD-PACK: the pack's picture, larger, in place of the palette's colours.
+        let hd = colours
+            .hd
+            .and_then(|hd| hd.size_for(base).map(|size| (hd, size)));
+        let (width, height) = hd.map_or(base, |(_, size)| size);
         self.picture_pixels.resize(width * height * 4, 0);
+        if let Some((hd, _)) = hd {
+            self.picture_pixels.copy_from_slice(hd.rgba);
+            // As the plain picture: opaque but where the overscan leaves the pixel out.
+            let scale = hd.scale;
+            for (at, &index) in indices.iter().enumerate() {
+                let alpha = if index == crate::interop::HIDDEN_PIXEL {
+                    0
+                } else {
+                    255
+                };
+                let (x, y) = (at % base.0, at / base.0);
+                for j in 0..scale {
+                    let row = ((y * scale + j) * width + x * scale) * 4;
+                    for i in 0..scale {
+                        self.picture_pixels[row + i * 4 + 3] = alpha;
+                    }
+                }
+            }
+            return self.send_picture(device, queue, (width, height), slot);
+        }
         for (pixel, &index) in self.picture_pixels.chunks_exact_mut(4).zip(indices) {
             if index == crate::interop::HIDDEN_PIXEL {
                 pixel.copy_from_slice(&[0; 4]);
@@ -478,7 +503,18 @@ impl TextureStore {
             }
         }
 
-        #[allow(clippy::cast_possible_truncation)] // At most 1280 and 720.
+        self.send_picture(device, queue, (width, height), slot)
+    }
+
+    /// Sends `picture_pixels` (`size`) to `slot`, or to a new slot.
+    fn send_picture(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        (width, height): (usize, usize),
+        slot: Option<TextureHandle>,
+    ) -> Option<TextureHandle> {
+        #[allow(clippy::cast_possible_truncation)] // At most HdPicture::MAX_SIDE.
         let size = (width as u32, height as u32);
         if let Some(handle) = slot {
             let entry = self.slots[handle.0 as usize]
