@@ -1715,6 +1715,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::MENU_AIDS, "Hacks"),
     (keys::MENU_CHEATS, "Triches…"),
     (keys::MENU_RAM_SEARCH, "Recherche RAM…"),
+    (keys::HANDHELD_MENU_CHEATS, "Triches"),
     (keys::CHEATS_TITLE, "Triches : {0}"),
     (keys::CHEATS_ALL_ON, "Triches activées"),
     (keys::CHEATS_EMPTY, "Aucune triche pour ce jeu : ajoutez-en une ci-dessous, prenez-en dans la base de triches, ou trouvez une adresse avec la recherche RAM."),

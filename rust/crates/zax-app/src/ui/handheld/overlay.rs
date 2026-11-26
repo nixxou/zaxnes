@@ -26,6 +26,8 @@ pub enum OverlayItem {
     Widescreen,
     /// The hacks of the game, its aids (Rust-only, owner request).
     Hacks,
+    /// The cheats of the game (lot CHEATS).
+    Cheats,
     /// The game's achievements (Rust-only, owner request): shown while RetroAchievements is on.
     Achievements,
     /// Stop the game and show the ROM list.
@@ -41,7 +43,7 @@ pub enum OverlayItem {
 }
 
 /// The rows, in order.
-pub const ITEMS: [OverlayItem; 14] = [
+pub const ITEMS: [OverlayItem; 15] = [
     OverlayItem::Resume,
     OverlayItem::SaveState,
     OverlayItem::LoadState,
@@ -50,6 +52,7 @@ pub const ITEMS: [OverlayItem; 14] = [
     OverlayItem::Options,
     OverlayItem::Widescreen,
     OverlayItem::Hacks,
+    OverlayItem::Cheats,
     OverlayItem::Achievements,
     OverlayItem::QuitToList,
     OverlayItem::WebOpenRom,
@@ -105,6 +108,8 @@ pub enum OverlayCommand {
     Widescreen,
     /// Show the hacks of the game.
     Hacks,
+    /// Show the game's cheats (lot CHEATS).
+    Cheats,
     /// Show the game's achievements.
     Achievements,
     /// Stop the game, back to the ROM list.
@@ -280,6 +285,7 @@ impl OverlayModel {
             OverlayItem::Options => OverlayCommand::Options,
             OverlayItem::Widescreen => OverlayCommand::Widescreen,
             OverlayItem::Hacks => OverlayCommand::Hacks,
+            OverlayItem::Cheats => OverlayCommand::Cheats,
             OverlayItem::Achievements => OverlayCommand::Achievements,
             OverlayItem::QuitToList => OverlayCommand::QuitToList,
             OverlayItem::WebOpenRom => OverlayCommand::WebDialog(crate::web_bridge::WebDialog::Rom),

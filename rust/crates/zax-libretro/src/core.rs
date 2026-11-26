@@ -186,6 +186,10 @@ pub struct Core {
     /// The last 2D picture shown: its left and top in the full picture, its size, and the full
     /// picture's width and height (the aim of a Zapper is read on it).
     shown_area: (u32, u32, u32, u32, u32, u32),
+    /// The frontend's cheats (lot CHEATS, `retro_cheat_set`): its index, on or off, its codes.
+    cheats: std::collections::BTreeMap<u32, zax_cheats::Cheat>,
+    /// The RAM writes of the cheats that are on, before every frame.
+    ram_cheats: Vec<zax_cheats::RamWrite>,
 }
 
 impl Core {
@@ -242,6 +246,8 @@ impl Core {
             pointers: [None; 2],
             aim: std::sync::Arc::new(std::sync::Mutex::new([ZapperPosition::OFF_SCREEN; 2])),
             shown_area: (0, 0, 256, 240, 256, 240),
+            cheats: std::collections::BTreeMap::new(),
+            ram_cheats: Vec::new(),
         };
         let aim = std::sync::Arc::clone(&core.aim);
         core.nes
@@ -519,7 +525,67 @@ impl Core {
     ///
     /// With the 120 Hz scrolling on, it takes two calls a frame: the first runs it and shows its
     /// picture, the second shows the playfield half way to the next (in 3D, its tiles).
+    /// A byte of the game's memory as the CPU reads it (the Game Genie's patches applied).
+    #[must_use]
+    pub fn read_memory(&self, address: u16) -> u8 {
+        self.nes.read_memory(address)
+    }
+
+    /// Drops every cheat (`retro_cheat_reset`).
+    pub fn reset_cheats(&mut self) {
+        self.cheats.clear();
+        self.apply_cheats();
+    }
+
+    /// The frontend's cheat `index`, on or off, made of `code` (`retro_cheat_set`): Game Genie,
+    /// Pro Action Replay or `AAAA:VV` codes, several joined by `+`. `false` when a code does not
+    /// read, the cheat then dropped.
+    pub fn set_cheat(&mut self, index: u32, enabled: bool, code: &str) -> bool {
+        let read = zax_cheats::CheatCode::parse_list(code).ok();
+        let known = read.is_some();
+        if let Some(codes) = read {
+            let description = String::new();
+            self.cheats.insert(index, zax_cheats::Cheat { description, codes, enabled });
+        } else {
+            self.cheats.remove(&index);
+        }
+        self.apply_cheats();
+        known
+    }
+
+    /// Writes a byte of the game's memory (tests: a value to see a cheat write over).
+    #[doc(hidden)]
+    pub fn write_memory_for_test(&mut self, address: u16, value: u8) {
+        self.nes.write_memory(address, value);
+    }
+
+    fn apply_cheats(&mut self) {
+        let list = zax_cheats::CheatList {
+            cheats: self.cheats.values().cloned().collect(),
+        };
+        self.ram_cheats = list.ram_writes();
+        let patches: Vec<zax_core_api::CpuReadPatch> = list
+            .rom_patches()
+            .into_iter()
+            .map(|patch| zax_core_api::CpuReadPatch {
+                address: patch.address,
+                value: patch.value,
+                compare: patch.compare,
+            })
+            .collect();
+        self.nes.set_cpu_read_patches(&patches);
+    }
+
     pub fn run(&mut self, input: u16) {
+        // Lot CHEATS: the RAM codes before the frame, as every frame.
+        for write in &self.ram_cheats {
+            if write
+                .compare
+                .is_none_or(|compare| self.nes.read_memory(write.address) == compare)
+            {
+                self.nes.write_memory(write.address, write.value);
+            }
+        }
         if self.smooth() {
             self.run_smooth(input);
             return;

@@ -21,6 +21,8 @@ zax-profiles = { path = "../zax-profiles" }
 zax-render = { path = "../zax-render" }
 zax-scripting = { path = "../zax-scripting" }
 zax-settings = { path = "../zax-settings" }
+zax-cheats = { path = "../zax-cheats" }
+zax-core-api = { path = "../zax-core-api" }
 glow = "0.16"
 
 [dev-dependencies]

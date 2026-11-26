@@ -750,6 +750,7 @@ impl HandheldUi {
             Screen::Keyboard => self.draw_keyboard(ui),
             Screen::AchievementList => self.draw_achievement_list(ui, frame),
             Screen::AchievementGrid => self.draw_achievement_grid(ui, frame),
+            Screen::Cheats => self.draw_cheats(ui, frame),
             Screen::InGame => {}
         }
         if let Some(question) = ZaxUi::confirmation(frame.host) {
@@ -1234,6 +1235,39 @@ impl HandheldUi {
         painter.hints(layout::hints(Screen::Overscan));
     }
 
+    /// The cheats of the game in play (lot CHEATS).
+    fn draw_cheats(&self, ui: &Ui, frame: &UiFrame<'_>) {
+        let Some(_window) = full_screen(ui, "##cheats", BACKGROUND) else {
+            return;
+        };
+        let Some(page) = self.cheats.as_ref() else {
+            return;
+        };
+        let painter = self.painter(ui);
+        let name = frame.host.current_game_title().unwrap_or_default();
+        painter.title(
+            &strings::format(&strings::get(keys::CHEATS_TITLE), &[name]),
+            "",
+        );
+        let specs: Vec<RowSpec> = page
+            .rows(frame.host)
+            .into_iter()
+            .map(|row| RowSpec::Row {
+                left: row.label,
+                badges: Vec::new(),
+                right: row.value,
+                colour: if row.warning { GAME_OWN } else { DIM },
+            })
+            .collect();
+        let note = page.note();
+        let room = painter.list_room();
+        painter.spec_list(&specs, page.selected(), room);
+        if let Some(note) = note {
+            painter.note(specs.len().min(8), &note);
+        }
+        painter.hints(layout::hints(Screen::Cheats));
+    }
+
     fn draw_controls(&mut self, ui: &Ui, frame: &UiFrame<'_>) {
         let Some(_window) = full_screen(ui, "##controls", BACKGROUND) else {
             return;
@@ -1478,6 +1512,7 @@ impl HandheldUi {
             OverlayItem::Options => keys::WINDOW_OPTIONS,
             OverlayItem::Widescreen => keys::HACK_WIDESCREEN,
             OverlayItem::Hacks => keys::MENU_AIDS,
+            OverlayItem::Cheats => keys::HANDHELD_MENU_CHEATS,
             OverlayItem::Achievements => keys::TAB_ACHIEVEMENTS,
             OverlayItem::QuitToList => keys::HANDHELD_MENU_QUIT_TO_LIST,
             OverlayItem::WebOpenRom => keys::HANDHELD_MENU_WEB_OPEN_ROM,

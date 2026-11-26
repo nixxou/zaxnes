@@ -630,6 +630,7 @@ pub const ACH_KEY_DONE: &str = "achievements.key.done";
 // ------------------------------------------------- lot CHEATS
 pub const MENU_CHEATS: &str = "menu.cheats";
 pub const MENU_RAM_SEARCH: &str = "menu.ram_search";
+pub const HANDHELD_MENU_CHEATS: &str = "handheld.menu.cheats";
 pub const CHEATS_TITLE: &str = "cheats.title";
 pub const CHEATS_ALL_ON: &str = "cheats.all_on";
 pub const CHEATS_EMPTY: &str = "cheats.empty";
@@ -1088,6 +1089,7 @@ pub const PUBLISHED: &[&str] = &[
     ACH_KEY_DONE,
     MENU_CHEATS,
     MENU_RAM_SEARCH,
+    HANDHELD_MENU_CHEATS,
     CHEATS_TITLE,
     CHEATS_ALL_ON,
     CHEATS_EMPTY,

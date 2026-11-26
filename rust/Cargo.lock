@@ -2916,6 +2916,8 @@ version = "0.6.1"
 dependencies = [
  "glow",
  "png 0.17.16",
+ "zax-cheats",
+ "zax-core-api",
  "zax-engine3d",
  "zax-nes",
  "zax-profiles",

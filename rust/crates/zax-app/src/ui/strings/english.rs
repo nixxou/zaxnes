@@ -1734,6 +1734,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::MENU_AIDS, "Hacks"),
     (keys::MENU_CHEATS, "Cheats..."),
     (keys::MENU_RAM_SEARCH, "RAM search..."),
+    (keys::HANDHELD_MENU_CHEATS, "Cheats"),
     (keys::CHEATS_TITLE, "Cheats: {0}"),
     (keys::CHEATS_ALL_ON, "Cheats on"),
     (keys::CHEATS_EMPTY, "No cheat for this game yet: add one below, take some from the cheat database, or find an address with the RAM search."),

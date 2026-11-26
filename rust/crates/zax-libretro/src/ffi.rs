@@ -1039,10 +1039,22 @@ pub unsafe extern "C" fn retro_unserialize(data: *const c_void, size: usize) -> 
 }
 
 #[no_mangle]
-pub extern "C" fn retro_cheat_reset() {}
+pub extern "C" fn retro_cheat_reset() {
+    with_game(Core::reset_cheats);
+}
 
+/// # Safety
+///
+/// `code` is null or a NUL-terminated string alive for the call.
 #[no_mangle]
-pub extern "C" fn retro_cheat_set(_index: c_uint, _enabled: bool, _code: *const c_char) {}
+pub unsafe extern "C" fn retro_cheat_set(index: c_uint, enabled: bool, code: *const c_char) {
+    if code.is_null() {
+        return;
+    }
+    // SAFETY: the frontend hands a NUL-terminated string, alive for the call.
+    let code = unsafe { std::ffi::CStr::from_ptr(code) }.to_string_lossy();
+    with_game(|core| core.set_cheat(index, enabled, &code));
+}
 
 /// Draws a crosshair at each point (0 to 1 across and down) of the frontend's framebuffer, bound
 /// and declared top-left: a white cross with a black edge, its size following the height.

@@ -256,6 +256,7 @@ impl ZaxUi {
         ui.text_disabled(strings::get(keys::CHEATS_CODES_HINT));
     }
 
+    #[allow(clippy::too_many_lines)] // one section, drawn top to bottom
     fn draw_cheat_database(&mut self, ui: &Ui, host: &mut AppHost) {
         if !ui.collapsing_header(
             strings::get(keys::CHEATS_DATABASE_HEADER),

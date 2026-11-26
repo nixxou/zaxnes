@@ -8,6 +8,7 @@
 pub mod achievement_grid;
 pub mod achievements;
 pub mod advanced;
+pub mod cheats;
 pub mod compat;
 pub mod defaults;
 mod draw;
@@ -94,6 +95,8 @@ pub enum Screen {
     AchievementList,
     /// A game's achievements as a grid of icons (Rust-only): from the list or the in-game menu.
     AchievementGrid,
+    /// The cheats of the game in play (lot CHEATS), from the in-game menu.
+    Cheats,
     /// The game itself, with no interface.
     InGame,
 }
@@ -130,6 +133,8 @@ pub struct HandheldUi {
     game_options: Option<GameOptionsModel>,
     /// The hacks of one game, while their screen is open.
     hacks: Option<HacksModel>,
+    /// The cheats of the game in play, while their screen is open (lot CHEATS).
+    cheats: Option<cheats::CheatsPage>,
     /// The widescreen button held (owner request: released, it turns the widescreen on with
     /// everything or off; held, it shows its settings).
     widescreen_hold: Option<WidescreenHold>,
@@ -271,6 +276,7 @@ impl HandheldUi {
             options: HandheldOptionsModel::new(),
             game_options: None,
             hacks: None,
+            cheats: None,
             widescreen_hold: None,
             hacks_return: Screen::Home,
             overscan: OverscanModel::new(false),
@@ -1338,6 +1344,7 @@ impl HandheldUi {
                     self.carry_out_overlay(command, frame.host);
                 }
             }
+            Screen::Cheats => self.press_cheats(button, frame.host),
             Screen::States => {
                 let host = &*frame.host;
                 let command = self.states.handle(button, |slot| slot_state(host, slot));
@@ -1694,6 +1701,18 @@ impl HandheldUi {
         }
     }
 
+    /// A press on the cheats screen (lot CHEATS): B goes back to the in-game menu.
+    fn press_cheats(&mut self, button: PadButton, host: &mut AppHost) {
+        let leave = self
+            .cheats
+            .as_mut()
+            .is_none_or(|page| page.handle(button, host));
+        if leave {
+            self.cheats = None;
+            self.screen = Screen::Overlay;
+        }
+    }
+
     /// A press on the RetroAchievements screen.
     fn press_achievements(&mut self, button: PadButton, host: &mut AppHost) {
         let signed_in = matches!(
@@ -1903,6 +1922,10 @@ impl HandheldUi {
             OverlayCommand::Achievements => {
                 self.open_grid(achievement_grid::GridSource::Playing, Screen::Overlay);
             }
+            OverlayCommand::Cheats => {
+                self.cheats = Some(cheats::CheatsPage::open(host));
+                self.screen = Screen::Cheats;
+            }
             OverlayCommand::Hacks => {
                 if let Some(rom) = host.current_rom_path().map(PathBuf::from) {
                     let title = host.current_game_title().map(str::to_owned);
@@ -2093,6 +2116,10 @@ impl HandheldUi {
             Screen::Keyboard => {
                 self.keyboard = Some(KeyboardModel::new(Field::Username, "Player"));
                 self.screen = Screen::Keyboard;
+            }
+            Screen::Cheats => {
+                self.cheats = Some(cheats::CheatsPage::default());
+                self.screen = Screen::Cheats;
             }
             Screen::Home | Screen::InGame => self.screen = screen,
         }
