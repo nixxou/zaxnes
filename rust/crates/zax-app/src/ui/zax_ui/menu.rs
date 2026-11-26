@@ -35,10 +35,14 @@ impl ZaxUi {
             ui.open_popup(forced);
         }
         let mut chosen = None;
+        let video = crate::ui::text::menu_video();
         for Menu { title, items } in self.menu_bar.menus() {
             if let Some(_menu) = ui.begin_menu(title) {
                 engaged = true;
                 chosen = chosen.or(draw_items(ui, items, host));
+                if *title == video {
+                    draw_side_by_side(ui, host);
+                }
             }
         }
         let (open, hacks) = self.draw_game_options(ui, host);
@@ -396,4 +400,38 @@ fn draw_items(ui: &Ui, items: &[MenuItem], host: &AppHost) -> Option<Chosen> {
         }
     }
     chosen
+}
+
+/// Lot SBS (owner request): the two side by side outputs at the bottom of the Video menu, a
+/// submenu of their values each, the 3D one with its strength. They write the settings as the
+/// options window does.
+fn draw_side_by_side(ui: &Ui, host: &mut AppHost) {
+    use zax_settings::catalogue;
+    use zax_settings::values::SettingValue;
+
+    ui.separator();
+    for id in [SettingId::VideoSbs3d, SettingId::VideoSbsFamicom3d] {
+        let descriptor = catalogue::descriptor(id);
+        let current = host.settings().get(id).as_int();
+        let Some(_submenu) = ui.begin_menu(crate::ui::text::label_of(descriptor)) else {
+            continue;
+        };
+        for option in descriptor.domain().options().unwrap_or_default() {
+            #[allow(clippy::cast_possible_truncation)] // 0 to 2.
+            let value = option.value as i32;
+            let label = crate::ui::text::label_of_option(&option.label);
+            if ui.menu_item_config(&label).selected(value == current).build() {
+                host.update_settings(|model| model.set(id, SettingValue::Enum(value)));
+            }
+        }
+        if id == SettingId::VideoSbs3d {
+            ui.separator();
+            let strength = SettingId::VideoSbs3dStrength;
+            let mut value = host.settings().get(strength).as_float();
+            let label = crate::ui::text::label_of(catalogue::descriptor(strength));
+            if ui.slider(&label, 0.25, 3.0, &mut value) {
+                host.update_settings(|model| model.set(strength, SettingValue::Float(value)));
+            }
+        }
+    }
 }

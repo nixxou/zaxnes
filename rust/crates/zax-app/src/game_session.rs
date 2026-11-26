@@ -22,6 +22,7 @@ use zax_engine3d::engine::ConversionEngine;
 use zax_engine3d::error::EngineError;
 use zax_engine3d::palette::Rgb24;
 use zax_engine3d::settings::RenderAlgorithm;
+use zax_engine3d::stereo::StereoTracker;
 use zax_engine3d::vectors::Vec3;
 use zax_nes::movie::{Movie, MovieRun};
 use zax_nes::{NesBus, NesCore, ZapperPosition};
@@ -304,6 +305,9 @@ pub struct GameSession {
     aimed: Option<ZapperPosition>,
     batch_records: Vec<TileRecord>,
     pipeline: FramePipeline,
+    /// Lots F3D and SBS: the last fields of the game and the eye each was for, so that a Famicom
+    /// 3D System game shows each eye's own picture (`stereo_eye`).
+    stereo: StereoTracker,
     /// `video.widescreen_strict_edges`: whether the engine is told where each band of a
     /// widescreen frame stops being drawn, so that a shape cut there stays unfinished.
     strict_wide_edges: bool,
@@ -535,6 +539,7 @@ impl GameSession {
             run_ahead_held_at_zero: false,
             core_follows_the_inputs: false,
             pipeline: FramePipeline::default(),
+            stereo: StereoTracker::default(),
         };
         session.pipeline.ahead_allowed = scripts_leave_the_core_alone(profile);
         session.core_follows_the_inputs = session.pipeline.ahead_allowed;
@@ -1656,6 +1661,7 @@ impl GameSession {
         let batch = self.core.frame_batch();
         self.batch_records.clear();
         self.batch_records.extend_from_slice(batch.records);
+        self.stereo.note_eye(self.core.expansion_output());
         let captured = (
             (batch.palette, batch.margin_palette),
             batch.mask_x,
@@ -1844,6 +1850,13 @@ impl GameSession {
         } else {
             self.core.wide_picture_into(destination)
         }
+    }
+
+    /// Lot SBS: which eye the field the core just ran is for, while a Famicom 3D System game
+    /// alternates its eyes: `Some(true)` for the right one; `None` for every other game.
+    #[must_use]
+    pub fn stereo_eye(&self) -> Option<bool> {
+        self.stereo.newest_eye()
     }
 
     /// [`GameSession::copy_nes_picture`] with the sprites the experimental smooth scrolling draws

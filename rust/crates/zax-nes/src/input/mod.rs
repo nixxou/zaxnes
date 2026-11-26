@@ -49,6 +49,12 @@ pub struct InputPorts {
     /// The cycle from which a raised strobe's reload of the shift registers counts, 0 while none
     /// is waiting. See [`InputPorts::write`]; transient, derived, and outside the savestate.
     reload_at: i64,
+    /// The three output lines OUT0-OUT2 of the last `$4016` write (bits 0-2 of the value): OUT0 is
+    /// the strobe, OUT1 and OUT2 reach the expansion port. The Famicom 3D System's shutter
+    /// glasses read OUT1 (nesdev, "Famicom 3D System": 0 = the next field is for the left eye,
+    /// 1 = for the right eye). Transient and outside the savestate, like [`Self::reload_at`]:
+    /// a game writes `$4016` every frame, and nothing the console computes depends on it.
+    outputs: u8,
     /// The VS. System of the image loaded, or `None` for a NES image — which is **every** image
     /// as far as the paths above are concerned, this field being read only by the `$4016` and
     /// `$4017` arms of `NesBus::read_io_register`, which are `#[cold]` and out of line.
@@ -82,6 +88,7 @@ impl InputPorts {
             input_word: 0,
             strobe: false,
             reload_at: 0,
+            outputs: 0,
             #[cfg(feature = "board-vs-system")]
             vs: None,
         }
@@ -329,6 +336,7 @@ impl InputPorts {
     /// nothing per cycle has to ask.
     pub fn write(&mut self, value: u8, cycle: i64) {
         let strobe = value & 0x01 != 0;
+        self.outputs = value & 0x07;
 
         // A reload armed for this cycle or an earlier one has happened: this write's own level
         // only reaches the line from the next cycle, so it cannot take it back.
@@ -350,12 +358,19 @@ impl InputPorts {
         }
     }
 
+    /// The OUT0-OUT2 lines of the last `$4016` write (see [`Self::outputs`]).
+    #[must_use]
+    pub const fn outputs(&self) -> u8 {
+        self.outputs
+    }
+
     /// Returns the ports to their power-on state; the plugged devices stay (as in the
     /// reference).
     pub fn reset(&mut self) {
         self.input_word = 0;
         self.strobe = false;
         self.reload_at = 0;
+        self.outputs = 0;
         self.shift = [0; Self::PORT_COUNT];
         self.shift_count = [0; Self::PORT_COUNT];
         self.zapper = [ZapperPosition::OFF_SCREEN; Self::PORT_COUNT];

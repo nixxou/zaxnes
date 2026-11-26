@@ -1016,6 +1016,12 @@ fn apply(options: &Options, scene: &mut SyntheticScene) {
     state.settings.skybox = options.skybox;
     state.settings.custom_background_color = options.background;
     state.real_time = options.real_time;
+    // Lot SBS: `ZAXNES_STEREO_EYE` (a signed fraction of the camera distance) renders one eye of
+    // a stereo pair, as the application's side-by-side output does.
+    state.stereo_eye = std::env::var("ZAXNES_STEREO_EYE")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0.0);
 
     // Q-064: the three bodies exist and are parametric, but REQ-SCN-050 leaves them off; this
     // is what a capture turns them on with.

@@ -156,6 +156,12 @@ impl ImguiRenderer {
 
     /// Draws `draw_data` over the window's framebuffer.
     pub fn render(&self, draw_data: &DrawData) {
+        self.render_in(draw_data, None);
+    }
+
+    /// Lot SBS: draws `draw_data` into the columns `(left, width)` of the window, in pixels (the
+    /// interface of one eye, squeezed when it is wider), or over the whole window for `None`.
+    pub fn render_in(&self, draw_data: &DrawData, columns: Option<(i32, i32)>) {
         let [display_width, display_height] = draw_data.display_size;
         let [scale_x, scale_y] = draw_data.framebuffer_scale;
         #[allow(clippy::cast_possible_truncation)] // pixel sizes of a window
@@ -166,12 +172,16 @@ impl ImguiRenderer {
         if width <= 0 || height <= 0 {
             return;
         }
+        let (left, columns_width) = columns.unwrap_or((0, width));
+        #[allow(clippy::cast_precision_loss)] // pixel sizes of a window
+        let squeeze = columns_width as f32 / width as f32;
         let gl = &*self.gl;
         // SAFETY: plain GL calls on the current context; the buffers are the renderer's own and
         // the slices handed to GL are the draw lists', alive for the call.
         unsafe {
             let saved = SavedState::read(gl);
             self.set_up(draw_data, width, height);
+            gl.viewport(left, 0, columns_width, height);
             let clip_offset = draw_data.display_pos;
             let mut bound = FONT_TEXTURE_ID;
             for list in draw_lists(draw_data) {
@@ -204,10 +214,11 @@ impl ImguiRenderer {
                             gl.bind_texture(glow::TEXTURE_2D, Some(texture));
                             bound = id;
                         }
+                        #[allow(clippy::cast_precision_loss)] // pixel sizes of a window
                         let clip = [
-                            (clip_rect[0] - clip_offset[0]) * scale_x,
+                            (clip_rect[0] - clip_offset[0]) * scale_x * squeeze + left as f32,
                             (clip_rect[1] - clip_offset[1]) * scale_y,
-                            (clip_rect[2] - clip_offset[0]) * scale_x,
+                            (clip_rect[2] - clip_offset[0]) * scale_x * squeeze + left as f32,
                             (clip_rect[3] - clip_offset[1]) * scale_y,
                         ];
                         if clip[2] <= clip[0] || clip[3] <= clip[1] {

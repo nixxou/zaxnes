@@ -149,6 +149,26 @@ impl CameraView {
         self
     }
 
+    /// Lot SBS: the view of one eye of a stereo pair. The eye moves `fraction` of the displayed
+    /// distance along the camera's right axis (negative: the left eye), looking the same way, and
+    /// the projection is shifted so that the two eyes converge at that distance: what lies there
+    /// is where the single view has it, nearer comes out of the screen, farther goes behind it.
+    #[must_use]
+    pub fn stereo_eye(mut self, fraction: f32) -> Self {
+        if fraction == 0.0 {
+            return self;
+        }
+        let convergence = self.distance.max(1.0);
+        let offset = fraction * convergence;
+        self.eye = self.eye + (self.right * offset);
+        self.view = look_at(self.eye, self.forward, self.up);
+        // A point straight ahead at the convergence distance is `-offset` to the side of the moved
+        // eye; the shift brings it back to the centre of the picture (row-vector convention: the
+        // third row's x is the off-centre term of the frustum).
+        self.projection.m31 -= self.projection.m11 * offset / convergence;
+        self
+    }
+
     /// The combined view-projection matrix, OpenGL frame.
     #[must_use]
     pub fn view_projection(&self) -> Matrix4x4 {
@@ -406,6 +426,12 @@ impl SceneCamera {
         flat.local_camera = false;
         flat.angles = tilt;
         (flat.target, flat.distance) = self.picture_framing(clipping);
+        // A view narrower than the picture (an eye of Full SBS, lot SBS) steps back until the
+        // picture's width fits too; any wider view is framed on the height alone, as before.
+        let rect = VisibleRect::from_clipping(clipping);
+        let half_angle = self.fov * std::f32::consts::PI / 180.0 / 2.0;
+        let width_fit = (rect.max_x - rect.min_x).max(1.0) / 2.0 / (half_angle.tan() * aspect);
+        flat.distance = flat.distance.max(width_fit);
         flat.build_view(Vec4F::new(0.0, 0.0, 0.0, 0.0), aspect)
     }
 

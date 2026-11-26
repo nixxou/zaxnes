@@ -537,6 +537,10 @@ pub struct WgpuSceneRenderer {
     batching: Option<Batching>,
     statistics: RenderStatistics,
     last_view: CameraView,
+    /// Lot SBS: the shadow volume the left eye's render filled the map for; the right eye's render
+    /// of the same frame draws with that map instead of filling it again (the light does not
+    /// depend on the eye).
+    stereo_volume: Option<ShadowVolume>,
     group_opaque: bool,
     /// The diagnostic lines this backend has to hand the host (AMD-051's channel). The one
     /// subject Q-104 recorded — the Enhanced style of AMD-055, which this backend did not render —
@@ -773,6 +777,7 @@ impl WgpuSceneRenderer {
             batching,
             statistics,
             last_view: CameraView::default(),
+            stereo_volume: None,
             group_opaque: false,
             diagnostics: Vec::new(),
             layouts,
@@ -1163,8 +1168,12 @@ impl WgpuSceneRenderer {
             )
         } else {
             scene.framed_view(scene.camera.build_view(scene.view_clipping(), aspect))
-        };
-        self.last_view = view;
+        }
+        .stereo_eye(scene.stereo_eye);
+        // Lot SBS: the Zapper aims through the left eye (or the single view), not the right one.
+        if scene.stereo_eye <= 0.0 {
+            self.last_view = view;
+        }
 
         let started = std::time::Instant::now();
         let mut residency = WgpuResidency {
@@ -1223,7 +1232,14 @@ impl WgpuSceneRenderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("zax frame"),
             });
-        let volume = self.shadow_pass(&mut encoder, scene, &view, variant);
+        let volume = match self.stereo_volume.filter(|_| scene.stereo_eye > 0.0) {
+            Some(kept) => kept,
+            None => {
+                let volume = self.shadow_pass(&mut encoder, scene, &view, variant);
+                self.stereo_volume = (scene.stereo_eye < 0.0).then_some(volume);
+                volume
+            }
+        };
         self.scene_pass(&mut encoder, target, scene, frame, &view, &volume, variant);
         self.queue.submit([encoder.finish()]);
 

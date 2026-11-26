@@ -1616,6 +1616,48 @@ fn emulation_pause_3d(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("3D at half the refresh rate"),
     );
+    // Rust-only (owner request, lot SBS): the picture of each eye side by side, for a 3D
+    // television (Half SBS, each eye squeezed into half the width) or video glasses and headsets
+    // (Full SBS, each eye at full resolution). Two settings: the 3D scene seen by two cameras,
+    // and the two pictures a Famicom 3D System game draws for its glasses. Not exposed to Lua.
+    // The Famicom 3D System one is on (Half SBS) by default (owner request): it only acts while
+    // such a game alternates its eyes, that is once the player has turned the game's own 3D mode
+    // on, which shows nothing watchable without the glasses anyway.
+    for (id, label, default) in [
+        (SettingId::VideoSbs3d, "Side by side 3D", 0),
+        (SettingId::VideoSbsFamicom3d, "Side by side Famicom 3D System", 1),
+    ] {
+        out.push(
+            SettingDescriptor::new(
+                id,
+                SettingKind::Enum,
+                SettingValue::Enum(default),
+                SettingScope::User,
+                SettingEffect::Immediate,
+                SettingTheme::Video,
+            )
+            .with_domain(Domain::choice(vec![
+                opt(0, "Off"),
+                opt(1, "Half SBS"),
+                opt(2, "Full SBS"),
+            ]))
+            .with_label(label),
+        );
+    }
+    // Lot SBS (owner request): how far apart the two eyes of the 3D are, 1 being the strength
+    // validated on still frames (about 2° each side of the camera).
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoSbs3dStrength,
+            SettingKind::Float,
+            SettingValue::Float(1.0),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_domain(Domain::range(0.25, 3.0))
+        .with_label("Side by side 3D strength"),
+    );
 }
 
 fn conversion(out: &mut Vec<SettingDescriptor>) {

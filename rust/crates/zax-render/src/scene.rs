@@ -359,6 +359,9 @@ pub struct SceneState {
     /// The frame time in seconds the animated deformation uses: emulated frames divided by 60
     /// (REQ-SCN-043, SPEC-04B REQ-E3D-568). It freezes while the game is paused.
     pub emulated_time: f32,
+    /// Lot SBS: the eye of a stereo pair this render is for, as a signed fraction of the camera
+    /// distance ([`crate::camera::CameraView::stereo_eye`]); 0 for the single view.
+    pub stereo_eye: f32,
 }
 
 impl Default for SceneState {
@@ -387,6 +390,7 @@ impl Default for SceneState {
             followed_shape: None,
             real_time: 0.0,
             emulated_time: 0.0,
+            stereo_eye: 0.0,
         }
     }
 }

@@ -285,12 +285,16 @@ pub const SIMPLE_TOUCH_ROWS: [OptionRow; 17] = [
 ];
 
 /// *Display* in the simple mode.
-pub const SIMPLE_DISPLAY_ROWS: [OptionRow; 6] = [
+pub const SIMPLE_DISPLAY_ROWS: [OptionRow; 9] = [
     OptionRow::ShowFps,
     OptionRow::Setting(SettingId::VideoVSync),
     OptionRow::Setting(SettingId::VideoAntiAlias),
     OptionRow::Setting(SettingId::VideoSkipFrame),
     OptionRow::Page(OptionsPage::Shaders),
+    // Lot SBS (owner request): the side by side outputs, in the console too.
+    OptionRow::Setting(SettingId::VideoSbs3d),
+    OptionRow::Setting(SettingId::VideoSbs3dStrength),
+    OptionRow::Setting(SettingId::VideoSbsFamicom3d),
     OptionRow::Reset,
 ];
 
@@ -490,7 +494,7 @@ pub const ADVANCED_HUB: [OptionRow; 7] = [
 
 /// *Advanced options › Display*. The render scale is here **and** on the main page: the one
 /// setting the mockup gives two entry points on purpose.
-pub const DISPLAY_ROWS: [OptionRow; 12] = [
+pub const DISPLAY_ROWS: [OptionRow; 15] = [
     OptionRow::ShowFps,
     OptionRow::Setting(SettingId::VideoVSync),
     OptionRow::Setting(SettingId::VideoFrameRate),
@@ -500,6 +504,10 @@ pub const DISPLAY_ROWS: [OptionRow; 12] = [
     OptionRow::Setting(SettingId::VideoDynamicResolution),
     OptionRow::Setting(SettingId::VideoRenderMethod),
     OptionRow::Setting(SettingId::VideoAntiAlias),
+    // Lot SBS (owner request): the side by side outputs, in the console too.
+    OptionRow::Setting(SettingId::VideoSbs3d),
+    OptionRow::Setting(SettingId::VideoSbs3dStrength),
+    OptionRow::Setting(SettingId::VideoSbsFamicom3d),
     OptionRow::Group(keys::GROUP_ADVANCED),
     OptionRow::Setting(SettingId::VideoMaxQueuedFrames),
     OptionRow::Reset,

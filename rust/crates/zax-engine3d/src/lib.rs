@@ -26,6 +26,7 @@ mod segmenter;
 pub mod settings;
 pub mod space_bend;
 pub mod state_codec;
+pub mod stereo;
 pub mod tracker;
 pub mod vectors;
 

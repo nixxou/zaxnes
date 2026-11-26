@@ -772,6 +772,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.pause_3d_in_2d", "Pause the 3D in 2D"),
     ("setting.emu.catch_up_last_3d", "Catch-up: 3D of the shown frame only"),
     ("setting.video.half_rate_3d", "3D at 30 fps (game at full speed)"),
+    ("setting.video.sbs_3d", "Side by side 3D"),
+    ("setting.video.sbs_famicom_3d", "Side by side Famicom 3D System"),
+    ("setting.video.sbs_3d_strength", "Side by side 3D strength"),
+    ("hint.needs_sbs_3d", "(no effect: the side by side 3D is off)"),
     ("setting.video.dynamic_resolution", "Automatic resolution"),
     ("setting.video.shader_resolution", "Shader resolution"),
     (
@@ -864,6 +868,8 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.ui.language", "Language"),
     // ----------------------------------- labels of the enumerated values
     ("option.Off", "Off"),
+    ("option.Half SBS", "Half SBS (3D TV)"),
+    ("option.Full SBS", "Full SBS (glasses, headset)"),
     ("option.Auto", "Auto"),
     ("option.Light", "Light"),
     ("option.Strong", "Strong"),
@@ -952,6 +958,19 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
          and sharpens again where it is not. Needs the Render Tex method, the OpenGL back end, and \
          a known frame budget — that is, vertical synchronisation or a frame cap. Default: off, on \
          both platforms.",
+    ),
+    (
+        "detail.video.sbs_3d",
+        "Shows the 3D scene once for each eye, side by side, for a 3D television, video glasses or          a headset. Half SBS squeezes each eye into half the width (a 3D television in its SBS mode          stretches each half back); Full SBS keeps each eye at full resolution, half the window          each. The two eyes are two cameras a little apart that meet at the game's screen: what a          profile puts in front comes out, what it puts behind goes in. The 2D picture of a game is          then shown in both halves. Costs about twice the drawing of the scene. Default: off.",
+    ),
+    (
+        "detail.video.sbs_3d_strength",
+        "How far apart the two eyes of the side by side 3D are: more relief, but harder on the \
+         eyes beyond 1.5. 1 is about 2 degrees each side of the camera. Default: 1.",
+    ),
+    (
+        "detail.video.sbs_famicom_3d",
+        "For the Famicom 3D System games (JJ, Cosmic Epsilon, Attack Animal Gakuen…) played in 2D          with their 3D mode on: each eye's own picture, as the game drew it for its shutter          glasses, side by side (Half SBS or Full SBS as for the 3D). Off, the left eye's picture          alone is shown. Default: Half SBS (it only acts once the game's own 3D mode is on).",
     ),
     (
         "detail.video.anti_alias",

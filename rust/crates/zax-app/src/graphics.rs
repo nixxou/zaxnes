@@ -73,6 +73,59 @@ impl Backend {
     }
 }
 
+/// Lot SBS: how the window shows the two eyes (`video.stereo_output`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StereoLayout {
+    /// One picture, the whole width.
+    Off,
+    /// Each eye squeezed into half the width, drawn at the whole window's size (3D televisions
+    /// stretch each half back).
+    Half,
+    /// Each eye at its own resolution, half the width each (video glasses, headsets).
+    Full,
+}
+
+impl StereoLayout {
+    /// The layout `video.stereo_output` asks for.
+    #[must_use]
+    pub const fn from_setting(value: i32) -> Self {
+        match value {
+            1 => Self::Half,
+            2 => Self::Full,
+            _ => Self::Off,
+        }
+    }
+}
+
+/// Lot SBS: what the window shows of the scene: the layout and the right eye's picture, when one
+/// was drawn (without one, both halves show the main picture).
+#[derive(Clone, Copy)]
+pub struct StereoPicture<'a> {
+    pub layout: StereoLayout,
+    pub right: Option<&'a SceneView>,
+}
+
+/// The layer of the wgpu window that shows `view`, `height` pixels high, `bottom` above the
+/// window's bottom, over `columns` of the window (lot SBS; `None` for the whole width).
+#[cfg(feature = "wgpu")]
+fn scene_layer(
+    view: Option<&SceneView>,
+    height: u32,
+    bottom: u32,
+    columns: Option<(u32, u32)>,
+) -> Option<zax_platform::wgpu_display::SceneLayer<'_>> {
+    match view {
+        Some(SceneView::Wgpu(view)) => Some(zax_platform::wgpu_display::SceneLayer {
+            view: &view.view,
+            texture: &view.texture,
+            height,
+            bottom,
+            columns,
+        }),
+        _ => None,
+    }
+}
+
 /// The picture of the scene: the host's view of the game.
 pub enum SceneView {
     Gl(OffscreenFramebuffer),
@@ -81,6 +134,19 @@ pub enum SceneView {
 }
 
 impl SceneView {
+    /// The size of the picture in pixels.
+    #[must_use]
+    pub fn size(&self) -> (i32, i32) {
+        match self {
+            Self::Gl(view) => (view.width(), view.height()),
+            #[cfg(feature = "wgpu")]
+            Self::Wgpu(view) => (
+                i32::try_from(view.width).unwrap_or(1),
+                i32::try_from(view.height).unwrap_or(1),
+            ),
+        }
+    }
+
     /// Gives the picture `width` x `height` pixels inside buffers of `capacity` (the OpenGL
     /// picture; the wgpu one is sized exactly).
     ///
@@ -326,6 +392,26 @@ impl Graphics {
         }
     }
 
+    /// Lot SBS: a second picture of the scene like `like`, `width` x `height`, for the right
+    /// eye; `None` when it cannot be made.
+    #[must_use]
+    pub fn new_view(&self, like: &SceneView, width: i32, height: i32) -> Option<SceneView> {
+        match (self, like) {
+            (Self::Gl { gl, .. }, _) => OffscreenFramebuffer::new(Rc::clone(gl), width, height)
+                .ok()
+                .map(SceneView::Gl),
+            #[cfg(feature = "wgpu")]
+            (Self::Wgpu(_), SceneView::Wgpu(like)) => Some(SceneView::Wgpu(WgpuView::new(
+                &like.device,
+                &like.queue,
+                width,
+                height,
+            ))),
+            #[cfg(feature = "wgpu")]
+            (Self::Wgpu(_), _) => None,
+        }
+    }
+
     /// Draws `frame` with `scene` into `view`.
     ///
     /// # Errors
@@ -378,29 +464,50 @@ impl Graphics {
         ui: &mut ImguiFrontend,
         (width, height): (i32, i32),
         (view_height, view_bottom): (i32, i32),
+        stereo: StereoPicture<'_>,
     ) {
         match self {
             Self::Gl { gl, .. } => {
                 framebuffer::begin_window_pass(gl, width, height);
                 if let Some(SceneView::Gl(view)) = view {
-                    view.blit_to_default_framebuffer(width, view_height, view_bottom);
+                    if stereo.layout == StereoLayout::Off {
+                        view.blit_to_default_framebuffer(width, view_height, view_bottom);
+                    } else {
+                        // Lot SBS: the left eye in the left half, the right eye in the right one.
+                        let half = width / 2;
+                        view.blit_into_window(0, view_bottom, half, view_height);
+                        let right = match stereo.right {
+                            Some(SceneView::Gl(right)) => right,
+                            _ => view,
+                        };
+                        right.blit_into_window(half, view_bottom, width - half, view_height);
+                    }
                 }
                 ui.render();
             }
             #[cfg(feature = "wgpu")]
             Self::Wgpu(_) => {
-                let layer = match view {
-                    Some(SceneView::Wgpu(view)) => Some(zax_platform::wgpu_display::SceneLayer {
-                        view: &view.view,
-                        texture: &view.texture,
-                        height: size(view_height),
-                        bottom: u32::try_from(view_bottom).unwrap_or(0),
-                    }),
-                    _ => None,
+                let (layer_height, bottom) =
+                    (size(view_height), u32::try_from(view_bottom).unwrap_or(0));
+                let layer = |view, columns| scene_layer(view, layer_height, bottom, columns);
+                // Lot SBS: the left eye in the left half, the right eye in the right one.
+                let (left, right) = if stereo.layout == StereoLayout::Off {
+                    (layer(view, None), None)
+                } else {
+                    let half = size(width) / 2;
+                    (
+                        layer(view, Some((0, half))),
+                        layer(stereo.right.or(view), Some((half, size(width) - half))),
+                    )
                 };
                 if let Some(display) = window.wgpu_mut() {
                     display.update_pictures(&ui.take_picture_updates());
-                    display.draw((size(width), size(height)), layer, Some(ui.draw_data()));
+                    display.draw_split(
+                        (size(width), size(height)),
+                        (left, right),
+                        Some(ui.draw_data()),
+                        stereo.layout != StereoLayout::Off,
+                    );
                 }
             }
         }

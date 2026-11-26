@@ -75,6 +75,9 @@ pub struct SceneLayer<'a> {
     /// The pixels between the scene's bottom and the window's (the touch pad's band in
     /// portrait); 0 puts the scene at the bottom.
     pub bottom: u32,
+    /// Lot SBS: the columns of the window the picture covers, `(left, width)`; `None` for the
+    /// whole width.
+    pub columns: Option<(u32, u32)>,
 }
 
 /// The surface, the device and what draws the window.
@@ -88,6 +91,13 @@ pub struct WgpuDisplay {
     /// The picture the preset drew at a share of the window (`video.shader_resolution`).
     #[cfg_attr(not(feature = "shaders"), allow(dead_code))]
     reduced: Reduced,
+    /// Lot SBS: the right eye's own slang chain (a preset may keep pictures from frame to
+    /// frame), made when a right eye is first drawn through a preset.
+    #[cfg(feature = "shaders")]
+    shaders_right: Option<crate::slang_chain::SlangShaders>,
+    /// Lot SBS: the picture each eye's preset drew, composed into its half of the window.
+    #[cfg_attr(not(feature = "shaders"), allow(dead_code))]
+    eye_targets: [Option<(wgpu::Texture, wgpu::TextureView)>; 2],
     pending: Option<wgpu::SurfaceTexture>,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
@@ -214,6 +224,9 @@ impl WgpuDisplay {
             #[cfg(feature = "shaders")]
             shaders,
             reduced: Reduced::default(),
+            #[cfg(feature = "shaders")]
+            shaders_right: None,
+            eye_targets: [None, None],
             pending: None,
             surface,
             config,
@@ -356,6 +369,30 @@ impl WgpuDisplay {
         scene: Option<SceneLayer<'_>>,
         interface: Option<&DrawData>,
     ) {
+        self.draw_split((width, height), (scene, None), interface, false);
+    }
+
+    /// Lot SBS: [`Self::draw`] with the right eye's picture in `right`; each layer then says
+    /// which columns of the window it covers, and each eye goes through its own slang chain.
+    pub fn draw_eyes(
+        &mut self,
+        (width, height): (u32, u32),
+        scene: Option<SceneLayer<'_>>,
+        right: Option<SceneLayer<'_>>,
+        interface: Option<&DrawData>,
+    ) {
+        self.draw_split((width, height), (scene, right), interface, false);
+    }
+
+    /// Lot SBS: [`Self::draw_eyes`], with the interface drawn once in each half of the window
+    /// when `split_interface` (the side by side outputs).
+    pub fn draw_split(
+        &mut self,
+        (width, height): (u32, u32),
+        (scene, right): (Option<SceneLayer<'_>>, Option<SceneLayer<'_>>),
+        interface: Option<&DrawData>,
+        split_interface: bool,
+    ) {
         let (width, height) = (width.max(1), height.max(1));
         if (width, height) != (self.config.width, self.config.height) {
             self.config.width = width;
@@ -376,9 +413,24 @@ impl WgpuDisplay {
         if let Some(interface) = interface {
             self.interface.prepare(&self.device, &self.queue, interface);
         }
+        // Lot SBS: two eyes are each filtered into a picture of their own, then composed.
+        let mut eye_commands = Vec::new();
+        let mut eyes_filtered = [false; 2];
+        if let (Some(left), Some(right)) = (scene, right) {
+            for (index, layer) in [left, right].into_iter().enumerate() {
+                if let Some(commands) = self.filter_eye(index, layer) {
+                    eye_commands.push(commands);
+                    eyes_filtered[index] = true;
+                }
+            }
+        }
         // The slang shaders draw the scene picture themselves (clearing the window to black),
         // before the window pass; the interface then goes over them unfiltered.
-        let filtered = scene.and_then(|scene| self.filter_scene(&view, scene, (width, height)));
+        let filtered = if right.is_some() {
+            None
+        } else {
+            scene.and_then(|scene| self.filter_scene(&view, scene, (width, height)))
+        };
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("zax window"),
@@ -400,7 +452,20 @@ impl WgpuDisplay {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            if let Some(scene) = scene.filter(|_| filtered.is_none()) {
+            if let (Some(left), Some(right)) = (scene, right) {
+                for (index, layer) in [left, right].into_iter().enumerate() {
+                    let drawn = match &self.eye_targets[index] {
+                        Some((texture, view)) if eyes_filtered[index] => SceneLayer {
+                            view,
+                            texture,
+                            ..layer
+                        },
+                        _ => layer,
+                    };
+                    self.compositor
+                        .draw(&self.device, &mut pass, drawn, (width, height));
+                }
+            } else if let Some(scene) = scene.filter(|_| filtered.is_none()) {
                 self.compositor
                     .draw(&self.device, &mut pass, scene, (width, height));
             } else if let Some(reduced) = self.reduced_layer(height) {
@@ -409,12 +474,25 @@ impl WgpuDisplay {
                     .draw(&self.device, &mut pass, reduced, (width, height));
             }
             if let Some(interface) = interface {
-                self.interface.draw(&mut pass, interface, (width, height));
+                if split_interface {
+                    let half = width / 2;
+                    for columns in [(0, half), (half, width - half)] {
+                        self.interface
+                            .draw(&mut pass, interface, (width, height), Some(columns));
+                    }
+                } else {
+                    self.interface
+                        .draw(&mut pass, interface, (width, height), None);
+                }
             }
         }
         // The shader passes write the window before the window pass loads it.
-        self.queue
-            .submit(filtered.into_iter().chain([encoder.finish()]));
+        self.queue.submit(
+            eye_commands
+                .into_iter()
+                .chain(filtered)
+                .chain([encoder.finish()]),
+        );
         self.pending = Some(frame);
     }
 
@@ -506,6 +584,88 @@ impl WgpuDisplay {
         )
     }
 
+    /// Lot SBS: the commands drawing eye `index`'s `layer` through its own slang chain into a
+    /// picture of the layer's size; none without a preset (the compositor then draws the layer).
+    #[cfg(feature = "shaders")]
+    fn filter_eye(&mut self, index: usize, layer: SceneLayer<'_>) -> Option<wgpu::CommandBuffer> {
+        let wanted = self.shaders.wanted().cloned();
+        let frame = self.shaders.frame();
+        let shaders = if index == 0 {
+            &mut self.shaders
+        } else {
+            let right = self.shaders_right.get_or_insert_with(|| {
+                crate::slang_chain::SlangShaders::new(&self.device, &self.queue, &self.adapter)
+            });
+            right.request(wanted.as_ref());
+            let _ = right.update(frame);
+            right
+        };
+        wanted.as_ref()?;
+        // The eye's picture keeps the scene picture's proportions at the layer's height: a whole
+        // 16:9 picture in Half SBS, which the compositor then squeezes into its half (a bezel
+        // preset draws its television for the picture the eye really gets), half the width in
+        // Full SBS.
+        let height = layer.height.max(1);
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss
+        )] // Window sizes.
+        let width = ((height as f32 * layer.texture.width() as f32
+            / layer.texture.height().max(1) as f32)
+            .round() as u32)
+            .max(1);
+        let fits = self.eye_targets[index].as_ref().is_some_and(|(texture, _)| {
+            (texture.width(), texture.height()) == (width, height)
+                && texture.format() == self.config.format
+        });
+        if !fits {
+            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("zax slang eye"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.config.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            self.eye_targets[index] = Some((texture, view));
+        }
+        let (_, view) = self.eye_targets[index].as_ref()?;
+        // The picture's rectangle, centred in the eye's, as for the whole window.
+        let rectangle = match shaders.picture_aspect() {
+            Some(aspect) if aspect.is_finite() && aspect > 0.0 => {
+                #[allow(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    clippy::cast_precision_loss
+                )] // Window sizes.
+                let inner = ((height as f32 * aspect).round() as u32).clamp(1, width);
+                ((width - inner) / 2, 0, inner, height)
+            }
+            _ => (0, 0, width, height),
+        };
+        shaders.record(
+            layer.texture,
+            view,
+            self.config.format,
+            rectangle,
+            (width, height),
+        )
+    }
+
+    #[cfg(not(feature = "shaders"))]
+    #[allow(clippy::unused_self)]
+    const fn filter_eye(&self, _index: usize, _layer: SceneLayer<'_>) -> Option<wgpu::CommandBuffer> {
+        None
+    }
+
     /// The picture the preset drew at a share of the window this frame, to stretch over its
     /// `height` pixels; none when it drew on the window itself.
     #[cfg(feature = "shaders")]
@@ -520,6 +680,7 @@ impl WgpuDisplay {
             texture,
             height,
             bottom: 0,
+            columns: None,
         })
     }
 
@@ -798,10 +959,12 @@ impl Compositor {
         });
         let layer = scene.height.clamp(1, height);
         let bottom = scene.bottom.min(height - layer);
+        let (left, columns) = scene.columns.unwrap_or((0, width));
+        let left = left.min(width - 1);
         pass.set_viewport(
-            0.0,
+            left as f32,
             (height - layer - bottom) as f32,
-            width as f32,
+            columns.clamp(1, width - left) as f32,
             layer as f32,
             0.0,
             1.0,
@@ -1133,13 +1296,35 @@ impl InterfaceRenderer {
         clippy::cast_sign_loss,
         clippy::cast_precision_loss
     )] // Pixel rectangles of a window.
-    fn draw(&self, pass: &mut wgpu::RenderPass<'_>, data: &DrawData, (width, height): (u32, u32)) {
+    /// Draws `data` over the window, or into its columns `(left, width)` (lot SBS: the interface
+    /// of one eye, squeezed when it is wider).
+    #[allow(clippy::cast_precision_loss)] // Window sizes.
+    fn draw(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        data: &DrawData,
+        (width, height): (u32, u32),
+        columns: Option<(u32, u32)>,
+    ) {
         let (Some(group), Some(vertices), Some(indices)) =
             (&self.group, &self.vertices, &self.indices)
         else {
             return;
         };
         let [scale_x, scale_y] = data.framebuffer_scale;
+        let drawn_width = (data.display_size[0] * scale_x).max(1.0);
+        let (column_left, column_width) = columns.unwrap_or((0, width));
+        let squeeze = column_width as f32 / drawn_width;
+        let left_edge = column_left as f32;
+        let right_edge = (column_left + column_width).min(width) as f32;
+        pass.set_viewport(
+            left_edge,
+            0.0,
+            right_edge - left_edge,
+            height as f32,
+            0.0,
+            1.0,
+        );
         let clip_offset = data.display_pos;
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, group, &[]);
@@ -1170,9 +1355,11 @@ impl InterfaceRenderer {
                     pass.set_bind_group(0, texture_group, &[]);
                     bound = id;
                 }
-                let left = ((clip_rect[0] - clip_offset[0]) * scale_x).max(0.0);
+                let left =
+                    ((clip_rect[0] - clip_offset[0]) * scale_x * squeeze + left_edge).max(left_edge);
                 let top = ((clip_rect[1] - clip_offset[1]) * scale_y).max(0.0);
-                let right = ((clip_rect[2] - clip_offset[0]) * scale_x).min(width as f32);
+                let right = ((clip_rect[2] - clip_offset[0]) * scale_x * squeeze + left_edge)
+                    .min(right_edge);
                 let bottom = ((clip_rect[3] - clip_offset[1]) * scale_y).min(height as f32);
                 if right <= left || bottom <= top {
                     continue;
@@ -1194,6 +1381,7 @@ impl InterfaceRenderer {
             index_base += list.idx_buffer().len() as u32;
         }
         pass.set_scissor_rect(0, 0, width, height);
+        pass.set_viewport(0.0, 0.0, width as f32, height as f32, 0.0, 1.0);
     }
 }
 
