@@ -739,7 +739,9 @@ impl ZaxUi {
         else {
             return;
         };
-        if !Path::new(path).is_file() {
+        // A game of an archive is `<archive>/<entry>`: its archive is the file that must be there.
+        let game = Path::new(path);
+        if !game.is_file() && crate::emulation::rom_file::archive_member(game).is_none() {
             // The file has gone: it leaves the list and the user is told, with the text SPEC-10
             // REQ-UI-083 fixes for an unusable ROM.
             if let Some(store) = host.settings_store_mut() {

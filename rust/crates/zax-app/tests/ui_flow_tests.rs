@@ -180,6 +180,46 @@ fn req_ui_200_the_recent_roms_are_remembered_and_pruned() {
     assert_eq!(NotificationSeverity::Error, shown.severity);
 }
 
+/// Owner report (2026-11-27): a recent game of an archive (`<archive>/<entry>`, no file of its
+/// own) was dropped from the list as gone; it opens again, and leaves only once its archive is
+/// gone.
+#[test]
+fn a_recent_game_of_an_archive_opens_again() {
+    use std::io::Write as _;
+    let mut harness = UiHarness::new(&["Arkanoid"]);
+    let bytes = std::fs::read(harness.write_rom("source.nes")).expect("the ROM can be read");
+    let archive = harness.root.path().join("Pack.zip");
+    let mut zip = zip::ZipWriter::new(std::fs::File::create(&archive).expect("a zip"));
+    zip.start_file("game.nes", zip::write::SimpleFileOptions::default())
+        .expect("an entry");
+    zip.write_all(&bytes).expect("the entry is written");
+    zip.finish().expect("the zip is closed");
+    let game = archive.join("game.nes").to_string_lossy().into_owned();
+    set_profile_for(&mut harness, &game, "g0");
+    let recent = |harness: &UiHarness| -> Vec<String> {
+        harness
+            .host
+            .settings_store()
+            .expect("a settings store")
+            .games()
+            .recent_roms()
+            .to_vec()
+    };
+
+    harness.run_with(Command::OpenRom, CommandArgs::of_text(&game));
+    assert_eq!(vec![full_path(&game)], recent(&harness));
+    harness.run(Command::Stop);
+    harness.run_with(Command::OpenRecentRom, CommandArgs::of_number(0));
+    assert_eq!(vec![full_path(&game)], recent(&harness));
+    assert_eq!(Some(full_path(&game).as_str()), harness.host.current_rom_path());
+
+    // The archive disappears: the entry leaves the list.
+    harness.run(Command::Stop);
+    std::fs::remove_file(&archive).expect("the archive can be deleted");
+    harness.run_with(Command::OpenRecentRom, CommandArgs::of_number(0));
+    assert_eq!(0, recent(&harness).len());
+}
+
 // Q-037
 #[test]
 fn req_ui_200_the_2d_toggle_is_a_hot_switch_of_the_rendering() {
