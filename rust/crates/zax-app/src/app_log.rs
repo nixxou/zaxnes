@@ -105,6 +105,17 @@ pub fn recent(count: usize) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// A panic's message, to the error output and to the log file when the file is free: it never
+/// waits, the panic may come from inside a write.
+pub fn panic_line(line: &str) {
+    eprintln!("{line}");
+    if let Some(file) = FILE.get() {
+        if let Ok(mut file) = file.try_lock() {
+            let _ = writeln!(file, "{line}");
+        }
+    }
+}
+
 fn to_file(line: &str) {
     remember(line);
     if let Some(file) = FILE.get() {

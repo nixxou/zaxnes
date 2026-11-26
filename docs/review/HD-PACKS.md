@@ -40,7 +40,7 @@ Owner request (2026-11-21): play Mesen HD packs. Branch `feat/hd-pack` from dev,
 - [x] 2D: HD picture uploaded instead of the NES picture (GL and wgpu); checked headless with
       `cargo run --release -p zax-hdpacks --example hd_shot` on Castlevania and the workshop's
       exported pack (poc-hdpack/userdata-test/HdPacks)
-- [ ] 3D: design to decide (HD textures on the flat tiles?)
+- [x] 3D: HD textures on the tiles (fix/hd-scroll, 2026-11-26; section below)
 
 ## Mesen2 semantics (from its HdPackLoader / HdNesPack, read 2026-11-24)
 
@@ -69,6 +69,28 @@ jumped at each screen. Checked against MesenCE 2.2.1 on the same walk (Start, th
 shot every 180 frames): same pillar position at 3 s, same framing at 6 s. Which line Mesen takes
 the scroll from when it changes mid-frame was not read in its code: the band is an assumption
 that agrees with Castlevania.
+
+## The 3D (fix/hd-scroll, 2026-11-26)
+
+`video.hd_pack_3d` (owner request, 2026-11-26), offered with the 2D one in the Video menu, the
+Display page of the options window and of the console, and the game options. Each frame in 3D,
+`zax_hdpacks::compose::record_tiles` chooses the HD tile of every tile record as the 2D picture
+does (its rule's conditions at the tile's top-left pixel). The app makes a direct texture of
+`8 x scale` texels for it (`HdPackState::tile_textures`, cached by picture, place, flips and the
+tile's own colours): the pack's picture flipped as the tile is shown, over the tile's own NES
+colours where the HD picture is transparent (the 3D shape stays the NES tile's). The renderer
+gives a tile that texture, found by screen place (background) or slot (sprite), and reads it
+`scale` times as far (`tex_tilting`); a tile with a direct texture of the profile keeps its own.
+The pack's backgrounds, additions and the mid-frame checks of the 2D are left out of the 3D.
+Not checked against a picture yet: the flips assume the 3D tile shows the pattern as displayed.
+
+## Smooth scrolling with an HD pack (fix/hd-scroll, 2026-11-26)
+
+With the smooth scrolling from the run-ahead (every preset, display above 61 Hz), the sprites
+that move with the camera are drawn apart (`SceneState::picture_overlay`). The overlay is now
+composed with the pack on the whole picture and masked to them; the picture is composed without
+them and their records. Before, the compositor saw a picture without them (NES pixels kept) and
+the overlay showed them in palette colours on top.
 
 ## Not supported yet (and why)
 

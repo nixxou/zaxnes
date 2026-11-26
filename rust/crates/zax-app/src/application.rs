@@ -1853,6 +1853,7 @@ impl Running {
                     nes_picture_rgb: &[],
                     nes_picture_hd: None,
                     nes_overlay_hd: None,
+                    hd_tiles: None,
                 };
                 draw_eyes(
                     graphics,
@@ -2555,6 +2556,7 @@ impl EyePicture {
             // An eye of a Famicom 3D System game is drawn as the console drew it: no HD pack.
             nes_picture_hd: None,
             nes_overlay_hd: None,
+            hd_tiles: None,
         }
     }
 }
@@ -3353,6 +3355,35 @@ fn draw_hd_picture(state: &mut RunState, session: &GameSession, width: usize, ov
     state.hd_scale = scale;
 }
 
+/// Lot HD-PACK in 3D: the HD pack's textures of the tiles of the frame `session` shows, into
+/// `state.hd.tiles`, once the pack is read.
+fn draw_hd_tiles(state: &mut RunState, session: &GameSession) {
+    let Some(loaded) = state.hd.pack() else {
+        return;
+    };
+    let palette = session.copy_picture_records(&mut state.hd.records);
+    let core = session.core();
+    let memory = |address: u16| core.read_memory(address);
+    let rgb = [[0u8; 3]; 64];
+    let margin = core.widescreen_margin().max(0);
+    let records = std::mem::take(&mut state.hd.records);
+    let input = zax_hdpacks::FrameInput {
+        picture: &[],
+        width: 256 + 2 * usize::try_from(margin).unwrap_or(0),
+        height: 240,
+        margin,
+        margin_y: 0,
+        records: &records,
+        palette,
+        frame: u64::try_from(core.frame_count()).unwrap_or(0),
+        rgb: &rgb,
+        memory: &memory,
+        scroll: core.playfield_origin(),
+    };
+    state.hd.tile_textures(&loaded, &input);
+    state.hd.records = records;
+}
+
 fn update_scene(host: &mut AppHost, state: &mut RunState) {
     let two_dimensional = host.showing_two_dimensional();
     let composite = composite_options(host);
@@ -3393,6 +3424,7 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     let smooth_3d = host.settings().get(SettingId::EmuSmoothScroll3d).as_bool();
     // Lot HD-PACK: the pack of the game in play, read once a game starts.
     let hd_2d = host.settings().get(SettingId::VideoHdPack2d).as_bool();
+    let hd_3d = host.settings().get(SettingId::VideoHdPack3d).as_bool();
     let rom = host.current_rom_path().map(str::to_owned);
     let user_root = host.paths().root.clone();
     state
@@ -3543,6 +3575,11 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         scene.picture_crop = zax_profiles::values::Vec4F::new(crop[0], crop[1], crop[2], crop[3]);
         scene.picture_shift = None;
         scene.picture_overlay.clear();
+        // Lot HD-PACK in 3D: the HD pack's textures of the frame's tiles.
+        state.hd.tiles.clear();
+        if hd_3d {
+            draw_hd_tiles(state, session);
+        }
         // Experimental (owner request, 2026-11-20): the 3D playfield between two frames too,
         // from the shift and motion kept with the frame the scene shows.
         let smooth = session.published_smooth();
@@ -3655,6 +3692,12 @@ fn render_scene(
                 rgba: &state.hd.overlay,
                 scale: state.hd_scale,
             }),
+        hd_tiles: (picture.is_empty() && !state.hd.tiles.is_empty()).then_some(
+            zax_render::scene::HdTiles {
+                textures: &state.hd.tiles,
+                scale: state.hd.tile_scale,
+            },
+        ),
     };
     if layout == StereoLayout::Off || scene.two_dimensional_mode {
         return draw_scene(

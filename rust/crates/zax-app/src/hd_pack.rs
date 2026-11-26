@@ -19,6 +19,7 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::Arc;
 
 use zax_core_api::TileRecord;
+use zax_engine3d::geometry::texture::ObjectTexture;
 use zax_hdpacks::compose::ChrIndex;
 use zax_hdpacks::{FolderFiles, HdPack, MemoryFiles};
 
@@ -163,6 +164,52 @@ pub struct LoadedHdPack {
     pub source: String,
 }
 
+/// The direct texture of HD tile `tile` for the tile `key` describes: the pack's picture flipped
+/// as the tile is shown, over the tile's own colours (`backdrop` the NES colour of its colour 0).
+#[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // 8 x scale, scale <= 10
+fn tile_texture(
+    pack: &HdPack,
+    tile: &zax_hdpacks::pack::HdTile,
+    key: &TileTextureKey,
+    scale: u32,
+    backdrop: u8,
+) -> ObjectTexture {
+    use zax_engine3d::palette::{nes_color, Rgb24};
+    let pixels = zax_hdpacks::compose::tile_pixels(pack, tile);
+    let side = 8 * scale;
+    let nes_index = |x: u32, y: u32| {
+        // The colour (0 to 3) of NES pixel (x, y) of the tile as shown.
+        let x = if key.mirror.0 { 7 - x } else { x };
+        let y = if key.mirror.1 { 7 - y } else { y };
+        let bit = |plane: u64| ((plane >> (8 * y)) >> (7 - x)) & 1;
+        (bit(key.planes.0) | (bit(key.planes.1) << 1)) as usize
+    };
+    let mut colors = Vec::with_capacity((side * side) as usize);
+    for y in 0..side {
+        for x in 0..side {
+            let sx = if key.mirror.0 { side - 1 - x } else { x };
+            let sy = if key.mirror.1 { side - 1 - y } else { y };
+            let [r, g, b, a] = pixels[(sy * side + sx) as usize];
+            let index = nes_index(x / scale, y / scale);
+            let under = nes_color(usize::from(if index == 0 {
+                backdrop & 0x3F
+            } else {
+                key.palette[index] & 0x3F
+            }));
+            let mix = |top: u8, bottom: u8| {
+                ((u32::from(top) * u32::from(a) + u32::from(bottom) * (255 - u32::from(a))) / 255)
+                    as u8
+            };
+            colors.push(Rgb24::new(
+                mix(r, under.r),
+                mix(g, under.g),
+                mix(b, under.b),
+            ));
+        }
+    }
+    ObjectTexture::direct(side as i32, side as i32, colors)
+}
+
 /// The CHR ROM of an iNES image (empty for a CHR-RAM game or another format).
 #[must_use]
 pub fn chr_rom(image: &[u8]) -> &[u8] {
@@ -245,9 +292,80 @@ pub struct HdPackState {
     /// The HD picture of the sprites the smooth scrolling draws apart, transparent but where they
     /// are; empty while none are.
     pub overlay: Vec<u8>,
+    /// Lot HD-PACK in 3D: the HD textures of the tiles of the frame drawn, and their scale.
+    pub tiles: zax_render::scene::HdTileTextures,
+    pub tile_scale: usize,
+    /// The HD textures made so far, by picture, place, flips and the tile's own colours.
+    tile_cache: std::collections::HashMap<TileTextureKey, Arc<ObjectTexture>>,
 }
 
+/// What an HD tile texture is made of: the pack's picture and place, the brightness, the flips
+/// and the tile's own pattern and colours (which show where the HD picture is transparent).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct TileTextureKey {
+    image: usize,
+    x: u32,
+    y: u32,
+    brightness: u32,
+    mirror: (bool, bool),
+    planes: (u64, u64),
+    palette: [u8; 4],
+}
+
+/// How many HD tile textures are kept before the cache starts over.
+const TILE_CACHE_LIMIT: usize = 4096;
+
 impl HdPackState {
+    /// Lot HD-PACK in 3D: the HD textures of `records` (the frame's tile records, `input` lending
+    /// the rest of the frame), each as the 2D picture would draw its tile: flipped as the tile
+    /// is shown, the tile's own colour where the HD picture is transparent.
+    pub fn tile_textures(&mut self, loaded: &LoadedHdPack, input: &zax_hdpacks::FrameInput<'_>) {
+        use zax_render::scene::HdTileKey;
+        self.tiles.clear();
+        if self.tile_cache.len() > TILE_CACHE_LIMIT {
+            self.tile_cache.clear();
+        }
+        let chosen = zax_hdpacks::compose::record_tiles(&loaded.pack, &loaded.chr, input);
+        let scale = loaded.pack.scale.max(1);
+        self.tile_scale = scale as usize;
+        for (record, tile) in input.records.iter().zip(chosen) {
+            let Some(tile) = tile else {
+                continue;
+            };
+            let key = TileTextureKey {
+                image: tile.image,
+                x: tile.x,
+                y: tile.y,
+                brightness: tile.brightness.to_bits(),
+                mirror: (
+                    !record.background && record.mirror_h,
+                    !record.background && record.mirror_v,
+                ),
+                planes: (record.plane0, record.plane1),
+                palette: zax_hdpacks::compose::palette_of(record, &input.palette),
+            };
+            let texture = self
+                .tile_cache
+                .entry(key)
+                .or_insert_with(|| {
+                    Arc::new(tile_texture(
+                        &loaded.pack,
+                        &tile,
+                        &key,
+                        scale,
+                        input.palette[0],
+                    ))
+                })
+                .clone();
+            let at = if record.background {
+                HdTileKey::Background(i32::from(record.x), i32::from(record.y))
+            } else {
+                HdTileKey::Sprite(record.index)
+            };
+            self.tiles.insert(at, texture);
+        }
+    }
+
     /// Follows the game in play: a new ROM starts reading its pack (none: forgets it). `log` gets
     /// what was found.
     pub fn follow(&mut self, rom: Option<&str>, user_root: Option<&Path>, log: &dyn Fn(&str)) {

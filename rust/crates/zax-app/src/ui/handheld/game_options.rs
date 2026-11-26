@@ -73,14 +73,14 @@ pub const GAME_ADVANCED_HUB: [OptionRow; 4] = [
 
 /// *Advanced options › Display* of a game: the two rows that left the main screen, and the two
 /// of RO-2 that belong to the picture as it reaches the screen.
-pub const GAME_DISPLAY_ROWS: [OptionRow; 5] = [
+pub const GAME_DISPLAY_ROWS: [OptionRow; 6] = [
     OptionRow::ShowFps,
     OptionRow::Profiler,
     OptionRow::Setting(SettingId::VideoAntiAlias),
     OptionRow::Setting(SettingId::VideoMaxQueuedFrames),
-    // Lot HD-PACK (owner request): the game's Mesen HD pack in 2D (the 3D's comes when it is
-    // drawn).
+    // Lot HD-PACK (owner request): the game's Mesen HD pack, in 2D and in 3D.
     OptionRow::Setting(SettingId::VideoHdPack2d),
+    OptionRow::Setting(SettingId::VideoHdPack3d),
 ];
 
 /// *Advanced options › 3D rendering* of a game: the visual style, then its two pages.
@@ -921,10 +921,10 @@ mod tests {
         assert!(!is_game_row_setting(SettingId::LightIntensity));
     }
 
-    /// Each of the thirty-two rows a game can have stores a value of its own, "Use Global" takes
+    /// Each of the thirty-three rows a game can have stores a value of its own, "Use Global" takes
     /// it back, and "Put everything back to global" clears the lot. Thirty until KIRBY-MERGE
     /// added the smooth scrolling from the run-ahead; thirty-one stepped since the engine row,
-    /// thirty-two with the HD pack in 2D.
+    /// thirty-two with the HD pack in 2D, thirty-three with the one in 3D.
     #[test]
     fn ro_3_every_row_stores_its_own_value_and_goes_back_to_global() {
         let steppable: Vec<OptionRow> = all_game_rows()
@@ -932,7 +932,7 @@ mod tests {
             // own test above.
             .filter(|row| *row != OptionRow::Overscan)
             .collect();
-        assert_eq!(32, steppable.len(), "{steppable:?}");
+        assert_eq!(33, steppable.len(), "{steppable:?}");
         let mut model = model(GameOptions::new());
         for row in &steppable {
             let row = *row;

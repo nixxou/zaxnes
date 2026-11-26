@@ -40,13 +40,9 @@ impl NesPictureTexture {
     }
 
     /// Uploads `indices` (NES colour indices, row 0 first, `height` rows of 256 or of a
-    /// widescreen width) and returns the texture, or `None` when the frame has no such size.
-    pub fn upload(&mut self, indices: &[u8], height: usize) -> Result<Option<Texture>, GlError> {
-        self.upload_with_colours(indices, crate::scene::PictureColours::default(), height)
-    }
-
-    /// [`Self::upload`] with the picture's emphasis or decoded colours (lot FIDPLUS-D2b); both
-    /// empty is the palette alone.
+    /// widescreen width) with the picture's emphasis, decoded or HD colours (lot FIDPLUS-D2b,
+    /// lot HD-PACK; all empty is the palette alone) and returns the texture, or `None` when the
+    /// frame has no such size.
     pub fn upload_with_colours(
         &mut self,
         indices: &[u8],

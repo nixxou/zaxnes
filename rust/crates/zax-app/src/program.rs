@@ -28,6 +28,12 @@ const EXIT_USAGE: i32 = 2;
 /// built one.
 #[must_use]
 pub fn run(arguments: &[String]) -> i32 {
+    // A crash of the windowed program leaves its reason in the log (its error output is lost).
+    let report = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        crate::app_log::panic_line(&format!("Zaxnes: crash: {info}"));
+        report(info);
+    }));
     // Before anything prints: `--help`, `--list-profiles`, import output and usage errors.
     zax_platform::console::attach_to_parent_console();
     let arguments: Vec<&str> = arguments.iter().map(String::as_str).collect();

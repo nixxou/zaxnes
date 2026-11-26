@@ -102,8 +102,6 @@ fn ro_1_the_excluded_list_is_unchanged() {
     assert_eq!(
         [
             SettingId::UiLastBrowseDir,
-            // Lot HD-PACK: the HD pack in 3D, out until it is drawn.
-            SettingId::VideoHdPack3d,
             SettingId::UiWindowRect,
             SettingId::UiOptionsAdvanced,
             SettingId::UiOptionsPreset,
@@ -517,8 +515,8 @@ fn ro_3_every_console_setting_is_a_row_the_console_can_step() {
     // MAPPERS-N `emu.rainbow_network` (mapper 682's ESP) and the eight `emu.vs_dip_N`, FAST-1
     // `emu.fast_core`. REWRITE-UI step 23 adds the ten rows of the signal options, and the
     // owner's request of 2026-11-19 `camera.frame_picture`, and of 2026-11-20
-    // `emu.smooth_scroll_3d`. Lot SBS adds its three rows, lot HD-PACK `video.hd_pack_2d`.
-    assert_eq!(112, advanced::ROW_SETTINGS.len());
+    // `emu.smooth_scroll_3d`. Lot SBS adds its three rows, lot HD-PACK `video.hd_pack_2d` and `video.hd_pack_3d`.
+    assert_eq!(113, advanced::ROW_SETTINGS.len());
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::EmuEngine));
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::AudioClassicOutput));
     assert!(advanced::ROW_SETTINGS.contains(&SettingId::EmuSmoothScrollAhead));
@@ -660,8 +658,8 @@ fn ro_3_every_setting_a_game_can_set_has_a_global_value_to_point_at() {
     // The desktop menu and the console pages of a game walk the same tree, so neither can gain a
     // row the other has not got: the main screen plus the pages, and nothing else. Thirty until
     // KIRBY-MERGE added the smooth scrolling from the run-ahead beside the game's run-ahead, and
-    // thirty-two since the engine row, thirty-three with the HD pack in 2D.
-    assert_eq!(33, game_options::all_game_rows().count());
+    // thirty-two since the engine row, thirty-four with the HD pack in 2D and in 3D.
+    assert_eq!(34, game_options::all_game_rows().count());
 }
 
 /// RO-3 §3: the desktop *Game options* menu follows the console tree, and does so by **walking

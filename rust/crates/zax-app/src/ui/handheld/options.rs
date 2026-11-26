@@ -285,7 +285,7 @@ pub const SIMPLE_TOUCH_ROWS: [OptionRow; 17] = [
 ];
 
 /// *Display* in the simple mode.
-pub const SIMPLE_DISPLAY_ROWS: [OptionRow; 9] = [
+pub const SIMPLE_DISPLAY_ROWS: [OptionRow; 11] = [
     OptionRow::ShowFps,
     OptionRow::Setting(SettingId::VideoVSync),
     OptionRow::Setting(SettingId::VideoAntiAlias),
@@ -295,6 +295,9 @@ pub const SIMPLE_DISPLAY_ROWS: [OptionRow; 9] = [
     OptionRow::Setting(SettingId::VideoSbs3d),
     OptionRow::Setting(SettingId::VideoSbs3dStrength),
     OptionRow::Setting(SettingId::VideoSbsFamicom3d),
+    // Lot HD-PACK (owner request, 2026-11-26): the game's Mesen HD pack.
+    OptionRow::Setting(SettingId::VideoHdPack2d),
+    OptionRow::Setting(SettingId::VideoHdPack3d),
     OptionRow::Reset,
 ];
 
@@ -494,7 +497,7 @@ pub const ADVANCED_HUB: [OptionRow; 7] = [
 
 /// *Advanced options › Display*. The render scale is here **and** on the main page: the one
 /// setting the mockup gives two entry points on purpose.
-pub const DISPLAY_ROWS: [OptionRow; 16] = [
+pub const DISPLAY_ROWS: [OptionRow; 17] = [
     OptionRow::ShowFps,
     OptionRow::Setting(SettingId::VideoVSync),
     OptionRow::Setting(SettingId::VideoFrameRate),
@@ -508,8 +511,9 @@ pub const DISPLAY_ROWS: [OptionRow; 16] = [
     OptionRow::Setting(SettingId::VideoSbs3d),
     OptionRow::Setting(SettingId::VideoSbs3dStrength),
     OptionRow::Setting(SettingId::VideoSbsFamicom3d),
-    // Lot HD-PACK: the game's Mesen HD pack in 2D.
+    // Lot HD-PACK: the game's Mesen HD pack, in 2D and in 3D.
     OptionRow::Setting(SettingId::VideoHdPack2d),
+    OptionRow::Setting(SettingId::VideoHdPack3d),
     OptionRow::Group(keys::GROUP_ADVANCED),
     OptionRow::Setting(SettingId::VideoMaxQueuedFrames),
     OptionRow::Reset,

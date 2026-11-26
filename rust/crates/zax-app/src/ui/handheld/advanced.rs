@@ -32,7 +32,7 @@ use crate::ui::text;
 ///
 /// Adding a setting to the desktop window therefore does not add a console row: a console row is
 /// an owner decision, written down here and placed by a page table.
-pub const ROW_SETTINGS: [SettingId; 112] = [
+pub const ROW_SETTINGS: [SettingId; 113] = [
     SettingId::VideoVSync,
     // Lot SBS (owner request).
     SettingId::VideoSbs3d,
@@ -93,6 +93,7 @@ pub const ROW_SETTINGS: [SettingId; 112] = [
     SettingId::VideoTvBrightness,
     // Lot HD-PACK: a game's option, so offered globally too (RO-3).
     SettingId::VideoHdPack2d,
+    SettingId::VideoHdPack3d,
     SettingId::CameraFov,
     SettingId::CameraFramePicture,
     SettingId::RenderShadow,
