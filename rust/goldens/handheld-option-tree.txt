@@ -80,6 +80,7 @@ options
         video.sbs_3d
         video.sbs_3d_strength
         video.sbs_famicom_3d
+        video.hd_pack_2d
       [group.advanced]
         video.max_queued_frames
         row.reset
@@ -289,6 +290,7 @@ game options
       row.profiler
       video.anti_alias
       video.max_queued_frames
+      video.hd_pack_2d
     page.rendering_3d
       render.visual_style
       page.enhanced_effects

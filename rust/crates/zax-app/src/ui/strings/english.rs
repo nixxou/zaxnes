@@ -975,6 +975,14 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
         "For the Famicom 3D System games (JJ, Cosmic Epsilon, Attack Animal Gakuen…) played in 2D          with their 3D mode on: each eye's own picture, as the game drew it for its shutter          glasses, side by side (Half SBS or Full SBS as for the 3D). Off, the left eye's picture          alone is shown. Default: Half SBS (it only acts once the game's own 3D mode is on).",
     ),
     (
+        "detail.video.hd_pack_2d",
+        "Draws the 2D picture with the game's Mesen HD pack (a hires.txt and its pictures), when \
+         one is found: in the game's archive (a folder of it holding a hires.txt, chosen for the \
+         game as its other extra files: its own name first, then its region tags, then an \
+         untagged one), else in HdPacks beside the ROM, then in HdPacks of the user data. Can be \
+         set for one game. Default: off.",
+    ),
+    (
         "detail.video.anti_alias",
         "Smooths the staircase on the slanted edges of the 3D shapes. The first two levels are \
          multisampling — 4 and 8 samples per pixel — so the pixel art of the textures stays \

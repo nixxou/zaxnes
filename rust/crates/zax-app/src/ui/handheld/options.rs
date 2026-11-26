@@ -494,7 +494,7 @@ pub const ADVANCED_HUB: [OptionRow; 7] = [
 
 /// *Advanced options › Display*. The render scale is here **and** on the main page: the one
 /// setting the mockup gives two entry points on purpose.
-pub const DISPLAY_ROWS: [OptionRow; 15] = [
+pub const DISPLAY_ROWS: [OptionRow; 16] = [
     OptionRow::ShowFps,
     OptionRow::Setting(SettingId::VideoVSync),
     OptionRow::Setting(SettingId::VideoFrameRate),
@@ -508,6 +508,8 @@ pub const DISPLAY_ROWS: [OptionRow; 15] = [
     OptionRow::Setting(SettingId::VideoSbs3d),
     OptionRow::Setting(SettingId::VideoSbs3dStrength),
     OptionRow::Setting(SettingId::VideoSbsFamicom3d),
+    // Lot HD-PACK: the game's Mesen HD pack in 2D.
+    OptionRow::Setting(SettingId::VideoHdPack2d),
     OptionRow::Group(keys::GROUP_ADVANCED),
     OptionRow::Setting(SettingId::VideoMaxQueuedFrames),
     OptionRow::Reset,

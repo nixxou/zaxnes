@@ -720,7 +720,7 @@ largeur (lunettes et casques). **Side by side 3D strength** (0,25 à 3, 1 par d�
 ou moins les deux yeux. Les shaders slang s'appliquent à chaque œil, et l'interface est dessinée
 dans chaque moitié.
 
-Les jeux du **Famicom 3D System** (*Famicom Grand Prix II*, *JJ*…) montrent leurs deux images
+Les jeux du **Famicom 3D System** (*JJ*, *Cosmic Epsilon*, *Attack Animal Gakuen*…) montrent leurs deux images
 alternées comme le faisaient les lunettes : **Side by side Famicom 3D System**
 (`video.sbs_famicom_3d`, Half SBS par défaut) place l'image de chaque œil dans sa moitié, telle
 que le jeu l'a dessinée. Les deux réglages sont dans l'onglet d'options **Affichage**, le menu
