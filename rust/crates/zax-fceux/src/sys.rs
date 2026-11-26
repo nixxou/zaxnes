@@ -97,7 +97,18 @@ pub struct ZaxMovieInfo {
     pub rom_md5_matches: i32,
 }
 
+/// `zax_read_patch` of `zax/zaxfceux.h`, field for field (lot CHEATS): `compare` -1 for none.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ZaxReadPatch {
+    pub address: u16,
+    pub value: u8,
+    pub compare: i16,
+}
+
 extern "C" {
+    pub fn zax_set_read_patches(patches: *const ZaxReadPatch, count: usize) -> i32;
+
     pub fn zax_set_log_sink(sink: ZaxLogFn, user: *mut c_void);
     pub fn zax_flush_log();
     pub fn zax_version() -> *const c_char;

@@ -589,6 +589,26 @@ impl Fceux {
         check(unsafe { sys::zax_write_memory(address, value) })
     }
 
+    /// The Game Genie's codes (lot CHEATS), as FCEUX's own substitute cheats: the CPU reads
+    /// `value` at `address`, while the cartridge holds `compare` there when there is one. The
+    /// list replaces the last; an empty one removes them.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NoRom`] when no ROM is loaded.
+    pub fn set_read_patches(&mut self, patches: &[(u16, u8, Option<u8>)]) -> Result<(), Error> {
+        let patches: Vec<sys::ZaxReadPatch> = patches
+            .iter()
+            .map(|&(address, value, compare)| sys::ZaxReadPatch {
+                address,
+                value,
+                compare: compare.map_or(-1, i16::from),
+            })
+            .collect();
+        // SAFETY: `patches` holds `len` items for the call, the library copies what it keeps.
+        check(unsafe { sys::zax_set_read_patches(patches.as_ptr(), patches.len()) })
+    }
+
     /// Upper bound the core reports on the size of a savestate for the ROM loaded, which a host
     /// that has to announce a state size before serialising needs (REQ-ARCH-013).
     ///

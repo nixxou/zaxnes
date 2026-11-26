@@ -583,3 +583,38 @@ fn with_no_rom_a_frame_does_nothing() {
     assert_eq!(engine.frame_batch().records.len(), 0);
     assert!(engine.save_state_to(true, &mut Vec::new()).is_err());
 }
+
+/// Lot CHEATS: a Game Genie code through FCEUX's substitute cheats, with and without its
+/// compare byte; an empty list removes it.
+#[test]
+fn the_game_genie_patches_the_rom_reads() {
+    let _guard = lock();
+    // $8000: INC $0300; JMP $8000, every vector at $8000, on NROM.
+    let mut image = vec![0u8; 16 + 0x8000 + 0x2000];
+    image[..4].copy_from_slice(b"NES\x1A");
+    image[4] = 2;
+    image[5] = 1;
+    image[16..22].copy_from_slice(&[0xEE, 0x00, 0x03, 0x4C, 0x00, 0x80]);
+    for vector in 0..3 {
+        let at = 16 + 0x8000 - 6 + vector * 2;
+        image[at..at + 2].copy_from_slice(&[0x00, 0x80]);
+    }
+    let mut engine = FceuxEngine::new().unwrap();
+    assert!(engine.load_rom(&image, "cheats.nes").success);
+    let patch = zax_core_api::CpuReadPatch { address: 0x8001, value: 0x01, compare: Some(0x00) };
+    assert!(engine.set_cpu_read_patches(&[patch]));
+    let before = (engine.read_memory(0x0300), engine.read_memory(0x0301));
+    for _ in 0..3 {
+        engine.run_frame(0);
+    }
+    assert_eq!(engine.read_memory(0x0300), before.0);
+    assert_ne!(engine.read_memory(0x0301), before.1);
+
+    // A compare byte the ROM does not hold: INC $0300 again.
+    let wrong = zax_core_api::CpuReadPatch { compare: Some(0x55), ..patch };
+    assert!(engine.set_cpu_read_patches(&[wrong]));
+    let at = engine.read_memory(0x0300);
+    engine.run_frame(0);
+    assert_ne!(engine.read_memory(0x0300), at);
+    assert!(engine.set_cpu_read_patches(&[]));
+}

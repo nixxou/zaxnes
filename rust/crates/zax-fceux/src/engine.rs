@@ -579,6 +579,16 @@ impl Engine for FceuxEngine {
         let _ = self.fceux.write_memory(address, value);
     }
 
+    fn set_cpu_read_patches(&mut self, patches: &[zax_core_api::CpuReadPatch]) -> bool {
+        // Lot CHEATS: FCEUX's substitute cheats. Without a ROM there is nothing to patch, and
+        // nothing to keep either: a new ROM starts without any.
+        let patches: Vec<(u16, u8, Option<u8>)> = patches
+            .iter()
+            .map(|patch| (patch.address, patch.value, patch.compare))
+            .collect();
+        self.fceux.set_read_patches(&patches).is_ok() || patches.is_empty()
+    }
+
     // ------------------------------------------------------------ savestates
 
     fn save_state_to(
