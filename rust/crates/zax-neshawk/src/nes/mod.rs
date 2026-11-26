@@ -220,6 +220,10 @@ pub struct Bus {
     /// Zaxnes's widescreen extension (lot NESHAWK-HACKS), **`None` unless the host asked for
     /// it**: see [`crate::wide`] for why `None` is the C#'s machine to the cycle.
     pub wide: Option<Box<crate::wide::WideHooks>>,
+
+    /// Zaxnes's Game Genie codes (lot CHEATS): what the CPU reads at `$8000-$FFFF` replaced,
+    /// `None` without any, the C#'s path then.
+    pub rom_patches: Option<Box<[zax_core_api::CpuReadPatch]>>,
 }
 
 impl Clone for Bus {
@@ -278,6 +282,7 @@ impl Clone for Bus {
             bus_log: self.bus_log.clone(),
             load_report: self.load_report.clone(),
             wide: self.wide.clone(),
+            rom_patches: self.rom_patches.clone(),
             rdy: self.rdy,
             rdy_freeze: self.rdy_freeze,
             total_executed_cycles: self.total_executed_cycles,
@@ -904,7 +909,15 @@ impl Bus {
         let iaddr = i32::from(addr);
         if addr >= 0x8000 {
             // easy optimization, since rom reads are so common, move this up
-            ret = self.board.read_prg(iaddr - 0x8000);
+            ret = match self.rom_patches.as_deref() {
+                None => self.board.read_prg(iaddr - 0x8000),
+                // Lot CHEATS: the Game Genie's byte instead of the cartridge's.
+                Some(patches) => zax_core_api::CpuReadPatch::apply(
+                    patches,
+                    addr,
+                    self.board.read_prg(iaddr - 0x8000),
+                ),
+            };
         } else if addr < 0x0800 {
             ret = self.ram[addr as usize];
         } else if addr < 0x2000 {
@@ -993,7 +1006,13 @@ impl Bus {
         let iaddr = i32::from(addr);
         if addr >= 0x4020 {
             let db = self.db;
-            self.board.peek_cart(iaddr, db)
+            let byte = self.board.peek_cart(iaddr, db);
+            match self.rom_patches.as_deref() {
+                Some(patches) if addr >= 0x8000 => {
+                    zax_core_api::CpuReadPatch::apply(patches, addr, byte)
+                }
+                _ => byte,
+            }
         } else if addr < 0x0800 {
             self.ram[addr as usize]
         } else if addr < 0x2000 {
@@ -1129,6 +1148,9 @@ crate::state::sync_struct!(inherent Bus {
     // Zaxnes's widescreen extension: not NesHawk state. The engine saves it in a block of its
     // own and only when present (lot NESHAWK-HACKS), so a block without it is unchanged.
     wide,
+    // Zaxnes's Game Genie codes (lot CHEATS): the host's, not the machine's; a state keeps the
+    // ones in force.
+    rom_patches,
 });
 
 impl crate::state::SyncState for Bus {

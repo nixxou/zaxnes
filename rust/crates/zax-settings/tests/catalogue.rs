@@ -98,6 +98,8 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "audio.latency_ms",
             "audio.mute",
             "camera.frame_picture",
+            // Lot CHEATS: the cheat database the cheats window chose.
+            "cheats.database",
             "emu.builtin_patches",
             "emu.cartridge_db",
             "emu.catch_up",

@@ -134,7 +134,7 @@ fn the_2d_picture_is_seen_head_on_and_leaves_the_camera_alone() {
 
     // Leaving the 2D mode (here, the game) puts the camera back in charge.
     tap(&mut harness, &mut handheld, PadButton::Menu);
-    for _ in 0..8 {
+    for _ in 0..9 {
         tap(&mut harness, &mut handheld, PadButton::Down);
     }
     tap(&mut harness, &mut handheld, PadButton::A); // quit to the ROM list
@@ -230,9 +230,9 @@ fn the_load_screen_loads_a_state_and_leaves_an_empty_slot_alone() {
 fn quit_to_the_rom_list_stops_the_game() {
     let (mut harness, mut handheld) = start(&[], &["Game.nes"]);
     play(&mut harness, &mut handheld);
-    // Quit to ROM list is the ninth row (no Rewind row on the handheld; Widescreen and Hacks
-    // before it).
-    for _ in 0..8 {
+    // Quit to ROM list is the tenth row (no Rewind row on the handheld; Widescreen, Hacks and
+    // Cheats before it).
+    for _ in 0..9 {
         tap(&mut harness, &mut handheld, PadButton::Down);
     }
     tap(&mut harness, &mut handheld, PadButton::A);
@@ -375,7 +375,7 @@ fn the_options_of_a_game_hold_only_what_changes_and_play_with_it() {
     assert_eq!(Screen::InGame, handheld.screen());
     assert_eq!(!shadows, harness.host.settings().shadow());
     tap(&mut harness, &mut handheld, PadButton::Menu);
-    for _ in 0..8 {
+    for _ in 0..9 {
         tap(&mut harness, &mut handheld, PadButton::Down);
     }
     tap(&mut harness, &mut handheld, PadButton::A); // quit to the ROM list
@@ -700,7 +700,7 @@ fn ro_3_the_advanced_options_of_a_game_are_a_hub_of_pages() {
             .as_int()
     );
     tap(&mut harness, &mut handheld, PadButton::Menu);
-    for _ in 0..8 {
+    for _ in 0..9 {
         tap(&mut harness, &mut handheld, PadButton::Down);
     }
     tap(&mut harness, &mut handheld, PadButton::A); // quit to the ROM list
@@ -811,9 +811,9 @@ fn a_game_a_frontend_asks_for_plays_and_quitting_goes_back_to_it() {
     assert!(harness.host.current_game_id().is_some(), "the game plays");
     assert_eq!(Screen::InGame, handheld.screen());
     assert!(!folder.join(zax_app::launch_request::FILE).exists());
-    // The menu, then Quit to ROM list (the ninth row): the application quits.
+    // The menu, then Quit to ROM list (the tenth row): the application quits.
     tap(&mut harness, &mut handheld, PadButton::Menu);
-    for _ in 0..8 {
+    for _ in 0..9 {
         tap(&mut harness, &mut handheld, PadButton::Down);
     }
     tap(&mut harness, &mut handheld, PadButton::A);

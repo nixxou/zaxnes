@@ -116,6 +116,10 @@ fn req_ui_205_the_model_enumerates_every_menu_command() {
         NextShader,
         PreviousShader,
         TakeScreenshot,
+        // Lot CHEATS: RetroArch's T, Y and U.
+        PreviousCheat,
+        NextCheat,
+        ToggleCheat,
     ];
     for command in expected {
         assert!(

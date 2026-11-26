@@ -3084,14 +3084,15 @@ fn achievements(out: &mut Vec<SettingDescriptor>) {
         ));
     }
     // Lot CHEATS: the cheat database the player chose (a folder or a zip of sheets), empty for
-    // the one beside the program or in the user data, if any.
+    // the one beside the program or in the user data, if any. The cheats window sets it, not
+    // the options.
     out.push(SettingDescriptor::new(
         SettingId::CheatsDatabase,
         SettingKind::Text,
         SettingValue::from(""),
         SettingScope::User,
         SettingEffect::Immediate,
-        SettingTheme::Emulation,
+        SettingTheme::Internal,
     ));
 }
 

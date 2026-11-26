@@ -556,6 +556,7 @@ impl Nes {
                 bus_log: BusLog::default(),
                 load_report: None,
                 wide: None,
+                rom_patches: None,
                 // `MOS6502X.Reset` sets these two in the C#; they live on the machine here.
                 rdy: true,
                 rdy_freeze: false,

@@ -460,3 +460,28 @@ impl CloneRun for NesHawkEngine {
             .collect()
     }
 }
+
+/// Lot CHEATS: a Game Genie code on the bus's ROM reads, with and without its compare byte, kept
+/// through a power cycle, gone with an empty list.
+#[test]
+fn the_game_genie_patches_the_rom_reads() {
+    use zax_core_api::CpuReadPatch;
+    let mut engine = loaded();
+    // INC $0300 at $800A becomes INC $0301.
+    let patch = CpuReadPatch { address: 0x800B, value: 0x01, compare: Some(0x00) };
+    assert!(engine.set_cpu_read_patches(&[patch]));
+    assert_eq!(engine.read_memory(0x800B), 0x01);
+    engine.power();
+    for _ in 0..3 {
+        engine.run_frame(0);
+    }
+    assert_eq!(engine.read_memory(0x0300), 0);
+    assert_ne!(engine.read_memory(0x0301), 0);
+
+    // A compare byte the ROM does not hold: no patch.
+    let wrong = CpuReadPatch { compare: Some(0x55), ..patch };
+    assert!(engine.set_cpu_read_patches(&[wrong]));
+    assert_eq!(engine.read_memory(0x800B), 0x00);
+    assert!(engine.set_cpu_read_patches(&[]));
+    assert_eq!(engine.read_memory(0x800B), 0x00);
+}

@@ -714,7 +714,9 @@ impl Engine for NesHawkEngine {
         if self.nes.is_none() {
             return;
         }
-        if let Ok(nes) = self.build() {
+        if let Ok(mut nes) = self.build() {
+            // The Game Genie's codes stay on through a power cycle (lot CHEATS).
+            nes.b.rom_patches = self.nes.as_ref().and_then(|old| old.b.rom_patches.clone());
             self.nes = Some(nes);
             self.frame_offset = 0;
             self.audio.borrow_mut().clear();
@@ -862,6 +864,15 @@ impl Engine for NesHawkEngine {
         if let Some(nes) = self.nes.as_mut() {
             nes.write_memory(address, value);
         }
+    }
+
+    fn set_cpu_read_patches(&mut self, patches: &[zax_core_api::CpuReadPatch]) -> bool {
+        // Lot CHEATS: on the bus's ROM reads; a ROM loaded later starts without them, as the
+        // engine handle wants.
+        if let Some(nes) = self.nes.as_mut() {
+            nes.b.rom_patches = (!patches.is_empty()).then(|| patches.into());
+        }
+        true
     }
 
     // ------------------------------------------------------------ savestates
