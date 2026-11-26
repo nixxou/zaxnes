@@ -41,7 +41,7 @@ Notes for the NES:
 | 3b | Sheet of a ROM: `zax_cheats::sheet::choose` and `zax_app::cheat_database` (folder or zip, Mesen JSON or libretro `.cht`), through the game database's No-Intro name of the data CRC, then the file name | done |
 | 4 | Engines: RAM cheats through `Engine::write_memory` after each frame (all engines); Game Genie on Zaxnes's CPU read path, FCEUX through its own cheat API, NesHawk through its bus | done on the three engines (FCEUX through the fork branch `zax-cheats`) |
 | 5 | Application: cheats per game saved beside the other per-game data, Cheats window (list, add, enable), Search window, libretro `retro_cheat_set` | done, with the console interface's page and RetroArch's T/Y/U |
-| 6 | Database: decide what to ship (see 3.) | none shipped; the player points at one (`cheats.database`) or drops it beside the program |
+| 6 | Database: decide what to ship (see 3.) | BeesNES's built in; the player may point at another (`cheats.database`) or drop it beside the program |
 
 ## 3. Open questions for the owner
 
@@ -114,3 +114,4 @@ Notes for the NES:
   - Not done: the callgrind level-1 comparison of the standard path (no Zaxnes core change since
     041b7a6e's boxed field and out-of-line patched path).
   - Callgrind level 1 (clean builds from git archive, dev bc767c68 vs 53c8d5ad, 300 frames): mm2 core 7 284 470 450 -> 7 284 465 830, total -0.001 %; zelda2 core 7 372 035 172 -> 7 372 030 552, total -0.001 %. No cost on the standard path.
+- 2026-11-26: owner asked for the cheats built in: BeesNES's Cheats.zip (1.67 MB, MIT, SHA-256 E07CFD5D...) embedded as rust/crates/zax-app/cheats/Cheats.zip, used when no database was chosen or put in place. Notices in THIRD-PARTY-NOTICES.md and ASSETS-LICENSES.md.

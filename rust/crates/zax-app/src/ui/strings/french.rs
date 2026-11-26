@@ -1731,7 +1731,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::CHEATS_DATABASE_USE, "Utiliser"),
     (keys::CHEATS_DATABASE_BROWSE, "Parcourir…"),
     (keys::CHEATS_DATABASE_LOOK_UP, "Chercher ce jeu"),
-    (keys::CHEATS_NO_DATABASE, "Aucune base de triches : choisissez un dossier ou un zip de fiches, une par ROM et à son nom (.json de Mesen ou .cht de libretro)."),
+    (keys::CHEATS_BUILTIN_DATABASE, "La base intégrée (BeesNES, 1958 jeux). Choisissez un dossier ou un zip de fiches, une par ROM et à son nom (.json de Mesen ou .cht de libretro), pour en utiliser une autre."),
     (keys::CHEATS_NO_SHEET, "La base n'a pas de fiche pour ce jeu."),
     (keys::CHEATS_SHEET, "Fiche : {0}"),
     (keys::CHEATS_MATCH_EXACT, "Faite pour cette ROM."),

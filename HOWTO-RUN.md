@@ -316,11 +316,11 @@ cherche une adresse dans sa mémoire. Les deux sont grisés sans jeu.
   `CC`) ; plusieurs codes d'une même triche se joignent par `+`. Les codes Game Genie remplacent
   ce que le processeur lit dans la ROM ; ils marchent sur les trois moteurs (Zaxnes, FCEUX,
   NesHawk). Les codes RAM aussi.
-- **La base de triches.** Zaxnes n'en fournit pas. Désignez un dossier ou un zip de fiches, une
-  par ROM et à son nom No-Intro (`.json` de Mesen, ou `.cht` de libretro-database), dans le
-  champ **Base** ou avec **Parcourir…** ; sans choix, Zaxnes prend `cheats.zip` ou le dossier
-  `cheats` à côté de l'exécutable, puis `cheats\database.zip` ou `cheats\database` des données
-  utilisateur. La fiche du jeu est trouvée par la CRC de ses données (son nom No-Intro dans la
+- **La base de triches.** Zaxnes en intègre une, celle de BeesNES (1958 jeux). Pour en utiliser
+  une autre, désignez un dossier ou un zip de fiches, une par ROM et à son nom No-Intro (`.json`
+  de Mesen, ou `.cht` de libretro-database), dans le champ **Base** ou avec **Parcourir…** ; sans
+  choix, Zaxnes prend `cheats.zip` ou le dossier `cheats` à côté de l'exécutable, puis
+  `cheats\database.zip` ou `cheats\database` des données utilisateur, et enfin sa base intégrée. La fiche du jeu est trouvée par la CRC de ses données (son nom No-Intro dans la
   base des jeux), puis par le nom du fichier, puis par le titre. La fenêtre dit à quel point elle
   est sûre : faite pour cette ROM, trouvée par le nom du fichier, faite pour une autre version
   (orange : les codes peuvent ne pas marcher) ou pour une autre région (rouge). « Ajouter » prend

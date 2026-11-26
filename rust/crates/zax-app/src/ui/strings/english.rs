@@ -1750,7 +1750,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::CHEATS_DATABASE_USE, "Use"),
     (keys::CHEATS_DATABASE_BROWSE, "Browse..."),
     (keys::CHEATS_DATABASE_LOOK_UP, "Look up this game"),
-    (keys::CHEATS_NO_DATABASE, "No cheat database: choose a folder or a zip of sheets, one per ROM named after it (Mesen .json or libretro .cht)."),
+    (keys::CHEATS_BUILTIN_DATABASE, "The built-in database (BeesNES, 1958 games). Choose a folder or a zip of sheets, one per ROM named after it (Mesen .json or libretro .cht), to use another."),
     (keys::CHEATS_NO_SHEET, "The database has no sheet for this game."),
     (keys::CHEATS_SHEET, "Sheet: {0}"),
     (keys::CHEATS_MATCH_EXACT, "Made for this ROM."),

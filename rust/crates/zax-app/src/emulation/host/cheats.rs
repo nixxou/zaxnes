@@ -33,8 +33,8 @@ pub struct CheatState {
     selected: usize,
     /// The engine refused the Game Genie codes of the list (they do nothing there).
     game_genie_refused: bool,
-    /// The database last opened, with the path it was opened from.
-    database: Option<(PathBuf, CheatDatabase)>,
+    /// The database last opened, with the path it was opened from (`None`: the built-in one).
+    database: Option<(Option<PathBuf>, CheatDatabase)>,
     /// The data CRC of the game, read as it started (the core may be away later).
     crc: Option<u32>,
     /// The RAM search.
@@ -323,18 +323,24 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     ///
     /// The database or its sheet did not read.
     pub fn cheat_sheet(&mut self) -> Result<Option<FoundSheet>, String> {
-        let Some(path) = self.cheat_database_path() else {
-            return Ok(None);
-        };
+        // The database the player chose or put in place, else the one built in.
+        let path = self.cheat_database_path();
+        let shown = path.as_ref().map_or_else(
+            || crate::cheat_database::BUILTIN_NAME.to_owned(),
+            |path| path.display().to_string(),
+        );
         if self
             .cheats
             .database
             .as_ref()
             .is_none_or(|(opened, _)| *opened != path)
         {
-            let database = CheatDatabase::open(&path)
-                .map_err(|error| format!("{}: {error}", path.display()))?;
-            self.cheats.database = Some((path.clone(), database));
+            let database = match &path {
+                Some(path) => CheatDatabase::open(path),
+                None => CheatDatabase::builtin(),
+            }
+            .map_err(|error| format!("{shown}: {error}"))?;
+            self.cheats.database = Some((path, database));
         }
         let Some(rom) = self.current_rom_path().map(str::to_owned) else {
             return Ok(None);
@@ -346,9 +352,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         };
         database
             .sheet_for(crc, &stem)
-            .map_err(|error| format!("{}: {error}", path.display()))
+            .map_err(|error| format!("{shown}: {error}"))
     }
-
     /// A byte of the game's memory as the CPU reads it, for the RAM search; `None` without a
     /// game or while the core is away.
     #[must_use]

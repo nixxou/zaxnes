@@ -211,7 +211,8 @@ Each game can run on one of three engines, picked in its options:
   simple options like curvature or scanlines. On the PC you can still edit every parameter.
 - **Movies**: record a game and replay it exactly.
 - **Cheats**: Game Genie, Pro Action Replay and raw codes on all three engines, kept per game, a
-  cheat database you point at (Mesen or libretro sheets, matched to the ROM by its No-Intro name),
+  built-in cheat database of 1958 games (or your own Mesen or libretro sheets), matched to the
+  ROM by its No-Intro name,
   and a RAM search to find your own.
 - A **console interface** made for the gamepad, on handhelds and on the desktop (F1), with a
   touch pad on Android.

@@ -73,11 +73,7 @@ impl CheatsPage {
         rows.push(match &self.sheet {
             None => CheatRow {
                 label: strings::get(keys::CHEATS_DATABASE_HEADER),
-                value: strings::get(if host.cheat_database_path().is_some() {
-                    keys::CHEATS_NO_SHEET
-                } else {
-                    keys::CHEATS_NO_DATABASE
-                }),
+                value: strings::get(keys::CHEATS_NO_SHEET),
                 warning: false,
             },
             Some(Err(error)) => CheatRow {

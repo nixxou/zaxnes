@@ -25,7 +25,10 @@ Les **profils audio de console** (`rust/crates/zax-nes/src/apu/console_profile.r
 CPU « letterless » de chaque console mesurée, ainsi que la formule de ses filtres passe-haut. Les
 choix d'émulation documentés d'après BeesNES (position de démarrage du PPU, effacement de l'OAM,
 défaut OAMADDR, horloges et géométrie des régions PAL-M et PAL-N, inversion des rapports
-cycliques des famiclones) en citent le fichier et la ligne. BeesNES est distribué sous licence MIT :
+cycliques des famiclones) en citent le fichier et la ligne. La **base de triches intégrée**
+(`rust/crates/zax-app/cheats/Cheats.zip`, 1958 fiches au format JSON de Mesen) est le
+`Cheats/Cheats.zip` de BeesNES, repris tel quel ; son dépôt n'en documente pas la provenance.
+BeesNES est distribué sous licence MIT :
 
     MIT License
 

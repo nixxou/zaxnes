@@ -1,6 +1,6 @@
 //! A cheat database the player points at (lot CHEATS): a folder or a zip of sheets, one per ROM
 //! image, in Mesen's JSON (BeesNES's `Cheats.zip`, Mesen's own) or libretro's `.cht`
-//! (libretro-database `cht/`). Nothing is shipped until the owner chooses (`docs/progress/CHEATS.md`).
+//! (libretro-database `cht/`); without one, the database built into the program (BeesNES's, [`BUILTIN_ZIP`]).
 //!
 //! A ROM finds its sheet through the game database: its data CRC gives its No-Intro name, the name
 //! the sheets carry; a ROM the database does not know (a hack, a homebrew) is looked for by its
@@ -39,7 +39,15 @@ impl SheetFormat {
 enum Source {
     Folder(PathBuf),
     Zip(PathBuf),
+    Builtin,
 }
+
+/// The database built into the program (owner request, 2026-11-26): BeesNES's `Cheats.zip`
+/// (MIT, `cheats/BEESNES-LICENSE.txt`), 1958 sheets in Mesen's JSON named after No-Intro.
+pub const BUILTIN_ZIP: &[u8] = include_bytes!("../cheats/Cheats.zip");
+
+/// The name the built-in database goes by where a path would be shown.
+pub const BUILTIN_NAME: &str = "BeesNES Cheats.zip (built in)";
 
 /// One sheet: where it is and its format.
 #[derive(Debug, Clone)]
@@ -99,6 +107,33 @@ impl CheatDatabase {
             Source::Zip(path.to_owned())
         };
         Ok(Self { source, sheets })
+    }
+
+    /// The database built into the program.
+    ///
+    /// # Errors
+    ///
+    /// Only if the zip built in does not read, which a test rules out.
+    pub fn builtin() -> std::io::Result<Self> {
+        let archive = zip::ZipArchive::new(std::io::Cursor::new(BUILTIN_ZIP))
+            .map_err(std::io::Error::other)?;
+        let mut sheets = BTreeMap::new();
+        for file in archive.file_names() {
+            if file.ends_with('/') {
+                continue;
+            }
+            if let Some((name, format)) = SheetFormat::of(file) {
+                let name = name.rsplit('/').next().unwrap_or(name).to_owned();
+                sheets.entry(name).or_insert(Entry {
+                    file: file.to_owned(),
+                    format,
+                });
+            }
+        }
+        Ok(Self {
+            source: Source::Builtin,
+            sheets,
+        })
     }
 
     /// How many sheets it holds.
@@ -171,6 +206,16 @@ impl CheatDatabase {
             Source::Zip(path) => {
                 let mut archive =
                     zip::ZipArchive::new(fs::File::open(path)?).map_err(std::io::Error::other)?;
+                let mut file = archive
+                    .by_name(&entry.file)
+                    .map_err(std::io::Error::other)?;
+                let mut bytes = Vec::new();
+                file.read_to_end(&mut bytes)?;
+                bytes
+            }
+            Source::Builtin => {
+                let mut archive = zip::ZipArchive::new(std::io::Cursor::new(BUILTIN_ZIP))
+                    .map_err(std::io::Error::other)?;
                 let mut file = archive
                     .by_name(&entry.file)
                     .map_err(std::io::Error::other)?;

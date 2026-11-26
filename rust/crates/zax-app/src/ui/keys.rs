@@ -646,7 +646,7 @@ pub const CHEATS_DATABASE_PATH: &str = "cheats.database_path";
 pub const CHEATS_DATABASE_USE: &str = "cheats.database_use";
 pub const CHEATS_DATABASE_BROWSE: &str = "cheats.database_browse";
 pub const CHEATS_DATABASE_LOOK_UP: &str = "cheats.database_look_up";
-pub const CHEATS_NO_DATABASE: &str = "cheats.no_database";
+pub const CHEATS_BUILTIN_DATABASE: &str = "cheats.builtin_database";
 pub const CHEATS_NO_SHEET: &str = "cheats.no_sheet";
 pub const CHEATS_SHEET: &str = "cheats.sheet";
 pub const CHEATS_MATCH_EXACT: &str = "cheats.match.exact";
@@ -1105,7 +1105,7 @@ pub const PUBLISHED: &[&str] = &[
     CHEATS_DATABASE_USE,
     CHEATS_DATABASE_BROWSE,
     CHEATS_DATABASE_LOOK_UP,
-    CHEATS_NO_DATABASE,
+    CHEATS_BUILTIN_DATABASE,
     CHEATS_NO_SHEET,
     CHEATS_SHEET,
     CHEATS_MATCH_EXACT,

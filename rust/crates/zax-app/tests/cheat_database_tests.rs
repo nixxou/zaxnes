@@ -96,3 +96,15 @@ fn coverage_of_a_real_database() {
     println!("{} sheets: {counts:?}", database.len());
     assert!(counts.get("Exact").copied().unwrap_or(0) > 0);
 }
+
+/// The database built into the program (owner request, 2026-11-26) reads, and finds Mega Man 3
+/// (USA) by its data CRC.
+#[test]
+fn the_built_in_database_finds_a_game_by_its_crc() {
+    let database = zax_app::cheat_database::CheatDatabase::builtin().unwrap();
+    assert!(database.len() > 1900, "{} sheets", database.len());
+    let sheet = database.sheet_for(Some(0x603A_AA57), "mm3").unwrap().unwrap();
+    assert_eq!(sheet.name, "Mega Man 3 (USA)");
+    assert_eq!(sheet.matched, zax_cheats::sheet::SheetMatch::Exact);
+    assert!(sheet.imported.cheats.len() > 1, "{} cheats", sheet.imported.cheats.len());
+}

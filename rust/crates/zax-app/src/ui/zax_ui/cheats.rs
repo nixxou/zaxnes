@@ -282,6 +282,9 @@ impl ZaxUi {
         if ui.small_button(strings::get(keys::CHEATS_DATABASE_BROWSE)) {
             self.open_browser(host, BrowserPurpose::CheatDatabase);
         }
+        if host.cheat_database_path().is_none() {
+            ui.text_disabled(strings::get(keys::CHEATS_BUILTIN_DATABASE));
+        }
         if self.cheats.sheet.is_none()
             || ui.small_button(strings::get(keys::CHEATS_DATABASE_LOOK_UP))
         {
@@ -299,12 +302,7 @@ impl ZaxUi {
                 ));
             }
             Some(Ok(None)) => {
-                let key = if host.cheat_database_path().is_some() {
-                    keys::CHEATS_NO_SHEET
-                } else {
-                    keys::CHEATS_NO_DATABASE
-                };
-                ui.text_wrapped(strings::get(key));
+                ui.text_wrapped(strings::get(keys::CHEATS_NO_SHEET));
             }
             Some(Ok(Some(sheet))) => {
                 ui.text(strings::format(
