@@ -10,6 +10,7 @@ use zax_hdpacks::compose::ChrIndex;
 use zax_hdpacks::image::Rgba;
 use zax_hdpacks::{compose, FolderFiles, FrameInput};
 
+#[allow(clippy::too_many_lines)] // one walk, step after step
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 5 {
