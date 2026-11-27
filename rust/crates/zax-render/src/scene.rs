@@ -382,7 +382,7 @@ impl Default for SceneState {
             two_dimensional_mode: false,
             picture_head_on: false,
             picture_tilt: [0.0; 2],
-            picture_crop: Vec4F::new(0.0, 0.0, 0.0, 0.0),
+            picture_crop: Self::NO_PICTURE_CROP,
             picture_framed: false,
             picture_shift: None,
             picture_overlay: Vec::new(),
@@ -424,9 +424,19 @@ impl SceneState {
         }
     }
 
-    /// The visible rectangle of the current clip margins (REQ-SCN-039).
+    /// The visible rectangle of the current clip margins (REQ-SCN-039). In the 2D mode, the
+    /// picture's: the overscan alone ([`Self::picture_clipping`]), the widescreen margins in.
     #[must_use]
     pub fn visible_rectangle(&self) -> VisibleRect {
+        if self.two_dimensional_mode {
+            let crop = self.picture_clipping();
+            return VisibleRect::from_clipping(Vec4F::new(
+                crop.x - self.margin,
+                crop.y - self.margin_y,
+                crop.z - self.margin,
+                crop.w - self.margin_y,
+            ));
+        }
         VisibleRect::from_clipping(self.view_clipping())
     }
 
@@ -443,10 +453,20 @@ impl SceneState {
         )
     }
 
-    /// The clipping of the 2D picture's head-on view: the profile's, each side at least the
-    /// overscan's in Resize ([`Self::picture_crop`]).
+    /// A [`Self::picture_crop`] that cuts nothing: the clipping counts from a frame 240 high and
+    /// the picture's rows lie 8 higher (REQ-E3D-410), so the top side is -8.
+    pub const NO_PICTURE_CROP: Vec4F = Vec4F::new(0.0, 0.0, 0.0, -8.0);
+
+    /// The clipping of the game's picture. In the 2D mode, the overscan's alone
+    /// ([`Self::picture_crop`]: owner, 2026-11-27, the whole picture as Mesen shows it; the 3D
+    /// conversion's clipping, 8 rows and 8 columns by default and a profile's own, cut the 2D
+    /// picture before). In 3D (the view framed on the picture for a slang preset), the
+    /// conversion's, each side at least the overscan's.
     #[must_use]
     pub fn picture_clipping(&self) -> Vec4F {
+        if self.two_dimensional_mode {
+            return self.picture_crop;
+        }
         Vec4F::new(
             self.clipping.x.max(self.picture_crop.x),
             self.clipping.y.max(self.picture_crop.y),

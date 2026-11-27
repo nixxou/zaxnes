@@ -138,31 +138,46 @@ fn req_e3d_410_the_picture_is_not_turned_upside_down() {
     );
 }
 
+/// The 2D picture is cut by the overscan alone (owner, 2026-11-27): the 3D conversion's
+/// clipping, a profile's included, no longer bites into it.
 #[test]
-fn req_scn_036_the_picture_is_cut_by_the_visible_rectangle() {
+fn req_scn_036_the_picture_is_cut_by_the_overscan_alone() {
     let gl = GlFixture::create(320, 300);
     let mut renderer = gl.renderer();
     let picture = picture(0x30);
 
-    let mut wide = scene();
-    wide.clipping = Vec4F::new(0.1, 8.1, 8.1, 0.1);
-    let full = gl
-        .render(&mut renderer, &wide, &frame(&picture))
-        .column_span(0x00_0000);
-
-    let mut narrow = scene();
-    narrow.clipping = Vec4F::new(64.1, 8.1, 64.1, 0.1);
-    let cut = gl
-        .render(&mut renderer, &narrow, &frame(&picture))
-        .column_span(0x00_0000);
-
-    assert!(
-        cut.0 > full.0,
-        "the left margin should bite into the picture"
+    let mut head_on = scene();
+    head_on.picture_head_on = true;
+    let whole = head_on.visible_rectangle();
+    assert_eq!(
+        (0.0, 0.0, 256.0, 248.0),
+        (whole.min_x, whole.min_y, whole.max_x, whole.max_y),
+        "by default the whole picture, its 240 rows and 256 columns"
     );
-    assert!(
-        cut.1 < full.1,
-        "the right margin should bite into the picture"
+    let full = gl
+        .render(&mut renderer, &head_on, &frame(&picture))
+        .column_span(0x00_0000);
+
+    let mut clipped = head_on.clone();
+    clipped.clipping = Vec4F::new(64.1, 24.1, 64.1, 16.1);
+    let rect = clipped.visible_rectangle();
+    assert_eq!(
+        (whole.min_x, whole.min_y, whole.max_x, whole.max_y),
+        (rect.min_x, rect.min_y, rect.max_x, rect.max_y),
+        "the 3D clipping should leave the 2D picture whole"
+    );
+    let kept = gl
+        .render(&mut renderer, &clipped, &frame(&picture))
+        .column_span(0x00_0000);
+    assert_eq!(full, kept, "the 3D clipping should leave the 2D picture whole");
+
+    let mut cropped = head_on.clone();
+    cropped.picture_crop = Vec4F::new(8.0, 0.0, 8.0, -8.0);
+    let rect = cropped.visible_rectangle();
+    assert_eq!(
+        (8.0, 248.0),
+        (rect.min_x, rect.max_x),
+        "the overscan's sides should bite into the picture"
     );
 }
 

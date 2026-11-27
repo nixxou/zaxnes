@@ -136,7 +136,8 @@ impl Overscan {
     #[must_use]
     pub fn crop(&self) -> [f32; 4] {
         if !self.resize {
-            return [0.0; 4];
+            // Nothing cut: the frame's top is 8 under the picture's.
+            return [0.0, 0.0, 0.0, -8.0];
         }
         let bottom = if self.bottom > 0 { self.bottom + 8 } else { 0 };
         #[allow(clippy::cast_precision_loss)] // -8..=40.
@@ -197,7 +198,7 @@ mod tests {
     #[test]
     fn resize_cuts_the_picture_rows_where_they_lie_in_the_scene() {
         let mut overscan = sides(8, 8, 6, 0);
-        assert_eq!([0.0; 4], overscan.crop(), "Fit");
+        assert_eq!([0.0, 0.0, 0.0, -8.0], overscan.crop(), "Fit: nothing cut");
         overscan.resize = true;
         // The bottom 8 rows end at y = 16, the top 8 at 240: the frame's own top.
         assert_eq!([6.0, 16.0, 0.0, 0.0], overscan.crop());
