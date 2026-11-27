@@ -229,8 +229,9 @@ mod tests {
     fn loads_lua_api() {
         let api = read_lua_api(&goldens_dir().join("lua-api.txt")).unwrap();
         // 512 before AMD-063, which adds `Instance.IsSolidTile` (REQ-LUA-121) and
-        // `Pattern.HasPlaceholders` (REQ-LUA-120).
-        assert_eq!(api.lines.len(), 514);
+        // `Pattern.HasPlaceholders` (REQ-LUA-120), 516 since 3dSen 2.2 (`ManettesAPI.GetPlayerState`
+        // and `SettingAPI.TurboRate`).
+        assert_eq!(api.lines.len(), 516);
         assert_eq!(api.lines.iter().filter(|l| l.kind == "global").count(), 35);
     }
 }
