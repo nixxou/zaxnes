@@ -239,7 +239,7 @@ mod tests {
     #[test]
     fn the_summary_shows_a_games_own_sides() {
         let mut settings = SettingsModel::new();
-        assert_eq!("NTSC 0/0/0/0 · PAL 0/0/0/0 · Resize", summary(&settings));
+        assert_eq!("NTSC 8/8/0/0 · PAL 0/0/0/0 · Resize", summary(&settings));
         settings.set(SettingId::VideoOverscanTop, SettingValue::Enum(8));
         assert_eq!("8/G/G/G · Resize", summary(&settings));
     }

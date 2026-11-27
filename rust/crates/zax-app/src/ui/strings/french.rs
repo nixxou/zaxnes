@@ -1067,15 +1067,15 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
          masquait les rangées extrêmes, et beaucoup de jeux y laissent des déchets de défilement. \
          De 0 à 32 pixels ; 8 est la valeur usuelle pour le haut et le bas. Ce qui arrive à la place \
          libérée est réglé par la ligne Overscan ci-dessus. Un jeu peut régler ses quatre marges \
-         dans ses options, qui l'emportent alors sur celles-ci. Par défaut : 0 — toute l'image.",
+         dans ses options, qui l'emportent alors sur celles-ci. Par défaut : 8, comme la plupart des émulateurs.",
     ),
     (
         "detail.video.overscan_ntsc_bottom",
         "Combien de rangées de pixels sont coupées en bas de l'image d'un jeu NTSC. Un téléviseur \
          masquait les rangées extrêmes, et beaucoup de jeux y laissent des déchets de défilement. \
          De 0 à 32 pixels ; 8 est la valeur usuelle pour le haut et le bas. Un jeu peut régler ses \
-         quatre marges dans ses options, qui l'emportent alors sur celles-ci. Par défaut : 0 — \
-         toute l'image.",
+         quatre marges dans ses options, qui l'emportent alors sur celles-ci. Par défaut : 8, \
+         comme la plupart des émulateurs.",
     ),
     (
         "detail.video.overscan_ntsc_left",

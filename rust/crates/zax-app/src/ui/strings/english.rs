@@ -1112,14 +1112,14 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
          the outermost rows, and many games leave scrolling rubbish there. 0 to 32 pixels; 8 is the \
          usual value for the top and the bottom. What happens to the freed space is the Overscan \
          mode row above. A game can set its own four margins in its options, which then win over \
-         these. Default: 0 — the whole picture.",
+         these. Default: 8, as most emulators.",
     ),
     (
         "detail.video.overscan_ntsc_bottom",
         "How many pixel rows are cut from the bottom of the picture of an NTSC game. A television \
          hid the outermost rows, and many games leave scrolling rubbish there. 0 to 32 pixels; 8 is \
          the usual value for the top and the bottom. A game can set its own four margins in its \
-         options, which then win over these. Default: 0 — the whole picture.",
+         options, which then win over these. Default: 8, as most emulators.",
     ),
     (
         "detail.video.overscan_ntsc_left",

@@ -319,7 +319,7 @@ fn the_options_change_the_settings_of_the_host() {
     assert_eq!(Screen::Overscan, handheld.screen());
     tap(&mut harness, &mut handheld, PadButton::Right);
     assert_eq!(
-        1,
+        9,
         harness
             .host
             .settings()

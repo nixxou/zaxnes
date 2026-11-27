@@ -2849,52 +2849,58 @@ fn overscan_pixels(global: bool) -> Vec<SettingOption> {
 fn video_overscan(out: &mut Vec<SettingDescriptor>) {
     // Rust-only (owner request): the picture's edges a television did not show (games leave
     // scrolling garbage there), as Mesen sets them: per side, for the NTSC games and for the PAL
-    // ones, 0 by default (the whole picture). A game has the four sides of its own
+    // ones. By default 8 at the top and the bottom of an NTSC game, as most emulators but Mesen
+    // (owner, 2026-11-27), and nothing else (a PAL television showed the whole picture). A game has the four sides of its own
     // (`video.overscan_top` and the others, "Global" by default: its region's), and the way they
     // show: left out (the scene's background shows there), the picture keeping its size ("Fit"), or the rest enlarged to fill the
     // view in 2D ("Resize"). With a widescreen margin the left and right sides are not cut (the
     // margins go on past them), with a vertical one the top and bottom are not either but where
     // the game's margin decoder asks. Not exposed to Lua.
     let sides = [
-        (SettingId::VideoOverscanNtscTop, "Overscan NTSC: top", false),
+        (SettingId::VideoOverscanNtscTop, "Overscan NTSC: top", false, 8),
         (
             SettingId::VideoOverscanNtscBottom,
             "Overscan NTSC: bottom",
             false,
+            8,
         ),
         (
             SettingId::VideoOverscanNtscLeft,
             "Overscan NTSC: left",
             false,
+            0,
         ),
         (
             SettingId::VideoOverscanNtscRight,
             "Overscan NTSC: right",
             false,
+            0,
         ),
-        (SettingId::VideoOverscanPalTop, "Overscan PAL: top", false),
+        (SettingId::VideoOverscanPalTop, "Overscan PAL: top", false, 0),
         (
             SettingId::VideoOverscanPalBottom,
             "Overscan PAL: bottom",
             false,
+            0,
         ),
-        (SettingId::VideoOverscanPalLeft, "Overscan PAL: left", false),
+        (SettingId::VideoOverscanPalLeft, "Overscan PAL: left", false, 0),
         (
             SettingId::VideoOverscanPalRight,
             "Overscan PAL: right",
             false,
+            0,
         ),
-        (SettingId::VideoOverscanTop, "Overscan: top", true),
-        (SettingId::VideoOverscanBottom, "Overscan: bottom", true),
-        (SettingId::VideoOverscanLeft, "Overscan: left", true),
-        (SettingId::VideoOverscanRight, "Overscan: right", true),
+        (SettingId::VideoOverscanTop, "Overscan: top", true, -1),
+        (SettingId::VideoOverscanBottom, "Overscan: bottom", true, -1),
+        (SettingId::VideoOverscanLeft, "Overscan: left", true, -1),
+        (SettingId::VideoOverscanRight, "Overscan: right", true, -1),
     ];
-    for (id, label, global) in sides {
+    for (id, label, global, default) in sides {
         out.push(
             SettingDescriptor::new(
                 id,
                 SettingKind::Enum,
-                SettingValue::Enum(if global { -1 } else { 0 }),
+                SettingValue::Enum(default),
                 SettingScope::User,
                 SettingEffect::Immediate,
                 SettingTheme::Video,
