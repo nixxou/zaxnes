@@ -216,6 +216,8 @@ pub fn load(rom_path: &Path, user_root: Option<&Path>) -> Result<Option<LoadedHd
             }
         }
         .map_err(|error| format!("{}: {error}", place.path().display()))?;
+        // On this thread, before the game draws with it: no pause the first time a tile shows.
+        pack.decode_tile_pictures();
         let chr = if pack.uses_indices {
             ChrIndex::new(chr_rom(&image))
         } else {
@@ -245,6 +247,8 @@ pub struct HdPackState {
     /// What `picture` was drawn from: the pack, the frame's number and its NES picture. A display
     /// faster than the game shows each frame twice or more; it is drawn once.
     pub drawn_from: Option<(usize, u64, Vec<u8>)>,
+    /// Counts the HD pictures drawn (never reset): the renderer sends a picture once.
+    pub generation: u64,
     /// The compositor, which keeps its layers of backgrounds from one frame to the next.
     pub composer: zax_hdpacks::compose::Composer,
 }

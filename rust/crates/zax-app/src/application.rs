@@ -3295,6 +3295,7 @@ fn draw_hd_picture(state: &mut RunState, session: &GameSession, width: usize) {
         .hd
         .composer
         .compose(&loaded.pack, &loaded.chr, &input, &mut state.hd.picture);
+    state.hd.generation += 1;
     state.hd_scale = loaded.pack.scale.max(1) as usize;
     let mut source = state.hd.drawn_from.take().map(|(_, _, picture)| picture).unwrap_or_default();
     source.clear();
@@ -3608,6 +3609,7 @@ fn render_scene(
             zax_render::scene::HdPicture {
                 rgba: &state.hd.picture,
                 scale: state.hd_scale,
+                generation: state.hd.generation,
             },
         ),
         nes_overlay_hd: None,

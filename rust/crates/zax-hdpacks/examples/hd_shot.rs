@@ -9,6 +9,7 @@ use zax_hdpacks::compose::ChrIndex;
 use zax_hdpacks::image::Rgba;
 use zax_hdpacks::{compose, FolderFiles, FrameInput};
 
+#[allow(clippy::too_many_lines)] // one measuring run, step after step
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 5 {
@@ -36,6 +37,14 @@ fn main() {
         pack.backgrounds.len(),
         pack.additions.len(),
         pack.skipped
+    );
+    let started = std::time::Instant::now();
+    pack.decode_tile_pictures();
+    let decoded = pack.pictures.iter().filter(|p| p.is_decoded()).count();
+    println!(
+        "tile pictures decoded in {:?}: {decoded} of {}",
+        started.elapsed(),
+        pack.pictures.len()
     );
     if std::env::var_os("HD_SHOT_DECODE_ALL").is_some() {
         let started = std::time::Instant::now();

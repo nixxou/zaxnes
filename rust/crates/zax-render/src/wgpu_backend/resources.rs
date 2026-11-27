@@ -294,6 +294,8 @@ pub struct TextureStore {
     free: Vec<u32>,
     by_address: FastMap<*const ObjectTexture, TextureHandle>,
     picture: Option<TextureHandle>,
+    /// Lot HD-PACK: the generation of the HD picture `picture` holds, if it holds one.
+    picture_hd: Option<u64>,
     /// The sprites the experimental smooth scrolling draws apart, a second picture.
     overlay: Option<TextureHandle>,
     picture_pixels: Vec<u8>,
@@ -414,8 +416,21 @@ impl TextureStore {
         height: usize,
     ) -> Option<TextureHandle> {
         let slot = self.picture;
+        // Lot HD-PACK: the HD picture already sent is not sent again.
+        let hd = crate::interop::picture_size(indices.len(), height).and_then(|base| {
+            colours
+                .hd
+                .filter(|hd| hd.size_for(base).is_some())
+                .map(|hd| hd.generation)
+        });
+        if let (Some(generation), Some(handle)) = (hd, slot) {
+            if self.picture_hd == Some(generation) {
+                return Some(handle);
+            }
+        }
         let handle = self.upload_picture(device, queue, indices, colours, height, slot)?;
         self.picture = Some(handle);
+        self.picture_hd = hd;
         Some(handle)
     }
 

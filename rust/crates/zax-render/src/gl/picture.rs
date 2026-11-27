@@ -26,6 +26,8 @@ pub struct NesPictureTexture {
     handle: Option<Texture>,
     /// Size of the texture allocated: 256 x 240, or larger for a widescreen picture.
     size: (usize, usize),
+    /// Lot HD-PACK: the generation of the HD picture the texture holds, if it holds one.
+    hd_generation: Option<u64>,
 }
 
 impl NesPictureTexture {
@@ -36,6 +38,7 @@ impl NesPictureTexture {
             pixels: vec![0; WIDTH * HEIGHT * 4],
             handle: None,
             size: (WIDTH, HEIGHT),
+            hd_generation: None,
         }
     }
 
@@ -64,6 +67,12 @@ impl NesPictureTexture {
             }
             self.size = size;
         }
+        // Lot HD-PACK: the HD picture already sent is not sent again.
+        let generation = hd.map(|(hd, _)| hd.generation);
+        if generation.is_some() && generation == self.hd_generation && self.handle.is_some() {
+            return Ok(self.handle);
+        }
+        self.hd_generation = generation;
         self.pixels.resize(size.0 * size.1 * 4, 0);
         if let Some((hd, _)) = hd {
             self.pixels.copy_from_slice(hd.rgba);

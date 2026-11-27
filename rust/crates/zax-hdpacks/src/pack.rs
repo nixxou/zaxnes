@@ -274,6 +274,38 @@ pub struct HdPack {
     pub uses_indices: bool,
 }
 
+impl HdPack {
+    /// Decodes now, on the cores, the pictures the tiles are drawn from: a picture is otherwise
+    /// decoded the first time it is drawn, a pause in the game. The pictures only backgrounds use
+    /// (the large ones) are left to be decoded when drawn.
+    pub fn decode_tile_pictures(&self) {
+        let backgrounds: std::collections::HashSet<usize> =
+            self.backgrounds.iter().map(|background| background.image).collect();
+        let mut tiles: Vec<usize> = self
+            .rules
+            .values()
+            .chain(self.defaults.values())
+            .flatten()
+            .map(|rule| rule.tile.image)
+            .filter(|image| !backgrounds.contains(image))
+            .collect();
+        tiles.sort_unstable();
+        tiles.dedup();
+        let decode = |&at: &usize| {
+            if let Some(picture) = self.pictures.get(at) {
+                let _ = picture.get();
+            }
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use rayon::prelude::*;
+            tiles.par_iter().for_each(decode);
+        }
+        #[cfg(target_arch = "wasm32")]
+        tiles.iter().for_each(decode);
+    }
+}
+
 fn hex_bytes(text: &str) -> Option<Vec<u8>> {
     if text.len() % 2 != 0 {
         return None;

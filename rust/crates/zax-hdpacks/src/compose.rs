@@ -195,6 +195,7 @@ impl Entry {
 const NONE: u32 = u32::MAX;
 
 /// The tiles of each pixel of the picture: the background tile and up to four sprites.
+#[derive(Debug, Default)]
 struct Owners {
     width: usize,
     height: usize,
@@ -236,7 +237,13 @@ impl Owners {
 }
 
 /// The entries and owners of a frame, additions included.
-fn build(pack: &HdPack, chr: &ChrIndex, input: &FrameInput<'_>) -> (Vec<Entry>, Owners) {
+/// `owners` is the table of a frame before, its memory used again.
+fn build(
+    pack: &HdPack,
+    chr: &ChrIndex,
+    input: &FrameInput<'_>,
+    mut owners: Owners,
+) -> (Vec<Entry>, Owners) {
     let mut entries: Vec<Entry> = input
         .records
         .iter()
@@ -247,12 +254,12 @@ fn build(pack: &HdPack, chr: &ChrIndex, input: &FrameInput<'_>) -> (Vec<Entry>, 
             added: false,
         })
         .collect();
-    let mut owners = Owners {
-        width: input.width,
-        height: input.height,
-        background: vec![NONE; input.width * input.height],
-        sprites: vec![[NONE; 4]; input.width * input.height],
-    };
+    owners.width = input.width;
+    owners.height = input.height;
+    owners.background.clear();
+    owners.background.resize(input.width * input.height, NONE);
+    owners.sprites.clear();
+    owners.sprites.resize(input.width * input.height, [NONE; 4]);
     let mut sprites: Vec<(i32, u32)> = Vec::new();
     for (at, entry) in entries.iter().enumerate() {
         let at = at as u32;
@@ -567,6 +574,8 @@ pub struct Composer {
     /// What each layer was drawn from: its backgrounds and their offsets, the margins, the scale
     /// and the size. A layer drawn from the same is not drawn again.
     drawn: [Option<LayerKey>; 4],
+    /// The pixels' tiles of the frame before, their memory used again.
+    owners: Option<Owners>,
 }
 
 /// What a layer of backgrounds is drawn from (see [`Composer`]).
@@ -687,11 +696,13 @@ impl Composer {
         if input.picture.len() < width * height {
             return;
         }
-        let (entries, owners) = build(pack, chr, input);
+        let (entries, owners_table) =
+            build(pack, chr, input, self.owners.take().unwrap_or_default());
+        let owners = &owners_table;
         let context = Context {
             pack,
             input,
-            owners: &owners,
+            owners,
             entries: &entries,
             chr,
             global: std::cell::RefCell::new(vec![0; pack.conditions.len()]),
@@ -815,7 +826,6 @@ impl Composer {
             }
         };
         let entries = &entries;
-        let owners = &owners;
         let tiles = &tiles;
         // One NES row: `scale` rows of the HD picture.
         let draw_row = |y: usize, out: &mut [u8]| {
@@ -931,6 +941,7 @@ impl Composer {
             }
         };
         for_each_chunk(out, row_bytes * scale, &draw_row);
+        self.owners = Some(owners_table);
     }
 }
 

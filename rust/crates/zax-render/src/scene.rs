@@ -542,6 +542,10 @@ pub struct SceneFrame<'a> {
 pub struct HdPicture<'a> {
     pub rgba: &'a [u8],
     pub scale: usize,
+    /// A number of its own for each new HD picture: one with the number of the picture already
+    /// sent is the same picture, not sent to the GPU again (a display faster than the game shows
+    /// each picture twice or more).
+    pub generation: u64,
 }
 
 impl HdPicture<'_> {
